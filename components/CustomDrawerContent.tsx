@@ -36,7 +36,7 @@ export default function CustomDrawerContent(props: any) {
     <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
       <View style={styles.container}>
 
-        {/* Top Section with Avatar and Dropdown */}
+        {/* Account Section */}
         <TouchableOpacity
           onPress={() => setShowAccountDropdown(!showAccountDropdown)}
           style={styles.accountHeader}
@@ -56,7 +56,6 @@ export default function CustomDrawerContent(props: any) {
           />
         </TouchableOpacity>
 
-        {/* Account Dropdown */}
         {showAccountDropdown && (
           <View style={styles.accountDropdown}>
             <DrawerItem
@@ -74,19 +73,20 @@ export default function CustomDrawerContent(props: any) {
           </View>
         )}
 
-        {/* Track a package dropdown */}
-        <DrawerItem
-          label="Track a package"
-          labelStyle={styles.label}
-          icon={() => (
-            <Feather
-              name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={colors.primary}
-            />
-          )}
-          onPress={() => setShowTrackDropdown((prev) => !prev)}
-        />
+        {/* Track a Package Section */}
+        <View style={styles.customItem}>
+          <View style={styles.trackHeader}>
+            <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+            <Text style={styles.trackLabel}>Track a package</Text>
+            <TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
+              <Feather
+                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={colors.primary}
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
 
         {showTrackDropdown &&
           trackingStatuses.map((item) => (
@@ -108,7 +108,7 @@ export default function CustomDrawerContent(props: any) {
             />
           ))}
 
-        {/* Other Drawer Items */}
+        {/* Other Navigation Items */}
         <DrawerItem
           label="Talk to a rep"
           labelStyle={styles.label}
@@ -134,10 +134,11 @@ export default function CustomDrawerContent(props: any) {
           onPress={() => props.navigation.navigate('settings')}
         />
 
-        {/* Bottom Alert */}
+        {/* Footer Icon */}
         <View style={styles.footerIcon}>
           <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />
         </View>
+
       </View>
     </DrawerContentScrollView>
   );
@@ -150,7 +151,7 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   accountHeader: {
-    backgroundColor: '#601DA6', // New primary purple
+    backgroundColor: '#601DA6',
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
@@ -182,7 +183,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   accountDropdown: {
-    backgroundColor: '#4D2292', // New darker secondary purple
+    backgroundColor: '#4D2292',
     marginHorizontal: 12,
     marginTop: 6,
     paddingLeft: 10,
@@ -208,6 +209,23 @@ const styles = StyleSheet.create({
   subItem: {
     paddingLeft: 30,
     paddingVertical: 0,
+  },
+  customItem: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+  },
+  trackHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  trackIcon: {
+    marginRight: 10,
+  },
+  trackLabel: {
+    flex: 1,
+    fontSize: 17,
+    color: colors.text,
   },
   footerIcon: {
     marginTop: 'auto',
