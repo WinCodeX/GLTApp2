@@ -10,10 +10,10 @@ import {
   FontAwesome5,
 } from '@expo/vector-icons';
 import React from 'react';
-import { ColorValue } from 'react-native';
+import { ColorValue, Dimensions } from 'react-native';
 
 import colors from '@/theme/colors';
-import CustomDrawerContent from '@/components/CustomDrawerContent'; // Adjust path as needed
+import CustomDrawerContent from '@/components/CustomDrawerContent';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -40,6 +40,8 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 };
 
 export default function DrawerLayout() {
+  const drawerWidth = Dimensions.get('window').width * 0.65; // ~65% of screen width
+
   return (
     <ThemeProvider value={CustomDarkTheme}>
       <Drawer
@@ -52,6 +54,7 @@ export default function DrawerLayout() {
             headerShown: false,
             drawerStyle: {
               backgroundColor: colors.background,
+              width: drawerWidth, // 👈 limit drawer width here
             },
             drawerActiveTintColor: colors.primary,
             drawerInactiveTintColor: 'white',
