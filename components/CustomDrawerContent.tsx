@@ -73,7 +73,7 @@ export default function CustomDrawerContent(props: any) {
           </View>
         )}
 
-        {/* Track a Package Section */}
+        {/* Track a Package */}
         <View style={styles.customItem}>
           <View style={styles.trackHeader}>
             <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
@@ -108,7 +108,7 @@ export default function CustomDrawerContent(props: any) {
             />
           ))}
 
-        {/* Other Navigation Items */}
+        {/* General Navigation */}
         <DrawerItem
           label="Talk to a rep"
           labelStyle={styles.label}
@@ -127,11 +127,29 @@ export default function CustomDrawerContent(props: any) {
           icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}
           onPress={() => props.navigation.navigate('history')}
         />
+
+        {/* Contacts ABOVE Settings */}
+        <DrawerItem
+          label="Contacts"
+          labelStyle={styles.label}
+          icon={() => <Feather name="user" size={24} color={colors.primary} />}
+          onPress={() => props.navigation.navigate('contacts')}
+        />
+
+        {/* Settings */}
         <DrawerItem
           label="Settings"
           labelStyle={styles.label}
           icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}
           onPress={() => props.navigation.navigate('settings')}
+        />
+
+        {/* Invite Friends BELOW Settings */}
+        <DrawerItem
+          label="Invite Friends"
+          labelStyle={styles.label}
+          icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}
+          onPress={() => props.navigation.navigate('invite')}
         />
 
         {/* Footer Icon */}
