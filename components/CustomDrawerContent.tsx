@@ -3,7 +3,13 @@ import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
-import { View, Text, Image, StyleSheet } from 'react-native';
+import {
+  View,
+  Text,
+  Image,
+  StyleSheet,
+  TouchableOpacity,
+} from 'react-native';
 import {
   Feather,
   Ionicons,
@@ -28,35 +34,27 @@ export default function CustomDrawerContent(props: any) {
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
       <View style={styles.container}>
-        {/* Avatar and Logo */}
-        <View style={styles.profile}>
-          <Image
-            source={{ uri: 'https://i.imgur.com/0y8Ftya.png' }} // Replace with dynamic avatar
-            style={styles.avatar}
+        {/* Avatar and Header Info */}
+        <TouchableOpacity
+          onPress={() => setShowDropdown(!showDropdown)}
+          style={styles.userHeader}
+        >
+          <View>
+            <Text style={styles.userName}>Xs</Text>
+            <Text style={styles.userPhone}>+254 712 293 377</Text>
+          </View>
+          <Feather
+            name={showDropdown ? 'chevron-up' : 'chevron-down'}
+            size={22}
+            color={colors.primary}
           />
-          <Text style={styles.logoText}>GLT :)</Text>
-        </View>
+        </TouchableOpacity>
 
-        {/* Menu Items */}
-        <DrawerItem
-          label="Account"
-          labelStyle={styles.label}
-          icon={() => <Feather name="user" size={24} color={colors.primary} />}
-          style={styles.itemStyle}
-          onPress={() => props.navigation.navigate('account')}
-        />
-
-        {/* Track a package (dropdown) */}
+        {/* Dropdown: Track a package */}
         <DrawerItem
           label="Track a package"
           labelStyle={styles.label}
-          icon={() => (
-            <Feather
-              name={showDropdown ? 'chevron-down' : 'chevron-right'}
-              size={24}
-              color={colors.primary}
-            />
-          )}
+          icon={() => <Feather name="map-pin" size={22} color={colors.primary} />}
           style={styles.itemStyle}
           onPress={() => setShowDropdown((prev) => !prev)}
         />
@@ -81,12 +79,18 @@ export default function CustomDrawerContent(props: any) {
             />
           ))}
 
+        {/* Other Drawer Items */}
+        <DrawerItem
+          label="Account"
+          labelStyle={styles.label}
+          icon={() => <Feather name="user" size={24} color={colors.primary} />}
+          style={styles.itemStyle}
+          onPress={() => props.navigation.navigate('account')}
+        />
         <DrawerItem
           label="Talk to a rep"
           labelStyle={styles.label}
-          icon={() => (
-            <Feather name="message-circle" size={24} color={colors.primary} />
-          )}
+          icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}
           style={styles.itemStyle}
           onPress={() => props.navigation.navigate('support')}
         />
@@ -112,7 +116,7 @@ export default function CustomDrawerContent(props: any) {
           onPress={() => props.navigation.navigate('settings')}
         />
 
-        {/* Alert Icon at Bottom */}
+        {/* Bottom Alert */}
         <View style={styles.footerIcon}>
           <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />
         </View>
@@ -127,20 +131,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingTop: 20,
   },
-  profile: {
+  userHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 20,
+    paddingHorizontal: 20,
+    marginBottom: 10,
   },
-  avatar: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    marginBottom: 8,
+  userName: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: '600',
   },
-  logoText: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: colors.primary,
+  userPhone: {
+    color: 'gray',
+    fontSize: 14,
+    marginTop: 2,
   },
   label: {
     color: colors.text,
