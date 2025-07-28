@@ -150,12 +150,18 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   accountHeader: {
-    backgroundColor: '#601DA6', // light purple
+    backgroundColor: '#601DA6',
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
-    borderBottomWidth: 1,
-    borderBottomColor: '#4f1688',
+    marginHorizontal: 12,
+    marginTop: 10,
+    borderRadius: 16, // Rounded corners
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 3,
+    elevation: 3,
   },
   avatar: {
     width: 42,
@@ -176,8 +182,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   accountDropdown: {
-    backgroundColor: '#731DA6', // slightly darker purple
+    backgroundColor: '#731DA6',
+    marginHorizontal: 12,
+    marginTop: 6,
     paddingLeft: 10,
+    paddingVertical: 5,
+    borderRadius: 14, // Rounded corners
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 2,
+    elevation: 2,
   },
   label: {
     color: colors.text,
