@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import {
   DrawerContentScrollView,
   DrawerItem,
@@ -13,6 +13,18 @@ import {
 import colors from '../theme/colors';
 
 export default function CustomDrawerContent(props: any) {
+  const [showDropdown, setShowDropdown] = useState(false);
+
+  const trackingStatuses = [
+    { label: 'Pending', key: 'pending', icon: 'clock' },
+    { label: 'Paid', key: 'paid', icon: 'check-circle' },
+    { label: 'Submitted', key: 'submitted', icon: 'upload' },
+    { label: 'In transit', key: 'in-transit', icon: 'truck' },
+    { label: 'Delivered', key: 'delivered', icon: 'box' },
+    { label: 'Collected', key: 'collected', icon: 'archive' },
+    { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
+  ];
+
   return (
     <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
       <View style={styles.container}>
@@ -32,16 +44,47 @@ export default function CustomDrawerContent(props: any) {
           icon={() => <Feather name="user" size={22} color={colors.primary} />}
           onPress={() => props.navigation.navigate('account')}
         />
+
+        {/* Track a package (dropdown) */}
         <DrawerItem
           label="Track a package"
           labelStyle={styles.label}
-          icon={() => <Feather name="map-pin" size={22} color={colors.primary} />}
-          onPress={() => props.navigation.navigate('track')}
+          icon={() => (
+            <Feather
+              name={showDropdown ? 'chevron-down' : 'chevron-right'}
+              size={22}
+              color={colors.primary}
+            />
+          )}
+          onPress={() => setShowDropdown((prev) => !prev)}
         />
+
+        {showDropdown &&
+          trackingStatuses.map((item) => (
+            <DrawerItem
+              key={item.key}
+              label={item.label}
+              labelStyle={[styles.label, { fontSize: 14, marginLeft: 10 }]}
+              icon={() => (
+                <Feather name={item.icon as any} size={18} color={colors.primary} />
+              )}
+              style={{ marginLeft: 20 }}
+              onPress={() =>
+                props.navigation.navigate({
+                  name: 'track',
+                  params: { status: item.key },
+                  merge: true,
+                })
+              }
+            />
+          ))}
+
         <DrawerItem
           label="Talk to a rep"
           labelStyle={styles.label}
-          icon={() => <Feather name="message-circle" size={22} color={colors.primary} />}
+          icon={() => (
+            <Feather name="message-circle" size={22} color={colors.primary} />
+          )}
           onPress={() => props.navigation.navigate('support')}
         />
         <DrawerItem
