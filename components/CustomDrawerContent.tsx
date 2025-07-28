@@ -41,7 +41,8 @@ export default function CustomDrawerContent(props: any) {
         <DrawerItem
           label="Account"
           labelStyle={styles.label}
-          icon={() => <Feather name="user" size={22} color={colors.primary} />}
+          icon={() => <Feather name="user" size={24} color={colors.primary} />}
+          style={styles.itemStyle}
           onPress={() => props.navigation.navigate('account')}
         />
 
@@ -52,10 +53,11 @@ export default function CustomDrawerContent(props: any) {
           icon={() => (
             <Feather
               name={showDropdown ? 'chevron-down' : 'chevron-right'}
-              size={22}
+              size={24}
               color={colors.primary}
             />
           )}
+          style={styles.itemStyle}
           onPress={() => setShowDropdown((prev) => !prev)}
         />
 
@@ -64,11 +66,11 @@ export default function CustomDrawerContent(props: any) {
             <DrawerItem
               key={item.key}
               label={item.label}
-              labelStyle={[styles.label, { fontSize: 14, marginLeft: 10 }]}
+              labelStyle={[styles.subLabel]}
               icon={() => (
-                <Feather name={item.icon as any} size={18} color={colors.primary} />
+                <Feather name={item.icon as any} size={20} color={colors.primary} />
               )}
-              style={{ marginLeft: 20 }}
+              style={styles.subItem}
               onPress={() =>
                 props.navigation.navigate({
                   name: 'track',
@@ -83,26 +85,30 @@ export default function CustomDrawerContent(props: any) {
           label="Talk to a rep"
           labelStyle={styles.label}
           icon={() => (
-            <Feather name="message-circle" size={22} color={colors.primary} />
+            <Feather name="message-circle" size={24} color={colors.primary} />
           )}
+          style={styles.itemStyle}
           onPress={() => props.navigation.navigate('support')}
         />
         <DrawerItem
           label="FAQs"
           labelStyle={styles.label}
-          icon={() => <Feather name="help-circle" size={22} color={colors.primary} />}
+          icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}
+          style={styles.itemStyle}
           onPress={() => props.navigation.navigate('faqs')}
         />
         <DrawerItem
           label="History"
           labelStyle={styles.label}
-          icon={() => <MaterialIcons name="history" size={22} color={colors.primary} />}
+          icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}
+          style={styles.itemStyle}
           onPress={() => props.navigation.navigate('history')}
         />
         <DrawerItem
           label="Settings"
           labelStyle={styles.label}
-          icon={() => <Ionicons name="settings-outline" size={22} color={colors.primary} />}
+          icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}
+          style={styles.itemStyle}
           onPress={() => props.navigation.navigate('settings')}
         />
 
@@ -138,8 +144,21 @@ const styles = StyleSheet.create({
   },
   label: {
     color: colors.text,
-    fontSize: 16,
-    marginLeft: -10,
+    fontSize: 17,
+    marginLeft: -5,
+  },
+  subLabel: {
+    color: colors.text,
+    fontSize: 15,
+    marginLeft: 5,
+  },
+  itemStyle: {
+    marginLeft: 5,
+    paddingVertical: 2,
+  },
+  subItem: {
+    paddingLeft: 30,
+    paddingVertical: 0,
   },
   footerIcon: {
     marginTop: 'auto',
