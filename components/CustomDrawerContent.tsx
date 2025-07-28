@@ -150,13 +150,13 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   accountHeader: {
-    backgroundColor: '#601DA6',
+    backgroundColor: '#601DA6', // New primary purple
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
     marginHorizontal: 12,
     marginTop: 10,
-    borderRadius: 16, // Rounded corners
+    borderRadius: 16,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
     shadowOpacity: 0.15,
@@ -182,12 +182,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   accountDropdown: {
-    backgroundColor: '#731DA6',
+    backgroundColor: '#4D2292', // New darker secondary purple
     marginHorizontal: 12,
     marginTop: 6,
     paddingLeft: 10,
     paddingVertical: 5,
-    borderRadius: 14, // Rounded corners
+    borderRadius: 14,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
