@@ -150,12 +150,12 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   accountHeader: {
-    backgroundColor: '#1b1d2a',
+    backgroundColor: '#2f3143', // lighter than before
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#2d2f3a',
+    borderBottomColor: '#3a3c4e',
   },
   avatar: {
     width: 42,
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   accountDropdown: {
-    backgroundColor: '#1e1f2f',
+    backgroundColor: '#37394e', // slightly darker for dropdown
     paddingLeft: 10,
   },
   label: {
