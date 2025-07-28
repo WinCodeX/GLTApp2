@@ -52,7 +52,7 @@ export default function CustomDrawerContent(props: any) {
           <Feather
             name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}
             size={20}
-            color={colors.primary}
+            color="#fff"
           />
         </TouchableOpacity>
 
@@ -62,13 +62,13 @@ export default function CustomDrawerContent(props: any) {
             <DrawerItem
               label="Account"
               labelStyle={styles.label}
-              icon={() => <Feather name="user" size={22} color={colors.primary} />}
+              icon={() => <Feather name="user" size={22} color="#fff" />}
               onPress={() => props.navigation.navigate('account')}
             />
             <DrawerItem
               label="Add Account"
               labelStyle={styles.label}
-              icon={() => <Feather name="plus" size={22} color={colors.primary} />}
+              icon={() => <Feather name="plus" size={22} color="#fff" />}
               onPress={() => {}}
             />
           </View>
@@ -150,12 +150,12 @@ const styles = StyleSheet.create({
     paddingTop: 10,
   },
   accountHeader: {
-    backgroundColor: '#2f3143', // lighter than before
+    backgroundColor: '#601DA6', // light purple
     flexDirection: 'row',
     alignItems: 'center',
     padding: 15,
     borderBottomWidth: 1,
-    borderBottomColor: '#3a3c4e',
+    borderBottomColor: '#4f1688',
   },
   avatar: {
     width: 42,
@@ -172,11 +172,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   userPhone: {
-    color: 'gray',
+    color: 'white',
     fontSize: 13,
   },
   accountDropdown: {
-    backgroundColor: '#37394e', // slightly darker for dropdown
+    backgroundColor: '#731DA6', // slightly darker purple
     paddingLeft: 10,
   },
   label: {
