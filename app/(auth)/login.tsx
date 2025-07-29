@@ -7,13 +7,12 @@ import { Button, TextInput } from 'react-native-paper';
 import api from '../../lib/api';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState<string>('');
-  const [password, setPassword] = useState<string>('');
-  const [showPassword, setShowPassword] = useState<boolean>(false);
-  const [errorMsg, setErrorMsg] = useState<string>('');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [errorMsg, setErrorMsg] = useState('');
   const router = useRouter();
 
-  // Optional cleanup on mount
   useEffect(() => {
     SecureStore.deleteItemAsync('auth_token');
     SecureStore.deleteItemAsync('user_id');
@@ -26,11 +25,17 @@ export default function LoginScreen() {
         user: { email, password },
       });
 
+      // Option 1: from body
       const token = response?.data?.token;
-      const userId = response?.data?.data?.id;
+      const userId = response?.data?.user?.id;
 
-      if (token && userId) {
-        await SecureStore.setItemAsync('auth_token', token);
+      // Optional fallback: from headers if body fails
+      const tokenFromHeader = response.headers?.authorization?.split(' ')[1];
+
+      const finalToken = token || tokenFromHeader;
+
+      if (finalToken && userId) {
+        await SecureStore.setItemAsync('auth_token', finalToken);
         await SecureStore.setItemAsync('user_id', String(userId));
 
         Toast.show({
@@ -41,10 +46,20 @@ export default function LoginScreen() {
         router.replace('/');
       } else {
         setErrorMsg('Login failed: token or user ID missing');
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Token or user data is missing',
+        });
       }
     } catch (err: any) {
       console.error('Login error:', err?.response?.data || err.message);
       setErrorMsg('Invalid email or password');
+      Toast.show({
+        type: 'error',
+        text1: 'Login failed',
+        text2: 'Invalid credentials or network error',
+      });
     }
   };
 
