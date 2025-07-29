@@ -76,9 +76,11 @@ export default function CustomDrawerContent(props: any) {
         {/* Track a Package */}
         <View style={styles.customItem}>
           <View style={styles.trackHeader}>
+
+<TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
             <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
             <Text style={styles.trackLabel}>Track a package</Text>
-            <TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
+            
               <Feather
                 name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
                 size={20}
