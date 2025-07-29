@@ -1,21 +1,21 @@
-import React, { useState } from 'react';
+import {
+  Feather,
+  FontAwesome5,
+  Ionicons,
+  MaterialIcons,
+} from '@expo/vector-icons';
 import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
+import React, { useState } from 'react';
 import {
-  View,
-  Text,
   Image,
   StyleSheet,
+  Text,
   TouchableOpacity,
+  View,
 } from 'react-native';
-import {
-  Feather,
-  Ionicons,
-  MaterialIcons,
-  FontAwesome5,
-} from '@expo/vector-icons';
 import colors from '../theme/colors';
 
 export default function CustomDrawerContent(props: any) {
@@ -74,13 +74,11 @@ export default function CustomDrawerContent(props: any) {
         )}
 
         {/* Track a Package */}
-<TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
         <View style={styles.customItem}>
           <View style={styles.trackHeader}>
-
             <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
             <Text style={styles.trackLabel}>Track a package</Text>
-            
+            <TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
               <Feather
                 name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
                 size={20}
