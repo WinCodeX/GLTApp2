@@ -50,7 +50,7 @@ export default function LoginScreen() {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>StockXApp Login</Text>
+      <Text style={styles.title}>GltApp Login</Text>
 
       <TextInput
         label="Email"
