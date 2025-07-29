@@ -391,13 +391,15 @@ const styles = StyleSheet.create({
     flex: 1, // Takes remaining space
   },
   infoCard: {
-    backgroundColor: '#1e1f24',
+    backgroundColor: '#1a1625', // Dark purple background
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
+    borderWidth: 1,
+    borderColor: '#bd93f9' // Purple border accent
   },
   sectionTitle: {
     color: '#aaa',
@@ -427,7 +429,14 @@ const styles = StyleSheet.create({
     color: '#bbb',
     fontSize: 15,
   },
-  identityCard: { backgroundColor: '#282a36', margin: 16, borderRadius: 12, padding: 16 },
+  identityCard: { 
+    backgroundColor: '#1a1625', // Dark purple background
+    margin: 16, 
+    borderRadius: 12, 
+    padding: 16,
+    borderWidth: 1,
+    borderColor: '#bd93f9' // Purple border accent
+  },
   identityRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   userName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   accountType: { color: '#888', fontSize: 14, marginTop: 4 },
