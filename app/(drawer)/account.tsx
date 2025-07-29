@@ -241,7 +241,46 @@ colors={['#bd93f9']}
       />          
     </TouchableOpacity>          
   </View>          
-</View>          <View style={styles.identityCard}>          
+</View>         
+
+<View style={styles.infoCard}>
+  <Text style={styles.sectionTitle}>Account Information</Text>
+
+  <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
+    <Text style={styles.infoLabel}>Username</Text>
+    <View style={styles.infoRight}>
+      <Text style={styles.infoValue}>{user?.username || '—'}</Text>
+      <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+    </View>
+  </TouchableOpacity>
+
+  <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
+    <Text style={styles.infoLabel}>Display Name</Text>
+    <View style={styles.infoRight}>
+      <Text style={styles.infoValue}>{user?.display_name || 'LVL0'}</Text>
+      <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+    </View>
+  </TouchableOpacity>
+
+  <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
+    <Text style={styles.infoLabel}>Email</Text>
+    <View style={styles.infoRight}>
+      <Text style={styles.infoValue}>{user?.email || '—'}</Text>
+      <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+    </View>
+  </TouchableOpacity>
+
+  <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
+    <Text style={styles.infoLabel}>Phone</Text>
+    <View style={styles.infoRight}>
+      <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
+      <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+    </View>
+  </TouchableOpacity>
+</View>
+
+
+ <View style={styles.identityCard}>          
   <Text style={styles.userName}>Business</Text>          
   <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>          
     <Button mode="outlined" onPress={() => setShowBusinessModal(true)}>Create</Button>          
@@ -295,6 +334,48 @@ joinedBusinesses.map((biz) => (
 container: { flex: 1, backgroundColor: '#0e0e11' },
 headerRow: { flexDirection: 'row', alignItems: 'center', padding: 16, gap: 10 },
 header: { fontSize: 22, fontWeight: 'bold', color: '#bd93f9' },
+infoCard: {
+  backgroundColor: '#1e1f24',
+  marginHorizontal: 16,
+  marginBottom: 16,
+  borderRadius: 16,
+  paddingHorizontal: 16,
+  paddingTop: 16,
+  paddingBottom: 8,
+},
+
+sectionTitle: {
+  color: '#aaa',
+  fontSize: 15,
+  fontWeight: '600',
+  marginBottom: 8,
+},
+
+infoRow: {
+  flexDirection: 'row',
+  justifyContent: 'space-between',
+  alignItems: 'center',
+  paddingVertical: 14,
+  borderBottomColor: '#333',
+  borderBottomWidth: 1,
+},
+
+infoLabel: {
+  color: '#fff',
+  fontSize: 16,
+  fontWeight: '600',
+},
+
+infoRight: {
+  flexDirection: 'row',
+  alignItems: 'center',
+  gap: 6,
+},
+
+infoValue: {
+  color: '#bbb',
+  fontSize: 15,
+},
 identityCard: { backgroundColor: '#282a36', margin: 16, borderRadius: 12, padding: 16 },
 identityRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
 userName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
