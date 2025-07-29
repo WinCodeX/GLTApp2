@@ -1,32 +1,32 @@
-import React, { useState, useEffect, useLayoutEffect } from 'react';
-import { 
-  View, 
-  Text, 
-  StyleSheet, 
-  ScrollView, 
-  TouchableOpacity, 
-  RefreshControl, 
-  Modal 
-} from 'react-native';
-import { useRouter } from 'expo-router';
-import { useNavigation } from '@react-navigation/native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import * as ImagePicker from 'expo-image-picker';
-import * as SecureStore from 'expo-secure-store';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
-import Toast from 'react-native-toast-message';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useNavigation } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
+import React, { useEffect, useLayoutEffect, useState } from 'react';
+import {
+  Modal,
+  RefreshControl,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View
+} from 'react-native';
+import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 
-import { useUser } from '../context/UserContext';
-import { getBusinesses, createInvite } from '../lib/helpers/business';
-import { uploadAvatar } from '../lib/helpers/uploadAvatar';
-import LoaderOverlay from '../components/LoaderOverlay';
-import ChangelogModal, { CHANGELOG_KEY, CHANGELOG_VERSION } from '../components/ChangelogModal';
-import BusinessModal from '../components/BusinessModal';
-import JoinBusinessModal from '../components/JoinBusinessModal';
-import AvatarPreviewModal from '../components/AvatarPreviewModal';
+import AvatarPreviewModal from '../../components/AvatarPreviewModal';
+import BusinessModal from '../../components/BusinessModal';
+import ChangelogModal, { CHANGELOG_KEY, CHANGELOG_VERSION } from '../../components/ChangelogModal';
+import JoinBusinessModal from '../../components/JoinBusinessModal';
+import LoaderOverlay from '../../components/LoaderOverlay';
+import { useUser } from '../../context/UserContext';
+import { createInvite, getBusinesses } from '../../lib/helpers/business';
+import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
 
 export default function AccountScreen() {
   const { user, refreshUser, loading: userLoading, error: userError } = useUser();
@@ -225,7 +225,7 @@ export default function AccountScreen() {
           <View style={styles.identityRow}>
             <View>
               <Text style={styles.userName}>{user?.username || 'No name'}</Text>
-              <Text style={styles.accountType}>StockApp Account</Text>
+              <Text style={styles.accountType}>Glt Account</Text>
               <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
             </View>
             <TouchableOpacity onPress={pickAndPreviewAvatar}>
@@ -234,7 +234,7 @@ export default function AccountScreen() {
                 source={
                   user?.avatar_url
                     ? { uri: user.avatar_url }
-                    : require('../assets/images/avatar_placeholder.png')
+                    : require('../../assets/images/avatar_placeholder.png')
                 }
               />
             </TouchableOpacity>
