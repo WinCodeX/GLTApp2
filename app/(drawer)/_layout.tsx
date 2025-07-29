@@ -11,9 +11,10 @@ import {
 import React from 'react';
 import { ColorValue, Dimensions } from 'react-native';
 
+import { Provider as PaperProvider } from 'react-native-paper'; // 👈 Add this
 import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import { UserProvider } from '@/context/UserContext'; // ✅ Ensure this path is correct
+import { UserProvider } from '@/context/UserContext';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -42,33 +43,35 @@ export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
 
   return (
-    <ThemeProvider value={CustomDarkTheme}>
-      <UserProvider> {/* ✅ Wrap everything to provide user context globally */}
-        <Drawer
-          drawerContent={(props) => <CustomDrawerContent {...props} />}
-          screenOptions={({ route }) => {
-            const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
-            const IconComponent = iconData.lib;
+    <PaperProvider>
+      <ThemeProvider value={CustomDarkTheme}>
+        <UserProvider>
+          <Drawer
+            drawerContent={(props) => <CustomDrawerContent {...props} />}
+            screenOptions={({ route }) => {
+              const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
+              const IconComponent = iconData.lib;
 
-            return {
-              headerShown: false,
-              drawerStyle: {
-                backgroundColor: colors.background,
-                width: drawerWidth,
-              },
-              drawerActiveTintColor: colors.primary,
-              drawerInactiveTintColor: 'white',
-              drawerLabelStyle: {
-                fontSize: 16,
-                marginLeft: -10,
-              },
-              drawerIcon: ({ color }: { color: ColorValue }) => (
-                <IconComponent name={iconData.name} size={20} color={color} />
-              ),
-            };
-          }}
-        />
-      </UserProvider>
-    </ThemeProvider>
+              return {
+                headerShown: false,
+                drawerStyle: {
+                  backgroundColor: colors.background,
+                  width: drawerWidth,
+                },
+                drawerActiveTintColor: colors.primary,
+                drawerInactiveTintColor: 'white',
+                drawerLabelStyle: {
+                  fontSize: 16,
+                  marginLeft: -10,
+                },
+                drawerIcon: ({ color }: { color: ColorValue }) => (
+                  <IconComponent name={iconData.name} size={20} color={color} />
+                ),
+              };
+            }}
+          />
+        </UserProvider>
+      </ThemeProvider>
+    </PaperProvider>
   );
 }
