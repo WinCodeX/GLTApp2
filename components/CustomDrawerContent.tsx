@@ -74,39 +74,19 @@ export default function CustomDrawerContent(props: any) {
         )}
 
         {/* Track a Package */}
-        <View style={styles.customItem}>
-          <View style={styles.trackHeader}>
-            <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-            <Text style={styles.trackLabel}>Track a package</Text>
-            <TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
-              <Feather
-                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={colors.primary}
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {showTrackDropdown &&
-          trackingStatuses.map((item) => (
-            <DrawerItem
-              key={item.key}
-              label={item.label}
-              labelStyle={styles.subLabel}
-              icon={() => (
-                <Feather name={item.icon as any} size={20} color={colors.primary} />
-              )}
-              style={styles.subItem}
-              onPress={() =>
-                props.navigation.navigate({
-                  name: 'track',
-                  params: { status: item.key },
-                  merge: true,
-                })
-              }
-            />
-          ))}
+       <View style={styles.customItem}>
+  <View style={styles.trackHeader}>
+    <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+    <Text style={styles.trackLabel}>Track a package</Text>
+    <TouchableOpacity onPress={() => setShowTrackDropdown((prev) => !prev)}>
+      <Feather
+        name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+        size={20}
+        color={colors.primary}
+      />
+    </TouchableOpacity>
+  </View>
+</View>
 
         {/* General Navigation */}
         <DrawerItem
