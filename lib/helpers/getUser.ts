@@ -13,7 +13,7 @@ export const getUser = async () => {
       },
     });
 
-    const user = res.data.data.attributes;
+    const user = res.data;
 
     // Save to cache for offline use
     await AsyncStorage.setItem("cached_user", JSON.stringify(user));
