@@ -155,8 +155,11 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0f' },
   locationsContainer: { paddingTop: 20, paddingBottom: 20 },
   sectionTitle: {
-    fontSize: 18, fontWeight: 'bold', color: '#fff',
+    fontSize: 24, fontWeight: 'bold', color: '#fff',
     textAlign: 'center', marginBottom: 15, opacity: 0.9,
+textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   animatedContainer: { height: 60, overflow: 'hidden' },
   animatedContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
