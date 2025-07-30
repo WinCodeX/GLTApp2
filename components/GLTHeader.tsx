@@ -1,4 +1,3 @@
-// components/GLTHeader.tsx
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
@@ -14,15 +13,15 @@ export default function GLTHeader() {
 
   return (
     <View style={styles.container}>
-      {/* Drawer toggle */}
-      <TouchableOpacity onPress={handleOpenDrawer}>
-        <Feather name="menu" size={24} color="white" />
-      </TouchableOpacity>
+      {/* Left section: Menu + Title */}
+      <View style={styles.leftContainer}>
+        <TouchableOpacity onPress={handleOpenDrawer} style={styles.menuIcon}>
+          <Feather name="menu" size={26} color="white" />
+        </TouchableOpacity>
+        <Text style={styles.title}>GLT Logistics</Text>
+      </View>
 
-      {/* Title */}
-      <Text style={styles.title}>GLT Logistics</Text>
-
-      {/* Search icon placeholder */}
+      {/* Right section: Search */}
       <TouchableOpacity onPress={() => console.log('Search tapped')}>
         <Feather name="search" size={24} color="white" />
       </TouchableOpacity>
@@ -32,7 +31,7 @@ export default function GLTHeader() {
 
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.header, // Make sure colors.header exists in your color theme
+    backgroundColor: colors.header,
     paddingTop: 50,
     paddingBottom: 15,
     paddingHorizontal: 20,
@@ -41,10 +40,17 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     elevation: 5,
   },
+  leftContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  menuIcon: {
+    marginRight: 10,
+  },
   title: {
     color: 'white',
     fontSize: 20,
-    fontWeight: 'bold',
-    fontFamily: 'SpaceMono',
+    fontWeight: '600',
+    fontFamily: 'System', // iOS default; update below if using a custom font
   },
 });
