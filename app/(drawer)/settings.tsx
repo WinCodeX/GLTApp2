@@ -9,8 +9,7 @@ const SETTINGS_SECTIONS = [
     data: [
       { id: '1', label: 'Account', icon: 'account-circle' },
       { id: '2', label: 'Content & Social', icon: 'group' },
-      { id: '3', label: 'Data & Privacy', icon: 'lock' },
-      { id: '4', label: 'Family Center', icon: 'family-restroom' },
+    
     ],
   },
   {
