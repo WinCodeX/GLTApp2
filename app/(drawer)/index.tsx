@@ -30,30 +30,29 @@ export default function HomeScreen() {
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const startAnimation = () => {
-      // Calculate the total width of one set of locations
-      const locationTagWidth = 120; // Approximate width of each tag including margins
-      const totalWidth = locations.length * locationTagWidth;
-      
-      // Reset position to 0
-      scrollX.setValue(0);
-      
-      // Animate to move one full cycle
+    // Calculate the total width of one set of locations
+    const locationTagWidth = 120; // Approximate width of each tag including margins
+    const totalWidth = locations.length * locationTagWidth;
+    
+    // Create infinite loop animation that never stops
+    const infiniteAnimation = Animated.loop(
       Animated.timing(scrollX, {
-        toValue: -totalWidth,
+        toValue: -totalWidth, // Move by one complete set
         duration: 15000, // 15 seconds for one complete cycle
         useNativeDriver: true,
-      }).start(() => {
-        // When animation completes, restart immediately
-        startAnimation();
-      });
-    };
+      }),
+      {
+        iterations: -1, // Infinite iterations
+        resetBeforeIteration: true, // Reset to start position before each iteration
+      }
+    );
 
-    startAnimation();
+    // Start the infinite animation
+    infiniteAnimation.start();
 
     // Cleanup function to stop animation when component unmounts
     return () => {
-      scrollX.stopAnimation();
+      infiniteAnimation.stop();
     };
   }, [scrollX]);
 
