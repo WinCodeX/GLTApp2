@@ -96,7 +96,7 @@ export default function HomeScreen() {
 
       {/* Animated Locations Section */}
       <View style={styles.locationsContainer}>
-        <Text style={styles.sectionTitle}>Available Locations</Text>
+        <Text style={styles.sectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
           <Animated.View
             style={[
