@@ -3,12 +3,12 @@
 import React, { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export const CHANGELOG_VERSION = '1.3.1';
+export const CHANGELOG_VERSION = '1.1.0';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Added chat feature',
+  'Added Hambuger menu feature',
 'User search',
 'And Chatlist for frequent chats',
   'New UI polish',
