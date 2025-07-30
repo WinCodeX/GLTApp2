@@ -99,7 +99,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 16,
     backgroundColor: colors.primary,
-    elevation: 4,
+    elevation: 5,  // Shadow for iOS and Android
+    shadowColor: '#000', // Shadow color for iOS
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    borderBottomWidth: 2,
+    borderBottomColor: '#3e1d70', // Edge glow effect color
   },
   backButton: {
     paddingRight: 10,
@@ -108,6 +114,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 22,
     fontWeight: 'bold',
+    flex: 1,
+    textAlign: 'center', // Centering the title
   },
   searchBar: {
     backgroundColor: '#2a2a3d',
@@ -117,6 +125,10 @@ const styles = StyleSheet.create({
     margin: 16,
     borderRadius: 8,
     fontSize: 16,
+    shadowColor: '#000', // Shadow color for search bar
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
   },
   sectionHeader: {
     fontSize: 18,
