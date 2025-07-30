@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
@@ -11,27 +11,42 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
+  const [ready, setReady] = useState(false); // 🚀 Ensure API baseURL is ready
   const router = useRouter();
 
   useEffect(() => {
-    SecureStore.deleteItemAsync('auth_token');
-    SecureStore.deleteItemAsync('user_id');
+    const initialize = async () => {
+      await SecureStore.deleteItemAsync('auth_token');
+      await SecureStore.deleteItemAsync('user_id');
+
+      try {
+        await api.get('/api/v1/ping');
+        console.log('✅ Backend reachable');
+        setReady(true);
+      } catch (err) {
+        console.log('❌ Ping failed:', err?.message || err);
+        Toast.show({
+          type: 'errorToast',
+          text1: 'Cannot reach server',
+          text2: 'Please check your connection.',
+        });
+      }
+    };
+
+    initialize();
   }, []);
 
   const handleLogin = async () => {
     setErrorMsg('');
+
     try {
-      const response = await api.post('api/v1/login', {
+      const response = await api.post('/api/v1/login', {
         user: { email, password },
       });
 
-      // Option 1: from body
       const token = response?.data?.token;
       const userId = response?.data?.user?.id;
-
-      // Optional fallback: from headers if body fails
       const tokenFromHeader = response.headers?.authorization?.split(' ')[1];
-
       const finalToken = token || tokenFromHeader;
 
       if (finalToken && userId) {
@@ -45,11 +60,11 @@ export default function LoginScreen() {
 
         router.replace('/');
       } else {
-        setErrorMsg('Login failed: token or user ID missing');
+        setErrorMsg('Login failed: Missing token or user ID');
         Toast.show({
           type: 'error',
           text1: 'Login failed',
-          text2: 'Token or user data is missing',
+          text2: 'Missing authentication data',
         });
       }
     } catch (err: any) {
@@ -58,7 +73,7 @@ export default function LoginScreen() {
       Toast.show({
         type: 'error',
         text1: 'Login failed',
-        text2: 'Invalid credentials or network error',
+        text2: 'Invalid credentials or server error',
       });
     }
   };
@@ -67,61 +82,72 @@ export default function LoginScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>GltApp Login</Text>
 
-      <TextInput
-        label="Email"
-        value={email}
-        onChangeText={setEmail}
-        keyboardType="email-address"
-        autoCapitalize="none"
-        mode="outlined"
-        style={styles.input}
-        textColor="#f8f8f2"
-        placeholderTextColor="#ccc"
-        outlineColor="#44475a"
-        activeOutlineColor="#bd93f9"
-      />
-
-      <TextInput
-        label="Password"
-        value={password}
-        onChangeText={setPassword}
-        secureTextEntry={!showPassword}
-        mode="outlined"
-        style={styles.input}
-        textColor="#f8f8f2"
-        placeholderTextColor="#ccc"
-        outlineColor="#44475a"
-        activeOutlineColor="#bd93f9"
-        right={
-          <TextInput.Icon
-            icon={showPassword ? 'eye-off' : 'eye'}
-            onPress={() => setShowPassword((v) => !v)}
-            forceTextInputFocus={false}
-            color="#aaa"
-          />
-        }
-      />
-
-      {errorMsg.length > 0 && (
-        <Text style={styles.error}>{errorMsg}</Text>
+      {!ready && (
+        <>
+          <ActivityIndicator size="large" color="#bd93f9" />
+          <Text style={styles.loadingText}>Connecting to server...</Text>
+        </>
       )}
 
-      <Button
-        mode="contained"
-        onPress={handleLogin}
-        style={styles.button}
-        labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-      >
-        Log In
-      </Button>
+      {ready && (
+        <>
+          <TextInput
+            label="Email"
+            value={email}
+            onChangeText={setEmail}
+            keyboardType="email-address"
+            autoCapitalize="none"
+            mode="outlined"
+            style={styles.input}
+            textColor="#f8f8f2"
+            placeholderTextColor="#ccc"
+            outlineColor="#44475a"
+            activeOutlineColor="#bd93f9"
+          />
 
-      <Button
-        onPress={() => router.push('/signup')}
-        textColor="#bd93f9"
-        style={styles.link}
-      >
-        Don't have an account? Sign up
-      </Button>
+          <TextInput
+            label="Password"
+            value={password}
+            onChangeText={setPassword}
+            secureTextEntry={!showPassword}
+            mode="outlined"
+            style={styles.input}
+            textColor="#f8f8f2"
+            placeholderTextColor="#ccc"
+            outlineColor="#44475a"
+            activeOutlineColor="#bd93f9"
+            right={
+              <TextInput.Icon
+                icon={showPassword ? 'eye-off' : 'eye'}
+                onPress={() => setShowPassword((v) => !v)}
+                forceTextInputFocus={false}
+                color="#aaa"
+              />
+            }
+          />
+
+          {errorMsg.length > 0 && (
+            <Text style={styles.error}>{errorMsg}</Text>
+          )}
+
+          <Button
+            mode="contained"
+            onPress={handleLogin}
+            style={styles.button}
+            labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+          >
+            Log In
+          </Button>
+
+          <Button
+            onPress={() => router.push('/signup')}
+            textColor="#bd93f9"
+            style={styles.link}
+          >
+            Don't have an account? Sign up
+          </Button>
+        </>
+      )}
     </View>
   );
 }
@@ -159,5 +185,11 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 8,
     fontSize: 14,
+  },
+  loadingText: {
+    color: '#ccc',
+    textAlign: 'center',
+    marginTop: 16,
+    fontSize: 16,
   },
 });
