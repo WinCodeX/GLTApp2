@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import colors from '../../theme/colors'; // Ensure your colors are imported here
 
 const SETTINGS_SECTIONS = [
@@ -47,43 +48,77 @@ export default function SettingsScreen({ navigation }: any) {
 
   // Render each item in the section list
   const renderItem = ({ item }: any) => (
-    <TouchableOpacity
-      style={styles.settingItem}
-      onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))} // Navigate to settings
-    >
-      <MaterialIcons name={item.icon} size={24} color={colors.primary} />
-      <Text style={styles.settingText}>{item.label}</Text>
-      <Feather name="chevron-right" size={20} color={colors.primary} />
-    </TouchableOpacity>
+    <View style={styles.settingItemContainer}>
+      <TouchableOpacity
+        style={styles.settingItem}
+        onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))} // Navigate to settings
+      >
+        <MaterialIcons name={item.icon} size={24} color="#fff" />
+        <Text style={styles.settingText}>{item.label}</Text>
+        <Feather name="chevron-right" size={20} color="#888" />
+      </TouchableOpacity>
+    </View>
+  );
+
+  // Render section with edge lighting effect
+  const renderSection = ({ section }) => (
+    <View style={styles.sectionContainer}>
+      <Text style={styles.sectionHeader}>{section.title}</Text>
+      <View style={styles.sectionContent}>
+        {section.data.map((item, index) => (
+          <View key={item.id}>
+            <View style={styles.settingItemContainer}>
+              <TouchableOpacity
+                style={styles.settingItem}
+                onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))}
+              >
+                <MaterialIcons name={item.icon} size={24} color="#fff" />
+                <Text style={styles.settingText}>{item.label}</Text>
+                <Feather name="chevron-right" size={20} color="#888" />
+              </TouchableOpacity>
+            </View>
+            {index < section.data.length - 1 && <View style={styles.separator} />}
+          </View>
+        ))}
+      </View>
+    </View>
   );
 
   return (
     <View style={styles.container}>
-      {/* Header with Back and Settings Title */}
-      <View style={styles.header}>
+      {/* Header with gradient background like account screen */}
+      <LinearGradient
+        colors={['#4c1d95', '#7c3aed', '#3730a3']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Feather name="chevron-left" size={24} color="#fff" />
+          <Feather name="chevron-left" size={28} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>Settings</Text>
-      </View>
+        <View style={styles.placeholder} />
+      </LinearGradient>
 
       {/* Search Bar */}
-      <TextInput
-        style={styles.searchBar}
-        placeholder="Search"
-        placeholderTextColor="#888"
-        value={search}
-        onChangeText={setSearch}
-      />
+      <View style={styles.searchContainer}>
+        <TextInput
+          style={styles.searchBar}
+          placeholder="Search settings..."
+          placeholderTextColor="#888"
+          value={search}
+          onChangeText={setSearch}
+        />
+      </View>
 
       {/* Settings List */}
       <SectionList
-        sections={filterSettings(SETTINGS_SECTIONS)} // Use filtered sections here
+        sections={filterSettings(SETTINGS_SECTIONS)}
         keyExtractor={(item) => item.id}
-        renderItem={renderItem}
-        renderSectionHeader={({ section }) => (
-          <Text style={styles.sectionHeader}>{section.title}</Text>
-        )}
+        renderItem={() => null} // We handle rendering in renderSectionHeader
+        renderSectionHeader={renderSection}
+        showsVerticalScrollIndicator={false}
+        contentContainerStyle={styles.listContainer}
       />
     </View>
   );
@@ -92,71 +127,97 @@ export default function SettingsScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0e0e11', // Dark background
+    backgroundColor: '#0a0a0f', // Darker background to match account screen
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    backgroundColor: '#601DA6', // Same background as account header
-    elevation: 5,  // Shadow for iOS and Android
-    shadowColor: '#000', // Shadow color for iOS
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 6,
-    borderBottomWidth: 2,
-    borderBottomColor: '#3e1d70', // Edge glow effect color
+    justifyContent: 'space-between',
+    paddingTop: 50, // Account for status bar
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   backButton: {
-    marginRight: 12,
-    padding: 4, // Adds some touchable area around the icon
+    padding: 8,
   },
   title: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 24,
     fontWeight: 'bold',
-    flex: 1,
-    textAlign: 'center', // Centering the title
-    fontFamily: 'cursive', // Font style for matching the example in the image
-    letterSpacing: 1, // Adding some space for better readability
+    fontStyle: 'italic', // Cursive-like style to match account screen
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  placeholder: {
+    width: 44, // Same width as back button for centering
+  },
+  searchContainer: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   searchBar: {
-    backgroundColor: '#2a2a3d',
+    backgroundColor: '#1a1a2e',
     color: '#fff',
-    paddingVertical: 10,
-    paddingLeft: 16,
-    margin: 16,
-    borderRadius: 8,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 12,
     fontSize: 16,
-    shadowColor: '#000', // Shadow color for search bar
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  listContainer: {
+    paddingBottom: 20,
+  },
+  sectionContainer: {
+    marginBottom: 24,
   },
   sectionHeader: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.primary,
-    marginLeft: 16,
-    marginBottom: 8,
-    paddingTop: 10,
+    color: '#fff',
+    marginLeft: 32,
+    marginBottom: 12,
+    opacity: 0.9,
+  },
+  sectionContent: {
+    marginHorizontal: 16,
+    borderRadius: 16,
+    backgroundColor: '#1a1a2e',
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.6)', // Purple edge lighting
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+    overflow: 'hidden',
+  },
+  settingItemContainer: {
+    backgroundColor: 'transparent',
   },
   settingItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2a2a3d',
-    paddingVertical: 12,
-    paddingLeft: 16,
-    paddingRight: 12,
-    marginVertical: 6,
-    borderRadius: 8,
-    marginLeft: 16,
-    marginRight: 16,
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'transparent',
   },
   settingText: {
     color: '#fff',
     fontSize: 16,
     flex: 1,
-    marginLeft: 12,
+    marginLeft: 16,
+    fontWeight: '500',
+  },
+  separator: {
+    height: 1,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    marginLeft: 60, // Align with text, not icon
   },
 });
