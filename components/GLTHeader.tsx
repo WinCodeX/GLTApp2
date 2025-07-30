@@ -50,7 +50,7 @@ const styles = StyleSheet.create({
   title: {
     color: 'white',
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: 'bold',
 textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
