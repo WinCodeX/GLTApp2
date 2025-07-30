@@ -30,38 +30,30 @@ export default function HomeScreen() {
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Calculate the total width of one set of locations
+    // Calculate the total width - we need to animate across multiple sets
     const locationTagWidth = 120; // Approximate width of each tag including margins
     const totalWidth = locations.length * locationTagWidth;
     
-    // Create truly seamless infinite animation
-    // We animate to move by exactly the width of one complete set
-    // When it completes, it seamlessly continues because we have multiple sets rendered
-    const createInfiniteAnimation = () => {
-      return Animated.timing(scrollX, {
-        toValue: scrollX._value - totalWidth, // Always move by one complete set from current position
-        duration: 15000, // 15 seconds for one complete cycle
+    // Create infinite loop animation that moves across 2 complete sets
+    // This ensures seamless looping without visible resets
+    const infiniteAnimation = Animated.loop(
+      Animated.timing(scrollX, {
+        toValue: -totalWidth * 2, // Move across 2 complete sets
+        duration: 30000, // 30 seconds for 2 complete cycles
         useNativeDriver: true,
-      });
-    };
+      }),
+      {
+        iterations: -1, // Infinite iterations
+        // Don't use resetBeforeIteration - let it loop naturally
+      }
+    );
 
-    const startContinuousAnimation = () => {
-      createInfiniteAnimation().start(({ finished }) => {
-        if (finished) {
-          // Reset the value but keep it visually seamless
-          // Since we have 3 sets, when we complete one cycle, 
-          // we reset the position to show the same visual state
-          scrollX.setValue(scrollX._value + totalWidth);
-          startContinuousAnimation(); // Continue the loop
-        }
-      });
-    };
-
-    startContinuousAnimation();
+    // Start the infinite animation
+    infiniteAnimation.start();
 
     // Cleanup function to stop animation when component unmounts
     return () => {
-      scrollX.stopAnimation();
+      infiniteAnimation.stop();
     };
   }, [scrollX]);
 
