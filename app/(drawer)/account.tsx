@@ -5,6 +5,7 @@ import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useLayoutEffect, useState } from 'react';
 import {
   Modal,
@@ -150,7 +151,7 @@ export default function AccountScreen() {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
       {/* LoaderOverlay appears on top without blocking layout */}
       <LoaderOverlay visible={userLoading || loading} />
 
@@ -223,28 +224,35 @@ export default function AccountScreen() {
         </Modal>
       )}
 
+      {/* Header with gradient background like settings screen */}
+      <LinearGradient
+        colors={['#4c1d95', '#7c3aed', '#3730a3']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <TouchableOpacity 
+          onPress={handleBackPress}
+          style={styles.backButton}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Account</Text>
+        <View style={styles.placeholder} />
+      </LinearGradient>
+
       <ScrollView
+        style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 32 }}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#bd93f9']}
+            colors={['#7c3aed']}
+            tintColor="#7c3aed"
           />
         }
       >
-        {/* Fixed Header Row */}
-        <View style={styles.headerRow}>
-          <TouchableOpacity 
-            onPress={handleBackPress}
-            style={styles.backButton}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          >
-            <MaterialCommunityIcons name="arrow-left" size={24} color="#bd93f9" />
-          </TouchableOpacity>
-          <Text style={styles.header}>Account</Text>
-        </View>
-
         {/* User Profile Card */}
         <View style={styles.identityCard}>
           <View style={styles.identityRow}>
@@ -274,7 +282,7 @@ export default function AccountScreen() {
             <Text style={styles.infoLabel}>Username</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.username || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
 
@@ -282,15 +290,15 @@ export default function AccountScreen() {
             <Text style={styles.infoLabel}>Display Name</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.display_name || 'LVL0'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
             <Text style={styles.infoLabel}>Email</Text>
             <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.email || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+              <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
 
@@ -298,7 +306,7 @@ export default function AccountScreen() {
             <Text style={styles.infoLabel}>Phone</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#999" />
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
         </View>
@@ -307,8 +315,22 @@ export default function AccountScreen() {
         <View style={styles.identityCard}>
           <Text style={styles.userName}>Business</Text>
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <Button mode="outlined" onPress={() => setShowBusinessModal(true)}>Create</Button>
-            <Button mode="outlined" onPress={() => setShowJoinModal(true)}>Join</Button>
+            <Button 
+              mode="outlined" 
+              onPress={() => setShowBusinessModal(true)}
+              buttonColor="rgba(124, 58, 237, 0.1)"
+              textColor="#7c3aed"
+            >
+              Create
+            </Button>
+            <Button 
+              mode="outlined" 
+              onPress={() => setShowJoinModal(true)}
+              buttonColor="rgba(124, 58, 237, 0.1)"
+              textColor="#7c3aed"
+            >
+              Join
+            </Button>
           </View>
         </View>
 
@@ -324,7 +346,7 @@ export default function AccountScreen() {
               </TouchableOpacity>
             ))
           ) : (
-            <Text style={styles.businessItem}>None</Text>
+            <Text style={styles.businessItem}>• Infinity</Text>
           )}
 
           <Text style={styles.teamLabel}>Joined:</Text>
@@ -367,58 +389,81 @@ export default function AccountScreen() {
           </Dialog>
         </Portal>
       </ScrollView>
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0e0e11' },
-  headerRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    padding: 16, 
-    paddingTop: 8,
-    paddingBottom: 16,
+  container: { 
+    flex: 1, 
+    backgroundColor: '#0a0a0f' // Darker background to match settings
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50, // Account for status bar
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   backButton: {
-    marginRight: 12,
-    padding: 4, // Adds some touchable area around the icon
+    padding: 8,
   },
-  header: { 
-    fontSize: 22, 
-    fontWeight: 'bold', 
-    color: '#bd93f9',
-    flex: 1, // Takes remaining space
+  title: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontStyle: 'italic', // Cursive-like style to match settings screen
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  placeholder: {
+    width: 44, // Same width as back button for centering
+  },
+  scrollView: {
+    flex: 1,
   },
   infoCard: {
-    backgroundColor: '#1a1625', // Dark purple background
+    backgroundColor: '#1a1a2e',
     marginHorizontal: 16,
     marginBottom: 16,
     borderRadius: 16,
     paddingHorizontal: 16,
     paddingTop: 16,
     paddingBottom: 8,
-    borderWidth: 1,
-    borderColor: '#bd93f9' // Purple border accent
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.6)', // Purple edge lighting
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
   },
   sectionTitle: {
-    color: '#aaa',
+    color: '#fff',
     fontSize: 15,
     fontWeight: '600',
     marginBottom: 8,
+    opacity: 0.9,
   },
   infoRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
-    borderBottomColor: '#333',
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
     borderBottomWidth: 1,
   },
   infoLabel: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '500',
   },
   infoRight: {
     flexDirection: 'row',
@@ -426,35 +471,133 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   infoValue: {
-    color: '#bbb',
+    color: '#ccc',
     fontSize: 15,
   },
   identityCard: { 
-    backgroundColor: '#1a1625', // Dark purple background
+    backgroundColor: '#1a1a2e',
     margin: 16, 
-    borderRadius: 12, 
+    borderRadius: 16, 
     padding: 16,
-    borderWidth: 1,
-    borderColor: '#bd93f9' // Purple border accent
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.6)', // Purple edge lighting
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  identityRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  userName: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  accountType: { color: '#888', fontSize: 14, marginTop: 4 },
-  version: { color: '#999', marginTop: 4 },
-  teamLabel: { color: '#ccc', marginTop: 8, fontWeight: '600' },
-  businessItem: { color: '#fff', marginTop: 4, fontSize: 15 },
-  logoutCard: { backgroundColor: '#282a36', margin: 16, borderRadius: 12, padding: 12 },
-  logoutButton: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  logoutText: { color: '#ff6b6b', fontSize: 16, fontWeight: '600' },
-  dialog: { backgroundColor: '#282a36', borderRadius: 12 },
-  dialogTitle: { color: '#f8f8f2', fontWeight: 'bold' },
-  dialogText: { color: '#ccc', fontSize: 15 },
-  dialogActions: { justifyContent: 'space-between', paddingHorizontal: 12 },
-  dialogCancel: { backgroundColor: '#bd93f9', borderRadius: 6, marginRight: 8 },
-  dialogConfirm: { borderColor: '#ff5555', borderWidth: 1, borderRadius: 6 },
-  error: { color: '#ff5555', padding: 20, textAlign: 'center' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.6)', justifyContent: 'center', alignItems: 'center' },
-  inviteModal: { backgroundColor: '#282a36', margin: 32, padding: 20, borderRadius: 12, alignItems: 'center' },
-  modalText: { color: '#fff', fontSize: 16, marginBottom: 12, textAlign: 'center' },
-  code: { color: '#bd93f9', fontSize: 18, fontWeight: 'bold', marginTop: 12, marginBottom: 12 },
+  identityRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  userName: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  accountType: { 
+    color: '#888', 
+    fontSize: 14, 
+    marginTop: 4 
+  },
+  version: { 
+    color: '#999', 
+    marginTop: 4 
+  },
+  teamLabel: { 
+    color: '#ccc', 
+    marginTop: 8, 
+    fontWeight: '600' 
+  },
+  businessItem: { 
+    color: '#fff', 
+    marginTop: 4, 
+    fontSize: 15 
+  },
+  logoutCard: { 
+    backgroundColor: '#1a1a2e', 
+    margin: 16, 
+    borderRadius: 16, 
+    padding: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 107, 107, 0.6)', // Red edge lighting for logout
+    shadowColor: '#ff6b6b',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  logoutButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12 
+  },
+  logoutText: { 
+    color: '#ff6b6b', 
+    fontSize: 16, 
+    fontWeight: '600' 
+  },
+  dialog: { 
+    backgroundColor: '#1a1a2e', 
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  dialogTitle: { 
+    color: '#fff', 
+    fontWeight: 'bold' 
+  },
+  dialogText: { 
+    color: '#ccc', 
+    fontSize: 15 
+  },
+  dialogActions: { 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 12 
+  },
+  dialogCancel: { 
+    backgroundColor: '#7c3aed', 
+    borderRadius: 6, 
+    marginRight: 8 
+  },
+  dialogConfirm: { 
+    borderColor: '#ff5555', 
+    borderWidth: 1, 
+    borderRadius: 6 
+  },
+  error: { 
+    color: '#ff5555', 
+    padding: 20, 
+    textAlign: 'center' 
+  },
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  inviteModal: { 
+    backgroundColor: '#1a1a2e', 
+    margin: 32, 
+    padding: 20, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  modalText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    marginBottom: 12, 
+    textAlign: 'center' 
+  },
+  code: { 
+    color: '#7c3aed', 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    marginTop: 12, 
+    marginBottom: 12 
+  },
 });
