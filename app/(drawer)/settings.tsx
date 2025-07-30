@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SectionList } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
-import colors from '../theme/colors'; // Ensure your colors are imported here
+import colors from '../../theme/colors'; // Ensure your colors are imported here
 
 const SETTINGS_SECTIONS = [
   {
