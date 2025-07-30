@@ -15,10 +15,10 @@ const SETTINGS_SECTIONS = [
   {
     title: 'App Settings',
     data: [
-      { id: '5', label: 'Appearance', icon: 'color-lens' },
-      { id: '6', label: 'Accessibility', icon: 'accessibility' },
-      { id: '7', label: 'Notifications', icon: 'notifications' },
-      { id: '8', label: 'Advanced', icon: 'settings' },
+      { id: '3', label: 'Appearance', icon: 'color-lens' },
+      { id: '4', label: 'Accessibility', icon: 'accessibility' },
+      { id: '5', label: 'Notifications', icon: 'notifications' },
+      { id: '6', label: 'Advanced', icon: 'settings' },
     ],
   },
   {
