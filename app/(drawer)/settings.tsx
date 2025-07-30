@@ -48,16 +48,14 @@ export default function SettingsScreen({ navigation }: any) {
 
   // Render each item in the section list
   const renderItem = ({ item }: any) => (
-    <View style={styles.settingItemContainer}>
-      <TouchableOpacity
-        style={styles.settingItem}
-        onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))} // Navigate to settings
-      >
-        <MaterialIcons name={item.icon} size={24} color="#fff" />
-        <Text style={styles.settingText}>{item.label}</Text>
-        <Feather name="chevron-right" size={20} color="#888" />
-      </TouchableOpacity>
-    </View>
+    <TouchableOpacity
+      style={styles.settingItem}
+      onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))} // Navigate to settings
+    >
+      <MaterialIcons name={item.icon} size={24} color="#fff" />
+      <Text style={styles.settingText}>{item.label}</Text>
+      <Feather name="chevron-right" size={20} color="#888" />
+    </TouchableOpacity>
   );
 
   // Render section with edge lighting effect
@@ -115,7 +113,7 @@ export default function SettingsScreen({ navigation }: any) {
       <SectionList
         sections={filterSettings(SETTINGS_SECTIONS)}
         keyExtractor={(item) => item.id}
-        renderItem={() => null} // We handle rendering in renderSectionHeader
+        renderItem={renderItem}
         renderSectionHeader={renderSection}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContainer}
