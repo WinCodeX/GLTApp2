@@ -210,6 +210,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
     color: '#fff',
+    textAlign: 'center',
     marginBottom: 15,
     marginLeft: 16,
     opacity: 0.9,
