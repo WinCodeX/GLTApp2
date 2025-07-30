@@ -117,6 +117,8 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     flex: 1,
     textAlign: 'center', // Centering the title
+    fontFamily: 'cursive', // Font style for matching the example in the image
+    letterSpacing: 1, // Adding some space for better readability
   },
   searchBar: {
     backgroundColor: '#2a2a3d',
