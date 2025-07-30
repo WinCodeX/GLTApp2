@@ -1,5 +1,5 @@
-import React from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SectionList } from 'react-native';
+import React, { useState } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import colors from '../../theme/colors'; // Ensure your colors are imported here
 
@@ -9,7 +9,6 @@ const SETTINGS_SECTIONS = [
     data: [
       { id: '1', label: 'Account', icon: 'account-circle' },
       { id: '2', label: 'Content & Social', icon: 'group' },
-    
     ],
   },
   {
@@ -32,6 +31,21 @@ const SETTINGS_SECTIONS = [
 ];
 
 export default function SettingsScreen({ navigation }: any) {
+  const [search, setSearch] = useState('');
+
+  // Function to filter the settings data
+  const filterSettings = (sections: any) => {
+    if (!search) return sections;
+
+    return sections.map((section: any) => ({
+      ...section,
+      data: section.data.filter((item: any) =>
+        item.label.toLowerCase().includes(search.toLowerCase())
+      ),
+    }));
+  };
+
+  // Render each item in the section list
   const renderItem = ({ item }: any) => (
     <TouchableOpacity
       style={styles.settingItem}
@@ -45,9 +59,26 @@ export default function SettingsScreen({ navigation }: any) {
 
   return (
     <View style={styles.container}>
-      <Text style={styles.title}>Settings</Text>
+      {/* Header with Back and Settings Title */}
+      <View style={styles.header}>
+        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+          <Feather name="chevron-left" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.title}>Settings</Text>
+      </View>
+
+      {/* Search Bar */}
+      <TextInput
+        style={styles.searchBar}
+        placeholder="Search"
+        placeholderTextColor="#888"
+        value={search}
+        onChangeText={setSearch}
+      />
+
+      {/* Settings List */}
       <SectionList
-        sections={SETTINGS_SECTIONS}
+        sections={filterSettings(SETTINGS_SECTIONS)} // Use filtered sections here
         keyExtractor={(item) => item.id}
         renderItem={renderItem}
         renderSectionHeader={({ section }) => (
@@ -62,14 +93,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: colors.background,
-    paddingTop: 20,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: colors.primary,
+    elevation: 4,
+  },
+  backButton: {
+    paddingRight: 10,
   },
   title: {
+    color: '#fff',
     fontSize: 22,
     fontWeight: 'bold',
+  },
+  searchBar: {
+    backgroundColor: '#2a2a3d',
     color: '#fff',
-    marginLeft: 16,
-    marginBottom: 15,
+    paddingVertical: 10,
+    paddingLeft: 16,
+    margin: 16,
+    borderRadius: 8,
+    fontSize: 16,
   },
   sectionHeader: {
     fontSize: 18,
