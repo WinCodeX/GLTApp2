@@ -34,25 +34,34 @@ export default function HomeScreen() {
     const locationTagWidth = 120; // Approximate width of each tag including margins
     const totalWidth = locations.length * locationTagWidth;
     
-    // Create infinite loop animation that never stops
-    const infiniteAnimation = Animated.loop(
-      Animated.timing(scrollX, {
-        toValue: -totalWidth, // Move by one complete set
+    // Create truly seamless infinite animation
+    // We animate to move by exactly the width of one complete set
+    // When it completes, it seamlessly continues because we have multiple sets rendered
+    const createInfiniteAnimation = () => {
+      return Animated.timing(scrollX, {
+        toValue: scrollX._value - totalWidth, // Always move by one complete set from current position
         duration: 15000, // 15 seconds for one complete cycle
         useNativeDriver: true,
-      }),
-      {
-        iterations: -1, // Infinite iterations
-        resetBeforeIteration: true, // Reset to start position before each iteration
-      }
-    );
+      });
+    };
 
-    // Start the infinite animation
-    infiniteAnimation.start();
+    const startContinuousAnimation = () => {
+      createInfiniteAnimation().start(({ finished }) => {
+        if (finished) {
+          // Reset the value but keep it visually seamless
+          // Since we have 3 sets, when we complete one cycle, 
+          // we reset the position to show the same visual state
+          scrollX.setValue(scrollX._value + totalWidth);
+          startContinuousAnimation(); // Continue the loop
+        }
+      });
+    };
+
+    startContinuousAnimation();
 
     // Cleanup function to stop animation when component unmounts
     return () => {
-      infiniteAnimation.stop();
+      scrollX.stopAnimation();
     };
   }, [scrollX]);
 
@@ -105,8 +114,8 @@ export default function HomeScreen() {
               },
             ]}
           >
-            {/* Render locations multiple times for seamless loop */}
-            {[...locations, ...locations, ...locations].map((location, index) => (
+            {/* Render many more sets for truly seamless infinite scroll */}
+            {[...locations, ...locations, ...locations, ...locations, ...locations].map((location, index) => (
               <LocationTag key={`${location}-${index}`} location={location} />
             ))}
           </Animated.View>
