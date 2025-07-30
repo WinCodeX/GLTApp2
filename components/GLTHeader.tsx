@@ -51,6 +51,9 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 20,
     fontWeight: '600',
+textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
     fontFamily: 'System', // iOS default; update below if using a custom font
   },
 });
