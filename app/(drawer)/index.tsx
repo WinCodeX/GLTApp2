@@ -26,21 +26,35 @@ export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [cost, setCost] = useState<number | null>(null);
-  
+
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    const animate = () => {
-      Animated.loop(
-        Animated.timing(scrollX, {
-          toValue: -screenWidth * 2, // Adjust multiplier based on content width
-          duration: 20000, // 20 seconds for slow pace
-          useNativeDriver: true,
-        })
-      ).start();
+    const startAnimation = () => {
+      // Calculate the total width of one set of locations
+      const locationTagWidth = 120; // Approximate width of each tag including margins
+      const totalWidth = locations.length * locationTagWidth;
+      
+      // Reset position to 0
+      scrollX.setValue(0);
+      
+      // Animate to move one full cycle
+      Animated.timing(scrollX, {
+        toValue: -totalWidth,
+        duration: 15000, // 15 seconds for one complete cycle
+        useNativeDriver: true,
+      }).start(() => {
+        // When animation completes, restart immediately
+        startAnimation();
+      });
     };
 
-    animate();
+    startAnimation();
+
+    // Cleanup function to stop animation when component unmounts
+    return () => {
+      scrollX.stopAnimation();
+    };
   }, [scrollX]);
 
   // Dummy cost calculation
@@ -92,7 +106,7 @@ export default function HomeScreen() {
               },
             ]}
           >
-            {/* Render locations multiple times for continuous loop */}
+            {/* Render locations multiple times for seamless loop */}
             {[...locations, ...locations, ...locations].map((location, index) => (
               <LocationTag key={`${location}-${index}`} location={location} />
             ))}
@@ -104,7 +118,7 @@ export default function HomeScreen() {
       <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
-          
+
           <View style={styles.inputContainer}>
             <LinearGradient
               colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']}
