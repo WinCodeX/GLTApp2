@@ -11,7 +11,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
-  const [ready, setReady] = useState(false); // 🚀 Ensure API baseURL is ready
+  const [ready, setReady] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -19,16 +19,40 @@ export default function LoginScreen() {
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
-      try {
-        await api.get('/api/v1/ping');
-        console.log('✅ Backend reachable');
+      // Try multiple endpoints to check server connectivity
+      const healthCheckEndpoints = [
+        '/api/v1/ping',
+        '/api/v1/health',
+        '/ping',
+        '/health',
+        '/', // Root endpoint
+      ];
+
+      let serverReachable = false;
+
+      for (const endpoint of healthCheckEndpoints) {
+        try {
+          console.log(`🔍 Trying endpoint: ${endpoint}`);
+          await api.get(endpoint);
+          console.log(`✅ Server reachable at: ${endpoint}`);
+          serverReachable = true;
+          break;
+        } catch (err) {
+          console.log(`❌ Failed ${endpoint}:`, err?.response?.status || err?.message);
+          // Continue to next endpoint
+        }
+      }
+
+      if (serverReachable) {
         setReady(true);
-      } catch (err) {
-        console.log('❌ Ping failed:', err?.message || err);
+      } else {
+        // Still allow login attempt even if ping fails
+        console.log('⚠️ No health check endpoints responded, but allowing login attempt');
+        setReady(true);
         Toast.show({
-          type: 'errorToast',
-          text1: 'Cannot reach server',
-          text2: 'Please check your connection.',
+          type: 'info',
+          text1: 'Server connection uncertain',
+          text2: 'Will attempt login anyway',
         });
       }
     };
@@ -54,7 +78,7 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('user_id', String(userId));
 
         Toast.show({
-          type: 'defaultToast',
+          type: 'success',
           text1: 'Welcome back!',
         });
 
@@ -67,14 +91,39 @@ export default function LoginScreen() {
           text2: 'Missing authentication data',
         });
       }
-    } catch (err: any) {
-      console.error('Login error:', err?.response?.data || err.message);
-      setErrorMsg('Invalid email or password');
-      Toast.show({
-        type: 'error',
-        text1: 'Login failed',
-        text2: 'Invalid credentials or server error',
-      });
+    } catch (err) {
+      console.error('Login error:', err?.response?.data || err?.message);
+      
+      // More specific error handling
+      if (err?.response?.status === 401) {
+        setErrorMsg('Invalid email or password');
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Invalid credentials',
+        });
+      } else if (err?.response?.status >= 500) {
+        setErrorMsg('Server error, please try again later');
+        Toast.show({
+          type: 'error',
+          text1: 'Server Error',
+          text2: 'Please try again later',
+        });
+      } else if (err?.code === 'NETWORK_ERROR' || err?.message?.includes('Network')) {
+        setErrorMsg('Network error - check your connection');
+        Toast.show({
+          type: 'error',
+          text1: 'Network Error',
+          text2: 'Please check your internet connection',
+        });
+      } else {
+        setErrorMsg('Login failed - please try again');
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Please try again',
+        });
+      }
     }
   };
 
