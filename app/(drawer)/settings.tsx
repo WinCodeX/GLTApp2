@@ -26,7 +26,7 @@ const SETTINGS_SECTIONS = [
     title: 'Support',
     data: [
       { id: '9', label: 'Support', icon: 'help-circle' },
-      { id: '10', label: 'Upload debug logs to Discord Support', icon: 'file-upload' },
+      { id: '10', label: 'Upload any Bugs you find to GLT Support', icon: 'file-upload' },
       { id: '11', label: 'Acknowledgements', icon: 'info' },
     ],
   },
