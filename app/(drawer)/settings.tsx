@@ -5,20 +5,29 @@ import colors from '../../theme/colors'; // Ensure your colors are imported here
 
 const SETTINGS_SECTIONS = [
   {
+    title: 'Account Settings',
+    data: [
+      { id: '1', label: 'Account', icon: 'account-circle' },
+      { id: '2', label: 'Content & Social', icon: 'group' },
+      { id: '3', label: 'Data & Privacy', icon: 'lock' },
+      { id: '4', label: 'Family Center', icon: 'family-restroom' },
+    ],
+  },
+  {
     title: 'App Settings',
     data: [
-      { id: '1', label: 'Appearance', icon: 'color-lens' },
-      { id: '2', label: 'Accessibility', icon: 'accessibility' },
-      { id: '3', label: 'Notifications', icon: 'notifications' },
-      { id: '4', label: 'Advanced', icon: 'settings' },
+      { id: '5', label: 'Appearance', icon: 'color-lens' },
+      { id: '6', label: 'Accessibility', icon: 'accessibility' },
+      { id: '7', label: 'Notifications', icon: 'notifications' },
+      { id: '8', label: 'Advanced', icon: 'settings' },
     ],
   },
   {
     title: 'Support',
     data: [
-      { id: '5', label: 'Support', icon: 'help-circle' },
-      { id: '6', label: 'Upload debug logs to GLT Support', icon: 'file-upload' },
-      { id: '7', label: 'Acknowledgements', icon: 'info' },
+      { id: '9', label: 'Support', icon: 'help-circle' },
+      { id: '10', label: 'Upload debug logs to Discord Support', icon: 'file-upload' },
+      { id: '11', label: 'Acknowledgements', icon: 'info' },
     ],
   },
 ];
@@ -69,6 +78,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
     marginLeft: 16,
     marginBottom: 8,
+    paddingTop: 10,
   },
   settingItem: {
     flexDirection: 'row',
