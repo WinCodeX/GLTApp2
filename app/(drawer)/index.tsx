@@ -9,6 +9,7 @@ import {
   Animated,
   ScrollView,
   Dimensions,
+  Easing,
 } from 'react-native';
 import { FAB } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -17,47 +18,40 @@ import colors from '../../theme/colors';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-// Dummy locations for demonstration
 const locations = [
-  'Nairobi', 'Mombasa', 'Kisumu', 'Eldoret', 'Nakuru', 'Thika', 'Machakos', 'Kisii', 'Kakamega', 'Meru'
+  'Nairobi', 'Mombasa', 'Kisumu', 'Eldoret', 'Nakuru',
+  'Thika', 'Machakos', 'Kisii', 'Kakamega', 'Meru',
 ];
 
 export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [cost, setCost] = useState<number | null>(null);
-
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    // Calculate the total width - we need to animate across multiple sets
-    const locationTagWidth = 120; // Approximate width of each tag including margins
-    const totalWidth = locations.length * locationTagWidth;
-    
-    // Create infinite loop animation that moves across 2 complete sets
-    // This ensures seamless looping without visible resets
-    const infiniteAnimation = Animated.loop(
+    const locationTagWidth = 120;
+    const visibleSetWidth = locations.length * locationTagWidth;
+    const repeatedList = 5;
+    const scrollDistance = visibleSetWidth * repeatedList;
+
+    const loop = () => {
+      scrollX.setValue(0);
       Animated.timing(scrollX, {
-        toValue: -totalWidth * 2, // Move across 2 complete sets
-        duration: 30000, // 30 seconds for 2 complete cycles
+        toValue: -scrollDistance / 2,
+        duration: 30000,
+        easing: Easing.linear,
         useNativeDriver: true,
-      }),
-      {
-        iterations: -1, // Infinite iterations
-        // Don't use resetBeforeIteration - let it loop naturally
-      }
-    );
-
-    // Start the infinite animation
-    infiniteAnimation.start();
-
-    // Cleanup function to stop animation when component unmounts
-    return () => {
-      infiniteAnimation.stop();
+      }).start(() => {
+        loop();
+      });
     };
+
+    loop();
+
+    return () => scrollX.stopAnimation();
   }, [scrollX]);
 
-  // Dummy cost calculation
   const calculateCost = () => {
     if (origin && destination) {
       const estimatedCost = 500 + Math.abs(locations.indexOf(origin) - locations.indexOf(destination)) * 100;
@@ -69,7 +63,6 @@ export default function HomeScreen() {
 
   const handleFabPress = () => {
     console.log('FAB pressed');
-    // Add navigation or modal later
   };
 
   const LocationTag = ({ location }) => (
@@ -91,41 +84,31 @@ export default function HomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Custom Header */}
       <GLTHeader />
 
-      {/* Animated Locations Section */}
+      {/* Animated Scrolling Section */}
       <View style={styles.locationsContainer}>
         <Text style={styles.sectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
           <Animated.View
             style={[
               styles.animatedContent,
-              {
-                transform: [{ translateX: scrollX }],
-              },
+              { transform: [{ translateX: scrollX }] },
             ]}
           >
-            {/* Render many more sets for truly seamless infinite scroll */}
-            {[...locations, ...locations, ...locations, ...locations, ...locations].map((location, index) => (
+            {Array(5).fill(locations).flat().map((location, index) => (
               <LocationTag key={`${location}-${index}`} location={location} />
             ))}
           </Animated.View>
         </View>
       </View>
 
-      {/* Cost Calculator Section */}
+      {/* Cost Calculator */}
       <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
-
           <View style={styles.inputContainer}>
-            <LinearGradient
-              colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.inputGradientBorder}
-            >
+            <LinearGradient colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']} style={styles.inputGradientBorder}>
               <TextInput
                 style={styles.input}
                 placeholder="From Location"
@@ -134,13 +117,7 @@ export default function HomeScreen() {
                 onChangeText={setOrigin}
               />
             </LinearGradient>
-
-            <LinearGradient
-              colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']}
-              start={{ x: 0, y: 0 }}
-              end={{ x: 1, y: 1 }}
-              style={styles.inputGradientBorder}
-            >
+            <LinearGradient colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']} style={styles.inputGradientBorder}>
               <TextInput
                 style={styles.input}
                 placeholder="To Location"
@@ -149,29 +126,16 @@ export default function HomeScreen() {
                 onChangeText={setDestination}
               />
             </LinearGradient>
-
             <TouchableOpacity onPress={calculateCost} activeOpacity={0.8}>
-              <LinearGradient
-                colors={['#7c3aed', '#3b82f6', '#10b981']}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={styles.calculateButton}
-              >
+              <LinearGradient colors={['#7c3aed', '#3b82f6', '#10b981']} style={styles.calculateButton}>
                 <Text style={styles.calculateButtonText}>Calculate Cost</Text>
               </LinearGradient>
             </TouchableOpacity>
 
             {cost !== null && (
               <View style={styles.costContainer}>
-                <LinearGradient
-                  colors={['rgba(16, 185, 129, 0.2)', 'rgba(59, 130, 246, 0.2)']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={styles.costGradientBg}
-                >
-                  <Text style={styles.costText}>
-                    Estimated Cost: KSh {cost.toLocaleString()}
-                  </Text>
+                <LinearGradient colors={['rgba(16, 185, 129, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.costGradientBg}>
+                  <Text style={styles.costText}>Estimated Cost: KSh {cost.toLocaleString()}</Text>
                 </LinearGradient>
               </View>
             )}
@@ -179,154 +143,70 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* Floating Action Button */}
-      <LinearGradient
-        colors={['#7c3aed', '#3b82f6']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.fabGradient}
-      >
-        <FAB
-          icon="plus"
-          style={styles.fab}
-          onPress={handleFabPress}
-          color="white"
-        />
+      {/* FAB */}
+      <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
+        <FAB icon="plus" style={styles.fab} onPress={handleFabPress} color="white" />
       </LinearGradient>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0a0a0f',
-  },
-  locationsContainer: {
-    paddingTop: 20,
-    paddingBottom: 20,
-  },
+  container: { flex: 1, backgroundColor: '#0a0a0f' },
+  locationsContainer: { paddingTop: 20, paddingBottom: 20 },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 15,
-    marginLeft: 16,
-    opacity: 0.9,
+    fontSize: 18, fontWeight: 'bold', color: '#fff',
+    textAlign: 'center', marginBottom: 15, opacity: 0.9,
   },
-  animatedContainer: {
-    height: 60,
-    overflow: 'hidden',
-  },
-  animatedContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  locationTagGradient: {
-    borderRadius: 25,
-    padding: 2, // This creates the gradient border effect
-    marginHorizontal: 8,
-  },
+  animatedContainer: { height: 60, overflow: 'hidden' },
+  animatedContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16 },
+  locationTagGradient: { borderRadius: 25, padding: 2, marginHorizontal: 8 },
   locationTag: {
     backgroundColor: '#1a1a2e',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 23,
-    minWidth: 80,
-    alignItems: 'center',
+    paddingVertical: 12, paddingHorizontal: 20,
+    borderRadius: 23, minWidth: 80, alignItems: 'center',
   },
-  locationText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  scrollContainer: {
-    flex: 1,
-  },
-  calculatorContainer: {
-    padding: 20,
-    marginTop: 20,
-  },
+  locationText: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  scrollContainer: { flex: 1 },
+  calculatorContainer: { padding: 20, marginTop: 20 },
   calculatorTitle: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 30,
+    fontSize: 24, fontWeight: 'bold', color: '#fff',
+    textAlign: 'center', marginBottom: 30,
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  inputContainer: {
-    alignItems: 'center',
-    gap: 20,
-  },
-  inputGradientBorder: {
-    borderRadius: 12,
-    padding: 2,
-    width: '90%',
-  },
+  inputContainer: { alignItems: 'center', gap: 20 },
+  inputGradientBorder: { borderRadius: 12, padding: 2, width: '90%' },
   input: {
     backgroundColor: '#1a1a2e',
-    color: '#fff',
-    padding: 16,
-    borderRadius: 10,
-    fontSize: 16,
-    width: '100%',
+    color: '#fff', padding: 16, borderRadius: 10,
+    fontSize: 16, width: '100%',
   },
   calculateButton: {
-    paddingVertical: 16,
-    paddingHorizontal: 40,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginTop: 10,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    paddingVertical: 16, paddingHorizontal: 40, borderRadius: 25,
+    alignItems: 'center', marginTop: 10,
+    shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, shadowRadius: 8, elevation: 8,
   },
   calculateButtonText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
+    color: '#fff', fontSize: 18, fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  costContainer: {
-    marginTop: 20,
-    width: '90%',
-  },
+  costContainer: { marginTop: 20, width: '90%' },
   costGradientBg: {
-    borderRadius: 12,
-    padding: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(16, 185, 129, 0.3)',
+    borderRadius: 12, padding: 16, alignItems: 'center',
+    borderWidth: 1, borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   costText: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
+    fontSize: 18, fontWeight: '600', color: '#fff', textAlign: 'center',
   },
   fabGradient: {
-    position: 'absolute',
-    right: 20,
-    bottom: 30,
-    borderRadius: 28,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
+    position: 'absolute', right: 20, bottom: 30, borderRadius: 28,
+    shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
-  fab: {
-    backgroundColor: 'transparent',
-    elevation: 0,
-    shadowOpacity: 0,
-  },
+  fab: { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 },
 });
