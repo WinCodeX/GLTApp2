@@ -92,13 +92,13 @@ export default function SettingsScreen({ navigation }: any) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#0e0e11', // Dark background
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: colors.primary,
+    backgroundColor: '#601DA6', // Same background as account header
     elevation: 5,  // Shadow for iOS and Android
     shadowColor: '#000', // Shadow color for iOS
     shadowOffset: { width: 0, height: 2 },
@@ -108,7 +108,8 @@ const styles = StyleSheet.create({
     borderBottomColor: '#3e1d70', // Edge glow effect color
   },
   backButton: {
-    paddingRight: 10,
+    marginRight: 12,
+    padding: 4, // Adds some touchable area around the icon
   },
   title: {
     color: '#fff',
