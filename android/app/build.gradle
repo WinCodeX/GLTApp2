@@ -24,6 +24,7 @@ android {
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace 'com.lvl0_x.gltapp2'
+
     defaultConfig {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
@@ -39,6 +40,12 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        release {
+            storeFile file(MYAPP_RELEASE_STORE_FILE)
+            storePassword MYAPP_RELEASE_STORE_PASSWORD
+            keyAlias MYAPP_RELEASE_KEY_ALIAS
+            keyPassword MYAPP_RELEASE_KEY_PASSWORD
+        }
     }
 
     buildTypes {
@@ -46,7 +53,7 @@ android {
             signingConfig signingConfigs.debug
         }
         release {
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.release
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
@@ -64,7 +71,6 @@ android {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
 
-    // ✅ APK Renaming Logic
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             def buildType = variant.buildType.name.capitalize()
