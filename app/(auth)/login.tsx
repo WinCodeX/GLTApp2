@@ -34,13 +34,24 @@ export default function LoginScreen() {
       });
 
       const token = response?.data?.token;
-      const userId = response?.data?.user?.id;
+      const user = response?.data?.user;
+      const userId = user?.id;
 
-      await SecureStore.setItemAsync('auth_token', token);
-      await SecureStore.setItemAsync('user_id', String(userId));
+      if (token && userId) {
+        await SecureStore.setItemAsync('auth_token', token);
+        await SecureStore.setItemAsync('user_id', String(userId));
 
-      Toast.show({ type: 'success', text1: 'Logged in with Google!' });
-      router.push('/(drawer)');
+        Toast.show({ type: 'success', text1: 'Logged in with Google!' });
+
+        const roles = user?.roles || [];
+        if (roles.includes('admin')) {
+          router.push('/admin');
+        } else {
+          router.push('/');
+        }
+      } else {
+        Toast.show({ type: 'error', text1: 'Google login failed', text2: 'Missing token or user ID' });
+      }
     } catch (err) {
       console.error('Google login error:', err);
       Toast.show({ type: 'error', text1: 'Google login failed' });
@@ -94,13 +105,20 @@ export default function LoginScreen() {
       });
 
       const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
-      const userId = response?.data?.user?.id;
+      const user = response?.data?.user;
+      const userId = user?.id;
 
       if (token && userId) {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
         Toast.show({ type: 'success', text1: 'Welcome back!' });
-        router.push('/(drawer)');
+
+        const roles = user?.roles || [];
+        if (roles.includes('admin')) {
+          router.push('/admin');
+        } else {
+          router.push('/');
+        }
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
         Toast.show({ type: 'error', text1: 'Login failed', text2: 'Incomplete data' });
@@ -128,7 +146,7 @@ export default function LoginScreen() {
       const result = await promptAsync();
 
       if (result?.type === 'success') {
-        // The callback in useGoogleAuth will handle the login
+        // handled in callback
         return;
       }
 
