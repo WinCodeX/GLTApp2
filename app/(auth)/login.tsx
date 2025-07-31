@@ -1,11 +1,11 @@
-import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ActivityIndicator, TouchableOpacity } from 'react-native';
+import { AntDesign } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import Toast from 'react-native-toast-message';
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Button, TextInput } from 'react-native-paper';
-import { LinearGradient } from 'expo-linear-gradient';
-import { AntDesign } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
 import api from '../../lib/api';
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
 
