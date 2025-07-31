@@ -15,10 +15,13 @@ export default function LoginScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [ready, setReady] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const router = useRouter();
 
   const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
     try {
+      setIsGoogleLoading(true);
       const response = await api.post('/api/v1/google_login', {
         user: {
           email: googleUser.email,
@@ -37,15 +40,20 @@ export default function LoginScreen() {
       await SecureStore.setItemAsync('user_id', String(userId));
 
       Toast.show({ type: 'success', text1: 'Logged in with Google!' });
-      router.replace('/');
+      
+      // Use push instead of replace and navigate to the correct path
+      router.push('/(drawer)');
     } catch (err) {
       console.error('Google login error:', err);
       Toast.show({ type: 'error', text1: 'Google login failed' });
+    } finally {
+      setIsGoogleLoading(false);
     }
   });
 
   useEffect(() => {
     const checkServer = async () => {
+      // Clear any existing tokens
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
@@ -79,7 +87,11 @@ export default function LoginScreen() {
   }, []);
 
   const handleLogin = async () => {
+    if (isLoggingIn) return; // Prevent multiple submissions
+    
     setErrorMsg('');
+    setIsLoggingIn(true);
+    
     try {
       const response = await api.post('/api/v1/login', {
         user: { email, password },
@@ -92,7 +104,9 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
         Toast.show({ type: 'success', text1: 'Welcome back!' });
-        router.replace('/(drawer)');
+        
+        // Use push instead of replace for more reliable navigation
+        router.push('/(drawer)');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
         Toast.show({ type: 'error', text1: 'Login failed', text2: 'Incomplete data' });
@@ -106,6 +120,20 @@ export default function LoginScreen() {
         setErrorMsg('Server error - try again');
         Toast.show({ type: 'error', text1: 'Login failed', text2: 'Unexpected error' });
       }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleGoogleLogin = async () => {
+    if (isGoogleLoading || !request) return;
+    
+    try {
+      setIsGoogleLoading(true);
+      await promptAsync();
+    } catch (error) {
+      console.error('Google login prompt error:', error);
+      setIsGoogleLoading(false);
     }
   };
 
@@ -133,6 +161,7 @@ export default function LoginScreen() {
               placeholderTextColor="#ccc"
               outlineColor="#44475a"
               activeOutlineColor="#bd93f9"
+              disabled={isLoggingIn || isGoogleLoading}
             />
 
             <TextInput
@@ -146,6 +175,7 @@ export default function LoginScreen() {
               placeholderTextColor="#ccc"
               outlineColor="#44475a"
               activeOutlineColor="#bd93f9"
+              disabled={isLoggingIn || isGoogleLoading}
               right={
                 <TextInput.Icon
                   icon={showPassword ? 'eye-off' : 'eye'}
@@ -159,29 +189,41 @@ export default function LoginScreen() {
             {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
 
             <TouchableOpacity
-              style={styles.googleBtn}
-              disabled={!request}
-              onPress={() => promptAsync()}
+              style={[styles.googleBtn, (isGoogleLoading || !request) && styles.disabledBtn]}
+              disabled={isGoogleLoading || !request || isLoggingIn}
+              onPress={handleGoogleLogin}
             >
-              <AntDesign name="google" size={20} color="white" />
-              <Text style={styles.googleText}>Sign in with Google</Text>
+              {isGoogleLoading ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <AntDesign name="google" size={20} color="white" />
+              )}
+              <Text style={styles.googleText}>
+                {isGoogleLoading ? 'Signing in...' : 'Sign in with Google'}
+              </Text>
             </TouchableOpacity>
 
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
-              style={styles.loginButtonGradient}
+              style={[styles.loginButtonGradient, isLoggingIn && styles.disabledBtn]}
             >
               <Button
                 mode="contained"
                 onPress={handleLogin}
                 style={styles.button}
                 labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+                disabled={isLoggingIn || isGoogleLoading}
               >
-                Log In
+                {isLoggingIn ? 'Logging In...' : 'Log In'}
               </Button>
             </LinearGradient>
 
-            <Button onPress={() => router.push('/signup')} textColor="#bd93f9" style={styles.link}>
+            <Button 
+              onPress={() => router.push('/signup')} 
+              textColor="#bd93f9" 
+              style={styles.link}
+              disabled={isLoggingIn || isGoogleLoading}
+            >
               Don't have an account? Sign up
             </Button>
           </>
@@ -249,5 +291,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  disabledBtn: {
+    opacity: 0.6,
   },
 });
