@@ -7,6 +7,7 @@ import { Button, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AntDesign } from '@expo/vector-icons';
 import api from '../../lib/api';
+import { useGoogleAuth } from '../../lib/useGoogleAuth'; // Make sure this exists
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -16,19 +17,39 @@ export default function LoginScreen() {
   const [ready, setReady] = useState(false);
   const router = useRouter();
 
+  const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
+    try {
+      const response = await api.post('/api/v1/google_login', {
+        user: {
+          email: googleUser.email,
+          first_name: googleUser.given_name,
+          last_name: googleUser.family_name,
+          avatar_url: googleUser.picture,
+          provider: 'google',
+          uid: googleUser.id,
+        },
+      });
+
+      const token = response?.data?.token;
+      const userId = response?.data?.user?.id;
+
+      await SecureStore.setItemAsync('auth_token', token);
+      await SecureStore.setItemAsync('user_id', String(userId));
+
+      Toast.show({ type: 'success', text1: 'Logged in with Google!' });
+      router.replace('/');
+    } catch (err) {
+      console.error('Google login error:', err);
+      Toast.show({ type: 'error', text1: 'Google login failed' });
+    }
+  });
+
   useEffect(() => {
     const initialize = async () => {
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
-      const healthCheckEndpoints = [
-        '/api/v1/ping',
-        '/api/v1/health',
-        '/ping',
-        '/health',
-        '/',
-      ];
-
+      const healthCheckEndpoints = ['/api/v1/ping', '/api/v1/health', '/ping', '/health', '/'];
       let serverReachable = false;
 
       for (const endpoint of healthCheckEndpoints) {
@@ -59,66 +80,35 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     setErrorMsg('');
-
     try {
       const response = await api.post('/api/v1/login', {
         user: { email, password },
       });
 
-      const token = response?.data?.token;
+      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
       const userId = response?.data?.user?.id;
-      const tokenFromHeader = response.headers?.authorization?.split(' ')[1];
-      const finalToken = token || tokenFromHeader;
 
-      if (finalToken && userId) {
-        await SecureStore.setItemAsync('auth_token', finalToken);
+      if (token && userId) {
+        await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
-
-        Toast.show({
-          type: 'success',
-          text1: 'Welcome back!',
-        });
-
+        Toast.show({ type: 'success', text1: 'Welcome back!' });
         router.replace('/');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
-        Toast.show({
-          type: 'error',
-          text1: 'Login failed',
-          text2: 'Missing authentication data',
-        });
+        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Missing authentication data' });
       }
     } catch (err) {
       console.error('Login error:', err?.response?.data || err?.message);
 
       if (err?.response?.status === 401) {
         setErrorMsg('Invalid email or password');
-        Toast.show({
-          type: 'error',
-          text1: 'Login failed',
-          text2: 'Invalid credentials',
-        });
+        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Invalid credentials' });
       } else if (err?.response?.status >= 500) {
         setErrorMsg('Server error, please try again later');
-        Toast.show({
-          type: 'error',
-          text1: 'Server Error',
-          text2: 'Please try again later',
-        });
-      } else if (err?.code === 'NETWORK_ERROR' || err?.message?.includes('Network')) {
-        setErrorMsg('Network error - check your connection');
-        Toast.show({
-          type: 'error',
-          text1: 'Network Error',
-          text2: 'Please check your internet connection',
-        });
+        Toast.show({ type: 'error', text1: 'Server Error', text2: 'Please try again later' });
       } else {
         setErrorMsg('Login failed - please try again');
-        Toast.show({
-          type: 'error',
-          text1: 'Login failed',
-          text2: 'Please try again',
-        });
+        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Unknown error occurred' });
       }
     }
   };
@@ -170,17 +160,19 @@ export default function LoginScreen() {
               }
             />
 
-            {errorMsg.length > 0 && (
-              <Text style={styles.error}>{errorMsg}</Text>
-            )}
+            {errorMsg.length > 0 && <Text style={styles.error}>{errorMsg}</Text>}
 
             {/* Sign in with Google */}
-            <TouchableOpacity style={styles.googleBtn} onPress={() => console.log('Sign in with Google')}>
+            <TouchableOpacity
+              style={styles.googleBtn}
+              disabled={!request}
+              onPress={() => promptAsync()}
+            >
               <AntDesign name="google" size={20} color="white" />
               <Text style={styles.googleText}>Sign in with Google</Text>
             </TouchableOpacity>
 
-            {/* Gradient Login Button */}
+            {/* Login Button */}
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
               style={styles.loginButtonGradient}
@@ -195,11 +187,7 @@ export default function LoginScreen() {
               </Button>
             </LinearGradient>
 
-            <Button
-              onPress={() => router.push('/signup')}
-              textColor="#bd93f9"
-              style={styles.link}
-            >
+            <Button onPress={() => router.push('/signup')} textColor="#bd93f9" style={styles.link}>
               Don't have an account? Sign up
             </Button>
           </>
@@ -210,14 +198,8 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  inner: {
-    flex: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-  },
+  container: { flex: 1 },
+  inner: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
   title: {
     color: '#f8f8f2',
     fontSize: 30,
