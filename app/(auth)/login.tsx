@@ -92,7 +92,7 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
         Toast.show({ type: 'success', text1: 'Welcome back!' });
-        router.replace('/(drawer)/index');
+        router.replace('/(drawer)');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
         Toast.show({ type: 'error', text1: 'Login failed', text2: 'Incomplete data' });
