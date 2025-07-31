@@ -40,8 +40,6 @@ export default function LoginScreen() {
       await SecureStore.setItemAsync('user_id', String(userId));
 
       Toast.show({ type: 'success', text1: 'Logged in with Google!' });
-      
-      // Use push instead of replace and navigate to the correct path
       router.push('/(drawer)');
     } catch (err) {
       console.error('Google login error:', err);
@@ -53,7 +51,6 @@ export default function LoginScreen() {
 
   useEffect(() => {
     const checkServer = async () => {
-      // Clear any existing tokens
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
@@ -87,11 +84,10 @@ export default function LoginScreen() {
   }, []);
 
   const handleLogin = async () => {
-    if (isLoggingIn) return; // Prevent multiple submissions
-    
+    if (isLoggingIn) return;
     setErrorMsg('');
     setIsLoggingIn(true);
-    
+
     try {
       const response = await api.post('/api/v1/login', {
         user: { email, password },
@@ -104,8 +100,6 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
         Toast.show({ type: 'success', text1: 'Welcome back!' });
-        
-        // Use push instead of replace for more reliable navigation
         router.push('/(drawer)');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
@@ -127,12 +121,29 @@ export default function LoginScreen() {
 
   const handleGoogleLogin = async () => {
     if (isGoogleLoading || !request) return;
-    
+
+    setIsGoogleLoading(true);
+
     try {
-      setIsGoogleLoading(true);
-      await promptAsync();
+      const result = await promptAsync();
+
+      if (result?.type === 'success') {
+        // The callback in useGoogleAuth will handle the login
+        return;
+      }
+
+      Toast.show({
+        type: 'info',
+        text1: 'Google login cancelled',
+      });
     } catch (error) {
       console.error('Google login prompt error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Google login error',
+        text2: 'Something went wrong',
+      });
+    } finally {
       setIsGoogleLoading(false);
     }
   };
@@ -218,9 +229,9 @@ export default function LoginScreen() {
               </Button>
             </LinearGradient>
 
-            <Button 
-              onPress={() => router.push('/signup')} 
-              textColor="#bd93f9" 
+            <Button
+              onPress={() => router.push('/signup')}
+              textColor="#bd93f9"
               style={styles.link}
               disabled={isLoggingIn || isGoogleLoading}
             >
