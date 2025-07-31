@@ -12,9 +12,10 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import AdminSidebar from './AdminSidebar';
 
-const { width, height } = Dimensions.get('window');
+const { width } = Dimensions.get('window');
 
 interface BottomTab {
   id: string;
@@ -28,12 +29,12 @@ interface AdminLayoutProps {
   activePanel?: string;
 }
 
-const AdminLayout: React.FC<AdminLayoutProps> = ({ 
-  children, 
-  activePanel = 'home' 
+const AdminLayout: React.FC<AdminLayoutProps> = ({
+  children,
+  activePanel = 'home',
 }) => {
-  const [sidebarVisible, setSidebarVisible] = useState<boolean>(false);
-  const [activeTab, setActiveTab] = useState<string>('home');
+  const [sidebarVisible, setSidebarVisible] = useState(false);
+  const [activeTab, setActiveTab] = useState('home');
 
   const bottomTabs: BottomTab[] = [
     { id: 'home', icon: 'home-outline', activeIcon: 'home', label: 'Home' },
@@ -43,23 +44,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     { id: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'You' },
   ];
 
-  const handleTabPress = (tabId: string): void => {
-    setActiveTab(tabId);
-  };
-
-  const toggleSidebar = (): void => {
-    setSidebarVisible(!sidebarVisible);
-  };
-
-  const closeSidebar = (): void => {
-    setSidebarVisible(false);
-  };
+  const toggleSidebar = () => setSidebarVisible(!sidebarVisible);
+  const closeSidebar = () => setSidebarVisible(false);
+  const handleTabPress = (tabId: string) => setActiveTab(tabId);
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#16213e" />
-      
-      {/* Fixed Header */}
+      <StatusBar translucent barStyle="light-content" backgroundColor="transparent" />
+
       <SafeAreaView style={styles.safeArea}>
         <LinearGradient
           colors={['#6c5ce7', '#a29bfe', '#74b9ff']}
@@ -67,33 +59,23 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           end={{ x: 1, y: 0 }}
           style={styles.header}
         >
-          {/* Left side - Menu & Logo */}
+          {/* Left - Menu & Logo */}
           <View style={styles.headerLeft}>
-            <TouchableOpacity
-              onPress={toggleSidebar}
-              style={styles.menuButton}
-            >
+            <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
               <Ionicons name="menu" size={24} color="white" />
             </TouchableOpacity>
-            
             <View style={styles.logoContainer}>
               <View style={styles.logoIcon}>
-                <Text style={styles.logoText}>
-                  GL
-                </Text>
+                <Text style={styles.logoText}>GL</Text>
               </View>
               <View>
-                <Text style={styles.companyName}>
-                  GLT Logistics
-                </Text>
-                <Text style={styles.panelTitle}>
-                  Admin Panel
-                </Text>
+                <Text style={styles.companyName}>GLT Logistics</Text>
+                <Text style={styles.panelTitle}>Admin Panel</Text>
               </View>
             </View>
           </View>
 
-          {/* Center - Search Bar */}
+          {/* Center - Search */}
           <View style={styles.searchContainer}>
             <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
             <TextInput
@@ -103,7 +85,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
             />
           </View>
 
-          {/* Right side - Actions */}
+          {/* Right - Icons */}
           <View style={styles.headerRight}>
             <TouchableOpacity style={styles.headerAction}>
               <Ionicons name="notifications-outline" size={22} color="white" />
@@ -117,47 +99,24 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         </LinearGradient>
       </SafeAreaView>
 
-      {/* Main Content Area */}
       <View style={styles.mainContent}>
-        {/* Sidebar */}
-        <AdminSidebar 
-          visible={sidebarVisible} 
-          onClose={closeSidebar}
-          activePanel={activePanel}
-        />
+        <AdminSidebar visible={sidebarVisible} onClose={closeSidebar} activePanel={activePanel} />
 
-        {/* Content Area */}
         <View style={styles.contentArea}>
-          <LinearGradient
-            colors={['#1a1a2e', '#16213e', '#0f0f23']}
-            style={styles.contentGradient}
-          >
-            <ScrollView
-              style={styles.scrollView}
-              contentContainerStyle={styles.scrollContent}
-            >
+          <LinearGradient colors={['#1a1a2e', '#16213e', '#0f0f23']} style={styles.contentGradient}>
+            <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
               {children}
             </ScrollView>
           </LinearGradient>
         </View>
 
-        {/* Overlay for mobile sidebar */}
-        {sidebarVisible && (
-          <TouchableOpacity
-            style={styles.overlay}
-            onPress={closeSidebar}
-          />
-        )}
+        {sidebarVisible && <TouchableOpacity style={styles.overlay} onPress={closeSidebar} />}
       </View>
 
-      {/* Bottom Tab Bar - Mobile */}
+      {/* Bottom Tabs */}
       <View style={styles.bottomTabBar}>
-        {bottomTabs.map((tab: BottomTab) => (
-          <TouchableOpacity
-            key={tab.id}
-            onPress={() => handleTabPress(tab.id)}
-            style={styles.tabButton}
-          >
+        {bottomTabs.map((tab) => (
+          <TouchableOpacity key={tab.id} onPress={() => handleTabPress(tab.id)} style={styles.tabButton}>
             <Ionicons
               name={activeTab === tab.id ? tab.activeIcon : tab.icon}
               size={22}
@@ -169,7 +128,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
                 {
                   color: activeTab === tab.id ? '#6c5ce7' : '#a0aec0',
                   fontWeight: activeTab === tab.id ? '600' : '400',
-                }
+                },
               ]}
             >
               {tab.label}
@@ -178,12 +137,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         ))}
       </View>
 
-      {/* Floating Action Button */}
+      {/* FAB */}
       <TouchableOpacity style={styles.fab}>
-        <LinearGradient
-          colors={['#6c5ce7', '#a29bfe']}
-          style={styles.fabGradient}
-        >
+        <LinearGradient colors={['#6c5ce7', '#a29bfe']} style={styles.fabGradient}>
           <Ionicons name="add" size={28} color="white" />
         </LinearGradient>
       </TouchableOpacity>
@@ -192,56 +148,28 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1a1a2e',
-  },
+  container: { flex: 1, backgroundColor: '#1a1a2e' },
   safeArea: {
+    paddingTop: Constants.statusBarHeight,
     backgroundColor: '#6c5ce7',
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
-    paddingTop: 8,
+    paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  menuButton: {
-    padding: 8,
-    marginRight: 12,
-  },
-  logoContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
+  headerLeft: { flexDirection: 'row', alignItems: 'center' },
+  menuButton: { padding: 8, marginRight: 12 },
+  logoContainer: { flexDirection: 'row', alignItems: 'center' },
   logoIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#2d3748',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
+    width: 32, height: 32, borderRadius: 16, backgroundColor: '#2d3748',
+    alignItems: 'center', justifyContent: 'center', marginRight: 8,
   },
-  logoText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  companyName: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  panelTitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-  },
+  logoText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
+  companyName: { color: 'white', fontWeight: '600', fontSize: 16 },
+  panelTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12 },
   searchContainer: {
     flex: 1,
     maxWidth: 300,
@@ -253,53 +181,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 36,
   },
-  searchInput: {
-    flex: 1,
-    marginLeft: 8,
-    color: 'white',
-    fontSize: 14,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerAction: {
-    padding: 8,
-    marginRight: 8,
-  },
+  searchInput: { flex: 1, marginLeft: 8, color: 'white', fontSize: 14 },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  headerAction: { padding: 8, marginRight: 8 },
   profileIcon: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#2d3748',
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 28, height: 28, borderRadius: 14, backgroundColor: '#2d3748',
+    alignItems: 'center', justifyContent: 'center',
   },
-  mainContent: {
-    flex: 1,
-    flexDirection: 'row',
-  },
-  contentArea: {
-    flex: 1,
-    backgroundColor: '#0f0f23',
-  },
-  contentGradient: {
-    flex: 1,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 100,
-  },
+  mainContent: { flex: 1, flexDirection: 'row' },
+  contentArea: { flex: 1, backgroundColor: '#0f0f23' },
+  contentGradient: { flex: 1 },
+  scrollView: { flex: 1 },
+  scrollContent: { paddingBottom: 100 },
   overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    zIndex: 998,
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 998,
   },
   bottomTabBar: {
     position: 'absolute',
@@ -315,15 +211,8 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     alignItems: 'center',
   },
-  tabButton: {
-    alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 8,
-  },
-  tabLabel: {
-    fontSize: 10,
-    marginTop: 2,
-  },
+  tabButton: { alignItems: 'center', paddingVertical: 4, paddingHorizontal: 8 },
+  tabLabel: { fontSize: 10, marginTop: 2 },
   fab: {
     position: 'absolute',
     bottom: 100,
