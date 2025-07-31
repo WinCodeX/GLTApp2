@@ -3,7 +3,13 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Button, TextInput } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
 import api from '../../lib/api';
@@ -22,6 +28,7 @@ export default function LoginScreen() {
   const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
     try {
       setIsGoogleLoading(true);
+
       const response = await api.post('/api/v1/google_login', {
         user: {
           email: googleUser.email,
@@ -41,16 +48,18 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
 
-        Toast.show({ type: 'success', text1: 'Logged in with Google!' });
-
         const roles = user?.roles || [];
-        if (roles.includes('admin')) {
-          router.push('/admin');
-        } else {
-          router.push('/');
-        }
+        const role = roles.includes('admin') ? 'admin' : 'client';
+        await SecureStore.setItemAsync('user_role', role);
+
+        Toast.show({ type: 'success', text1: 'Logged in with Google!' });
+        router.push(role === 'admin' ? '/admin' : '/');
       } else {
-        Toast.show({ type: 'error', text1: 'Google login failed', text2: 'Missing token or user ID' });
+        Toast.show({
+          type: 'error',
+          text1: 'Google login failed',
+          text2: 'Missing token or user ID',
+        });
       }
     } catch (err) {
       console.error('Google login error:', err);
@@ -65,7 +74,14 @@ export default function LoginScreen() {
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
-      const endpoints = ['/api/v1/ping', '/ping', '/health', '/api/v1/health', '/'];
+      const endpoints = [
+        '/api/v1/ping',
+        '/ping',
+        '/health',
+        '/api/v1/health',
+        '/',
+      ];
+
       let reachable = false;
 
       for (const path of endpoints) {
@@ -96,6 +112,7 @@ export default function LoginScreen() {
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
+
     setErrorMsg('');
     setIsLoggingIn(true);
 
@@ -104,33 +121,45 @@ export default function LoginScreen() {
         user: { email, password },
       });
 
-      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
+      const token =
+        response?.data?.token || response.headers?.authorization?.split(' ')[1];
       const user = response?.data?.user;
       const userId = user?.id;
 
       if (token && userId) {
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
-        Toast.show({ type: 'success', text1: 'Welcome back!' });
 
         const roles = user?.roles || [];
-        if (roles.includes('admin')) {
-          router.push('/admin');
-        } else {
-          router.push('/');
-        }
+        const role = roles.includes('admin') ? 'admin' : 'client';
+        await SecureStore.setItemAsync('user_role', role);
+
+        Toast.show({ type: 'success', text1: 'Welcome back!' });
+        router.push(role === 'admin' ? '/admin' : '/');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
-        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Incomplete data' });
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Incomplete data',
+        });
       }
     } catch (err) {
       console.error('Login error:', err?.response?.data || err?.message);
       if (err?.response?.status === 401) {
         setErrorMsg('Invalid email or password');
-        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Invalid credentials' });
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Invalid credentials',
+        });
       } else {
         setErrorMsg('Server error - try again');
-        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Unexpected error' });
+        Toast.show({
+          type: 'error',
+          text1: 'Login failed',
+          text2: 'Unexpected error',
+        });
       }
     } finally {
       setIsLoggingIn(false);
@@ -145,15 +174,9 @@ export default function LoginScreen() {
     try {
       const result = await promptAsync();
 
-      if (result?.type === 'success') {
-        // handled in callback
-        return;
-      }
+      if (result?.type === 'success') return;
 
-      Toast.show({
-        type: 'info',
-        text1: 'Google login cancelled',
-      });
+      Toast.show({ type: 'info', text1: 'Google login cancelled' });
     } catch (error) {
       console.error('Google login prompt error:', error);
       Toast.show({
@@ -218,7 +241,10 @@ export default function LoginScreen() {
             {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
 
             <TouchableOpacity
-              style={[styles.googleBtn, (isGoogleLoading || !request) && styles.disabledBtn]}
+              style={[
+                styles.googleBtn,
+                (isGoogleLoading || !request) && styles.disabledBtn,
+              ]}
               disabled={isGoogleLoading || !request || isLoggingIn}
               onPress={handleGoogleLogin}
             >
@@ -234,7 +260,10 @@ export default function LoginScreen() {
 
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
-              style={[styles.loginButtonGradient, isLoggingIn && styles.disabledBtn]}
+              style={[
+                styles.loginButtonGradient,
+                isLoggingIn && styles.disabledBtn,
+              ]}
             >
               <Button
                 mode="contained"
