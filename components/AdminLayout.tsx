@@ -60,7 +60,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       <StatusBar barStyle="light-content" backgroundColor="#16213e" />
       
       {/* Fixed Header */}
-      <SafeAreaView>
+      <SafeAreaView style={styles.safeArea}>
         <LinearGradient
           colors={['#6c5ce7', '#a29bfe', '#74b9ff']}
           start={{ x: 0, y: 0 }}
@@ -196,9 +196,13 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#1a1a2e',
   },
+  safeArea: {
+    backgroundColor: '#6c5ce7',
+  },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
+    paddingTop: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
