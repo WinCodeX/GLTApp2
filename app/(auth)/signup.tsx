@@ -28,7 +28,7 @@ export default function SignupScreen() {
 
   const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
     try {
-      const response = await api.post('/api/v1/google_signup', {
+      const response = await api.post('/api/v1/google_login', {
         user: {
           email: googleUser.email,
           first_name: googleUser.given_name,
