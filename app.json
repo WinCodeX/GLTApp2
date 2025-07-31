@@ -40,6 +40,9 @@
     ],
     "experiments": {
       "typedRoutes": true
+    },
+    "extra": {
+      "googleClientId": "YOUR_GOOGLE_CLIENT_ID_HERE"
     }
   }
 }
