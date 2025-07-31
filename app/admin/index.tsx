@@ -5,7 +5,7 @@ import CreateLocation from './panels/CreateLocation';
 import UserList from './panels/UserList';
 
 export default function AdminScreen() {
-  const [activePanel, setActivePanel] = useState('Create Location');
+  const [activePanel, setActivePanel] = useState('Dashboard');
 
   const renderPanel = () => {
     switch (activePanel) {
@@ -14,12 +14,12 @@ export default function AdminScreen() {
       case 'User List':
         return <UserList />;
       default:
-        return <Text style={{ color: 'white' }}>Select a panel from the sidebar</Text>;
+        return <Text style={{ color: 'white' }}>Welcome to the Admin Dashboard</Text>;
     }
   };
 
   return (
-    <AdminLayout activePanel={activePanel} onSelect={setActivePanel}>
+    <AdminLayout onSelect={setActivePanel} activePanel={activePanel}>
       {renderPanel()}
     </AdminLayout>
   );
