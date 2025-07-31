@@ -4,6 +4,7 @@ import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 import { Button, TextInput } from 'react-native-paper';
+import { LinearGradient } from 'expo-linear-gradient';
 import api from '../../lib/api';
 
 export default function LoginScreen() {
@@ -19,13 +20,12 @@ export default function LoginScreen() {
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
-      // Try multiple endpoints to check server connectivity
       const healthCheckEndpoints = [
         '/api/v1/ping',
         '/api/v1/health',
         '/ping',
         '/health',
-        '/', // Root endpoint
+        '/',
       ];
 
       let serverReachable = false;
@@ -39,16 +39,12 @@ export default function LoginScreen() {
           break;
         } catch (err) {
           console.log(`❌ Failed ${endpoint}:`, err?.response?.status || err?.message);
-          // Continue to next endpoint
         }
       }
 
-      if (serverReachable) {
-        setReady(true);
-      } else {
-        // Still allow login attempt even if ping fails
-        console.log('⚠️ No health check endpoints responded, but allowing login attempt');
-        setReady(true);
+      setReady(true);
+
+      if (!serverReachable) {
         Toast.show({
           type: 'info',
           text1: 'Server connection uncertain',
@@ -93,8 +89,7 @@ export default function LoginScreen() {
       }
     } catch (err) {
       console.error('Login error:', err?.response?.data || err?.message);
-      
-      // More specific error handling
+
       if (err?.response?.status === 401) {
         setErrorMsg('Invalid email or password');
         Toast.show({
@@ -128,92 +123,102 @@ export default function LoginScreen() {
   };
 
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>GltApp Login</Text>
+    <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
+      <View style={styles.inner}>
+        <Text style={styles.title}>Welcome Back</Text>
 
-      {!ready && (
-        <>
-          <ActivityIndicator size="large" color="#bd93f9" />
-          <Text style={styles.loadingText}>Connecting to server...</Text>
-        </>
-      )}
+        {!ready ? (
+          <>
+            <ActivityIndicator size="large" color="#bd93f9" />
+            <Text style={styles.loadingText}>Connecting to server...</Text>
+          </>
+        ) : (
+          <>
+            <TextInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+            />
 
-      {ready && (
-        <>
-          <TextInput
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            keyboardType="email-address"
-            autoCapitalize="none"
-            mode="outlined"
-            style={styles.input}
-            textColor="#f8f8f2"
-            placeholderTextColor="#ccc"
-            outlineColor="#44475a"
-            activeOutlineColor="#bd93f9"
-          />
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+              right={
+                <TextInput.Icon
+                  icon={showPassword ? 'eye-off' : 'eye'}
+                  onPress={() => setShowPassword((v) => !v)}
+                  forceTextInputFocus={false}
+                  color="#aaa"
+                />
+              }
+            />
 
-          <TextInput
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry={!showPassword}
-            mode="outlined"
-            style={styles.input}
-            textColor="#f8f8f2"
-            placeholderTextColor="#ccc"
-            outlineColor="#44475a"
-            activeOutlineColor="#bd93f9"
-            right={
-              <TextInput.Icon
-                icon={showPassword ? 'eye-off' : 'eye'}
-                onPress={() => setShowPassword((v) => !v)}
-                forceTextInputFocus={false}
-                color="#aaa"
-              />
-            }
-          />
+            {errorMsg.length > 0 && (
+              <Text style={styles.error}>{errorMsg}</Text>
+            )}
 
-          {errorMsg.length > 0 && (
-            <Text style={styles.error}>{errorMsg}</Text>
-          )}
+            <LinearGradient
+              colors={['#7c3aed', '#3b82f6', '#10b981']}
+              style={styles.loginButtonGradient}
+            >
+              <Button
+                mode="contained"
+                onPress={handleLogin}
+                style={styles.button}
+                labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+              >
+                Log In
+              </Button>
+            </LinearGradient>
 
-          <Button
-            mode="contained"
-            onPress={handleLogin}
-            style={styles.button}
-            labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-          >
-            Log In
-          </Button>
-
-          <Button
-            onPress={() => router.push('/signup')}
-            textColor="#bd93f9"
-            style={styles.link}
-          >
-            Don't have an account? Sign up
-          </Button>
-        </>
-      )}
-    </View>
+            <Button
+              onPress={() => router.push('/signup')}
+              textColor="#bd93f9"
+              style={styles.link}
+            >
+              Don't have an account? Sign up
+            </Button>
+          </>
+        )}
+      </View>
+    </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#282a36',
-    padding: 24,
+  },
+  inner: {
+    flex: 1,
+    paddingHorizontal: 24,
     justifyContent: 'center',
   },
   title: {
     color: '#f8f8f2',
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 20,
+    fontSize: 30,
+    fontWeight: 'bold',
+    marginBottom: 30,
     textAlign: 'center',
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
   },
   input: {
     marginBottom: 16,
@@ -221,18 +226,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   button: {
-    backgroundColor: '#bd93f9',
+    backgroundColor: 'transparent',
+    elevation: 0,
+    shadowOpacity: 0,
+  },
+  loginButtonGradient: {
+    borderRadius: 25,
+    overflow: 'hidden',
     marginTop: 8,
-    paddingVertical: 10,
-    borderRadius: 10,
   },
   link: {
-    marginTop: 12,
+    marginTop: 16,
   },
   error: {
     color: '#ff5555',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 10,
     fontSize: 14,
   },
   loadingText: {
