@@ -98,7 +98,7 @@ export default function SignupScreen() {
           text2: 'Welcome aboard!',
         });
 
-        router.replace('/(drawer)/index');
+        router.replace('/(drawer)');
       } else {
         Toast.show({
           type: 'error',
