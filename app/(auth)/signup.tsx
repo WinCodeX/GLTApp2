@@ -13,6 +13,7 @@ import { AntDesign } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
+import { useGoogleAuth } from '../../lib/useGoogleAuth'; // 👈 make sure this exists
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -24,6 +25,45 @@ export default function SignupScreen() {
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
+
+  const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
+    try {
+      const response = await api.post('/api/v1/google_signup', {
+        user: {
+          email: googleUser.email,
+          first_name: googleUser.given_name,
+          last_name: googleUser.family_name,
+          avatar_url: googleUser.picture,
+          provider: 'google',
+          uid: googleUser.id,
+        },
+      });
+
+      const token = response?.data?.token;
+      const userId = response?.data?.user?.id;
+
+      if (token && userId) {
+        await SecureStore.setItemAsync('auth_token', token);
+        await SecureStore.setItemAsync('user_id', String(userId));
+
+        Toast.show({
+          type: 'success',
+          text1: 'Signed up with Google!',
+        });
+
+        router.replace('/');
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Signup failed',
+          text2: 'Missing token or user ID',
+        });
+      }
+    } catch (err) {
+      const msg = err?.response?.data?.error || err?.message || 'Google signup failed';
+      Toast.show({ type: 'error', text1: 'Google Signup Error', text2: msg });
+    }
+  });
 
   const handleSignup = async () => {
     if (password !== confirmPassword) {
@@ -75,11 +115,6 @@ export default function SignupScreen() {
       });
       console.error('Signup error:', msg);
     }
-  };
-
-  const handleGoogleSignup = () => {
-    console.log('Google Sign Up');
-    // TODO: Integrate Google OAuth
   };
 
   return (
@@ -172,11 +207,17 @@ export default function SignupScreen() {
           activeOutlineColor="#bd93f9"
         />
 
-        <TouchableOpacity style={styles.googleBtn} onPress={handleGoogleSignup}>
+        {/* Google Sign Up */}
+        <TouchableOpacity
+          style={styles.googleBtn}
+          onPress={() => promptAsync()}
+          disabled={!request}
+        >
           <AntDesign name="google" size={20} color="white" />
           <Text style={styles.googleText}>Sign up with Google</Text>
         </TouchableOpacity>
 
+        {/* Gradient Sign Up Button */}
         <LinearGradient
           colors={['#7c3aed', '#3b82f6', '#10b981']}
           style={styles.gradientBtn}
