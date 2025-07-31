@@ -7,7 +7,7 @@ import { Button, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { AntDesign } from '@expo/vector-icons';
 import api from '../../lib/api';
-import { useGoogleAuth } from '../../lib/useGoogleAuth'; // Make sure this exists
+import { useGoogleAuth } from '../../lib/useGoogleAuth';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -45,37 +45,37 @@ export default function LoginScreen() {
   });
 
   useEffect(() => {
-    const initialize = async () => {
+    const checkServer = async () => {
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
 
-      const healthCheckEndpoints = ['/api/v1/ping', '/api/v1/health', '/ping', '/health', '/'];
-      let serverReachable = false;
+      const endpoints = ['/api/v1/ping', '/ping', '/health', '/api/v1/health', '/'];
+      let reachable = false;
 
-      for (const endpoint of healthCheckEndpoints) {
+      for (const path of endpoints) {
         try {
-          console.log(`🔍 Trying endpoint: ${endpoint}`);
-          await api.get(endpoint);
-          console.log(`✅ Server reachable at: ${endpoint}`);
-          serverReachable = true;
+          console.log(`🌐 Trying: ${api.defaults.baseURL}${path}`);
+          await api.get(path);
+          console.log(`✅ Success: ${path}`);
+          reachable = true;
           break;
         } catch (err) {
-          console.log(`❌ Failed ${endpoint}:`, err?.response?.status || err?.message);
+          console.log(`❌ Failed: ${path} - ${err?.message}`);
         }
       }
 
       setReady(true);
 
-      if (!serverReachable) {
+      if (!reachable) {
         Toast.show({
           type: 'info',
-          text1: 'Server connection uncertain',
-          text2: 'Will attempt login anyway',
+          text1: 'Server unreachable',
+          text2: 'Login might fail',
         });
       }
     };
 
-    initialize();
+    checkServer();
   }, []);
 
   const handleLogin = async () => {
@@ -95,20 +95,16 @@ export default function LoginScreen() {
         router.replace('/');
       } else {
         setErrorMsg('Login failed: Missing token or user ID');
-        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Missing authentication data' });
+        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Incomplete data' });
       }
     } catch (err) {
       console.error('Login error:', err?.response?.data || err?.message);
-
       if (err?.response?.status === 401) {
         setErrorMsg('Invalid email or password');
         Toast.show({ type: 'error', text1: 'Login failed', text2: 'Invalid credentials' });
-      } else if (err?.response?.status >= 500) {
-        setErrorMsg('Server error, please try again later');
-        Toast.show({ type: 'error', text1: 'Server Error', text2: 'Please try again later' });
       } else {
-        setErrorMsg('Login failed - please try again');
-        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Unknown error occurred' });
+        setErrorMsg('Server error - try again');
+        Toast.show({ type: 'error', text1: 'Login failed', text2: 'Unexpected error' });
       }
     }
   };
@@ -160,9 +156,8 @@ export default function LoginScreen() {
               }
             />
 
-            {errorMsg.length > 0 && <Text style={styles.error}>{errorMsg}</Text>}
+            {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
 
-            {/* Sign in with Google */}
             <TouchableOpacity
               style={styles.googleBtn}
               disabled={!request}
@@ -172,7 +167,6 @@ export default function LoginScreen() {
               <Text style={styles.googleText}>Sign in with Google</Text>
             </TouchableOpacity>
 
-            {/* Login Button */}
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
               style={styles.loginButtonGradient}
