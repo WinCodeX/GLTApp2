@@ -43,7 +43,10 @@
       "typedRoutes": true
     },
     "extra": {
-      "googleClientId": "918422141757-hn16hqoqomoofka1l63hcbs47jt4n0o4.apps.googleusercontent.com",
+      "expoClientId": "918422141757-hn16hqoqomoofka1l63hcbs47jt4n0o4.apps.googleusercontent.com",
+      "androidClientId": "918422141757-f6klbo81tkvphhgj2cgkgb8d0ihqe76n.apps.googleusercontent.com",
+      "iosClientId": "918422141757-nqc5vttr5n93atbnphg3k9is0gmuun92.apps.googleusercontent.com",
+      "webClientId": "918422141757-v2ut7c8ob1t11fb2e5k0g6d0vmk9gnsf.apps.googleusercontent.com",
       "router": {},
       "eas": {
         "projectId": "cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
