@@ -48,7 +48,6 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [isReady, setIsReady] = useState(false);
-  const [fallbackMode, setFallbackMode] = useState(false);
   const [hasAccount, setHasAccount] = useState(false);
   const router = useRouter();
 
@@ -57,36 +56,29 @@ export default function DrawerLayout() {
 
     async function init() {
       console.log('🔍 DrawerLayout: Starting authentication check...');
-      
       try {
-        // Check for stored auth tokens directly
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
-        
-        console.log('🔑 DrawerLayout: Auth token exists:', !!authToken);
-        console.log('👤 DrawerLayout: User ID exists:', !!userId);
-        
-        // If we have both token and user ID, consider user authenticated
+        const role = await SecureStore.getItemAsync('user_role'); // 👈 get user_role
+
         const isAuthenticated = !!(authToken && userId);
-        
-        // Still run bootstrap for other initialization
         const { isOffline } = await bootstrapApp();
-        
-        setFallbackMode(isOffline);
+
         setHasAccount(isAuthenticated);
         setIsReady(true);
-        
         await SplashScreen.hideAsync();
 
-        // Only redirect to login if we're sure there's no authentication
         if (!isAuthenticated) {
-          console.log('❌ DrawerLayout: No authentication found, redirecting to login');
+          console.log('❌ No authentication found, redirecting to /login');
           router.replace('/login');
+        } else if (role === 'admin') {
+          console.log('👑 Admin detected. Redirecting to /admin');
+          router.replace('/admin');
         } else {
-          console.log('✅ DrawerLayout: User authenticated, staying in app');
+          console.log('✅ Client user. Staying in drawer layout.');
         }
       } catch (error) {
-        console.error('❌ DrawerLayout: Error during initialization:', error);
+        console.error('❌ Initialization error:', error);
         setIsReady(true);
         await SplashScreen.hideAsync();
         router.replace('/login');
@@ -96,16 +88,7 @@ export default function DrawerLayout() {
     init();
   }, []);
 
-  if (!isReady) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
-
-  // Don't render the drawer if user is not authenticated
-  if (!hasAccount) {
+  if (!isReady || !hasAccount) {
     return (
       <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
         <ActivityIndicator size="large" color={colors.primary} />
