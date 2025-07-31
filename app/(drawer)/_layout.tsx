@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Dimensions, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
+import * as SecureStore from 'expo-secure-store';
 
 import {
   DarkTheme as NavigationDarkTheme,
@@ -55,21 +56,62 @@ export default function DrawerLayout() {
     SplashScreen.preventAutoHideAsync();
 
     async function init() {
-      const { isOffline, hasAccount } = await bootstrapApp();
-      setFallbackMode(isOffline);
-      setHasAccount(hasAccount);
-      setIsReady(true);
-      await SplashScreen.hideAsync();
+      console.log('🔍 DrawerLayout: Starting authentication check...');
+      
+      try {
+        // Check for stored auth tokens directly
+        const authToken = await SecureStore.getItemAsync('auth_token');
+        const userId = await SecureStore.getItemAsync('user_id');
+        
+        console.log('🔑 DrawerLayout: Auth token exists:', !!authToken);
+        console.log('👤 DrawerLayout: User ID exists:', !!userId);
+        
+        // If we have both token and user ID, consider user authenticated
+        const isAuthenticated = !!(authToken && userId);
+        
+        // Still run bootstrap for other initialization
+        const { isOffline } = await bootstrapApp();
+        
+        setFallbackMode(isOffline);
+        setHasAccount(isAuthenticated);
+        setIsReady(true);
+        
+        await SplashScreen.hideAsync();
 
-      if (!hasAccount) {
-        router.replace('/login'); // Replace with actual login route
+        // Only redirect to login if we're sure there's no authentication
+        if (!isAuthenticated) {
+          console.log('❌ DrawerLayout: No authentication found, redirecting to login');
+          router.replace('/login');
+        } else {
+          console.log('✅ DrawerLayout: User authenticated, staying in app');
+        }
+      } catch (error) {
+        console.error('❌ DrawerLayout: Error during initialization:', error);
+        setIsReady(true);
+        await SplashScreen.hideAsync();
+        router.replace('/login');
       }
     }
 
     init();
   }, []);
 
-  if (!isReady) return null;
+  if (!isReady) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // Don't render the drawer if user is not authenticated
+  if (!hasAccount) {
+    return (
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
 
   return (
     <PaperProvider>
