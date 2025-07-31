@@ -50,7 +50,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <View style={styles.container}>
-      <StatusBar translucent barStyle="light-content" backgroundColor="transparent" />
+      <StatusBar barStyle="light-content" backgroundColor="#6c5ce7" />
 
       <SafeAreaView style={styles.safeArea}>
         <LinearGradient
