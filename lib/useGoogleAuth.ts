@@ -3,11 +3,18 @@ import * as Google from 'expo-auth-session/providers/google';
 import { useEffect } from 'react';
 import Constants from 'expo-constants';
 import { makeRedirectUri } from 'expo-auth-session';
+import { Platform } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
-  const redirectUri = makeRedirectUri({ useProxy: true });
+  // Use custom scheme for native apps, proxy for web
+  const redirectUri = makeRedirectUri({ 
+    scheme: 'gltapp2',
+    useProxy: Platform.OS === 'web'
+  });
+
+  console.log('Redirect URI:', redirectUri); // Log for debugging
 
   const [request, response, promptAsync] = Google.useAuthRequest({
     expoClientId: Constants.expoConfig?.extra?.expoClientId,
@@ -15,14 +22,18 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
     androidClientId: Constants.expoConfig?.extra?.androidClientId,
     webClientId: Constants.expoConfig?.extra?.webClientId,
     scopes: ['profile', 'email'],
-    useProxy: true,
+    useProxy: Platform.OS === 'web',
     redirectUri,
   });
 
   useEffect(() => {
     if (response?.type === 'success') {
       const { authentication } = response;
-      fetchUserInfo(authentication?.accessToken);
+      if (authentication?.accessToken) {
+        fetchUserInfo(authentication.accessToken);
+      }
+    } else if (response?.type === 'error') {
+      console.error('Google Auth Error:', response.error);
     }
   }, [response]);
 
@@ -31,6 +42,11 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
       const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${token}` },
       });
+      
+      if (!res.ok) {
+        throw new Error(`HTTP error! status: ${res.status}`);
+      }
+      
       const user = await res.json();
       onAuthSuccess(user);
     } catch (err) {
