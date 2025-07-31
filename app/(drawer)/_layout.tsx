@@ -1,3 +1,8 @@
+import React, { useEffect, useState } from 'react';
+import { ActivityIndicator, Dimensions, View } from 'react-native';
+import * as SplashScreen from 'expo-splash-screen';
+import { useRouter } from 'expo-router';
+
 import {
   DarkTheme as NavigationDarkTheme,
   ThemeProvider,
@@ -8,13 +13,13 @@ import {
   Ionicons,
   MaterialIcons,
 } from '@expo/vector-icons';
-import React from 'react';
-import { ColorValue, Dimensions } from 'react-native';
+import { ColorValue } from 'react-native';
+import { Provider as PaperProvider } from 'react-native-paper';
 
-import { Provider as PaperProvider } from 'react-native-paper'; // 👈 Add this
 import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import { UserProvider } from '@/context/UserContext';
+import { bootstrapApp } from '@/lib/bootstrap';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -41,6 +46,30 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
+  const [isReady, setIsReady] = useState(false);
+  const [fallbackMode, setFallbackMode] = useState(false);
+  const [hasAccount, setHasAccount] = useState(false);
+  const router = useRouter();
+
+  useEffect(() => {
+    SplashScreen.preventAutoHideAsync();
+
+    async function init() {
+      const { isOffline, hasAccount } = await bootstrapApp();
+      setFallbackMode(isOffline);
+      setHasAccount(hasAccount);
+      setIsReady(true);
+      await SplashScreen.hideAsync();
+
+      if (!hasAccount) {
+        router.replace('/login'); // Replace with actual login route
+      }
+    }
+
+    init();
+  }, []);
+
+  if (!isReady) return null;
 
   return (
     <PaperProvider>
