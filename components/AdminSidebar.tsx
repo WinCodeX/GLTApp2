@@ -1,54 +1,45 @@
 import React from 'react';
 import { View, TouchableOpacity, StyleSheet } from 'react-native';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 
-export default function AdminSidebar({ onSelect, activePanel }) {
-  const screens = [
-    { icon: 'map-marker-outline', label: 'Create Location' },
-    { icon: 'account-group-outline', label: 'User List' },
-    // add more panels here
-  ];
+export default function AdminSidebar({ activePanel, onSelect }) {
+  const isActive = (panel) => panel === activePanel;
 
   return (
-    <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.sidebar}>
-      {screens.map((item, idx) => (
-        <TouchableOpacity
-          key={idx}
-          onPress={() => onSelect(item.label)}
-          style={[
-            styles.iconWrapper,
-            activePanel === item.label && styles.activeIconWrapper,
-          ]}
-        >
-          <MaterialCommunityIcons
-            name={item.icon}
-            size={28}
-            color={activePanel === item.label ? '#10b981' : '#bd93f9'}
-          />
-        </TouchableOpacity>
-      ))}
-    </LinearGradient>
+    <View style={styles.sidebar}>
+      <TouchableOpacity onPress={() => onSelect('Dashboard')} style={[styles.sideIcon, isActive('Dashboard') && styles.active]}>
+        <Feather name="home" size={20} color="#fff" />
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={() => onSelect('Create Location')} style={[styles.sideIcon, isActive('Create Location') && styles.active]}>
+        <MaterialCommunityIcons name="map-marker-plus" size={20} color="#fff" />
+      </TouchableOpacity>
+
+      <TouchableOpacity onPress={() => onSelect('User List')} style={[styles.sideIcon, isActive('User List') && styles.active]}>
+        <Feather name="users" size={20} color="#fff" />
+      </TouchableOpacity>
+
+      {/* Add more sidebar icons here */}
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   sidebar: {
     width: 60,
-    paddingTop: 30,
-    paddingBottom: 20,
-    alignItems: 'center',
-    backgroundColor: '#0a0a0f',
-    borderRightColor: '#1f1f2e',
+    backgroundColor: '#111',
     borderRightWidth: 1,
-  },
-  iconWrapper: {
-    paddingVertical: 20,
+    borderRightColor: '#222',
     alignItems: 'center',
-    width: '100%',
+    paddingVertical: 10,
   },
-  activeIconWrapper: {
-    backgroundColor: '#1f1f2e',
+  sideIcon: {
+    marginVertical: 12,
+    padding: 8,
     borderRadius: 8,
+    backgroundColor: '#1a1a1a',
+  },
+  active: {
+    backgroundColor: '#7c3aed',
   },
 });
