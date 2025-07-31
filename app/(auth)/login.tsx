@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { StyleSheet, Text, View, ActivityIndicator } from 'react-native';
+import { StyleSheet, Text, View, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 import { Button, TextInput } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
+import { AntDesign } from '@expo/vector-icons';
 import api from '../../lib/api';
 
 export default function LoginScreen() {
@@ -173,6 +174,13 @@ export default function LoginScreen() {
               <Text style={styles.error}>{errorMsg}</Text>
             )}
 
+            {/* Sign in with Google */}
+            <TouchableOpacity style={styles.googleBtn} onPress={() => console.log('Sign in with Google')}>
+              <AntDesign name="google" size={20} color="white" />
+              <Text style={styles.googleText}>Sign in with Google</Text>
+            </TouchableOpacity>
+
+            {/* Gradient Login Button */}
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
               style={styles.loginButtonGradient}
@@ -233,7 +241,7 @@ const styles = StyleSheet.create({
   loginButtonGradient: {
     borderRadius: 25,
     overflow: 'hidden',
-    marginTop: 8,
+    marginTop: 12,
   },
   link: {
     marginTop: 16,
@@ -249,5 +257,21 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 16,
     fontSize: 16,
+  },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#20202a',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  googleText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
