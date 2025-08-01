@@ -2,7 +2,7 @@ import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
   StyleSheet,
@@ -24,10 +24,23 @@ export default function LoginScreen() {
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const router = useRouter();
+  
+  // Prevent duplicate Google login processing
+  const googleLoginInProgress = useRef(false);
 
-  const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
+  // Memoize the Google auth success callback
+  const handleGoogleAuthSuccess = useCallback(async (googleUser) => {
+    // Prevent duplicate processing
+    if (googleLoginInProgress.current) {
+      console.log('⚠️ Google login already in progress, skipping...');
+      return;
+    }
+
+    googleLoginInProgress.current = true;
+    
     try {
       setIsGoogleLoading(true);
+      console.log('🔐 Processing Google login for:', googleUser.email);
 
       const response = await api.post('/api/v1/google_login', {
         user: {
@@ -53,8 +66,10 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('user_role', role);
 
         Toast.show({ type: 'success', text1: 'Logged in with Google!' });
+        console.log('✅ Google login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
         router.push(role === 'admin' ? '/admin' : '/');
       } else {
+        console.error('❌ Google login failed - missing token or user ID');
         Toast.show({
           type: 'error',
           text1: 'Google login failed',
@@ -62,12 +77,22 @@ export default function LoginScreen() {
         });
       }
     } catch (err) {
-      console.error('Google login error:', err);
+      console.error('❌ Google login error:', err);
       Toast.show({ type: 'error', text1: 'Google login failed' });
     } finally {
       setIsGoogleLoading(false);
+      // Reset the flag after a delay to prevent rapid re-attempts
+      setTimeout(() => {
+        googleLoginInProgress.current = false;
+      }, 3000);
     }
-  });
+  }, [router]);
+
+  const { promptAsync, request, redirectUri } = useGoogleAuth(handleGoogleAuthSuccess);
+
+  useEffect(() => {
+    console.log('🔗 Current redirect URI:', redirectUri);
+  }, [redirectUri]);
 
   useEffect(() => {
     const checkServer = async () => {
@@ -167,18 +192,32 @@ export default function LoginScreen() {
   };
 
   const handleGoogleLogin = async () => {
-    if (isGoogleLoading || !request) return;
+    if (isGoogleLoading || !request || googleLoginInProgress.current) {
+      console.log('⚠️ Google login blocked - already in progress or no request');
+      return;
+    }
 
     setIsGoogleLoading(true);
 
     try {
+      console.log('🚀 Initiating Google login...');
       const result = await promptAsync();
+      
+      console.log('📋 Google login result:', result?.type);
 
-      if (result?.type === 'success') return;
+      if (result?.type === 'success') {
+        // Success is handled by the useEffect in useGoogleAuth
+        console.log('✅ Google OAuth successful');
+        return;
+      }
 
-      Toast.show({ type: 'info', text1: 'Google login cancelled' });
+      if (result?.type === 'cancel') {
+        Toast.show({ type: 'info', text1: 'Google login cancelled' });
+      } else if (result?.type === 'dismiss') {
+        Toast.show({ type: 'info', text1: 'Google login dismissed' });
+      }
     } catch (error) {
-      console.error('Google login prompt error:', error);
+      console.error('❌ Google login prompt error:', error);
       Toast.show({
         type: 'error',
         text1: 'Google login error',
@@ -243,9 +282,9 @@ export default function LoginScreen() {
             <TouchableOpacity
               style={[
                 styles.googleBtn,
-                (isGoogleLoading || !request) && styles.disabledBtn,
+                (isGoogleLoading || !request || googleLoginInProgress.current) && styles.disabledBtn,
               ]}
-              disabled={isGoogleLoading || !request || isLoggingIn}
+              disabled={isGoogleLoading || !request || isLoggingIn || googleLoginInProgress.current}
               onPress={handleGoogleLogin}
             >
               {isGoogleLoading ? (
