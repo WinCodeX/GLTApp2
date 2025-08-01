@@ -1,77 +1,66 @@
-// app/_layout.tsx
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
+import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import { Slot, useRouter } from 'expo-router';
-import { ThemeProvider } from '@react-navigation/native';
-import { Provider as PaperProvider } from 'react-native-paper';
+import { Slot } from 'expo-router';
 
-import colors from '@/theme/colors';
-import { UserProvider } from '@/context/UserContext';
 import { bootstrapApp } from '@/lib/bootstrap';
 
-SplashScreen.preventAutoHideAsync();
-
-const CustomDarkTheme = {
-  dark: true,
-  colors: {
-    background: colors.background,
-    card: colors.card,
-    primary: colors.primary,
-    text: colors.text,
-    border: colors.border,
-    notification: colors.accent,
-  },
-};
-
-export default function AppLayout() {
+export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const router = useRouter();
 
   useEffect(() => {
-    async function initialize() {
+    SplashScreen.preventAutoHideAsync();
+
+    async function init() {
+      console.log('🔍 RootLayout: Starting authentication check...');
       try {
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
         const role = await SecureStore.getItemAsync('user_role');
 
-        const isAuthenticated = !!(authToken && userId);
+        const authenticated = !!(authToken && userId);
         await bootstrapApp();
 
-        if (!isAuthenticated) {
+        setIsAuthenticated(authenticated);
+        setUserRole(role);
+
+        if (!authenticated) {
+          console.log('❌ No authentication found, redirecting to /login');
           router.replace('/login');
         } else if (role === 'admin') {
+          console.log('👑 Admin detected. Redirecting to /admin');
           router.replace('/admin');
         } else {
-          // Let drawer routes render
+          console.log('✅ Client user authenticated.');
         }
-      } catch (err) {
+
+        setIsReady(true);
+        await SplashScreen.hideAsync();
+
+      } catch (error) {
+        console.error('❌ Initialization error:', error);
         router.replace('/login');
-      } finally {
         setIsReady(true);
         await SplashScreen.hideAsync();
       }
     }
 
-    initialize();
+    init();
   }, []);
 
+  // Show loading screen until initialization is complete
   if (!isReady) {
     return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.primary} />
+      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#000' }}>
+        <ActivityIndicator size="large" color="#007AFF" />
       </View>
     );
   }
 
-  return (
-    <PaperProvider>
-      <ThemeProvider value={CustomDarkTheme}>
-        <UserProvider>
-          <Slot /> {/* Renders the current route (drawer, admin, login, etc) */}
-        </UserProvider>
-      </ThemeProvider>
-    </PaperProvider>
-  );
+  return <Slot />;
 }
