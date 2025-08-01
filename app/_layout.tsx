@@ -79,12 +79,13 @@ export default function RootLayout() {
   }
 
   return (
-    <PaperProvider>
-      <ThemeProvider value={CustomDarkTheme}>
-        <UserProvider>
-          <Slot />
-        </UserProvider>
-      </ThemeProvider>
-    );
+  <PaperProvider>
+    <ThemeProvider value={CustomDarkTheme}>
+      <UserProvider>
+        <Slot />
+      </UserProvider>
+    </ThemeProvider>
+  </PaperProvider>
+);
   }
 }
