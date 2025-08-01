@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '@/context/UserContext';
+import { useUser } from '../context/UserContext'; // ✅ Imported
 import { Image } from 'react-native';
 
 const { width } = Dimensions.get('window');
