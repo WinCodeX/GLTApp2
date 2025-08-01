@@ -13,9 +13,9 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
 
   // Memoize the redirect URI so it doesn't change on every render
   const redirectUri = useMemo(() => {
+    // Use Expo's default handling instead of custom scheme for better compatibility
     const uri = makeRedirectUri({ 
-      scheme: 'gltapp2',
-      useProxy: Platform.OS === 'web'
+      useProxy: true // Always use proxy for better Google OAuth compatibility
     });
     console.log('🔗 Redirect URI (memoized):', uri);
     return uri;
@@ -27,7 +27,7 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
     androidClientId: Constants.expoConfig?.extra?.androidClientId,
     webClientId: Constants.expoConfig?.extra?.webClientId,
     scopes: ['profile', 'email'],
-    useProxy: Platform.OS === 'web',
+    useProxy: true, // Always use proxy for consistency
     redirectUri,
   });
 
@@ -56,6 +56,7 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
       }
     } else if (response.type === 'error') {
       console.error('❌ Google Auth Error:', response.error);
+      console.error('Error details:', response);
       processingRef.current = false;
     } else if (response.type === 'cancel') {
       console.log('🚫 Google Auth Cancelled by user');
@@ -98,6 +99,8 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
     try {
       console.log('🚀 Starting Google OAuth prompt...');
       console.log('🔗 Using redirect URI:', redirectUri);
+      console.log('🏗️ Platform:', Platform.OS);
+      console.log('📱 App ownership:', Constants.appOwnership);
       
       // Reset processing flag before new attempt
       processingRef.current = false;
