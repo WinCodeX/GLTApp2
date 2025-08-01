@@ -62,7 +62,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     if (tabId === 'home') {
       router.push('/admin'); // ✅ Home → admin dashboard
     } else if (tabId === 'profile') {
-      router.push('/account'); // ✅ Profile → account page
+      router.push('/drawer/account'); // ✅ Profile → account page
     }
     // Other tabs (like scan, packages) will just highlight for now
   };
