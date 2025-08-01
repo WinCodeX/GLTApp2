@@ -9,11 +9,13 @@ import {
   StatusBar,
   Dimensions,
   StyleSheet,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import AdminSidebar from './AdminSidebar';
+import { useUser } from '../context/UserContext'; // ✅ Imported
 
 const { width } = Dimensions.get('window');
 
@@ -35,6 +37,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 }) => {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [activeTab, setActiveTab] = useState('home');
+  const { user } = useUser(); // ✅ Extract user
+
+  const avatarSource = user?.avatar_url
+    ? { uri: user.avatar_url }
+    : require('../assets/images/avatar_placeholder.png'); // ✅ Avatar fallback
 
   const bottomTabs: BottomTab[] = [
     { id: 'home', icon: 'home-outline', activeIcon: 'home', label: 'Home' },
@@ -91,9 +98,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <Ionicons name="notifications-outline" size={22} color="white" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerAction}>
-              <View style={styles.profileIcon}>
-                <Ionicons name="person" size={16} color="white" />
-              </View>
+              <Image source={avatarSource} style={styles.avatarImage} />
             </TouchableOpacity>
           </View>
         </LinearGradient>
@@ -184,9 +189,12 @@ const styles = StyleSheet.create({
   searchInput: { flex: 1, marginLeft: 8, color: 'white', fontSize: 14 },
   headerRight: { flexDirection: 'row', alignItems: 'center' },
   headerAction: { padding: 8, marginRight: 8 },
-  profileIcon: {
-    width: 28, height: 28, borderRadius: 14, backgroundColor: '#2d3748',
-    alignItems: 'center', justifyContent: 'center',
+  avatarImage: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: '#fff',
   },
   mainContent: { flex: 1, flexDirection: 'row' },
   contentArea: { flex: 1, backgroundColor: '#0f0f23' },
