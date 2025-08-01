@@ -48,7 +48,6 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [isReady, setIsReady] = useState(false);
-  const [hasAccount, setHasAccount] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -59,42 +58,39 @@ export default function DrawerLayout() {
       try {
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
-        const role = await SecureStore.getItemAsync('user_role'); // 👈 get user_role
+        const role = await SecureStore.getItemAsync('user_role');
 
         const isAuthenticated = !!(authToken && userId);
-        const { isOffline } = await bootstrapApp();
-
-        setHasAccount(isAuthenticated);
-        setIsReady(true);
-        await SplashScreen.hideAsync();
+        await bootstrapApp();
 
         if (!isAuthenticated) {
           console.log('❌ No authentication found, redirecting to /login');
           router.replace('/login');
-        } else if (role === 'admin') {
+          return;
+        }
+
+        if (role === 'admin') {
           console.log('👑 Admin detected. Redirecting to /admin');
           router.replace('/admin');
-        } else {
-          console.log('✅ Client user. Staying in drawer layout.');
+          return;
         }
-      } catch (error) {
-        console.error('❌ Initialization error:', error);
+
+        console.log('✅ Client user. Staying in drawer layout.');
         setIsReady(true);
         await SplashScreen.hideAsync();
+
+      } catch (error) {
+        console.error('❌ Initialization error:', error);
         router.replace('/login');
+        await SplashScreen.hideAsync();
       }
     }
 
     init();
   }, []);
 
-  if (!isReady || !hasAccount) {
-    return (
-      <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.background }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
-  }
+  // Prevent any screen flicker by showing nothing until ready
+  if (!isReady) return null;
 
   return (
     <PaperProvider>
