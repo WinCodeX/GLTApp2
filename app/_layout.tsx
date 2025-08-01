@@ -29,13 +29,9 @@ const CustomDarkTheme = {
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
-  const [hasRedirected, setHasRedirected] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
-    // Prevent multiple initializations
-    if (hasRedirected) return;
-
     SplashScreen.preventAutoHideAsync();
 
     async function init() {
@@ -47,8 +43,6 @@ export default function RootLayout() {
 
         const authenticated = !!(authToken && userId);
         await bootstrapApp();
-
-        setHasRedirected(true); // Mark that we've handled the redirect
 
         if (!authenticated) {
           console.log('❌ No authentication found, redirecting to /login');
@@ -66,7 +60,6 @@ export default function RootLayout() {
 
       } catch (error) {
         console.error('❌ Initialization error:', error);
-        setHasRedirected(true);
         router.replace('/login');
         setIsReady(true);
         await SplashScreen.hideAsync();
@@ -74,7 +67,7 @@ export default function RootLayout() {
     }
 
     init();
-  }, [hasRedirected]);
+  }, []); // Empty dependency array - this effect should only run once
 
   // Show loading screen until initialization is complete
   if (!isReady) {
@@ -92,6 +85,6 @@ export default function RootLayout() {
           <Slot />
         </UserProvider>
       </ThemeProvider>
-    </PaperProvider>
-  );
+    );
+  }
 }
