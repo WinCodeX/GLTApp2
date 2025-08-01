@@ -4,8 +4,28 @@ import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { Slot } from 'expo-router';
+import { Provider as PaperProvider } from 'react-native-paper';
+import {
+  DarkTheme as NavigationDarkTheme,
+  ThemeProvider,
+} from '@react-navigation/native';
 
 import { bootstrapApp } from '@/lib/bootstrap';
+import { UserProvider } from '@/context/UserContext';
+import colors from '@/theme/colors';
+
+const CustomDarkTheme = {
+  ...NavigationDarkTheme,
+  colors: {
+    ...NavigationDarkTheme.colors,
+    background: colors.background,
+    card: colors.card,
+    primary: colors.primary,
+    text: colors.text,
+    border: colors.border,
+    notification: colors.accent,
+  },
+};
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
@@ -62,5 +82,13 @@ export default function RootLayout() {
     );
   }
 
-  return <Slot />;
+  return (
+    <PaperProvider>
+      <ThemeProvider value={CustomDarkTheme}>
+        <UserProvider>
+          <Slot />
+        </UserProvider>
+      </ThemeProvider>
+    </PaperProvider>
+  );
 }
