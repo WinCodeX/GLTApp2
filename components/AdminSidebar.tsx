@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useUser } from '@/context/UserContext';
+import { Image } from 'react-native';
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = width * 0.75;
@@ -176,25 +178,34 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           </View>
 
           {/* User Profile Section */}
-          <View style={styles.profileSection}>
-            <LinearGradient
-              colors={['#6c5ce7', '#a29bfe']}
-              style={styles.profileCard}
-            >
-              <View style={styles.profileAvatar}>
-                <Ionicons name="person" size={24} color="white" />
-              </View>
-              <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>
-                  Admin User
-                </Text>
-                <Text style={styles.profilePhone}>
-                  +254 712 299 377
-                </Text>
-              </View>
-              <Ionicons name="chevron-down" size={20} color="white" />
-            </LinearGradient>
-          </View>
+         const { user } = useUser();
+
+<View style={styles.profileSection}>
+  <LinearGradient
+    colors={['#6c5ce7', '#a29bfe']}
+    style={styles.profileCard}
+  >
+    <View style={styles.profileAvatar}>
+      {user.avatarUrl ? (
+        <Image
+          source={{ uri: user.avatarUrl }}
+          style={styles.avatarImage}
+        />
+      ) : (
+        <Ionicons name="person" size={24} color="white" />
+      )}
+    </View>
+    <View style={styles.profileInfo}>
+      <Text style={styles.profileName}>
+        {user.name || 'Admin User'}
+      </Text>
+      <Text style={styles.profilePhone}>
+        {user.phone || '+254 000 000 000'}
+      </Text>
+    </View>
+    <Ionicons name="chevron-down" size={20} color="white" />
+  </LinearGradient>
+</View>
 
           {/* Quick Actions */}
           <View style={styles.quickActions}>
@@ -371,7 +382,13 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 14,
     marginLeft: 12,
-  },
+},
+avatarImage: {
+  width: 40,
+  height: 40,
+  borderRadius: 20,
+  resizeMode: 'cover',
+},
 });
 
 export default AdminSidebar;
