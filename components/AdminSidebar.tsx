@@ -177,7 +177,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
               style={styles.profileCard}
             >
               <View style={styles.profileAvatar}>
-                {user.avatarUrl ? (
+                {user.avatar_url ? (
                   <Image
                     source={{ uri: user.avatar_url }}
                     style={styles.avatarImage}
