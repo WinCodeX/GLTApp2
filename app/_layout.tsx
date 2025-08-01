@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { ActivityIndicator, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
@@ -29,26 +29,26 @@ const CustomDarkTheme = {
 
 export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
-  const [hasRedirected, setHasRedirected] = useState(false);
   const router = useRouter();
+  const hasInitialized = useRef(false);
 
   useEffect(() => {
     // Prevent multiple initializations
-    if (hasRedirected) return;
-
-    SplashScreen.preventAutoHideAsync();
+    if (hasInitialized.current) return;
+    hasInitialized.current = true;
 
     async function init() {
       console.log('🔍 RootLayout: Starting authentication check...');
+      
       try {
+        await SplashScreen.preventAutoHideAsync();
+        
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
         const role = await SecureStore.getItemAsync('user_role');
 
         const authenticated = !!(authToken && userId);
         await bootstrapApp();
-
-        setHasRedirected(true); // Mark that we've handled the redirect
 
         if (!authenticated) {
           console.log('❌ No authentication found, redirecting to /login');
@@ -58,23 +58,19 @@ export default function RootLayout() {
           router.replace('/admin');
         } else {
           console.log('✅ Client user authenticated.');
-          // For regular users, we don't need to redirect as they'll use the drawer layout
         }
-
-        setIsReady(true);
-        await SplashScreen.hideAsync();
 
       } catch (error) {
         console.error('❌ Initialization error:', error);
-        setHasRedirected(true);
         router.replace('/login');
+      } finally {
         setIsReady(true);
         await SplashScreen.hideAsync();
       }
     }
 
     init();
-  }, [hasRedirected]);
+  }, []);
 
   // Show loading screen until initialization is complete
   if (!isReady) {
