@@ -1,39 +1,12 @@
-import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, View } from 'react-native';
-import * as SplashScreen from 'expo-splash-screen';
-import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
-
-import {
-  DarkTheme as NavigationDarkTheme,
-  ThemeProvider,
-} from '@react-navigation/native';
+// app/(drawer)/_layout.tsx
+import React from 'react';
+import { Dimensions } from 'react-native';
 import { Drawer } from 'expo-router/drawer';
-import {
-  Feather,
-  Ionicons,
-  MaterialIcons,
-} from '@expo/vector-icons';
+import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
 import { ColorValue } from 'react-native';
-import { Provider as PaperProvider } from 'react-native-paper';
 
-import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import { UserProvider } from '@/context/UserContext';
-import { bootstrapApp } from '@/lib/bootstrap';
-
-const CustomDarkTheme = {
-  ...NavigationDarkTheme,
-  colors: {
-    ...NavigationDarkTheme.colors,
-    background: colors.background,
-    card: colors.card,
-    primary: colors.primary,
-    text: colors.text,
-    border: colors.border,
-    notification: colors.accent,
-  },
-};
+import colors from '@/theme/colors';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -47,81 +20,31 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
-  const [isReady, setIsReady] = useState(false);
-  const router = useRouter();
-
-  useEffect(() => {
-    SplashScreen.preventAutoHideAsync();
-
-    async function init() {
-      console.log('🔍 DrawerLayout: Starting authentication check...');
-      try {
-        const authToken = await SecureStore.getItemAsync('auth_token');
-        const userId = await SecureStore.getItemAsync('user_id');
-        const role = await SecureStore.getItemAsync('user_role');
-
-        const isAuthenticated = !!(authToken && userId);
-        await bootstrapApp();
-
-        if (!isAuthenticated) {
-          console.log('❌ No authentication found, redirecting to /login');
-          router.replace('/login');
-          return;
-        }
-
-        if (role === 'admin') {
-          console.log('👑 Admin detected. Redirecting to /admin');
-          router.replace('/admin');
-          return;
-        }
-
-        console.log('✅ Client user. Staying in drawer layout.');
-        setIsReady(true);
-        await SplashScreen.hideAsync();
-
-      } catch (error) {
-        console.error('❌ Initialization error:', error);
-        router.replace('/login');
-        await SplashScreen.hideAsync();
-      }
-    }
-
-    init();
-  }, []);
-
-  // Prevent any screen flicker by showing nothing until ready
-  if (!isReady) return null;
 
   return (
-    <PaperProvider>
-      <ThemeProvider value={CustomDarkTheme}>
-        <UserProvider>
-          <Drawer
-            drawerContent={(props) => <CustomDrawerContent {...props} />}
-            screenOptions={({ route }) => {
-              const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
-              const IconComponent = iconData.lib;
+    <Drawer
+      drawerContent={(props) => <CustomDrawerContent {...props} />}
+      screenOptions={({ route }) => {
+        const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
+        const IconComponent = iconData.lib;
 
-              return {
-                headerShown: false,
-                drawerStyle: {
-                  backgroundColor: colors.background,
-                  width: drawerWidth,
-                },
-                drawerActiveTintColor: colors.primary,
-                drawerInactiveTintColor: 'white',
-                drawerLabelStyle: {
-                  fontSize: 16,
-                  marginLeft: -10,
-                },
-                drawerIcon: ({ color }: { color: ColorValue }) => (
-                  <IconComponent name={iconData.name} size={20} color={color} />
-                ),
-              };
-            }}
-          />
-        </UserProvider>
-      </ThemeProvider>
-    </PaperProvider>
+        return {
+          headerShown: false,
+          drawerStyle: {
+            backgroundColor: colors.background,
+            width: drawerWidth,
+          },
+          drawerActiveTintColor: colors.primary,
+          drawerInactiveTintColor: 'white',
+          drawerLabelStyle: {
+            fontSize: 16,
+            marginLeft: -10,
+          },
+          drawerIcon: ({ color }: { color: ColorValue }) => (
+            <IconComponent name={iconData.name} size={20} color={color} />
+          ),
+        };
+      }}
+    />
   );
 }
