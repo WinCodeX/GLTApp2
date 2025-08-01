@@ -11,7 +11,7 @@ import { ThemeProvider } from '@react-navigation/native';
 import colors from '@/theme/colors';
 import { UserProvider } from '@/context/UserContext';
 import { bootstrapApp } from '@/lib/bootstrap';
-import { CustomDarkTheme } from '@/theme/theme'; // optional if you're using theme constants
+import { CustomDarkTheme } from '@/theme/colors'; // optional if you're using theme constants
 
 SplashScreen.preventAutoHideAsync();
 
