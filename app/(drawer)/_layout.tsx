@@ -1,9 +1,5 @@
 import React from 'react';
 import { Dimensions } from 'react-native';
-import {
-  DarkTheme as NavigationDarkTheme,
-  ThemeProvider,
-} from '@react-navigation/native';
 import { Drawer } from 'expo-router/drawer';
 import {
   Feather,
@@ -11,24 +7,9 @@ import {
   MaterialIcons,
 } from '@expo/vector-icons';
 import { ColorValue } from 'react-native';
-import { Provider as PaperProvider } from 'react-native-paper';
 
 import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import { UserProvider } from '@/context/UserContext';
-
-const CustomDarkTheme = {
-  ...NavigationDarkTheme,
-  colors: {
-    ...NavigationDarkTheme.colors,
-    background: colors.background,
-    card: colors.card,
-    primary: colors.primary,
-    text: colors.text,
-    border: colors.border,
-    notification: colors.accent,
-  },
-};
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -44,35 +25,29 @@ export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
 
   return (
-    <PaperProvider>
-      <ThemeProvider value={CustomDarkTheme}>
-        <UserProvider>
-          <Drawer
-            drawerContent={(props) => <CustomDrawerContent {...props} />}
-            screenOptions={({ route }) => {
-              const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
-              const IconComponent = iconData.lib;
+    <Drawer
+      drawerContent={(props) => <CustomDrawerContent {...props} />}
+      screenOptions={({ route }) => {
+        const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
+        const IconComponent = iconData.lib;
 
-              return {
-                headerShown: false,
-                drawerStyle: {
-                  backgroundColor: colors.background,
-                  width: drawerWidth,
-                },
-                drawerActiveTintColor: colors.primary,
-                drawerInactiveTintColor: 'white',
-                drawerLabelStyle: {
-                  fontSize: 16,
-                  marginLeft: -10,
-                },
-                drawerIcon: ({ color }: { color: ColorValue }) => (
-                  <IconComponent name={iconData.name} size={20} color={color} />
-                ),
-              };
-            }}
-          />
-        </UserProvider>
-      </ThemeProvider>
-    </PaperProvider>
+        return {
+          headerShown: false,
+          drawerStyle: {
+            backgroundColor: colors.background,
+            width: drawerWidth,
+          },
+          drawerActiveTintColor: colors.primary,
+          drawerInactiveTintColor: 'white',
+          drawerLabelStyle: {
+            fontSize: 16,
+            marginLeft: -10,
+          },
+          drawerIcon: ({ color }: { color: ColorValue }) => (
+            <IconComponent name={iconData.name} size={20} color={color} />
+          ),
+        };
+      }}
+    />
   );
 }
