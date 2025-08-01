@@ -1,13 +1,13 @@
 // app/(drawer)/_layout.tsx
 import React from 'react';
-import { Dimensions } from 'react-native';
+import { Dimensions, ColorValue } from 'react-native';
 import { Drawer } from 'expo-router/drawer';
 import { Feather, Ionicons, MaterialIcons } from '@expo/vector-icons';
-import { ColorValue } from 'react-native';
 
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import colors from '@/theme/colors';
 
+// Define drawer icons for each screen
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
   track: { name: 'map-pin', lib: Feather },
@@ -39,6 +39,7 @@ export default function DrawerLayout() {
           drawerLabelStyle: {
             fontSize: 16,
             marginLeft: -10,
+            fontFamily: 'System', // fallback if Paper theme not ready
           },
           drawerIcon: ({ color }: { color: ColorValue }) => (
             <IconComponent name={iconData.name} size={20} color={color} />
