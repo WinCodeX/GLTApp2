@@ -4,15 +4,14 @@ import {
   Text,
   TouchableOpacity,
   ScrollView,
-  Animated,
   Dimensions,
   Platform,
   StyleSheet,
+  Image,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useUser } from '../context/UserContext'; // ✅ Imported
-import { Image } from 'react-native';
+import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = width * 0.75;
@@ -35,11 +34,12 @@ interface AdminSidebarProps {
   activePanel: string;
 }
 
-const AdminSidebar: React.FC<AdminSidebarProps> = ({ 
-  visible, 
-  onClose, 
-  activePanel 
+const AdminSidebar: React.FC<AdminSidebarProps> = ({
+  visible,
+  onClose,
+  activePanel,
 }) => {
+  const { user } = useUser(); // ✅ Correct placement
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     hangout: true,
     admin: true,
@@ -47,9 +47,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   });
 
   const toggleSection = (section: keyof ExpandedSections): void => {
-    setExpandedSections(prev => ({
+    setExpandedSections((prev) => ({
       ...prev,
-      [section]: !prev[section]
+      [section]: !prev[section],
     }));
   };
 
@@ -90,8 +90,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       style={[
         styles.featureItem,
         {
-          backgroundColor: activePanel === item.id ? 'rgba(108, 92, 231, 0.2)' : 'transparent',
-        }
+          backgroundColor:
+            activePanel === item.id ? 'rgba(108, 92, 231, 0.2)' : 'transparent',
+        },
       ]}
     >
       <Ionicons
@@ -105,7 +106,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           {
             color: activePanel === item.id ? '#6c5ce7' : '#cbd5e0',
             fontWeight: activePanel === item.id ? '600' : '400',
-          }
+          },
         ]}
       >
         {item.title}
@@ -128,9 +129,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           size={16}
           color="#a0aec0"
         />
-        <Text style={styles.sectionTitle}>
-          {title}
-        </Text>
+        <Text style={styles.sectionTitle}>{title}</Text>
       </TouchableOpacity>
       {expandedSections[sectionKey] && (
         <View style={styles.sectionContent}>
@@ -158,17 +157,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
             <View style={styles.headerContent}>
               <View style={styles.headerLeft}>
                 <View style={styles.logoContainer}>
-                  <Text style={styles.logoText}>
-                    GL
-                  </Text>
+                  <Text style={styles.logoText}>GL</Text>
                 </View>
                 <View>
-                  <Text style={styles.companyName}>
-                    GLT Logistics
-                  </Text>
-                  <Text style={styles.panelLabel}>
-                    Admin Panel
-                  </Text>
+                  <Text style={styles.companyName}>GLT Logistics</Text>
+                  <Text style={styles.panelLabel}>Admin Panel</Text>
                 </View>
               </View>
               <TouchableOpacity onPress={onClose}>
@@ -178,59 +171,47 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
           </View>
 
           {/* User Profile Section */}
-         const { user } = useUser();
-
-<View style={styles.profileSection}>
-  <LinearGradient
-    colors={['#6c5ce7', '#a29bfe']}
-    style={styles.profileCard}
-  >
-    <View style={styles.profileAvatar}>
-      {user.avatarUrl ? (
-        <Image
-          source={{ uri: user.avatarUrl }}
-          style={styles.avatarImage}
-        />
-      ) : (
-        <Ionicons name="person" size={24} color="white" />
-      )}
-    </View>
-    <View style={styles.profileInfo}>
-      <Text style={styles.profileName}>
-        {user.name || 'Admin User'}
-      </Text>
-      <Text style={styles.profilePhone}>
-        {user.phone || '+254 000 000 000'}
-      </Text>
-    </View>
-    <Ionicons name="chevron-down" size={20} color="white" />
-  </LinearGradient>
-</View>
+          <View style={styles.profileSection}>
+            <LinearGradient
+              colors={['#6c5ce7', '#a29bfe']}
+              style={styles.profileCard}
+            >
+              <View style={styles.profileAvatar}>
+                {user.avatarUrl ? (
+                  <Image
+                    source={{ uri: user.avatarUrl }}
+                    style={styles.avatarImage}
+                  />
+                ) : (
+                  <Ionicons name="person" size={24} color="white" />
+                )}
+              </View>
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>
+                  {user.name || 'Admin User'}
+                </Text>
+                <Text style={styles.profilePhone}>
+                  {user.phone || '+254 000 000 000'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={20} color="white" />
+            </LinearGradient>
+          </View>
 
           {/* Quick Actions */}
           <View style={styles.quickActions}>
-            <Text style={styles.sectionLabel}>
-              Quick Actions
-            </Text>
+            <Text style={styles.sectionLabel}>Quick Actions</Text>
             <View style={styles.locationButtons}>
-              {quickActionLocations.map((location: string) => (
-                <TouchableOpacity
-                  key={location}
-                  style={styles.locationButton}
-                >
+              {quickActionLocations.map((location) => (
+                <TouchableOpacity key={location} style={styles.locationButton}>
                   <Text style={styles.locationButtonText}>{location}</Text>
                 </TouchableOpacity>
               ))}
             </View>
           </View>
 
-          {/* Logistics Features */}
           {renderSection('Logistics', 'logistics', logisticsFeatures)}
-
-          {/* Admin Features */}
           {renderSection('Admin Features', 'admin', adminFeatures)}
-
-          {/* Support & More */}
           {renderSection('Support & More', 'hangout', supportFeatures)}
         </ScrollView>
       </LinearGradient>
@@ -314,6 +295,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    resizeMode: 'cover',
+  },
   profileInfo: {
     flex: 1,
   },
@@ -382,13 +369,7 @@ const styles = StyleSheet.create({
   featureText: {
     fontSize: 14,
     marginLeft: 12,
-},
-avatarImage: {
-  width: 40,
-  height: 40,
-  borderRadius: 20,
-  resizeMode: 'cover',
-},
+  },
 });
 
 export default AdminSidebar;
