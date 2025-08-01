@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Button, TextInput } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
-import api from '../../lib/api';
+import api, { getCurrentBaseUrl, refreshBaseUrl } from '../../lib/api';
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
 
 export default function LoginScreen() {
@@ -23,6 +23,7 @@ export default function LoginScreen() {
   const [ready, setReady] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  const [serverStatus, setServerStatus] = useState('checking'); // 'checking', 'connected', 'unreachable'
   const router = useRouter();
   
   // Prevent duplicate Google login processing
@@ -78,7 +79,12 @@ export default function LoginScreen() {
       }
     } catch (err) {
       console.error('❌ Google login error:', err);
-      Toast.show({ type: 'error', text1: 'Google login failed' });
+      const errorMessage = err?.response?.data?.message || err?.message || 'Unknown error';
+      Toast.show({ 
+        type: 'error', 
+        text1: 'Google login failed',
+        text2: errorMessage
+      });
     } finally {
       setIsGoogleLoading(false);
       // Reset the flag after a delay to prevent rapid re-attempts
@@ -95,45 +101,77 @@ export default function LoginScreen() {
   }, [redirectUri]);
 
   useEffect(() => {
-    const checkServer = async () => {
-      await SecureStore.deleteItemAsync('auth_token');
-      await SecureStore.deleteItemAsync('user_id');
-
-      const endpoints = [
-        '/api/v1/ping',
-        '/ping',
-        '/health',
-        '/api/v1/health',
-        '/',
-      ];
-
-      let reachable = false;
-
-      for (const path of endpoints) {
-        try {
-          console.log(`🌐 Trying: ${api.defaults.baseURL}${path}`);
-          await api.get(path);
-          console.log(`✅ Success: ${path}`);
-          reachable = true;
-          break;
-        } catch (err) {
-          console.log(`❌ Failed: ${path} - ${err?.message}`);
+    const initializeApp = async () => {
+      try {
+        setServerStatus('checking');
+        
+        // Check if user is already logged in (optional - remove if you want to always clear tokens)
+        const existingToken = await SecureStore.getItemAsync('auth_token');
+        const existingUserId = await SecureStore.getItemAsync('user_id');
+        
+        if (existingToken && existingUserId) {
+          console.log('🔑 Found existing auth tokens');
+          
+          // Optionally verify the token is still valid
+          try {
+            await api.get('/api/v1/me'); // or whatever endpoint checks auth
+            console.log('✅ Existing token is valid, redirecting...');
+            
+            const userRole = await SecureStore.getItemAsync('user_role');
+            router.replace(userRole === 'admin' ? '/admin' : '/');
+            return;
+          } catch (tokenError) {
+            console.log('🔑 Existing token is invalid, clearing...');
+            await SecureStore.deleteItemAsync('auth_token');
+            await SecureStore.deleteItemAsync('user_id');
+            await SecureStore.deleteItemAsync('user_role');
+          }
         }
-      }
 
-      setReady(true);
-
-      if (!reachable) {
-        Toast.show({
-          type: 'info',
-          text1: 'Server unreachable',
-          text2: 'Login might fail',
-        });
+        // Test server connectivity
+        console.log('🌐 Testing server connectivity...');
+        const baseUrl = getCurrentBaseUrl();
+        console.log('📍 Current base URL:', baseUrl);
+        
+        try {
+          // Simple ping to test connectivity
+          await api.get('/api/v1/ping');
+          console.log('✅ Server is reachable');
+          setServerStatus('connected');
+        } catch (pingError) {
+          console.log('❌ Server ping failed, trying to refresh base URL...');
+          
+          try {
+            // Try to refresh and find a working server
+            const newBaseUrl = await refreshBaseUrl();
+            console.log('🔄 New base URL resolved:', newBaseUrl);
+            
+            // Test again with new URL
+            await api.get('/api/v1/ping');
+            console.log('✅ Server is reachable after refresh');
+            setServerStatus('connected');
+          } catch (refreshError) {
+            console.log('❌ Server unreachable after refresh');
+            setServerStatus('unreachable');
+            
+            Toast.show({
+              type: 'warning',
+              text1: 'Server Connection Issue',
+              text2: 'Login may not work properly',
+              visibilityTime: 4000,
+            });
+          }
+        }
+      } catch (error) {
+        console.error('❌ App initialization error:', error);
+        setServerStatus('unreachable');
+      } finally {
+        setReady(true);
       }
     };
 
-    checkServer();
-  }, []);
+    initializeApp();
+  }, [router]);
 
   const handleLogin = async () => {
     if (isLoggingIn) return;
@@ -142,6 +180,8 @@ export default function LoginScreen() {
     setIsLoggingIn(true);
 
     try {
+      console.log('🔐 Attempting login for:', email);
+      
       const response = await api.post('/api/v1/login', {
         user: { email, password },
       });
@@ -160,32 +200,44 @@ export default function LoginScreen() {
         await SecureStore.setItemAsync('user_role', role);
 
         Toast.show({ type: 'success', text1: 'Welcome back!' });
+        console.log('✅ Login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
         router.push(role === 'admin' ? '/admin' : '/');
       } else {
-        setErrorMsg('Login failed: Missing token or user ID');
+        const message = 'Login failed: Missing token or user ID';
+        setErrorMsg(message);
+        console.error('❌', message);
         Toast.show({
           type: 'error',
           text1: 'Login failed',
-          text2: 'Incomplete data',
+          text2: 'Incomplete response from server',
         });
       }
     } catch (err) {
-      console.error('Login error:', err?.response?.data || err?.message);
+      console.error('❌ Login error:', err?.response?.data || err?.message);
+      
+      let errorMessage = 'Server error - try again';
+      let toastMessage = 'Unexpected error';
+
       if (err?.response?.status === 401) {
-        setErrorMsg('Invalid email or password');
-        Toast.show({
-          type: 'error',
-          text1: 'Login failed',
-          text2: 'Invalid credentials',
-        });
-      } else {
-        setErrorMsg('Server error - try again');
-        Toast.show({
-          type: 'error',
-          text1: 'Login failed',
-          text2: 'Unexpected error',
-        });
+        errorMessage = 'Invalid email or password';
+        toastMessage = 'Invalid credentials';
+      } else if (err?.response?.status === 422) {
+        errorMessage = 'Please check your email and password';
+        toastMessage = 'Invalid input';
+      } else if (err?.code === 'NETWORK_ERROR' || err?.message === 'Network Error') {
+        errorMessage = 'Network error - check your connection';
+        toastMessage = 'Connection failed';
+      } else if (err?.response?.data?.message) {
+        errorMessage = err.response.data.message;
+        toastMessage = 'Server error';
       }
+
+      setErrorMsg(errorMessage);
+      Toast.show({
+        type: 'error',
+        text1: 'Login failed',
+        text2: toastMessage,
+      });
     } finally {
       setIsLoggingIn(false);
     }
@@ -215,6 +267,13 @@ export default function LoginScreen() {
         Toast.show({ type: 'info', text1: 'Google login cancelled' });
       } else if (result?.type === 'dismiss') {
         Toast.show({ type: 'info', text1: 'Google login dismissed' });
+      } else if (result?.type === 'error') {
+        console.error('❌ Google OAuth error:', result.error);
+        Toast.show({
+          type: 'error',
+          text1: 'Google login error',
+          text2: result.error?.message || 'OAuth failed',
+        });
       }
     } catch (error) {
       console.error('❌ Google login prompt error:', error);
@@ -228,10 +287,68 @@ export default function LoginScreen() {
     }
   };
 
+  const handleRetryConnection = async () => {
+    setReady(false);
+    setServerStatus('checking');
+    
+    try {
+      console.log('🔄 Retrying server connection...');
+      const newBaseUrl = await refreshBaseUrl();
+      await api.get('/api/v1/ping');
+      setServerStatus('connected');
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Connected!',
+        text2: `Server: ${newBaseUrl}`,
+      });
+    } catch (error) {
+      setServerStatus('unreachable');
+      Toast.show({
+        type: 'error',
+        text1: 'Still unreachable',
+        text2: 'Please check your network',
+      });
+    } finally {
+      setReady(true);
+    }
+  };
+
+  const getServerStatusColor = () => {
+    switch (serverStatus) {
+      case 'connected': return '#10b981'; // green
+      case 'unreachable': return '#ef4444'; // red
+      case 'checking': return '#f59e0b'; // yellow
+      default: return '#6b7280'; // gray
+    }
+  };
+
+  const getServerStatusText = () => {
+    switch (serverStatus) {
+      case 'connected': return 'Server Connected';
+      case 'unreachable': return 'Server Unreachable';
+      case 'checking': return 'Checking Connection...';
+      default: return 'Unknown Status';
+    }
+  };
+
   return (
     <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
       <View style={styles.inner}>
         <Text style={styles.title}>Welcome Back</Text>
+
+        {/* Server Status Indicator */}
+        <View style={styles.statusContainer}>
+          <View style={[styles.statusDot, { backgroundColor: getServerStatusColor() }]} />
+          <Text style={[styles.statusText, { color: getServerStatusColor() }]}>
+            {getServerStatusText()}
+          </Text>
+          {serverStatus === 'unreachable' && (
+            <TouchableOpacity onPress={handleRetryConnection} style={styles.retryButton}>
+              <Text style={styles.retryText}>Retry</Text>
+            </TouchableOpacity>
+          )}
+        </View>
 
         {!ready ? (
           <>
@@ -337,11 +454,38 @@ const styles = StyleSheet.create({
     color: '#f8f8f2',
     fontSize: 30,
     fontWeight: 'bold',
-    marginBottom: 30,
+    marginBottom: 20,
     textAlign: 'center',
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
+  },
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 20,
+    gap: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  statusText: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  retryButton: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    backgroundColor: '#44475a',
+    borderRadius: 4,
+  },
+  retryText: {
+    color: '#f8f8f2',
+    fontSize: 10,
+    fontWeight: '600',
   },
   input: {
     marginBottom: 16,
