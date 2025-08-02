@@ -79,7 +79,7 @@ export default function SignupScreen() {
       const response = await api.post('/api/v1/signup', {
         user: {
           email,
-          phone,
+          phone_number: phone,
           first_name: firstName,
           last_name: lastName,
           password,
