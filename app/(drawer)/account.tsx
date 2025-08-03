@@ -5,7 +5,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import {
   Modal,
   RefreshControl,
@@ -13,24 +13,36 @@ import {
   StyleSheet,
   Text,
   TouchableOpacity,
-  View
+  View,
+  ActivityIndicator
 } from 'react-native';
 import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
+import * as SplashScreen from 'expo-splash-screen';
 import Toast from 'react-native-toast-message';
 
-import AvatarPreviewModal from '../../components/AvatarPreviewModal';
-import BusinessModal from '../../components/BusinessModal';
-import ChangelogModal, { CHANGELOG_KEY, CHANGELOG_VERSION } from '../../components/ChangelogModal';
-import JoinBusinessModal from '../../components/JoinBusinessModal';
-import LoaderOverlay from '../../components/LoaderOverlay';
+// ✅ Lazy load heavy components to prevent blocking
+const AvatarPreviewModal = React.lazy(() => import('../../components/AvatarPreviewModal'));
+const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
+const ChangelogModal = React.lazy(() => import('../../components/ChangelogModal'));
+const JoinBusinessModal = React.lazy(() => import('../../components/JoinBusinessModal'));
+const LoaderOverlay = React.lazy(() => import('../../components/LoaderOverlay'));
+
 import { useUser } from '../../context/UserContext';
 import { createInvite, getBusinesses } from '../../lib/helpers/business';
 import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
 
+// ✅ Import changelog constants directly to avoid loading modal
+const CHANGELOG_KEY = 'changelog_seen';
+const CHANGELOG_VERSION = '1.0.0'; // Replace with your actual version
+
 export default function AccountScreen() {
+  // ✅ Initialize component state
+  const [isScreenReady, setIsScreenReady] = useState(false);
+  const [screenError, setScreenError] = useState<string | null>(null);
+  
   const { user, refreshUser, loading: userLoading, error: userError } = useUser();
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [ownedBusinesses, setOwnedBusinesses] = useState([]);
   const [joinedBusinesses, setJoinedBusinesses] = useState([]);
@@ -44,60 +56,93 @@ export default function AccountScreen() {
 
   const router = useRouter();
 
-  // ✅ REMOVED useNavigation and useLayoutEffect - these were causing conflicts
-
-  // ✅ Added component lifecycle logging for debugging
+  // ✅ Component initialization
   useEffect(() => {
-    console.log('AccountScreen mounted');
+    let isMounted = true;
+    
+    async function initializeScreen() {
+      try {
+        console.log('📱 AccountScreen: Initializing...');
+        
+        // ✅ Small delay to ensure everything is mounted
+        await new Promise(resolve => setTimeout(resolve, 50));
+        
+        if (isMounted) {
+          console.log('✅ AccountScreen: Ready');
+          setIsScreenReady(true);
+          
+          // ✅ Hide splash screen once account screen is ready
+          setTimeout(async () => {
+            try {
+              await SplashScreen.hideAsync();
+            } catch (e) {
+              // Splash screen might already be hidden
+              console.log('Splash screen already hidden');
+            }
+          }, 100);
+        }
+        
+      } catch (error) {
+        console.error('❌ AccountScreen initialization error:', error);
+        if (isMounted) {
+          setScreenError(error.message);
+          setIsScreenReady(true);
+        }
+      }
+    }
+
+    initializeScreen();
+    
     return () => {
-      console.log('AccountScreen unmounting');
+      isMounted = false;
     };
   }, []);
 
-  // Load businesses and handle changelog display
-  const loadBusinesses = async () => {
+  // ✅ Load businesses data
+  const loadBusinesses = useCallback(async () => {
     try {
+      console.log('📊 Loading businesses...');
       const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
       if (!seen) setShowChangelog(true);
       
       const data = await getBusinesses();
       setOwnedBusinesses(data?.owned || []);
       setJoinedBusinesses(data?.joined || []);
+      console.log('✅ Businesses loaded');
     } catch (error) {
-      console.log('Error loading businesses:', error);
-      Toast.show({ type: 'errorToast', text1: 'Failed to load businesses.' });
+      console.log('❌ Error loading businesses:', error);
+      Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
       setOwnedBusinesses([]);
       setJoinedBusinesses([]);
     }
-  };
-
-  const reloadFullProfile = async () => {
-    setRefreshing(true);
-    setLoading(true);
-    try {
-      await refreshUser();
-      await loadBusinesses();
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
-    }
-  };
-
-  useEffect(() => {
-    reloadFullProfile();
   }, []);
 
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await refreshUser();
-    await loadBusinesses();
-    setRefreshing(false);
-  };
+  // ✅ Load data only after screen is ready
+  useEffect(() => {
+    if (isScreenReady && !screenError && !userError) {
+      console.log('🔄 AccountScreen ready, loading data...');
+      loadBusinesses();
+    }
+  }, [isScreenReady, screenError, userError, loadBusinesses]);
 
-  const pickAndPreviewAvatar = async () => {
+  // ✅ Refresh handler
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await Promise.all([
+        refreshUser(),
+        loadBusinesses()
+      ]);
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshUser, loadBusinesses]);
+
+  // ✅ Avatar picker
+  const pickAndPreviewAvatar = useCallback(async () => {
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
-      return Toast.show({ type: 'warningToast', text1: 'Photo access denied.' });
+      return Toast.show({ type: 'error', text1: 'Photo access denied.' });
     }
 
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -108,68 +153,78 @@ export default function AccountScreen() {
 
     if (result.canceled || !result.assets?.length) return;
     setPreviewUri(result.assets[0].uri);
-  };
+  }, []);
 
-  const confirmUploadAvatar = async () => {
+  // ✅ Avatar upload
+  const confirmUploadAvatar = useCallback(async () => {
     if (!previewUri) return;
 
+    setLoading(true);
     try {
       await uploadAvatar(previewUri);
-      Toast.show({ type: 'successToast', text1: 'Avatar updated!' });
-      await reloadFullProfile();
+      Toast.show({ type: 'success', text1: 'Avatar updated!' });
+      await refreshUser();
     } catch {
-      Toast.show({ type: 'errorToast', text1: 'Upload failed.' });
+      Toast.show({ type: 'error', text1: 'Upload failed.' });
     } finally {
       setPreviewUri(null);
+      setLoading(false);
     }
-  };
+  }, [previewUri, refreshUser]);
 
-  const confirmLogout = async () => {
-    await SecureStore.deleteItemAsync('auth_token');
-    Toast.show({ type: 'warningToast', text1: 'Logged out successfully' });
-    setShowLogoutConfirm(false);
-    router.replace('/login');
-  };
+  // ✅ Logout handler
+  const confirmLogout = useCallback(async () => {
+    try {
+      await SecureStore.deleteItemAsync('auth_token');
+      await SecureStore.deleteItemAsync('user_id');
+      await SecureStore.deleteItemAsync('user_role');
+      
+      Toast.show({ type: 'info', text1: 'Logged out successfully' });
+      setShowLogoutConfirm(false);
+      router.replace('/login');
+    } catch (error) {
+      console.error('Logout error:', error);
+      Toast.show({ type: 'error', text1: 'Logout failed' });
+    }
+  }, [router]);
 
-  const dismissChangelog = async () => {
-    await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
-    setShowChangelog(false);
-  };
-
-  // ✅ Improved back button handling with better error handling and logging
-  const handleBackPress = () => {
-    console.log('Back button pressed in AccountScreen');
+  // ✅ Back navigation
+  const handleBackPress = useCallback(() => {
+    console.log('🔙 Back button pressed');
     
     try {
-      // Check if we can go back
       if (router.canGoBack && router.canGoBack()) {
-        console.log('Can go back - using router.back()');
+        console.log('✅ Going back');
         router.back();
       } else {
-        console.log('Cannot go back - using fallback navigation to admin');
-        // Navigate to admin dashboard as fallback
+        console.log('🏠 No back history, going to admin');
         router.replace('/admin');
       }
     } catch (error) {
-      console.error('Navigation error in handleBackPress:', error);
-      
-      // Try alternative navigation methods
-      try {
-        console.log('Trying router.replace as last resort');
-        router.replace('/admin');
-      } catch (secondError) {
-        console.error('Second navigation attempt failed:', secondError);
-        // If all else fails, at least log the error
-        Toast.show({ 
-          type: 'errorToast', 
-          text1: 'Navigation error occurred' 
-        });
-      }
+      console.error('❌ Navigation error:', error);
+      router.replace('/admin');
     }
-  };
+  }, [router]);
 
-  // ✅ Add error boundary-like error handling
-  if (userError) {
+  // ✅ Loading screen while initializing
+  if (!isScreenReady) {
+    return (
+      <View style={styles.loadingContainer}>
+        <LinearGradient
+          colors={['#4c1d95', '#7c3aed', '#3730a3']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.loadingGradient}
+        >
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading Account...</Text>
+        </LinearGradient>
+      </View>
+    );
+  }
+
+  // ✅ Error screen
+  if (screenError || userError) {
     return (
       <View style={styles.container}>
         <LinearGradient
@@ -186,8 +241,13 @@ export default function AccountScreen() {
         </LinearGradient>
         
         <View style={styles.errorContainer}>
-          <Text style={styles.error}>Failed to load account data</Text>
-          <Button mode="outlined" onPress={reloadFullProfile}>
+          <Text style={styles.error}>
+            {screenError || 'Failed to load account data'}
+          </Text>
+          <Button mode="outlined" onPress={() => {
+            setScreenError(null);
+            loadBusinesses();
+          }}>
             Retry
           </Button>
         </View>
@@ -195,40 +255,50 @@ export default function AccountScreen() {
     );
   }
 
+  // ✅ Main content
   return (
     <View style={styles.container}>
-      {/* LoaderOverlay appears on top without blocking layout */}
-      <LoaderOverlay visible={userLoading || loading} />
+      {/* ✅ Suspense wrapper for lazy-loaded components */}
+      <Suspense fallback={<View />}>
+        {loading && <LoaderOverlay visible={true} />}
 
-      {showChangelog && (
-        <ChangelogModal visible onClose={dismissChangelog} />
-      )}
+        {showChangelog && (
+          <ChangelogModal 
+            visible 
+            onClose={() => {
+              AsyncStorage.setItem(CHANGELOG_KEY, 'true');
+              setShowChangelog(false);
+            }} 
+          />
+        )}
 
-      {previewUri && (
-        <AvatarPreviewModal
-          visible
-          uri={previewUri}
-          onCancel={() => setPreviewUri(null)}
-          onConfirm={confirmUploadAvatar}
-        />
-      )}
+        {previewUri && (
+          <AvatarPreviewModal
+            visible
+            uri={previewUri}
+            onCancel={() => setPreviewUri(null)}
+            onConfirm={confirmUploadAvatar}
+          />
+        )}
 
-      {showBusinessModal && (
-        <BusinessModal
-          visible
-          onClose={() => setShowBusinessModal(false)}
-          onCreate={reloadFullProfile}
-        />
-      )}
+        {showBusinessModal && (
+          <BusinessModal
+            visible
+            onClose={() => setShowBusinessModal(false)}
+            onCreate={loadBusinesses}
+          />
+        )}
 
-      {showJoinModal && (
-        <JoinBusinessModal
-          visible
-          onClose={() => setShowJoinModal(false)}
-          onJoin={reloadFullProfile}
-        />
-      )}
+        {showJoinModal && (
+          <JoinBusinessModal
+            visible
+            onClose={() => setShowJoinModal(false)}
+            onJoin={loadBusinesses}
+          />
+        )}
+      </Suspense>
 
+      {/* Business invite modal */}
       {selectedBusiness && (
         <Modal visible transparent animationType="fade">
           <View style={styles.modalOverlay}>
@@ -253,7 +323,7 @@ export default function AccountScreen() {
                   <Text selectable style={styles.code}>{inviteLink}</Text>
                   <Button onPress={() => {
                     Clipboard.setStringAsync(inviteLink);
-                    Toast.show({ type: 'successToast', text1: 'Copied to clipboard!' });
+                    Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
                   }}>
                     Copy
                   </Button>
@@ -271,7 +341,7 @@ export default function AccountScreen() {
         </Modal>
       )}
 
-      {/* Header with gradient background */}
+      {/* Header */}
       <LinearGradient
         colors={['#4c1d95', '#7c3aed', '#3730a3']}
         start={{ x: 0, y: 0 }}
@@ -288,6 +358,7 @@ export default function AccountScreen() {
         <View style={styles.placeholder} />
       </LinearGradient>
 
+      {/* Content */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 32 }}
@@ -325,10 +396,7 @@ export default function AccountScreen() {
         <View style={styles.infoCard}>
           <Text style={styles.sectionTitle}>Account Information</Text>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => {
-            console.log('Navigating to edit-username');
-            router.push('/edit-username');
-          }}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
             <Text style={styles.infoLabel}>Username</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.username || '—'}</Text>
@@ -336,10 +404,7 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => {
-            console.log('Navigating to edit-display-name');
-            router.push('/edit-display-name');
-          }}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
             <Text style={styles.infoLabel}>Display Name</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.display_name || 'LVL0'}</Text>
@@ -347,10 +412,7 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => {
-            console.log('Navigating to edit-email');
-            router.push('/edit-email');
-          }}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
             <Text style={styles.infoLabel}>Email</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
@@ -358,10 +420,7 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => {
-            console.log('Navigating to edit-phone');
-            router.push('/edit-phone');
-          }}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
             <Text style={styles.infoLabel}>Phone</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
@@ -425,40 +484,29 @@ export default function AccountScreen() {
             <Text style={styles.logoutText}>Log Out</Text>
           </TouchableOpacity>
         </View>
-
-        {/* Debug Info - Remove in production */}
-        {__DEV__ && (
-          <View style={styles.debugCard}>
-            <Text style={styles.debugTitle}>Debug Info:</Text>
-            <Text style={styles.debugText}>User Loading: {userLoading.toString()}</Text>
-            <Text style={styles.debugText}>Loading: {loading.toString()}</Text>
-            <Text style={styles.debugText}>Can Go Back: {router.canGoBack ? router.canGoBack().toString() : 'N/A'}</Text>
-            <Text style={styles.debugText}>User Error: {userError ? 'Yes' : 'No'}</Text>
-          </View>
-        )}
-
-        {/* Logout Confirmation Dialog */}
-        <Portal>
-          <Dialog
-            visible={showLogoutConfirm}
-            onDismiss={() => setShowLogoutConfirm(false)}
-            style={styles.dialog}
-          >
-            <Dialog.Title style={styles.dialogTitle}>Confirm Logout</Dialog.Title>
-            <Dialog.Content>
-              <Text style={styles.dialogText}>Are you sure you want to log out?</Text>
-            </Dialog.Content>
-            <Dialog.Actions style={styles.dialogActions}>
-              <Button onPress={() => setShowLogoutConfirm(false)} style={styles.dialogCancel}>
-                No
-              </Button>
-              <Button mode="outlined" onPress={confirmLogout} style={styles.dialogConfirm}>
-                Yes
-              </Button>
-            </Dialog.Actions>
-          </Dialog>
-        </Portal>
       </ScrollView>
+
+      {/* Logout Confirmation Dialog */}
+      <Portal>
+        <Dialog
+          visible={showLogoutConfirm}
+          onDismiss={() => setShowLogoutConfirm(false)}
+          style={styles.dialog}
+        >
+          <Dialog.Title style={styles.dialogTitle}>Confirm Logout</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogText}>Are you sure you want to log out?</Text>
+          </Dialog.Content>
+          <Dialog.Actions style={styles.dialogActions}>
+            <Button onPress={() => setShowLogoutConfirm(false)} style={styles.dialogCancel}>
+              No
+            </Button>
+            <Button mode="outlined" onPress={confirmLogout} style={styles.dialogConfirm}>
+              Yes
+            </Button>
+          </Dialog.Actions>
+        </Dialog>
+      </Portal>
     </View>
   );
 }
@@ -467,6 +515,21 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#0a0a0f'
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0f',
+  },
+  loadingGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
   },
   header: {
     flexDirection: 'row',
@@ -499,33 +562,11 @@ const styles = StyleSheet.create({
   scrollView: {
     flex: 1,
   },
-  // ✅ Added error container styles
   errorContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
-  },
-  // ✅ Added debug card styles
-  debugCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 0, 0.3)',
-  },
-  debugTitle: {
-    color: '#ffff00',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  debugText: {
-    color: '#ccc',
-    fontSize: 12,
-    marginBottom: 4,
   },
   infoCard: {
     backgroundColor: '#1a1a2e',
