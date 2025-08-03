@@ -1,12 +1,11 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useNavigation } from '@react-navigation/native';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useLayoutEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Modal,
   RefreshControl,
@@ -17,7 +16,6 @@ import {
   View
 } from 'react-native';
 import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 
 import AvatarPreviewModal from '../../components/AvatarPreviewModal';
@@ -44,13 +42,17 @@ export default function AccountScreen() {
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
-  const navigation = useNavigation();
   const router = useRouter();
 
-  useLayoutEffect(() => {
-    navigation.getParent()?.setOptions({ tabBarStyle: { display: 'none' } });
-    return () => navigation.getParent()?.setOptions({ tabBarStyle: { display: 'flex' } });
-  }, [navigation]);
+  // ✅ REMOVED useNavigation and useLayoutEffect - these were causing conflicts
+
+  // ✅ Added component lifecycle logging for debugging
+  useEffect(() => {
+    console.log('AccountScreen mounted');
+    return () => {
+      console.log('AccountScreen unmounting');
+    };
+  }, []);
 
   // Load businesses and handle changelog display
   const loadBusinesses = async () => {
@@ -134,21 +136,64 @@ export default function AccountScreen() {
     setShowChangelog(false);
   };
 
-  // Handle back button press with better error handling
+  // ✅ Improved back button handling with better error handling and logging
   const handleBackPress = () => {
+    console.log('Back button pressed in AccountScreen');
+    
     try {
-      if (router.canGoBack()) {
+      // Check if we can go back
+      if (router.canGoBack && router.canGoBack()) {
+        console.log('Can go back - using router.back()');
         router.back();
       } else {
-        // Fallback navigation - adjust route as needed
-        router.replace('/');
+        console.log('Cannot go back - using fallback navigation to admin');
+        // Navigate to admin dashboard as fallback
+        router.replace('/admin');
       }
     } catch (error) {
-      console.log('Navigation error:', error);
-      // Alternative fallback
-      router.replace('/');
+      console.error('Navigation error in handleBackPress:', error);
+      
+      // Try alternative navigation methods
+      try {
+        console.log('Trying router.replace as last resort');
+        router.replace('/admin');
+      } catch (secondError) {
+        console.error('Second navigation attempt failed:', secondError);
+        // If all else fails, at least log the error
+        Toast.show({ 
+          type: 'errorToast', 
+          text1: 'Navigation error occurred' 
+        });
+      }
     }
   };
+
+  // ✅ Add error boundary-like error handling
+  if (userError) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={['#4c1d95', '#7c3aed', '#3730a3']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+            <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.title}>Account</Text>
+          <View style={styles.placeholder} />
+        </LinearGradient>
+        
+        <View style={styles.errorContainer}>
+          <Text style={styles.error}>Failed to load account data</Text>
+          <Button mode="outlined" onPress={reloadFullProfile}>
+            Retry
+          </Button>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -197,7 +242,9 @@ export default function AccountScreen() {
                   try {
                     const res = await createInvite(selectedBusiness.id);
                     setInviteLink(res?.code || 'No code');
-                  } catch {}
+                  } catch (error) {
+                    console.log('Error creating invite:', error);
+                  }
                 }}>
                   Generate Link
                 </Button>
@@ -224,7 +271,7 @@ export default function AccountScreen() {
         </Modal>
       )}
 
-      {/* Header with gradient background like settings screen */}
+      {/* Header with gradient background */}
       <LinearGradient
         colors={['#4c1d95', '#7c3aed', '#3730a3']}
         start={{ x: 0, y: 0 }}
@@ -278,7 +325,10 @@ export default function AccountScreen() {
         <View style={styles.infoCard}>
           <Text style={styles.sectionTitle}>Account Information</Text>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => {
+            console.log('Navigating to edit-username');
+            router.push('/edit-username');
+          }}>
             <Text style={styles.infoLabel}>Username</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.username || '—'}</Text>
@@ -286,7 +336,10 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => {
+            console.log('Navigating to edit-display-name');
+            router.push('/edit-display-name');
+          }}>
             <Text style={styles.infoLabel}>Display Name</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.display_name || 'LVL0'}</Text>
@@ -294,7 +347,10 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => {
+            console.log('Navigating to edit-email');
+            router.push('/edit-email');
+          }}>
             <Text style={styles.infoLabel}>Email</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
@@ -302,7 +358,10 @@ export default function AccountScreen() {
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => {
+            console.log('Navigating to edit-phone');
+            router.push('/edit-phone');
+          }}>
             <Text style={styles.infoLabel}>Phone</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
@@ -367,6 +426,17 @@ export default function AccountScreen() {
           </TouchableOpacity>
         </View>
 
+        {/* Debug Info - Remove in production */}
+        {__DEV__ && (
+          <View style={styles.debugCard}>
+            <Text style={styles.debugTitle}>Debug Info:</Text>
+            <Text style={styles.debugText}>User Loading: {userLoading.toString()}</Text>
+            <Text style={styles.debugText}>Loading: {loading.toString()}</Text>
+            <Text style={styles.debugText}>Can Go Back: {router.canGoBack ? router.canGoBack().toString() : 'N/A'}</Text>
+            <Text style={styles.debugText}>User Error: {userError ? 'Yes' : 'No'}</Text>
+          </View>
+        )}
+
         {/* Logout Confirmation Dialog */}
         <Portal>
           <Dialog
@@ -396,13 +466,13 @@ export default function AccountScreen() {
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: '#0a0a0f' // Darker background to match settings
+    backgroundColor: '#0a0a0f'
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingTop: 50, // Account for status bar
+    paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 16,
     shadowColor: '#7c3aed',
@@ -418,16 +488,44 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
-    fontStyle: 'italic', // Cursive-like style to match settings screen
+    fontStyle: 'italic',
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
   placeholder: {
-    width: 44, // Same width as back button for centering
+    width: 44,
   },
   scrollView: {
     flex: 1,
+  },
+  // ✅ Added error container styles
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  // ✅ Added debug card styles
+  debugCard: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 0, 0.3)',
+  },
+  debugTitle: {
+    color: '#ffff00',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  debugText: {
+    color: '#ccc',
+    fontSize: 12,
+    marginBottom: 4,
   },
   infoCard: {
     backgroundColor: '#1a1a2e',
@@ -438,7 +536,7 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 8,
     borderWidth: 2,
-    borderColor: 'rgba(124, 58, 237, 0.6)', // Purple edge lighting
+    borderColor: 'rgba(124, 58, 237, 0.6)',
     shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
@@ -480,7 +578,7 @@ const styles = StyleSheet.create({
     borderRadius: 16, 
     padding: 16,
     borderWidth: 2,
-    borderColor: 'rgba(124, 58, 237, 0.6)', // Purple edge lighting
+    borderColor: 'rgba(124, 58, 237, 0.6)',
     shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
@@ -522,7 +620,7 @@ const styles = StyleSheet.create({
     borderRadius: 16, 
     padding: 12,
     borderWidth: 2,
-    borderColor: 'rgba(255, 107, 107, 0.6)', // Red edge lighting for logout
+    borderColor: 'rgba(255, 107, 107, 0.6)',
     shadowColor: '#ff6b6b',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.3,
@@ -570,7 +668,9 @@ const styles = StyleSheet.create({
   error: { 
     color: '#ff5555', 
     padding: 20, 
-    textAlign: 'center' 
+    textAlign: 'center',
+    fontSize: 16,
+    marginBottom: 20,
   },
   modalOverlay: { 
     flex: 1, 
