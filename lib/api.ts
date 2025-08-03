@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
-const LOCAL_BASE_2 = 'http://10.41.201.106:3000';
+const LOCAL_BASE_2 = 'http://10.35.210.106:3000';
 const PROD_BASE = 'https://your-production-server.com'; // Add your production URL
 const FALLBACK_BASE = LOCAL_BASE_1; // Fallback to first local server
 
