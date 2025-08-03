@@ -335,7 +335,7 @@ export default function LoginScreen() {
   return (
     <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
       <View style={styles.inner}>
-        <Text style={styles.title}>Welcome Back</Text>
+        <Text style={styles.title}>Welcome Back!</Text>
 
         {/* Server Status Indicator */}
         <View style={styles.statusContainer}>
