@@ -62,6 +62,7 @@ const AdminIndex: React.FC = () => {
   const [activePerformanceTab, setActivePerformanceTab] = useState<number>(0);
   const translateX = useRef(new Animated.Value(0)).current;
   const panRef = useRef<PanGestureHandler>(null);
+  const isGestureActive = useRef(false);
 
   const performanceData: Record<PerformanceTab, PerformanceData> = {
     weekly: {
@@ -189,36 +190,66 @@ const AdminIndex: React.FC = () => {
     }
   };
 
+  // ✅ FIXED: Seamless tab navigation with proper animation
   const handleTabPress = (index: number): void => {
+    if (index === activePerformanceTab || isGestureActive.current) return;
+    
     setActivePerformanceTab(index);
     Animated.spring(translateX, {
       toValue: -index * (width - 32),
       useNativeDriver: true,
+      tension: 100,
+      friction: 8,
     }).start();
   };
 
-  // ✅ FIXED: Proper gesture handler with TypeScript types
+  // ✅ FIXED: Proper gesture handler that works seamlessly in both directions
   const onGestureEvent = Animated.event(
     [{ nativeEvent: { translationX: translateX } }],
-    { useNativeDriver: true }
+    { 
+      useNativeDriver: true,
+      listener: (event) => {
+        // Add the translation to the current tab position
+        const currentOffset = -activePerformanceTab * (width - 32);
+        const newTranslation = currentOffset + event.nativeEvent.translationX;
+        translateX.setValue(newTranslation);
+      }
+    }
   );
 
-  // ✅ FIXED: Proper state handling with react-native-gesture-handler State enum
+  // ✅ FIXED: Proper state handling for seamless bidirectional scrolling
   const onHandlerStateChange = (event: any): void => {
-    if (event.nativeEvent.state === State.END) {
-      const { translationX } = event.nativeEvent;
+    const { state, translationX: gestureTranslationX, velocityX } = event.nativeEvent;
+    
+    if (state === State.BEGAN) {
+      isGestureActive.current = true;
+    } else if (state === State.END || state === State.CANCELLED) {
+      isGestureActive.current = false;
+      
       let newIndex = activePerformanceTab;
-
-      if (translationX > 50 && activePerformanceTab > 0) {
-        newIndex = activePerformanceTab - 1;
-      } else if (translationX < -50 && activePerformanceTab < performanceTabs.length - 1) {
-        newIndex = activePerformanceTab + 1;
+      const threshold = (width - 32) * 0.3; // 30% of card width
+      
+      // Determine direction based on translation and velocity
+      if (Math.abs(gestureTranslationX) > threshold || Math.abs(velocityX) > 500) {
+        if (gestureTranslationX > 0 || velocityX > 500) {
+          // Swiping right (going to previous tab)
+          newIndex = Math.max(0, activePerformanceTab - 1);
+        } else if (gestureTranslationX < 0 || velocityX < -500) {
+          // Swiping left (going to next tab)
+          newIndex = Math.min(performanceTabs.length - 1, activePerformanceTab + 1);
+        }
       }
-
-      handleTabPress(newIndex);
+      
+      // Animate to the final position
+      setActivePerformanceTab(newIndex);
+      Animated.spring(translateX, {
+        toValue: -newIndex * (width - 32),
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
     }
   };
-
 
   // ✅ Enhanced action handlers with proper typing
   const handleQuickAction = (actionTitle: string): void => {
@@ -265,7 +296,7 @@ const AdminIndex: React.FC = () => {
               Welcome back, Admin! 👋
             </Text>
             <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 16 }}>
-              Here&apos;s what&apos;s happening with GLT Logistics today
+              Here's what's happening with GLT Logistics today
             </Text>
             <TouchableOpacity
               style={{
@@ -320,16 +351,24 @@ const AdminIndex: React.FC = () => {
               ))}
             </View>
 
-            {/* Performance Charts Container */}
-            <View style={{ overflow: 'hidden', borderRadius: 12 }}>
+            {/* Performance Charts Container - FIXED for seamless scrolling */}
+            <View style={{ 
+              overflow: 'hidden', 
+              borderRadius: 12,
+              width: width - 32,
+              alignSelf: 'center'
+            }}>
               <PanGestureHandler
                 ref={panRef}
                 onGestureEvent={onGestureEvent}
                 onHandlerStateChange={onHandlerStateChange}
+                activeOffsetX={[-10, 10]}
+                failOffsetY={[-50, 50]}
               >
                 <Animated.View
                   style={{
                     flexDirection: 'row',
+                    width: performanceTabs.length * (width - 32),
                     transform: [{ translateX }],
                   }}
                 >
@@ -419,6 +458,27 @@ const AdminIndex: React.FC = () => {
                   })}
                 </Animated.View>
               </PanGestureHandler>
+            </View>
+            
+            {/* Swipe Indicator */}
+            <View style={{ 
+              flexDirection: 'row', 
+              justifyContent: 'center', 
+              marginTop: 12,
+              alignItems: 'center'
+            }}>
+              {performanceTabs.map((_, index) => (
+                <View
+                  key={index}
+                  style={{
+                    width: 8,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: activePerformanceTab === index ? '#667eea' : 'rgba(102, 126, 234, 0.3)',
+                    marginHorizontal: 4,
+                  }}
+                />
+              ))}
             </View>
           </View>
 
