@@ -206,7 +206,6 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              <Text style={styles.panelTitle}>Admin Panel</Text>
             </View>
           </View>
 
@@ -363,7 +362,6 @@ const styles = StyleSheet.create({
   logoContainer: { 
     flexDirection: 'row', 
     alignItems: 'center',
-    flex: 1,
   },
   logoIcon: {
     width: 32, 
