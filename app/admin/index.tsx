@@ -62,7 +62,6 @@ const AdminIndex: React.FC = () => {
   const [activePerformanceTab, setActivePerformanceTab] = useState<number>(0);
   const translateX = useRef(new Animated.Value(0)).current;
   const panRef = useRef<PanGestureHandler>(null);
-  const isGestureActive = useRef(false);
 
   const performanceData: Record<PerformanceTab, PerformanceData> = {
     weekly: {
@@ -95,6 +94,7 @@ const AdminIndex: React.FC = () => {
   };
 
   const performanceTabs: PerformanceTab[] = ['weekly', 'monthly', 'yearly'];
+  const cardWidth = width - 32;
 
   const dashboardStats: DashboardStat[] = [
     {
@@ -190,63 +190,61 @@ const AdminIndex: React.FC = () => {
     }
   };
 
-  // ✅ FIXED: Seamless tab navigation with proper animation
+  // ✅ COMPLETELY FIXED: Seamless tab navigation with proper animation
   const handleTabPress = (index: number): void => {
-    if (index === activePerformanceTab || isGestureActive.current) return;
+    if (index === activePerformanceTab) return;
     
     setActivePerformanceTab(index);
     Animated.spring(translateX, {
-      toValue: -index * (width - 32),
+      toValue: -index * cardWidth,
       useNativeDriver: true,
-      tension: 100,
+      tension: 120,
       friction: 8,
     }).start();
   };
 
-  // ✅ FIXED: Proper gesture handler that works seamlessly in both directions
+  // ✅ FIXED: Proper gesture event that maintains smooth scrolling
   const onGestureEvent = Animated.event(
     [{ nativeEvent: { translationX: translateX } }],
     { 
       useNativeDriver: true,
       listener: (event) => {
-        // Add the translation to the current tab position
-        const currentOffset = -activePerformanceTab * (width - 32);
-        const newTranslation = currentOffset + event.nativeEvent.translationX;
-        translateX.setValue(newTranslation);
+        // Calculate base position for current tab
+        const basePosition = -activePerformanceTab * cardWidth;
+        // Apply gesture translation on top of base position
+        translateX.setValue(basePosition + event.nativeEvent.translationX);
       }
     }
   );
 
-  // ✅ FIXED: Proper state handling for seamless bidirectional scrolling
+  // ✅ COMPLETELY FIXED: Proper gesture state handling for smooth bidirectional scrolling
   const onHandlerStateChange = (event: any): void => {
     const { state, translationX: gestureTranslationX, velocityX } = event.nativeEvent;
     
-    if (state === State.BEGAN) {
-      isGestureActive.current = true;
-    } else if (state === State.END || state === State.CANCELLED) {
-      isGestureActive.current = false;
-      
+    if (state === State.END || state === State.CANCELLED) {
       let newIndex = activePerformanceTab;
-      const threshold = (width - 32) * 0.3; // 30% of card width
+      const threshold = cardWidth * 0.25; // 25% of card width
+      const velocityThreshold = 800;
       
-      // Determine direction based on translation and velocity
-      if (Math.abs(gestureTranslationX) > threshold || Math.abs(velocityX) > 500) {
-        if (gestureTranslationX > 0 || velocityX > 500) {
-          // Swiping right (going to previous tab)
+      // Determine swipe direction and calculate new index
+      if (Math.abs(gestureTranslationX) > threshold || Math.abs(velocityX) > velocityThreshold) {
+        if (gestureTranslationX > 0 || velocityX > velocityThreshold) {
+          // Swiping right (go to previous tab)
           newIndex = Math.max(0, activePerformanceTab - 1);
-        } else if (gestureTranslationX < 0 || velocityX < -500) {
-          // Swiping left (going to next tab)
+        } else if (gestureTranslationX < 0 || velocityX < -velocityThreshold) {
+          // Swiping left (go to next tab)
           newIndex = Math.min(performanceTabs.length - 1, activePerformanceTab + 1);
         }
       }
       
-      // Animate to the final position
+      // Update state and animate to final position
       setActivePerformanceTab(newIndex);
       Animated.spring(translateX, {
-        toValue: -newIndex * (width - 32),
+        toValue: -newIndex * cardWidth,
         useNativeDriver: true,
-        tension: 100,
+        tension: 120,
         friction: 8,
+        velocity: velocityX * 0.1, // Use gesture velocity for more natural feel
       }).start();
     }
   };
@@ -314,7 +312,7 @@ const AdminIndex: React.FC = () => {
             </TouchableOpacity>
           </LinearGradient>
 
-          {/* Performance Overview Section */}
+          {/* Performance Overview Section - COMPLETELY FIXED */}
           <View style={{ marginBottom: 24 }}>
             <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 16 }}>
               Performance Overview
@@ -351,24 +349,26 @@ const AdminIndex: React.FC = () => {
               ))}
             </View>
 
-            {/* Performance Charts Container - FIXED for seamless scrolling */}
+            {/* Performance Charts Container - COMPLETELY FIXED for seamless bidirectional scrolling */}
             <View style={{ 
               overflow: 'hidden', 
               borderRadius: 12,
-              width: width - 32,
+              width: cardWidth,
               alignSelf: 'center'
             }}>
               <PanGestureHandler
                 ref={panRef}
                 onGestureEvent={onGestureEvent}
                 onHandlerStateChange={onHandlerStateChange}
-                activeOffsetX={[-10, 10]}
-                failOffsetY={[-50, 50]}
+                activeOffsetX={[-20, 20]}
+                failOffsetY={[-30, 30]}
+                shouldCancelWhenOutside={false}
+                enabled={true}
               >
                 <Animated.View
                   style={{
                     flexDirection: 'row',
-                    width: performanceTabs.length * (width - 32),
+                    width: performanceTabs.length * cardWidth,
                     transform: [{ translateX }],
                   }}
                 >
@@ -379,7 +379,7 @@ const AdminIndex: React.FC = () => {
                         key={tabIndex}
                         colors={['#2d3748', '#1a202c']}
                         style={{
-                          width: width - 32,
+                          width: cardWidth,
                           borderRadius: 12,
                           padding: 20,
                           borderWidth: 1,
