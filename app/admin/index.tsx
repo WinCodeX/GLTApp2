@@ -190,7 +190,7 @@ const AdminIndex: React.FC = () => {
     }
   };
 
-  // ✅ COMPLETELY FIXED: Seamless tab navigation with proper animation
+  // ✅ COMPLETELY FIXED: Clean tab navigation
   const handleTabPress = (index: number): void => {
     if (index === activePerformanceTab) return;
     
@@ -198,53 +198,52 @@ const AdminIndex: React.FC = () => {
     Animated.spring(translateX, {
       toValue: -index * cardWidth,
       useNativeDriver: true,
-      tension: 120,
-      friction: 8,
+      tension: 100,
+      friction: 7,
     }).start();
   };
 
-  // ✅ FIXED: Proper gesture event that maintains smooth scrolling
+  // ✅ FIXED: Clean gesture handling without conflicts
+  const gestureTranslationX = useRef(new Animated.Value(0)).current;
+
   const onGestureEvent = Animated.event(
-    [{ nativeEvent: { translationX: translateX } }],
-    { 
-      useNativeDriver: true,
-      listener: (event) => {
-        // Calculate base position for current tab
-        const basePosition = -activePerformanceTab * cardWidth;
-        // Apply gesture translation on top of base position
-        translateX.setValue(basePosition + event.nativeEvent.translationX);
-      }
-    }
+    [{ nativeEvent: { translationX: gestureTranslationX } }],
+    { useNativeDriver: true }
   );
 
-  // ✅ COMPLETELY FIXED: Proper gesture state handling for smooth bidirectional scrolling
+  // ✅ COMPLETELY FIXED: Proper gesture state handling
   const onHandlerStateChange = (event: any): void => {
-    const { state, translationX: gestureTranslationX, velocityX } = event.nativeEvent;
+    const { state, translationX: gestureTranslation, velocityX } = event.nativeEvent;
     
-    if (state === State.END || state === State.CANCELLED) {
+    if (state === State.BEGAN) {
+      // Reset gesture translation at start
+      gestureTranslationX.setValue(0);
+    } else if (state === State.END || state === State.CANCELLED) {
       let newIndex = activePerformanceTab;
-      const threshold = cardWidth * 0.25; // 25% of card width
-      const velocityThreshold = 800;
+      const threshold = cardWidth * 0.3;
+      const velocityThreshold = 500;
       
-      // Determine swipe direction and calculate new index
-      if (Math.abs(gestureTranslationX) > threshold || Math.abs(velocityX) > velocityThreshold) {
-        if (gestureTranslationX > 0 || velocityX > velocityThreshold) {
-          // Swiping right (go to previous tab)
+      // Determine new index based on gesture
+      if (Math.abs(gestureTranslation) > threshold || Math.abs(velocityX) > velocityThreshold) {
+        if (gestureTranslation > 0 || velocityX > 0) {
+          // Swiping right (previous tab)
           newIndex = Math.max(0, activePerformanceTab - 1);
-        } else if (gestureTranslationX < 0 || velocityX < -velocityThreshold) {
-          // Swiping left (go to next tab)
+        } else {
+          // Swiping left (next tab)
           newIndex = Math.min(performanceTabs.length - 1, activePerformanceTab + 1);
         }
       }
+      
+      // Reset gesture translation
+      gestureTranslationX.setValue(0);
       
       // Update state and animate to final position
       setActivePerformanceTab(newIndex);
       Animated.spring(translateX, {
         toValue: -newIndex * cardWidth,
         useNativeDriver: true,
-        tension: 120,
-        friction: 8,
-        velocity: velocityX * 0.1, // Use gesture velocity for more natural feel
+        tension: 100,
+        friction: 7,
       }).start();
     }
   };
@@ -360,16 +359,21 @@ const AdminIndex: React.FC = () => {
                 ref={panRef}
                 onGestureEvent={onGestureEvent}
                 onHandlerStateChange={onHandlerStateChange}
-                activeOffsetX={[-20, 20]}
-                failOffsetY={[-30, 30]}
+                activeOffsetX={[-15, 15]}
+                failOffsetY={[-40, 40]}
                 shouldCancelWhenOutside={false}
                 enabled={true}
+                minPointers={1}
+                maxPointers={1}
               >
                 <Animated.View
                   style={{
                     flexDirection: 'row',
                     width: performanceTabs.length * cardWidth,
-                    transform: [{ translateX }],
+                    transform: [
+                      { translateX: translateX },
+                      { translateX: gestureTranslationX }
+                    ],
                   }}
                 >
                   {performanceTabs.map((tab, tabIndex) => {
