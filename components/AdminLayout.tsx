@@ -14,7 +14,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
-import { useRouter, usePathname } from 'expo-router'; // ✅ Added usePathname to track current route
+import { useRouter, usePathname } from 'expo-router';
 import AdminSidebar from './AdminSidebar';
 import { useUser } from '../context/UserContext';
 
@@ -25,7 +25,7 @@ interface BottomTab {
   icon: keyof typeof Ionicons.glyphMap;
   activeIcon: keyof typeof Ionicons.glyphMap;
   label: string;
-  route: string; // ✅ Added explicit route mapping
+  route: string;
 }
 
 interface AdminLayoutProps {
@@ -40,7 +40,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const { user } = useUser();
   const router = useRouter();
-  const pathname = usePathname(); // ✅ Track current route
+  const pathname = usePathname();
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
@@ -51,11 +51,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     { id: 'scan', icon: 'qr-code-outline', activeIcon: 'qr-code', label: 'Scan', route: '/admin/scan' },
     { id: 'packages', icon: 'cube-outline', activeIcon: 'cube', label: 'Packages', route: '/admin/packages' },
     { id: 'settings', icon: 'settings-outline', activeIcon: 'settings', label: 'Settings', route: '/admin/settings' },
-    { id: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'You', route: '/account' },
+    { id: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'You', route: '/admin/account' }, // ✅ Updated to admin account
   ];
 
   // ✅ Determine active tab based on current pathname
   const getActiveTab = () => {
+    // ✅ Special handling for account route
+    if (pathname === '/admin/account') {
+      return 'profile';
+    }
+    
     const currentTab = bottomTabs.find(tab => tab.route === pathname);
     return currentTab?.id || 'home';
   };
@@ -65,7 +70,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const toggleSidebar = () => setSidebarVisible(!sidebarVisible);
   const closeSidebar = () => setSidebarVisible(false);
 
-  // ✅ Improved navigation handler with error handling
+  // ✅ Updated navigation handler
   const handleTabPress = (tabId: string) => {
     try {
       const tab = bottomTabs.find(t => t.id === tabId);
@@ -82,16 +87,18 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // Use router.replace for same-level navigation to prevent stack buildup
+      // ✅ Updated navigation logic
       if (tabId === 'profile') {
-        router.push(tab.route); // Use push for account to allow back navigation
+        console.log('🚀 Navigating to admin account');
+        router.push('/admin/account'); // ✅ Navigate to admin account
+      } else if (tabId === 'home') {
+        router.replace('/admin'); // Admin dashboard
       } else {
-        router.replace(tab.route); // Use replace for admin tabs
+        router.replace(tab.route); // Other admin tabs
       }
       
     } catch (error) {
       console.error('Navigation error:', error);
-      // Fallback: try to navigate to admin home
       router.replace('/admin');
     }
   };
@@ -145,7 +152,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.headerAction}
-              onPress={() => handleTabPress('profile')} // ✅ Make avatar clickable
+              onPress={() => handleTabPress('profile')} // ✅ Navigate to admin account
             >
               <Image source={avatarSource} style={styles.avatarImage} />
             </TouchableOpacity>
@@ -165,8 +172,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         {sidebarVisible && <TouchableOpacity style={styles.overlay} onPress={closeSidebar} />}
       </View>
 
-      {/* Bottom Tabs - Only show on admin routes */}
-      {pathname?.startsWith('/admin') && (
+      {/* Bottom Tabs - Show on admin routes and admin account */}
+      {(pathname?.startsWith('/admin')) && (
         <View style={styles.bottomTabBar}>
           {bottomTabs.map((tab) => (
             <TouchableOpacity
@@ -195,8 +202,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         </View>
       )}
 
-      {/* Floating Action Button - Only show on admin routes */}
-      {pathname?.startsWith('/admin') && (
+      {/* Floating Action Button - Show on admin routes but NOT account */}
+      {(pathname?.startsWith('/admin') && pathname !== '/admin/account') && (
         <TouchableOpacity style={styles.fab}>
           <LinearGradient colors={['#6c5ce7', '#a29bfe']} style={styles.fabGradient}>
             <Ionicons name="add" size={28} color="white" />
