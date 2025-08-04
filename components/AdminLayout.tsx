@@ -1,3 +1,4 @@
+// components/AdminLayout.tsx - Gesture-handler-free version
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -184,7 +185,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Updated header gradient to match your design system */}
+        {/* ✅ Header with matching gradient */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
