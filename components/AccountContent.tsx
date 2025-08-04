@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Shared component extracted from your existing code
+// components/AccountContent.tsx - Fixed version with proper data handling
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -105,41 +105,99 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // ✅ Load businesses data
-  const loadBusinesses = useCallback(async () => {
+  // ✅ Clear all cached data helper
+  const clearAllCachedData = useCallback(async () => {
     try {
-      console.log('📊 Loading businesses...');
-      const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
-      if (!seen) setShowChangelog(true);
+      console.log('🧹 Clearing all cached data...');
       
-      const data = await getBusinesses();
-      setOwnedBusinesses(data?.owned || []);
-      setJoinedBusinesses(data?.joined || []);
-      console.log('✅ Businesses loaded');
-    } catch (error) {
-      console.log('❌ Error loading businesses:', error);
-      Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+      // Clear business data from state
       setOwnedBusinesses([]);
       setJoinedBusinesses([]);
+      setSelectedBusiness(null);
+      setInviteLink(null);
+      
+      // Clear AsyncStorage (but keep essential items like changelog)
+      const keys = await AsyncStorage.getAllKeys();
+      const keysToRemove = keys.filter(key => 
+        !key.includes('changelog') && 
+        !key.includes('onboarding') &&
+        !key.includes('settings')
+      );
+      
+      if (keysToRemove.length > 0) {
+        await AsyncStorage.multiRemove(keysToRemove);
+        console.log('✅ Cleared AsyncStorage keys:', keysToRemove);
+      }
+      
+    } catch (error) {
+      console.error('❌ Error clearing cached data:', error);
     }
   }, []);
 
-  // ✅ Load data only after screen is ready
-  useEffect(() => {
-    if (isScreenReady && !screenError && !userError) {
-      console.log(`🔄 AccountContent (${source}) ready, loading data...`);
-      loadBusinesses();
+  // ✅ Load businesses data with better error handling
+  const loadBusinesses = useCallback(async () => {
+    try {
+      console.log('📊 Loading businesses...');
+      
+      // Check changelog first
+      const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
+      if (!seen) setShowChangelog(true);
+      
+      // Clear previous data first
+      setOwnedBusinesses([]);
+      setJoinedBusinesses([]);
+      
+      // Fetch fresh business data
+      const data = await getBusinesses();
+      
+      // Only set data if user is still logged in and request succeeded
+      if (data && user) {
+        setOwnedBusinesses(data?.owned || []);
+        setJoinedBusinesses(data?.joined || []);
+        console.log('✅ Businesses loaded:', {
+          owned: data?.owned?.length || 0,
+          joined: data?.joined?.length || 0
+        });
+      } else {
+        console.log('⚠️ No business data or user not logged in');
+        setOwnedBusinesses([]);
+        setJoinedBusinesses([]);
+      }
+      
+    } catch (error) {
+      console.log('❌ Error loading businesses:', error);
+      Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+      // Clear stale data on error
+      setOwnedBusinesses([]);
+      setJoinedBusinesses([]);
     }
-  }, [isScreenReady, screenError, userError, loadBusinesses, source]);
+  }, [user]);
 
-  // ✅ Refresh handler
+  // ✅ Load data only after screen is ready and user is available
+  useEffect(() => {
+    if (isScreenReady && !screenError && !userError && user) {
+      console.log(`🔄 AccountContent (${source}) ready with user, loading data...`);
+      loadBusinesses();
+    } else if (isScreenReady && !user) {
+      // Clear data if no user
+      console.log('🧹 No user found, clearing business data');
+      setOwnedBusinesses([]);
+      setJoinedBusinesses([]);
+    }
+  }, [isScreenReady, screenError, userError, loadBusinesses, source, user]);
+
+  // ✅ Refresh handler with better error handling
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     try {
-      await Promise.all([
-        refreshUser(),
-        loadBusinesses()
-      ]);
+      // First refresh user data, then businesses
+      await refreshUser();
+      // Small delay to ensure user context is updated
+      await new Promise(resolve => setTimeout(resolve, 100));
+      await loadBusinesses();
+    } catch (error) {
+      console.error('❌ Refresh error:', error);
+      Toast.show({ type: 'error', text1: 'Failed to refresh data' });
     } finally {
       setRefreshing(false);
     }
@@ -179,28 +237,60 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [previewUri, refreshUser]);
 
-  // ✅ Logout handler
+  // ✅ Enhanced logout handler with proper cleanup
   const confirmLogout = useCallback(async () => {
     try {
+      console.log('🚪 Logging out...');
+      
+      // Clear all cached data first
+      await clearAllCachedData();
+      
+      // Remove auth tokens
       await SecureStore.deleteItemAsync('auth_token');
       await SecureStore.deleteItemAsync('user_id');
       await SecureStore.deleteItemAsync('user_role');
       
+      // Clear any other auth-related storage
+      try {
+        await AsyncStorage.removeItem('user_data');
+        await AsyncStorage.removeItem('business_data');
+      } catch (storageError) {
+        console.log('Note: Some storage items may not exist:', storageError);
+      }
+      
       Toast.show({ type: 'info', text1: 'Logged out successfully' });
       setShowLogoutConfirm(false);
+      
+      // Navigate to login
       router.replace('/login');
+      
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('❌ Logout error:', error);
       Toast.show({ type: 'error', text1: 'Logout failed' });
     }
-  }, [router]);
+  }, [router, clearAllCachedData]);
+
+  // ✅ Get display name with fallback
+  const getDisplayName = useCallback(() => {
+    // Priority: display_name -> first_name -> username -> fallback
+    if (user?.display_name && user.display_name.trim()) {
+      return user.display_name;
+    }
+    if (user?.first_name && user.first_name.trim()) {
+      return user.first_name;
+    }
+    if (user?.username && user.username.trim()) {
+      return user.username;
+    }
+    return 'User';
+  }, [user]);
 
   // ✅ Loading screen while initializing
   if (!isScreenReady) {
     return (
       <View style={styles.loadingContainer}>
         <LinearGradient
-          colors={['#4c1d95', '#7c3aed', '#3730a3']}
+          colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.loadingGradient}
@@ -218,7 +308,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return (
       <View style={styles.container}>
         <LinearGradient
-          colors={['#4c1d95', '#7c3aed', '#3730a3']}
+          colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.header}
@@ -331,9 +421,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         </Modal>
       )}
 
-      {/* Header */}
+      {/* Header with matching gradient */}
       <LinearGradient
-        colors={['#4c1d95', '#7c3aed', '#3730a3']}
+        colors={['#667eea', '#764ba2']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
@@ -356,8 +446,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <RefreshControl
             refreshing={refreshing}
             onRefresh={onRefresh}
-            colors={['#7c3aed']}
-            tintColor="#7c3aed"
+            colors={['#764ba2']}
+            tintColor="#764ba2"
           />
         }
       >
@@ -370,6 +460,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             <Text style={styles.debugText}>User Loading: {userLoading.toString()}</Text>
             <Text style={styles.debugText}>Component Ready: {isScreenReady.toString()}</Text>
             <Text style={styles.debugText}>User Role: {user?.role || 'Unknown'}</Text>
+            <Text style={styles.debugText}>Display Name: {getDisplayName()}</Text>
+            <Text style={styles.debugText}>First Name: {user?.first_name || 'N/A'}</Text>
+            <Text style={styles.debugText}>Owned Businesses: {ownedBusinesses.length}</Text>
+            <Text style={styles.debugText}>Joined Businesses: {joinedBusinesses.length}</Text>
           </View>
         )}
 
@@ -377,7 +471,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         <View style={styles.identityCard}>
           <View style={styles.identityRow}>
             <View>
-              <Text style={styles.userName}>{user?.username || 'No name'}</Text>
+              <Text style={styles.userName}>{getDisplayName()}</Text>
               <Text style={styles.accountType}>Glt Account</Text>
               <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
             </View>
@@ -409,7 +503,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
             <Text style={styles.infoLabel}>Display Name</Text>
             <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.display_name || 'LVL0'}</Text>
+              <Text style={styles.infoValue}>{user?.display_name || user?.first_name || 'LVL0'}</Text>
               <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
@@ -438,16 +532,16 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             <Button 
               mode="outlined" 
               onPress={() => setShowBusinessModal(true)}
-              buttonColor="rgba(124, 58, 237, 0.1)"
-              textColor="#7c3aed"
+              buttonColor="rgba(118, 75, 162, 0.1)"
+              textColor="#764ba2"
             >
               Create
             </Button>
             <Button 
               mode="outlined" 
               onPress={() => setShowJoinModal(true)}
-              buttonColor="rgba(124, 58, 237, 0.1)"
-              textColor="#7c3aed"
+              buttonColor="rgba(118, 75, 162, 0.1)"
+              textColor="#764ba2"
             >
               Join
             </Button>
@@ -466,7 +560,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               </TouchableOpacity>
             ))
           ) : (
-            <Text style={styles.businessItem}>• Infinity</Text>
+            <Text style={styles.businessItem}>None</Text>
           )}
 
           <Text style={styles.teamLabel}>Joined:</Text>
@@ -545,7 +639,7 @@ const styles = StyleSheet.create({
     paddingTop: 50,
     paddingBottom: 20,
     paddingHorizontal: 16,
-    shadowColor: '#7c3aed',
+    shadowColor: '#764ba2',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
@@ -559,7 +653,7 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
     fontStyle: 'italic',
-    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowColor: 'rgba(118, 75, 162, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
@@ -605,8 +699,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 8,
     borderWidth: 2,
-    borderColor: 'rgba(124, 58, 237, 0.6)',
-    shadowColor: '#7c3aed',
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
@@ -624,7 +718,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingVertical: 14,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+    borderBottomColor: 'rgba(118, 75, 162, 0.2)',
     borderBottomWidth: 1,
   },
   infoLabel: {
@@ -647,8 +741,8 @@ const styles = StyleSheet.create({
     borderRadius: 16, 
     padding: 16,
     borderWidth: 2,
-    borderColor: 'rgba(124, 58, 237, 0.6)',
-    shadowColor: '#7c3aed',
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
@@ -710,7 +804,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1a1a2e', 
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
+    borderColor: 'rgba(118, 75, 162, 0.4)',
   },
   dialogTitle: { 
     color: '#fff', 
@@ -725,7 +819,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12 
   },
   dialogCancel: { 
-    backgroundColor: '#7c3aed', 
+    backgroundColor: '#764ba2', 
     borderRadius: 6, 
     marginRight: 8 
   },
@@ -754,7 +848,7 @@ const styles = StyleSheet.create({
     borderRadius: 12, 
     alignItems: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
+    borderColor: 'rgba(118, 75, 162, 0.4)',
   },
   modalText: { 
     color: '#fff', 
@@ -763,7 +857,7 @@ const styles = StyleSheet.create({
     textAlign: 'center' 
   },
   code: { 
-    color: '#7c3aed', 
+    color: '#764ba2', 
     fontSize: 18, 
     fontWeight: 'bold', 
     marginTop: 12, 
