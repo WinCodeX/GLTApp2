@@ -7,19 +7,63 @@ import {
   TouchableOpacity,
   View,
   ScrollView,
-  PanGestureHandler,
   Animated,
 } from 'react-native';
+// ✅ CRITICAL FIX: Import from react-native-gesture-handler
+import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import AdminLayout from '../../components/AdminLayout';
 
 const { width } = Dimensions.get('window');
 
-const AdminIndex = () => {
-  const [activePerformanceTab, setActivePerformanceTab] = useState(0);
-  const translateX = useRef(new Animated.Value(0)).current;
-  const panRef = useRef();
+// ✅ Define proper types for performance data
+interface PerformanceData {
+  title: string;
+  data: number[];
+  labels: string[];
+  growth: string;
+  total: string;
+  successRate: string;
+  period: string;
+}
 
-  const performanceData = {
+interface DashboardStat {
+  title: string;
+  value: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  color: string[];
+  change: string;
+}
+
+interface QuickAction {
+  title: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  description: string;
+  colors: string[];
+}
+
+interface RecentActivity {
+  id: number;
+  title: string;
+  time: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  color: string;
+}
+
+interface PendingTask {
+  id: number;
+  title: string;
+  priority: 'high' | 'medium' | 'low';
+  count: number;
+}
+
+type PerformanceTab = 'weekly' | 'monthly' | 'yearly';
+
+const AdminIndex: React.FC = () => {
+  const [activePerformanceTab, setActivePerformanceTab] = useState<number>(0);
+  const translateX = useRef(new Animated.Value(0)).current;
+  const panRef = useRef<PanGestureHandler>(null);
+
+  const performanceData: Record<PerformanceTab, PerformanceData> = {
     weekly: {
       title: 'Weekly Performance',
       data: [65, 45, 80, 55, 75, 90, 70],
@@ -49,14 +93,14 @@ const AdminIndex = () => {
     }
   };
 
-  const performanceTabs = ['weekly', 'monthly', 'yearly'];
+  const performanceTabs: PerformanceTab[] = ['weekly', 'monthly', 'yearly'];
 
-  const dashboardStats = [
+  const dashboardStats: DashboardStat[] = [
     {
       title: 'Active Packages',
       value: '1,234',
       icon: 'cube',
-      color: ['#6c5ce7', '#a29bfe'],
+      color: ['#667eea', '#764ba2'],
       change: '+12%',
     },
     {
@@ -82,12 +126,12 @@ const AdminIndex = () => {
     },
   ];
 
-  const quickActions = [
+  const quickActions: QuickAction[] = [
     { 
       title: 'Track Package', 
       icon: 'location', 
       description: 'Track packages in real-time',
-      colors: ['#6c5ce7', '#a29bfe'] 
+      colors: ['#667eea', '#764ba2'] 
     },
     { 
       title: 'Cost Calculator', 
@@ -117,26 +161,26 @@ const AdminIndex = () => {
       title: 'Reports', 
       icon: 'bar-chart', 
       description: 'View analytics & reports',
-      colors: ['#a29bfe', '#6c5ce7'] 
+      colors: ['#764ba2', '#667eea'] 
     },
   ];
 
-  const recentActivities = [
+  const recentActivities: RecentActivity[] = [
     { id: 1, title: 'New package added', time: '2 min ago', icon: 'add-circle', color: '#00b894' },
-    { id: 2, title: 'User registered', time: '5 min ago', icon: 'person-add', color: '#6c5ce7' },
+    { id: 2, title: 'User registered', time: '5 min ago', icon: 'person-add', color: '#667eea' },
     { id: 3, title: 'Payment received', time: '10 min ago', icon: 'card', color: '#00cec9' },
     { id: 4, title: 'Package delivered', time: '15 min ago', icon: 'checkmark-circle', color: '#fd79a8' },
     { id: 5, title: 'Support ticket closed', time: '20 min ago', icon: 'close-circle', color: '#e17055' },
   ];
 
-  const pendingTasks = [
+  const pendingTasks: PendingTask[] = [
     { id: 1, title: 'Review pending withdrawals', priority: 'high', count: 5 },
     { id: 2, title: 'Process new user verifications', priority: 'medium', count: 12 },
     { id: 3, title: 'Update warehouse inventory', priority: 'low', count: 3 },
     { id: 4, title: 'Respond to support tickets', priority: 'high', count: 8 },
   ];
 
-  const getPriorityColor = (priority) => {
+  const getPriorityColor = (priority: PendingTask['priority']): string => {
     switch (priority) {
       case 'high': return '#e17055';
       case 'medium': return '#fdcb6e';
@@ -145,7 +189,7 @@ const AdminIndex = () => {
     }
   };
 
-  const handleTabPress = (index) => {
+  const handleTabPress = (index: number): void => {
     setActivePerformanceTab(index);
     Animated.spring(translateX, {
       toValue: -index * (width - 32),
@@ -153,19 +197,21 @@ const AdminIndex = () => {
     }).start();
   };
 
+  // ✅ FIXED: Proper gesture handler with TypeScript types
   const onGestureEvent = Animated.event(
     [{ nativeEvent: { translationX: translateX } }],
     { useNativeDriver: true }
   );
 
-  const onHandlerStateChange = (event) => {
-    if (event.nativeEvent.state === 5) { // End state
+  // ✅ FIXED: Proper state handling with react-native-gesture-handler State enum
+  const onHandlerStateChange = (event: any): void => {
+    if (event.nativeEvent.state === State.END) {
       const { translationX } = event.nativeEvent;
       let newIndex = activePerformanceTab;
 
       if (translationX > 50 && activePerformanceTab > 0) {
         newIndex = activePerformanceTab - 1;
-      } else if (translationX < -50 && activePerformanceTab < 2) {
+      } else if (translationX < -50 && activePerformanceTab < performanceTabs.length - 1) {
         newIndex = activePerformanceTab + 1;
       }
 
@@ -175,13 +221,39 @@ const AdminIndex = () => {
 
   const currentPerformance = performanceData[performanceTabs[activePerformanceTab]];
 
+  // ✅ Enhanced action handlers with proper typing
+  const handleQuickAction = (actionTitle: string): void => {
+    console.log(`Quick action pressed: ${actionTitle}`);
+    // Add navigation or action logic here
+  };
+
+  const handleViewAnalytics = (): void => {
+    console.log('View Analytics pressed');
+    // Add navigation logic here
+  };
+
+  const handleViewAllActivities = (): void => {
+    console.log('View All Activities pressed');
+    // Add navigation logic here
+  };
+
+  const handleViewAllTasks = (): void => {
+    console.log('View All Tasks pressed');
+    // Add navigation logic here
+  };
+
+  const handleTaskPress = (taskId: number): void => {
+    console.log(`Task ${taskId} pressed`);
+    // Add task handling logic here
+  };
+
   return (
     <AdminLayout activePanel="home">
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={{ padding: 16 }}>
           {/* Welcome Section */}
           <LinearGradient
-            colors={['#6c5ce7', '#a29bfe', '#74b9ff']}
+            colors={['#667eea', '#764ba2']}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={{
@@ -204,6 +276,9 @@ const AdminIndex = () => {
                 paddingHorizontal: 16,
                 alignSelf: 'flex-start',
               }}
+              onPress={handleViewAnalytics}
+              accessibilityLabel="View Analytics"
+              accessibilityRole="button"
             >
               <Text style={{ color: 'white', fontWeight: '600' }}>View Analytics</Text>
             </TouchableOpacity>
@@ -226,13 +301,16 @@ const AdminIndex = () => {
                     paddingVertical: 8,
                     marginHorizontal: 4,
                     borderRadius: 20,
-                    backgroundColor: activePerformanceTab === index ? '#6c5ce7' : 'rgba(108, 92, 231, 0.1)',
+                    backgroundColor: activePerformanceTab === index ? '#667eea' : 'rgba(102, 126, 234, 0.1)',
                     borderWidth: 1,
-                    borderColor: activePerformanceTab === index ? '#6c5ce7' : 'rgba(108, 92, 231, 0.3)',
+                    borderColor: activePerformanceTab === index ? '#667eea' : 'rgba(102, 126, 234, 0.3)',
                   }}
+                  accessibilityLabel={`${tab} performance tab`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: activePerformanceTab === index }}
                 >
                   <Text style={{
-                    color: activePerformanceTab === index ? 'white' : '#6c5ce7',
+                    color: activePerformanceTab === index ? 'white' : '#667eea',
                     fontSize: 12,
                     fontWeight: '600',
                     textTransform: 'capitalize'
@@ -268,26 +346,31 @@ const AdminIndex = () => {
                           padding: 20,
                           borderWidth: 1,
                           borderColor: '#4a5568',
-                          marginRight: tabIndex < performanceTabs.length - 1 ? 0 : 0,
                         }}
                       >
                         <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 16 }}>
                           <Text style={{ color: 'white', fontSize: 16, fontWeight: '600' }}>
                             {data.title}
                           </Text>
-                          <TouchableOpacity>
-                            <Text style={{ color: '#6c5ce7', fontSize: 12, fontWeight: '600' }}>
+                          <TouchableOpacity onPress={() => console.log(`View details for ${tab}`)}>
+                            <Text style={{ color: '#667eea', fontSize: 12, fontWeight: '600' }}>
                               View Details
                             </Text>
                           </TouchableOpacity>
                         </View>
 
                         {/* Chart */}
-                        <View style={{ flexDirection: 'row', alignItems: 'end', justifyContent: 'space-between', height: 100, marginBottom: 16 }}>
+                        <View style={{ 
+                          flexDirection: 'row', 
+                          alignItems: 'flex-end', 
+                          justifyContent: 'space-between', 
+                          height: 100, 
+                          marginBottom: 16 
+                        }}>
                           {data.data.map((height, index) => (
                             <View key={index} style={{ alignItems: 'center', flex: 1 }}>
                               <LinearGradient
-                                colors={['#6c5ce7', '#a29bfe']}
+                                colors={['#667eea', '#764ba2']}
                                 style={{
                                   width: tab === 'yearly' ? 25 : tab === 'monthly' ? 15 : 20,
                                   height: height,
@@ -295,7 +378,11 @@ const AdminIndex = () => {
                                   marginBottom: 8,
                                 }}
                               />
-                              <Text style={{ color: '#a0aec0', fontSize: tab === 'monthly' ? 8 : 10 }}>
+                              <Text style={{ 
+                                color: '#a0aec0', 
+                                fontSize: tab === 'monthly' ? 8 : 10,
+                                textAlign: 'center'
+                              }}>
                                 {data.labels[index]}
                               </Text>
                             </View>
@@ -307,7 +394,7 @@ const AdminIndex = () => {
                             <Text style={{ color: '#00b894', fontSize: 14, fontWeight: 'bold' }}>
                               {data.growth}
                             </Text>
-                            <Text style={{ color: '#a0aec0', fontSize: 12 }}>
+                            <Text style={{ color: '#a0aec0', fontSize: 12, textAlign: 'center' }}>
                               {data.period}
                             </Text>
                           </View>
@@ -315,19 +402,19 @@ const AdminIndex = () => {
                             <Text style={{ color: 'white', fontSize: 14, fontWeight: 'bold' }}>
                               {data.total}
                             </Text>
-                            <Text style={{ color: '#a0aec0', fontSize: 12 }}>
+                            <Text style={{ color: '#a0aec0', fontSize: 12, textAlign: 'center' }}>
                               Total deliveries
                             </Text>
                           </View>
                           <View style={{ alignItems: 'center' }}>
-                            <Text style={{ color: '#6c5ce7', fontSize: 14, fontWeight: 'bold' }}>
+                            <Text style={{ color: '#667eea', fontSize: 14, fontWeight: 'bold' }}>
                               {data.successRate}
                             </Text>
-                            <Text style={{ color: '#a0aec0', fontSize: 12 }}>
+                            <Text style={{ color: '#a0aec0', fontSize: 12, textAlign: 'center' }}>
                               Success rate
                             </Text>
                           </View>
-                        </View>
+                        </div>
                       </LinearGradient>
                     );
                   })}
@@ -443,8 +530,13 @@ const AdminIndex = () => {
                     </View>
                   </View>
                 ))}
-                <TouchableOpacity style={{ marginTop: 12 }}>
-                  <Text style={{ color: '#6c5ce7', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                <TouchableOpacity 
+                  style={{ marginTop: 12 }}
+                  onPress={handleViewAllActivities}
+                  accessibilityLabel="View all activities"
+                  accessibilityRole="button"
+                >
+                  <Text style={{ color: '#667eea', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
                     View All Activities
                   </Text>
                 </TouchableOpacity>
@@ -476,6 +568,9 @@ const AdminIndex = () => {
                       borderBottomWidth: task.id !== pendingTasks.length ? 1 : 0,
                       borderBottomColor: '#4a5568',
                     }}
+                    onPress={() => handleTaskPress(task.id)}
+                    accessibilityLabel={`${task.title} - ${task.priority} priority`}
+                    accessibilityRole="button"
                   >
                     <View style={{ flex: 1 }}>
                       <Text style={{ color: 'white', fontSize: 12, fontWeight: '500', marginBottom: 2 }}>
@@ -516,8 +611,13 @@ const AdminIndex = () => {
                     </View>
                   </TouchableOpacity>
                 ))}
-                <TouchableOpacity style={{ marginTop: 12 }}>
-                  <Text style={{ color: '#6c5ce7', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
+                <TouchableOpacity 
+                  style={{ marginTop: 12 }}
+                  onPress={handleViewAllTasks}
+                  accessibilityLabel="View all tasks"
+                  accessibilityRole="button"
+                >
+                  <Text style={{ color: '#667eea', fontSize: 12, fontWeight: '600', textAlign: 'center' }}>
                     View All Tasks
                   </Text>
                 </TouchableOpacity>
@@ -577,6 +677,10 @@ const AdminIndex = () => {
                     width: (width - 48) / 2,
                     marginBottom: 12,
                   }}
+                  onPress={() => handleQuickAction(action.title)}
+                  accessibilityLabel={action.title}
+                  accessibilityHint={action.description}
+                  accessibilityRole="button"
                 >
                   <LinearGradient
                     colors={['#2d3748', '#1a202c']}
