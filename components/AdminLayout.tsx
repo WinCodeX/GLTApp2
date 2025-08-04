@@ -1,5 +1,10 @@
+<<<<<<< HEAD
 // components/AdminLayout.tsx - Fixed header version
 import React, { useState, ReactNode, useEffect } from 'react';
+=======
+// components/AdminLayout.tsx - Gesture-handler-free version
+import React, { useState, ReactNode, useEffect, useMemo } from 'react';
+>>>>>>> 60de702 (fix)
 import {
   View,
   Text,
@@ -51,7 +56,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     : require('../assets/images/avatar_placeholder.png');
 
   // ✅ Properly typed bottom tabs with correct Ionicons names
-  const bottomTabs: BottomTab[] = [
+  const bottomTabs: BottomTab[] = useMemo(() => [
     { 
       id: 'home', 
       icon: 'home-outline' as IoniconsName, 
@@ -87,7 +92,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       label: 'You', 
       route: '/admin/account' 
     },
-  ];
+  ], []);
 
   // ✅ Determine active tab based on current pathname with proper typing
   const getActiveTab = (): string => {
@@ -158,7 +163,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
     console.log('Available tabs:', bottomTabs.map(t => t.id));
-  }, [pathname, activeTab]);
+  }, [pathname, activeTab, bottomTabs]);
 
   // ✅ Handle avatar press with proper navigation
   const handleAvatarPress = (): void => {
