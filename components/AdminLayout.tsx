@@ -20,10 +20,13 @@ import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 
+// ✅ Define proper TypeScript types for Ionicons
+type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
+
 interface BottomTab {
   id: string;
-  icon: keyof typeof Ionicons.glyphMap;
-  activeIcon: keyof typeof Ionicons.glyphMap;
+  icon: IoniconsName;
+  activeIcon: IoniconsName;
   label: string;
   route: string;
 }
@@ -46,17 +49,48 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     ? { uri: user.avatar_url }
     : require('../assets/images/avatar_placeholder.png');
 
+  // ✅ Properly typed bottom tabs with correct Ionicons names
   const bottomTabs: BottomTab[] = [
-    { id: 'home', icon: 'home-outline', activeIcon: 'home', label: 'Home', route: '/admin' },
-    { id: 'scan', icon: 'qr-code-outline', activeIcon: 'qr-code', label: 'Scan', route: '/admin/scan' },
-    { id: 'packages', icon: 'cube-outline', activeIcon: 'cube', label: 'Packages', route: '/admin/packages' },
-    { id: 'settings', icon: 'settings-outline', activeIcon: 'settings', label: 'Settings', route: '/admin/settings' },
-    { id: 'profile', icon: 'person-outline', activeIcon: 'person', label: 'You', route: '/admin/account' }, // ✅ Updated to admin account
+    { 
+      id: 'home', 
+      icon: 'home-outline' as IoniconsName, 
+      activeIcon: 'home' as IoniconsName, 
+      label: 'Home', 
+      route: '/admin' 
+    },
+    { 
+      id: 'scan', 
+      icon: 'qr-code-outline' as IoniconsName, 
+      activeIcon: 'qr-code' as IoniconsName, 
+      label: 'Scan', 
+      route: '/admin/scan' 
+    },
+    { 
+      id: 'packages', 
+      icon: 'cube-outline' as IoniconsName, 
+      activeIcon: 'cube' as IoniconsName, 
+      label: 'Packages', 
+      route: '/admin/packages' 
+    },
+    { 
+      id: 'settings', 
+      icon: 'settings-outline' as IoniconsName, 
+      activeIcon: 'settings' as IoniconsName, 
+      label: 'Settings', 
+      route: '/admin/settings' 
+    },
+    { 
+      id: 'profile', 
+      icon: 'person-outline' as IoniconsName, 
+      activeIcon: 'person' as IoniconsName, 
+      label: 'You', 
+      route: '/admin/account' 
+    },
   ];
 
-  // ✅ Determine active tab based on current pathname
-  const getActiveTab = () => {
-    // ✅ Special handling for account route
+  // ✅ Determine active tab based on current pathname with proper typing
+  const getActiveTab = (): string => {
+    // Special handling for account route
     if (pathname === '/admin/account') {
       return 'profile';
     }
@@ -67,11 +101,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   const activeTab = getActiveTab();
 
-  const toggleSidebar = () => setSidebarVisible(!sidebarVisible);
-  const closeSidebar = () => setSidebarVisible(false);
+  const toggleSidebar = (): void => setSidebarVisible(!sidebarVisible);
+  const closeSidebar = (): void => setSidebarVisible(false);
 
-  // ✅ Updated navigation handler
-  const handleTabPress = (tabId: string) => {
+  // ✅ Enhanced navigation handler with better error handling
+  const handleTabPress = (tabId: string): void => {
     try {
       const tab = bottomTabs.find(t => t.id === tabId);
       if (!tab) {
@@ -87,41 +121,84 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // ✅ Updated navigation logic
-      if (tabId === 'profile') {
-        console.log('🚀 Navigating to admin account');
-        router.push('/admin/account'); // ✅ Navigate to admin account
-      } else if (tabId === 'home') {
-        router.replace('/admin'); // Admin dashboard
-      } else {
-        router.replace(tab.route); // Other admin tabs
+      // Updated navigation logic with proper routing
+      switch (tabId) {
+        case 'profile':
+          console.log('🚀 Navigating to admin account');
+          router.push('/admin/account');
+          break;
+        case 'home':
+          router.replace('/admin');
+          break;
+        case 'scan':
+          router.replace('/admin/scan');
+          break;
+        case 'packages':
+          router.replace('/admin/packages');
+          break;
+        case 'settings':
+          router.replace('/admin/settings');
+          break;
+        default:
+          console.warn(`Unknown tab id: ${tabId}`);
+          router.replace('/admin');
+          break;
       }
       
     } catch (error) {
       console.error('Navigation error:', error);
+      // Fallback to admin home
       router.replace('/admin');
     }
   };
 
-  // ✅ Add navigation debug logging
+  // ✅ Navigation debug logging with proper types
   useEffect(() => {
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
+    console.log('Available tabs:', bottomTabs.map(t => t.id));
   }, [pathname, activeTab]);
+
+  // ✅ Handle avatar press with proper navigation
+  const handleAvatarPress = (): void => {
+    handleTabPress('profile');
+  };
+
+  // ✅ Handle search input with proper typing
+  const handleSearchSubmit = (text: string): void => {
+    console.log('Search submitted:', text);
+    // Add your search logic here
+  };
+
+  // ✅ Check if current route should show bottom tabs
+  const shouldShowBottomTabs = (): boolean => {
+    return pathname?.startsWith('/admin') ?? false;
+  };
+
+  // ✅ Check if current route should show FAB
+  const shouldShowFAB = (): boolean => {
+    return (pathname?.startsWith('/admin') && pathname !== '/admin/account') ?? false;
+  };
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#6c5ce7" />
+      <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
+        {/* ✅ Updated header gradient to match your design system */}
         <LinearGradient
-          colors={['#6c5ce7', '#a29bfe', '#74b9ff']}
+          colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0 }}
+          end={{ x: 1, y: 1 }}
           style={styles.header}
         >
           {/* Left - Menu & Logo */}
           <View style={styles.headerLeft}>
-            <TouchableOpacity onPress={toggleSidebar} style={styles.menuButton}>
+            <TouchableOpacity 
+              onPress={toggleSidebar} 
+              style={styles.menuButton}
+              accessibilityLabel="Open menu"
+              accessibilityRole="button"
+            >
               <Ionicons name="menu" size={24} color="white" />
             </TouchableOpacity>
             <View style={styles.logoContainer}>
@@ -142,70 +219,114 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               placeholder="Search..."
               placeholderTextColor="rgba(255,255,255,0.8)"
               style={styles.searchInput}
+              onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
+              returnKeyType="search"
+              accessibilityLabel="Search input"
             />
           </View>
 
-          {/* Right - Avatar */}
+          {/* Right - Notifications & Avatar */}
           <View style={styles.headerRight}>
-            <TouchableOpacity style={styles.headerAction}>
+            <TouchableOpacity 
+              style={styles.headerAction}
+              accessibilityLabel="Notifications"
+              accessibilityRole="button"
+            >
               <Ionicons name="notifications-outline" size={22} color="white" />
             </TouchableOpacity>
             <TouchableOpacity 
               style={styles.headerAction}
-              onPress={() => handleTabPress('profile')} // ✅ Navigate to admin account
+              onPress={handleAvatarPress}
+              accessibilityLabel="Open profile"
+              accessibilityRole="button"
             >
-              <Image source={avatarSource} style={styles.avatarImage} />
+              <Image 
+                source={avatarSource} 
+                style={styles.avatarImage}
+                accessibilityLabel="User avatar"
+              />
             </TouchableOpacity>
           </View>
         </LinearGradient>
       </SafeAreaView>
 
       <View style={styles.mainContent}>
-        <AdminSidebar visible={sidebarVisible} onClose={closeSidebar} activePanel={activePanel} />
+        <AdminSidebar 
+          visible={sidebarVisible} 
+          onClose={closeSidebar} 
+          activePanel={activePanel} 
+        />
         <View style={styles.contentArea}>
-          <LinearGradient colors={['#1a1a2e', '#16213e', '#0f0f23']} style={styles.contentGradient}>
-            <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+          <LinearGradient 
+            colors={['#1a1a2e', '#16213e', '#0f0f23']} 
+            style={styles.contentGradient}
+          >
+            <ScrollView 
+              style={styles.scrollView} 
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+            >
               {children}
             </ScrollView>
           </LinearGradient>
         </View>
-        {sidebarVisible && <TouchableOpacity style={styles.overlay} onPress={closeSidebar} />}
+        {sidebarVisible && (
+          <TouchableOpacity 
+            style={styles.overlay} 
+            onPress={closeSidebar}
+            accessibilityLabel="Close sidebar"
+            accessibilityRole="button"
+          />
+        )}
       </View>
 
       {/* Bottom Tabs - Show on admin routes and admin account */}
-      {(pathname?.startsWith('/admin')) && (
+      {shouldShowBottomTabs() && (
         <View style={styles.bottomTabBar}>
-          {bottomTabs.map((tab) => (
-            <TouchableOpacity
-              key={tab.id}
-              onPress={() => handleTabPress(tab.id)}
-              style={styles.tabButton}
-            >
-              <Ionicons
-                name={activeTab === tab.id ? tab.activeIcon : tab.icon}
-                size={22}
-                color={activeTab === tab.id ? '#6c5ce7' : '#a0aec0'}
-              />
-              <Text
-                style={[
-                  styles.tabLabel,
-                  {
-                    color: activeTab === tab.id ? '#6c5ce7' : '#a0aec0',
-                    fontWeight: activeTab === tab.id ? '600' : '400',
-                  },
-                ]}
+          {bottomTabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <TouchableOpacity
+                key={tab.id}
+                onPress={() => handleTabPress(tab.id)}
+                style={styles.tabButton}
+                accessibilityLabel={`${tab.label} tab`}
+                accessibilityRole="button"
+                accessibilityState={{ selected: isActive }}
               >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+                <Ionicons
+                  name={isActive ? tab.activeIcon : tab.icon}
+                  size={22}
+                  color={isActive ? '#667eea' : '#a0aec0'}
+                />
+                <Text
+                  style={[
+                    styles.tabLabel,
+                    {
+                      color: isActive ? '#667eea' : '#a0aec0',
+                      fontWeight: isActive ? '600' : '400',
+                    },
+                  ]}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
       )}
 
       {/* Floating Action Button - Show on admin routes but NOT account */}
-      {(pathname?.startsWith('/admin') && pathname !== '/admin/account') && (
-        <TouchableOpacity style={styles.fab}>
-          <LinearGradient colors={['#6c5ce7', '#a29bfe']} style={styles.fabGradient}>
+      {shouldShowFAB() && (
+        <TouchableOpacity 
+          style={styles.fab}
+          accessibilityLabel="Add new item"
+          accessibilityRole="button"
+        >
+          <LinearGradient 
+            colors={['#667eea', '#764ba2']} 
+            style={styles.fabGradient}
+          >
             <Ionicons name="add" size={28} color="white" />
           </LinearGradient>
         </TouchableOpacity>
@@ -215,10 +336,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#1a1a2e' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#1a1a2e' 
+  },
   safeArea: {
     paddingTop: Constants.statusBarHeight,
-    backgroundColor: '#6c5ce7',
+    backgroundColor: '#667eea',
   },
   header: {
     paddingHorizontal: 16,
@@ -226,19 +350,48 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    minHeight: 60,
   },
-  headerLeft: { flexDirection: 'row', alignItems: 'center' },
-  menuButton: { padding: 8, marginRight: 12 },
-  logoContainer: { flexDirection: 'row', alignItems: 'center' },
-  logoIcon: {
-    width: 32, height: 32, borderRadius: 16, backgroundColor: '#2d3748',
-    alignItems: 'center', justifyContent: 'center', marginRight: 8,
-  },
-  logoText: { color: 'white', fontWeight: 'bold', fontSize: 14 },
-  companyName: { color: 'white', fontWeight: '600', fontSize: 16 },
-  panelTitle: { color: 'rgba(255,255,255,0.8)', fontSize: 12 },
-  searchContainer: {
+  headerLeft: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
     flex: 1,
+  },
+  menuButton: { 
+    padding: 8, 
+    marginRight: 12,
+    borderRadius: 8,
+  },
+  logoContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    flex: 1,
+  },
+  logoIcon: {
+    width: 32, 
+    height: 32, 
+    borderRadius: 16, 
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center', 
+    justifyContent: 'center', 
+    marginRight: 8,
+  },
+  logoText: { 
+    color: 'white', 
+    fontWeight: 'bold', 
+    fontSize: 14 
+  },
+  companyName: { 
+    color: 'white', 
+    fontWeight: '600', 
+    fontSize: 16 
+  },
+  panelTitle: { 
+    color: 'rgba(255,255,255,0.8)', 
+    fontSize: 12 
+  },
+  searchContainer: {
+    flex: 2,
     maxWidth: 300,
     marginHorizontal: 16,
     backgroundColor: 'rgba(255,255,255,0.2)',
@@ -248,24 +401,57 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     height: 36,
   },
-  searchInput: { flex: 1, marginLeft: 8, color: 'white', fontSize: 14 },
-  headerRight: { flexDirection: 'row', alignItems: 'center' },
-  headerAction: { padding: 8, marginRight: 8 },
+  searchInput: { 
+    flex: 1, 
+    marginLeft: 8, 
+    color: 'white', 
+    fontSize: 14,
+    includeFontPadding: false,
+  },
+  headerRight: { 
+    flexDirection: 'row', 
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flex: 1,
+  },
+  headerAction: { 
+    padding: 8, 
+    marginLeft: 8,
+    borderRadius: 8,
+  },
   avatarImage: {
     width: 28,
     height: 28,
     borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#fff',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  mainContent: { flex: 1, flexDirection: 'row' },
-  contentArea: { flex: 1, backgroundColor: '#0f0f23' },
-  contentGradient: { flex: 1 },
-  scrollView: { flex: 1 },
-  scrollContent: { paddingBottom: 100 },
+  mainContent: { 
+    flex: 1, 
+    flexDirection: 'row' 
+  },
+  contentArea: { 
+    flex: 1, 
+    backgroundColor: '#0f0f23' 
+  },
+  contentGradient: { 
+    flex: 1 
+  },
+  scrollView: { 
+    flex: 1 
+  },
+  scrollContent: { 
+    paddingBottom: 100,
+    flexGrow: 1,
+  },
   overlay: {
-    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)', zIndex: 998,
+    position: 'absolute', 
+    top: 0, 
+    left: 0, 
+    right: 0, 
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.5)', 
+    zIndex: 998,
   },
   bottomTabBar: {
     position: 'absolute',
@@ -280,9 +466,19 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
+    paddingBottom: 12, // Account for home indicator on iOS
   },
-  tabButton: { alignItems: 'center', paddingVertical: 4, paddingHorizontal: 8 },
-  tabLabel: { fontSize: 10, marginTop: 2 },
+  tabButton: { 
+    alignItems: 'center', 
+    paddingVertical: 4, 
+    paddingHorizontal: 8,
+    minWidth: width / 5 - 16, // Ensure even spacing
+  },
+  tabLabel: { 
+    fontSize: 10, 
+    marginTop: 2,
+    textAlign: 'center',
+  },
   fab: {
     position: 'absolute',
     bottom: 100,
@@ -293,7 +489,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     elevation: 8,
-    shadowColor: '#6c5ce7',
+    shadowColor: '#667eea',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
