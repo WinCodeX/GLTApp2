@@ -1,28 +1,19 @@
-<<<<<<< HEAD
 // components/AdminLayout.tsx - Fixed header version
-import React, { useState, ReactNode, useEffect } from 'react';
-=======
-// components/AdminLayout.tsx - Gesture-handler-free version
-import React, { useState, ReactNode, useEffect, useMemo } from 'react';
->>>>>>> 60de702 (fix)
+import React, { ReactNode, useEffect, useState } from 'react';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  TextInput,
-  ScrollView,
-  SafeAreaView,
-  StatusBar,
   Dimensions,
-  StyleSheet,
   Image,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
-import { useRouter, usePathname } from 'expo-router';
-import AdminSidebar from './AdminSidebar';
 import { useUser } from '../context/UserContext';
+import AdminSidebar from './AdminSidebar';
 
 const { width } = Dimensions.get('window');
 

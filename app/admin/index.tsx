@@ -219,7 +219,6 @@ const AdminIndex: React.FC = () => {
     }
   };
 
-  const currentPerformance = performanceData[performanceTabs[activePerformanceTab]];
 
   // ✅ Enhanced action handlers with proper typing
   const handleQuickAction = (actionTitle: string): void => {
@@ -266,7 +265,7 @@ const AdminIndex: React.FC = () => {
               Welcome back, Admin! 👋
             </Text>
             <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 16 }}>
-              Here's what's happening with GLT Logistics today
+              Here&apos;s what&apos;s happening with GLT Logistics today
             </Text>
             <TouchableOpacity
               style={{
@@ -640,7 +639,7 @@ const AdminIndex: React.FC = () => {
                   }}
                 >
                   <LinearGradient
-                    colors={stat.color}
+                    colors={stat.color as [string, string, ...string[]]}
                     style={{
                       borderRadius: 12,
                       padding: 16,
@@ -692,7 +691,7 @@ const AdminIndex: React.FC = () => {
                     }}
                   >
                     <LinearGradient
-                      colors={action.colors}
+                      colors={action.colors as [string, string, ...string[]]}
                       style={{
                         width: 40,
                         height: 40,

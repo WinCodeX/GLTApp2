@@ -14,7 +14,7 @@
     "@expo/vector-icons": "^14.1.0",
     "@react-native-community/netinfo": "11.4.1",
     "@react-navigation/bottom-tabs": "^7.3.10",
-    "@react-navigation/drawer": "^7.5.5",
+    "@react-navigation/drawer": "^7.3.9",
     "@react-navigation/elements": "^2.3.8",
     "@react-navigation/native": "^7.1.6",
     "actioncable": "^5.2.8-1",
