@@ -1,19 +1,23 @@
 // components/AdminLayout.tsx - Fixed header version
-import React, { ReactNode, useEffect, useState } from 'react';
+import React, { useState, ReactNode, useEffect } from 'react';
 import {
-  Dimensions,
-  Image,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TextInput,
-  TouchableOpacity,
   View,
+  Text,
+  TouchableOpacity,
+  TextInput,
+  ScrollView,
+  SafeAreaView,
+  StatusBar,
+  Dimensions,
+  StyleSheet,
+  Image,
 } from 'react-native';
-import { useUser } from '../context/UserContext';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Ionicons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
+import { useRouter, usePathname } from 'expo-router';
 import AdminSidebar from './AdminSidebar';
+import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 
@@ -47,7 +51,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     : require('../assets/images/avatar_placeholder.png');
 
   // ✅ Properly typed bottom tabs with correct Ionicons names
-  const bottomTabs: BottomTab[] = useMemo(() => [
+  const bottomTabs: BottomTab[] = [
     { 
       id: 'home', 
       icon: 'home-outline' as IoniconsName, 
@@ -83,7 +87,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       label: 'You', 
       route: '/admin/account' 
     },
-  ], []);
+  ];
 
   // ✅ Determine active tab based on current pathname with proper typing
   const getActiveTab = (): string => {
@@ -154,7 +158,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
     console.log('Available tabs:', bottomTabs.map(t => t.id));
-  }, [pathname, activeTab, bottomTabs]);
+  }, [pathname, activeTab]);
 
   // ✅ Handle avatar press with proper navigation
   const handleAvatarPress = (): void => {
