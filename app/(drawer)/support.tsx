@@ -10,12 +10,14 @@ import {
   SafeAreaView,
   KeyboardAvoidingView,
   Platform,
+  Image,
 } from 'react-native';
 import {
   Feather,
   MaterialIcons,
   Ionicons,
 } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 
 interface Message {
   id: string;
@@ -24,30 +26,113 @@ interface Message {
   isSupport: boolean;
   type?: 'text' | 'voice';
   duration?: string;
+  emojis?: string;
 }
 
 export default function SupportScreen({ navigation }: any) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: 'Hello! How can we help you today?',
+      text: '',
       timestamp: '23:30',
       isSupport: true,
-      type: 'text',
+      type: 'voice',
+      duration: '5:08',
     },
     {
       id: '2',
-      text: 'Hi, I have a question about my package delivery',
-      timestamp: '23:31',
-      isSupport: false,
+      text: 'Aty vitu tamu tamu',
+      timestamp: '23:30',
+      isSupport: true,
       type: 'text',
+      emojis: '🤣💀',
     },
     {
       id: '3',
-      text: 'Of course! I\'d be happy to help you with that. Can you please provide your tracking number?',
+      text: '',
+      timestamp: '23:30',
+      isSupport: true,
+      type: 'voice',
+      duration: '5:08',
+    },
+    {
+      id: '4',
+      text: 'wueh',
+      timestamp: '23:30',
+      isSupport: true,
+      type: 'text',
+      emojis: '🤣🤣🤣🤣',
+    },
+    {
+      id: '5',
+      text: 'Jigi jigi',
+      timestamp: '23:31',
+      isSupport: true,
+      type: 'text',
+      emojis: '🤣',
+    },
+    {
+      id: '6',
+      text: 'Una pitia kwa club?',
+      timestamp: '23:31',
+      isSupport: true,
+      type: 'text',
+    },
+    {
+      id: '7',
+      text: '',
+      timestamp: '23:32',
+      isSupport: true,
+      type: 'voice',
+      duration: '5:08',
+    },
+    {
+      id: '8',
+      text: 'Brains?',
       timestamp: '23:32',
       isSupport: true,
       type: 'text',
+      emojis: '🤣',
+    },
+    {
+      id: '9',
+      text: '',
+      timestamp: '23:47',
+      isSupport: true,
+      type: 'voice',
+      duration: '5:08',
+    },
+    {
+      id: '10',
+      text: 'aty anatumia nini mingi',
+      timestamp: '23:47',
+      isSupport: true,
+      type: 'text',
+      emojis: '🤣🤣🤣',
+    },
+    {
+      id: '11',
+      text: '',
+      timestamp: '23:48',
+      isSupport: true,
+      type: 'voice',
+      duration: '5:08',
+    },
+    {
+      id: '12',
+      text: 'Missing you so much',
+      timestamp: '23:48',
+      isSupport: true,
+      type: 'text',
+      emojis: '💖',
+    },
+    {
+      id: '13',
+      text: 'I love you my darling wife. Goodnight and sweet dreams',
+      timestamp: '23:49',
+      isSupport: false,
+      type: 'text',
+      emojis: '😍🥰',
     },
   ]);
 
@@ -105,54 +190,92 @@ export default function SupportScreen({ navigation }: any) {
     ]}>
       {item.type === 'voice' ? (
         <View style={styles.voiceMessage}>
-          <Feather name="mic" size={16} color="#fff" />
-          <Text style={styles.voiceText}>Voice message ({item.duration})</Text>
+          <View style={styles.voiceIndicator}>
+            <Feather name="mic" size={14} color="#B8B8B8" />
+            <Text style={styles.voiceLabel}>Voice message ({item.duration})</Text>
+          </View>
+          <View style={styles.voiceWaveform}>
+            {[...Array(20)].map((_, i) => (
+              <View 
+                key={i} 
+                style={[
+                  styles.waveformBar,
+                  { height: Math.random() * 20 + 8 }
+                ]} 
+              />
+            ))}
+          </View>
         </View>
       ) : (
-        <Text style={styles.messageText}>{item.text}</Text>
+        <View>
+          <Text style={styles.messageText}>
+            {item.text}
+            {item.emojis && (
+              <Text style={styles.emojis}> {item.emojis}</Text>
+            )}
+          </Text>
+        </View>
       )}
       <View style={styles.messageFooter}>
         <Text style={styles.timestamp}>{item.timestamp}</Text>
         {!item.isSupport && (
-          <MaterialIcons name="done-all" size={16} color="#34D399" />
+          <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
         )}
       </View>
     </View>
   );
 
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#128C7E" />
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
       
       {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity 
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        >
-          <Feather name="arrow-left" size={24} color="#fff" />
-        </TouchableOpacity>
-        
-        <View style={styles.supportAvatar}>
-          <MaterialIcons name="support-agent" size={28} color="#fff" />
-        </View>
-        
-        <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>Customer Support</Text>
-          <Text style={styles.headerSubtitle}>last seen today at 23:36</Text>
-        </View>
-        
-        <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerButton}>
-            <Feather name="video" size={24} color="#fff" />
+      <LinearGradient
+        colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <View style={styles.headerContent}>
+          <TouchableOpacity 
+            onPress={() => navigation.goBack()}
+            style={styles.backButton}
+          >
+            <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton}>
-            <Feather name="phone" size={24} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerButton}>
-            <Feather name="more-vertical" size={24} color="#fff" />
-          </TouchableOpacity>
+          
+          <Image
+            source={require('../assets/images/avatar_placeholder.png')}
+            style={styles.avatar}
+          />
+          
+          <View style={styles.headerInfo}>
+            <Text style={styles.headerTitle}>Customer Support</Text>
+            <Text style={styles.headerSubtitle}>last seen yesterday at 23:36</Text>
+          </View>
+          
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.headerButton}>
+              <Feather name="video" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Feather name="phone" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Feather name="more-vertical" size={22} color="#fff" />
+            </TouchableOpacity>
+          </View>
         </View>
+      </LinearGradient>
+
+      {/* Call Notification */}
+      <View style={styles.callNotification}>
+        <View style={styles.callIcon}>
+          <Feather name="phone" size={16} color="#fff" />
+        </View>
+        <Text style={styles.callText}>Voice call</Text>
+        <Text style={styles.callDuration}>1 min</Text>
+        <Text style={styles.callTime}>23:32</Text>
       </View>
 
       {/* Messages */}
@@ -210,7 +333,7 @@ export default function SupportScreen({ navigation }: any) {
           </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </SafeAreaView>
+    </View>
   );
 }
 
@@ -218,29 +341,30 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0B141B',
+    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#128C7E',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingBottom: 12,
     elevation: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
+    shadowOpacity: 0.3,
     shadowRadius: 4,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingTop: 8,
   },
   backButton: {
     marginRight: 16,
+    padding: 4,
   },
-  supportAvatar: {
+  avatar: {
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#075E54',
-    justifyContent: 'center',
-    alignItems: 'center',
     marginRight: 12,
   },
   headerInfo: {
@@ -252,7 +376,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   headerSubtitle: {
-    color: '#B8E6D1',
+    color: '#E1BEE7',
     fontSize: 13,
     marginTop: 1,
   },
@@ -261,7 +385,42 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   headerButton: {
-    marginLeft: 16,
+    marginLeft: 20,
+    padding: 4,
+  },
+  callNotification: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1F2C34',
+    marginHorizontal: 12,
+    marginVertical: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    alignSelf: 'flex-start',
+  },
+  callIcon: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#075E54',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  callText: {
+    color: '#fff',
+    fontSize: 14,
+    flex: 1,
+  },
+  callDuration: {
+    color: '#8E8E93',
+    fontSize: 12,
+    marginRight: 8,
+  },
+  callTime: {
+    color: '#8E8E93',
+    fontSize: 12,
   },
   messagesContainer: {
     flex: 1,
@@ -272,11 +431,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
   },
   messageContainer: {
-    maxWidth: '80%',
+    maxWidth: '85%',
     marginVertical: 2,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 12,
+    borderRadius: 18,
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
@@ -285,29 +444,49 @@ const styles = StyleSheet.create({
   },
   supportMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#1F2C34',
-    borderBottomLeftRadius: 3,
-    marginRight: '20%',
+    backgroundColor: '#6B46C1',
+    borderBottomLeftRadius: 4,
+    marginRight: '15%',
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#005C4B',
-    borderBottomRightRadius: 3,
-    marginLeft: '20%',
+    backgroundColor: '#5B21B6',
+    borderBottomRightRadius: 4,
+    marginLeft: '15%',
   },
   messageText: {
     color: '#fff',
     fontSize: 16,
     lineHeight: 20,
   },
+  emojis: {
+    fontSize: 18,
+  },
   voiceMessage: {
+    minWidth: 200,
+  },
+  voiceIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginBottom: 8,
   },
-  voiceText: {
-    color: '#fff',
-    fontSize: 16,
-    marginLeft: 8,
+  voiceLabel: {
+    color: '#B8B8B8',
+    fontSize: 14,
+    marginLeft: 6,
+  },
+  voiceWaveform: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    height: 24,
+    marginBottom: 4,
+  },
+  waveformBar: {
+    width: 2,
+    backgroundColor: '#E1BEE7',
+    borderRadius: 1,
+    marginHorizontal: 1,
   },
   messageFooter: {
     flexDirection: 'row',
@@ -316,7 +495,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   timestamp: {
-    color: '#8E8E93',
+    color: '#E1BEE7',
     fontSize: 12,
     marginRight: 4,
   },
@@ -324,6 +503,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F2C34',
     paddingHorizontal: 8,
     paddingVertical: 8,
+    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
   },
   inputRow: {
     flexDirection: 'row',
@@ -338,8 +518,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-end',
     backgroundColor: '#2A3942',
-    borderRadius: 20,
-    paddingHorizontal: 12,
+    borderRadius: 25,
+    paddingHorizontal: 16,
     paddingVertical: 8,
     marginRight: 8,
     maxHeight: 100,
@@ -361,16 +541,16 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   sendButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
   sendButtonActive: {
-    backgroundColor: '#128C7E',
+    backgroundColor: '#7B3F98',
   },
   voiceButton: {
-    backgroundColor: '#128C7E',
+    backgroundColor: '#7B3F98',
   },
 });
