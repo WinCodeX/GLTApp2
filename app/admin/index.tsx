@@ -414,7 +414,7 @@ const AdminIndex: React.FC = () => {
                               Success rate
                             </Text>
                           </View>
-                        </div>
+                        </View>
                       </LinearGradient>
                     );
                   })}
