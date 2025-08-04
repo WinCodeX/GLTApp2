@@ -6,6 +6,8 @@ import {
   ThemeProvider,
   DarkTheme as NavigationDarkTheme,
 } from '@react-navigation/native';
+// ✅ Add GestureHandlerRootView import
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import { UserProvider } from '@/context/UserContext';
 import colors from '@/theme/colors';
@@ -25,12 +27,15 @@ const CustomDarkTheme = {
 
 export default function Layout() {
   return (
-    <PaperProvider>
-      <ThemeProvider value={CustomDarkTheme}>
-        <UserProvider>
-          <Slot />
-        </UserProvider>
-      </ThemeProvider>
-    </PaperProvider>
+    // ✅ Wrap everything with GestureHandlerRootView
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <PaperProvider>
+        <ThemeProvider value={CustomDarkTheme}>
+          <UserProvider>
+            <Slot />
+          </UserProvider>
+        </ThemeProvider>
+      </PaperProvider>
+    </GestureHandlerRootView>
   );
 }
