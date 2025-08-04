@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Gesture-handler-free version
+// components/AdminLayout.tsx - Fixed header version
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -185,7 +185,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Header with matching gradient */}
+        {/* ✅ Simplified header without company name */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -206,10 +206,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              <View>
-                <Text style={styles.companyName}>GLT Logistics</Text>
-                <Text style={styles.panelTitle}>Admin Panel</Text>
-              </View>
+              <Text style={styles.panelTitle}>Admin Panel</Text>
             </View>
           </View>
 
@@ -382,14 +379,10 @@ const styles = StyleSheet.create({
     fontWeight: 'bold', 
     fontSize: 14 
   },
-  companyName: { 
-    color: 'white', 
-    fontWeight: '600', 
-    fontSize: 16 
-  },
   panelTitle: { 
-    color: 'rgba(255,255,255,0.8)', 
-    fontSize: 12 
+    color: 'white', 
+    fontSize: 16,
+    fontWeight: '600',
   },
   searchContainer: {
     flex: 2,
