@@ -1,25 +1,23 @@
-import React, { useState, useRef, useEffect } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  StatusBar,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  Keyboard,
-} from 'react-native';
 import {
   Feather,
-  MaterialIcons,
-  Ionicons,
+  MaterialIcons
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import colors from '../theme/colors';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 
 interface Message {
   id: string;
@@ -245,7 +243,7 @@ export default function SupportScreen({ navigation }: any) {
           </TouchableOpacity>
           
           <Image
-            source={require('../assets/images/avatar_placeholder.png')}
+            source={require('../../assets/images/avatar_placeholder.png')}
             style={styles.avatar}
           />
           
