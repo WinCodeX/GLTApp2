@@ -367,11 +367,11 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 12,
     paddingVertical: 12,
   },
   backButton: {
-    marginRight: 16,
+    marginRight: 12,
     padding: 4,
   },
   avatar: {
@@ -383,12 +383,14 @@ const styles = StyleSheet.create({
   headerInfo: {
     flex: 1,
     justifyContent: 'center',
+    marginRight: 8,
   },
   headerTitle: {
     color: '#fff',
     fontSize: 17,
     fontWeight: '500',
     lineHeight: 20,
+    flexShrink: 0,
   },
   headerSubtitle: {
     color: '#E1BEE7',
@@ -399,9 +401,10 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
+    minWidth: 100,
   },
   headerButton: {
-    marginLeft: 20,
+    marginLeft: 16,
     padding: 6,
   },
   messagesContainer: {
