@@ -1,23 +1,25 @@
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  Feather,
-  MaterialIcons
-} from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  FlatList,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
+  View,
   Text,
+  StyleSheet,
+  FlatList,
   TextInput,
   TouchableOpacity,
-  View,
+  StatusBar,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  Image,
+  Keyboard,
 } from 'react-native';
+import {
+  Feather,
+  MaterialIcons,
+  Ionicons,
+} from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import colors from '../theme/colors';
 
 interface Message {
   id: string;
@@ -266,16 +268,6 @@ export default function SupportScreen({ navigation }: any) {
         </View>
       </LinearGradient>
 
-      {/* Call Notification */}
-      <View style={styles.callNotification}>
-        <View style={styles.callIcon}>
-          <Feather name="phone" size={16} color="#fff" />
-        </View>
-        <Text style={styles.callText}>Voice call</Text>
-        <Text style={styles.callDuration}>1 min</Text>
-        <Text style={styles.callTime}>23:32</Text>
-      </View>
-
       {/* Messages Container with Keyboard Avoidance */}
       <KeyboardAvoidingView 
         style={styles.flex}
@@ -376,7 +368,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingTop: 8,
+    paddingVertical: 12,
   },
   backButton: {
     marginRight: 16,
@@ -390,16 +382,19 @@ const styles = StyleSheet.create({
   },
   headerInfo: {
     flex: 1,
+    justifyContent: 'center',
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 19,
     fontWeight: '600',
+    lineHeight: 22,
   },
   headerSubtitle: {
     color: '#E1BEE7',
     fontSize: 13,
-    marginTop: 1,
+    marginTop: 2,
+    lineHeight: 16,
   },
   headerActions: {
     flexDirection: 'row',
@@ -407,41 +402,7 @@ const styles = StyleSheet.create({
   },
   headerButton: {
     marginLeft: 20,
-    padding: 4,
-  },
-  callNotification: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1F2C34',
-    marginHorizontal: 12,
-    marginVertical: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignSelf: 'flex-start',
-  },
-  callIcon: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: '#075E54',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  callText: {
-    color: '#fff',
-    fontSize: 14,
-    flex: 1,
-  },
-  callDuration: {
-    color: '#8E8E93',
-    fontSize: 12,
-    marginRight: 8,
-  },
-  callTime: {
-    color: '#8E8E93',
-    fontSize: 12,
+    padding: 6,
   },
   messagesContainer: {
     flex: 1,
