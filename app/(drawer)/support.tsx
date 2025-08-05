@@ -245,7 +245,7 @@ export default function SupportScreen({ navigation }: any) {
           </TouchableOpacity>
           
           <Image
-            source={require('../assets/images/avatar_placeholder.png')}
+            source={require('../../assets/images/avatar_placeholder.png')}
             style={styles.avatar}
           />
           
