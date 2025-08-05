@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Image,
+  Keyboard,
 } from 'react-native';
 import {
   Feather,
@@ -121,12 +122,24 @@ export default function SupportScreen({ navigation }: any) {
   ]);
 
   const [inputText, setInputText] = useState('');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const flatListRef = useRef<FlatList>(null);
 
-  // Create a simple avatar placeholder
-  const avatarSource = {
-    uri: 'https://via.placeholder.com/40x40/7B3F98/FFFFFF?text=CS'
-  };
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+
+    return () => {
+      keyboardDidHideListener.remove();
+      keyboardDidShowListener.remove();
+    };
+  }, []);
 
   const sendMessage = () => {
     if (inputText.trim()) {
@@ -213,7 +226,7 @@ export default function SupportScreen({ navigation }: any) {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
       
       {/* Header */}
@@ -232,7 +245,7 @@ export default function SupportScreen({ navigation }: any) {
           </TouchableOpacity>
           
           <Image
-            source={avatarSource}
+            source={require('../assets/images/avatar_placeholder.png')}
             style={styles.avatar}
           />
           
@@ -265,63 +278,82 @@ export default function SupportScreen({ navigation }: any) {
         <Text style={styles.callTime}>23:32</Text>
       </View>
 
-      {/* Messages */}
-      <View style={styles.messagesContainer}>
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          renderItem={renderMessage}
-          keyExtractor={(item) => item.id}
-          contentContainerStyle={styles.messagesList}
-          showsVerticalScrollIndicator={false}
-        />
-      </View>
-
-      {/* Input Area */}
+      {/* Messages Container with Keyboard Avoidance */}
       <KeyboardAvoidingView 
+        style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        style={styles.inputContainer}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        <View style={styles.inputRow}>
-          <View style={styles.textInputContainer}>
-            <TouchableOpacity style={styles.inputButton}>
-              <Feather name="smile" size={20} color="#8E8E93" />
-            </TouchableOpacity>
+        {/* Messages */}
+        <View style={[styles.messagesContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
+          <FlatList
+            ref={flatListRef}
+            data={messages}
+            renderItem={renderMessage}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={styles.messagesList}
+            showsVerticalScrollIndicator={false}
+            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+          />
+        </View>
+
+        {/* Input Area - Fixed at bottom */}
+        <View style={[
+          styles.inputContainer,
+          { 
+            paddingBottom: Platform.OS === 'ios' 
+              ? (keyboardHeight > 0 ? 8 : 34) 
+              : 8 
+          }
+        ]}>
+          <View style={styles.inputRow}>
+            <View style={styles.textInputContainer}>
+              <TouchableOpacity style={styles.inputButton}>
+                <Feather name="smile" size={20} color="#8E8E93" />
+              </TouchableOpacity>
+              
+              <TextInput
+                style={styles.textInput}
+                placeholder="Message"
+                placeholderTextColor="#8E8E93"
+                value={inputText}
+                onChangeText={setInputText}
+                multiline
+                maxLength={1000}
+                onFocus={() => {
+                  // Auto-scroll to bottom when input is focused
+                  setTimeout(() => {
+                    flatListRef.current?.scrollToEnd({ animated: true });
+                  }, 100);
+                }}
+              />
+              
+              <TouchableOpacity style={styles.attachButton}>
+                <Feather name="paperclip" size={18} color="#8E8E93" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cameraButton}>
+                <Feather name="camera" size={18} color="#8E8E93" />
+              </TouchableOpacity>
+            </View>
             
-            <TextInput
-              style={styles.textInput}
-              placeholder="Message"
-              placeholderTextColor="#8E8E93"
-              value={inputText}
-              onChangeText={setInputText}
-              multiline
-              maxLength={1000}
-            />
-            
-            <TouchableOpacity style={styles.attachButton}>
-              <Feather name="paperclip" size={18} color="#8E8E93" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.cameraButton}>
-              <Feather name="camera" size={18} color="#8E8E93" />
+            <TouchableOpacity 
+              style={[
+                styles.sendButton,
+                inputText.trim() ? styles.sendButtonActive : styles.voiceButton
+              ]}
+              onPress={inputText.trim() ? sendMessage : undefined}
+            >
+              {inputText.trim() ? (
+                <Feather name="send" size={18} color="#fff" />
+              ) : (
+                <Feather name="mic" size={18} color="#fff" />
+              )}
             </TouchableOpacity>
           </View>
-          
-          <TouchableOpacity 
-            style={[
-              styles.sendButton,
-              inputText.trim() ? styles.sendButtonActive : styles.voiceButton
-            ]}
-            onPress={inputText.trim() ? sendMessage : undefined}
-          >
-            {inputText.trim() ? (
-              <Feather name="send" size={18} color="#fff" />
-            ) : (
-              <Feather name="mic" size={18} color="#fff" />
-            )}
-          </TouchableOpacity>
         </View>
       </KeyboardAvoidingView>
-    </View>
+    </SafeAreaView>
   );
 }
 
@@ -329,7 +361,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0B141B',
-    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
+  },
+  flex: {
+    flex: 1,
   },
   header: {
     paddingBottom: 12,
@@ -338,6 +372,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
+    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
   },
   headerContent: {
     flexDirection: 'row',
@@ -417,6 +452,7 @@ const styles = StyleSheet.create({
   messagesList: {
     paddingVertical: 8,
     paddingHorizontal: 8,
+    flexGrow: 1,
   },
   messageWrapper: {
     marginVertical: 3,
@@ -495,10 +531,11 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   inputContainer: {
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(11, 20, 27, 0.95)',
     paddingHorizontal: 8,
     paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 32 : 8,
+    borderTopWidth: 0.5,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   inputRow: {
     flexDirection: 'row',
@@ -515,6 +552,11 @@ const styles = StyleSheet.create({
     marginRight: 8,
     maxHeight: 100,
     minHeight: 45,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
   },
   inputButton: {
     padding: 8,
@@ -542,11 +584,11 @@ const styles = StyleSheet.create({
     borderRadius: 22.5,
     justifyContent: 'center',
     alignItems: 'center',
-    elevation: 2,
+    elevation: 3,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
   sendButtonActive: {
     backgroundColor: '#7B3F98',
