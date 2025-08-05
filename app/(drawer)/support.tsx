@@ -18,6 +18,7 @@ import {
   Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import colors from '../theme/colors';
 
 interface Message {
   id: string;
@@ -33,111 +34,99 @@ export default function SupportScreen({ navigation }: any) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
-      text: '',
-      timestamp: '23:30',
+      text: 'Hello! Welcome to our customer support. How can I help you today?',
+      timestamp: '09:05',
       isSupport: true,
-      type: 'voice',
-      duration: '5:08',
+      type: 'text',
     },
     {
       id: '2',
-      text: 'Aty vitu tamu tamu',
-      timestamp: '23:30',
-      isSupport: true,
+      text: 'Hi, I have an issue with my recent order. The tracking shows it was delivered but I never received it.',
+      timestamp: '09:07',
+      isSupport: false,
       type: 'text',
-      emojis: '🤣💀',
     },
     {
       id: '3',
-      text: '',
-      timestamp: '23:30',
+      text: 'I\'m sorry to hear about this issue. Let me help you track down your package. Could you please provide me with your order number?',
+      timestamp: '09:08',
       isSupport: true,
-      type: 'voice',
-      duration: '5:08',
+      type: 'text',
     },
     {
       id: '4',
-      text: 'wueh',
-      timestamp: '23:30',
-      isSupport: true,
-      type: 'text',
-      emojis: '🤣🤣🤣🤣',
+      text: '',
+      timestamp: '09:09',
+      isSupport: false,
+      type: 'voice',
+      duration: '0:15',
     },
     {
       id: '5',
-      text: 'Jigi jigi',
-      timestamp: '23:31',
+      text: 'Thank you for the voice message. I can see your order #12345. Let me check the delivery details for you.',
+      timestamp: '09:10',
       isSupport: true,
       type: 'text',
-      emojis: '🤣',
     },
     {
       id: '6',
-      text: 'Una pitia kwa club?',
-      timestamp: '23:31',
+      text: 'I can see that the package was marked as delivered to your front door yesterday at 2:30 PM. Did you check with neighbors or any safe delivery locations?',
+      timestamp: '09:11',
       isSupport: true,
       type: 'text',
     },
     {
       id: '7',
-      text: '',
-      timestamp: '23:32',
-      isSupport: true,
-      type: 'voice',
-      duration: '5:08',
+      text: 'Yes, I checked everywhere. No one has seen it. This is really frustrating 😤',
+      timestamp: '09:12',
+      isSupport: false,
+      type: 'text',
     },
     {
       id: '8',
-      text: 'Brains?',
-      timestamp: '23:32',
+      text: '',
+      timestamp: '09:13',
       isSupport: true,
-      type: 'text',
-      emojis: '🤣',
+      type: 'voice',
+      duration: '0:32',
     },
     {
       id: '9',
-      text: '',
-      timestamp: '23:47',
+      text: 'I completely understand your frustration. I\'m going to initiate a delivery investigation and process a replacement order for you right away.',
+      timestamp: '09:14',
       isSupport: true,
-      type: 'voice',
-      duration: '5:08',
+      type: 'text',
     },
     {
       id: '10',
-      text: 'aty anatumia nini mingi',
-      timestamp: '23:47',
-      isSupport: true,
+      text: 'Thank you so much! That would be great. How long will the replacement take?',
+      timestamp: '09:15',
+      isSupport: false,
       type: 'text',
-      emojis: '🤣🤣🤣',
     },
     {
       id: '11',
-      text: '',
-      timestamp: '23:48',
+      text: 'Your replacement order will be shipped within 24 hours with priority delivery. You should receive it by Friday. I\'ll also email you the new tracking number.',
+      timestamp: '09:16',
       isSupport: true,
-      type: 'voice',
-      duration: '5:08',
+      type: 'text',
     },
     {
       id: '12',
-      text: 'Missing you so much',
-      timestamp: '23:48',
-      isSupport: true,
-      type: 'text',
-      emojis: '💖',
-    },
-    {
-      id: '13',
-      text: 'I love you my darling wife. Goodnight and sweet dreams',
-      timestamp: '23:49',
+      text: 'Perfect! Thank you for the excellent customer service 👍',
+      timestamp: '09:17',
       isSupport: false,
       type: 'text',
-      emojis: '😍🥰',
     },
   ]);
 
   const [inputText, setInputText] = useState('');
   const flatListRef = useRef<FlatList>(null);
+
+  // Create a simple avatar placeholder
+  const avatarSource = {
+    uri: 'https://via.placeholder.com/40x40/7B3F98/FFFFFF?text=CS'
+  };
 
   const sendMessage = () => {
     if (inputText.trim()) {
@@ -184,43 +173,41 @@ export default function SupportScreen({ navigation }: any) {
   };
 
   const renderMessage = ({ item }: { item: Message }) => (
-    <View style={[
-      styles.messageContainer,
-      item.isSupport ? styles.supportMessage : styles.userMessage
-    ]}>
-      {item.type === 'voice' ? (
-        <View style={styles.voiceMessage}>
-          <View style={styles.voiceIndicator}>
-            <Feather name="mic" size={14} color="#B8B8B8" />
-            <Text style={styles.voiceLabel}>Voice message ({item.duration})</Text>
+    <View style={styles.messageWrapper}>
+      <View style={[
+        styles.messageContainer,
+        item.isSupport ? styles.supportMessage : styles.userMessage
+      ]}>
+        {item.type === 'voice' ? (
+          <View style={styles.voiceMessage}>
+            <TouchableOpacity style={styles.playButton}>
+              <Feather name="play" size={12} color="#fff" />
+            </TouchableOpacity>
+            <View style={styles.voiceWaveform}>
+              {[...Array(25)].map((_, i) => (
+                <View 
+                  key={i} 
+                  style={[
+                    styles.waveformBar,
+                    { 
+                      height: Math.random() * 16 + 4,
+                      backgroundColor: item.isSupport ? '#B8B8B8' : '#E1BEE7'
+                    }
+                  ]} 
+                />
+              ))}
+            </View>
+            <Text style={styles.voiceDuration}>{item.duration}</Text>
           </View>
-          <View style={styles.voiceWaveform}>
-            {[...Array(20)].map((_, i) => (
-              <View 
-                key={i} 
-                style={[
-                  styles.waveformBar,
-                  { height: Math.random() * 20 + 8 }
-                ]} 
-              />
-            ))}
-          </View>
-        </View>
-      ) : (
-        <View>
-          <Text style={styles.messageText}>
-            {item.text}
-            {item.emojis && (
-              <Text style={styles.emojis}> {item.emojis}</Text>
-            )}
-          </Text>
-        </View>
-      )}
-      <View style={styles.messageFooter}>
-        <Text style={styles.timestamp}>{item.timestamp}</Text>
-        {!item.isSupport && (
-          <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
+        ) : (
+          <Text style={styles.messageText}>{item.text}</Text>
         )}
+        <View style={styles.messageFooter}>
+          <Text style={styles.timestamp}>{item.timestamp}</Text>
+          {!item.isSupport && (
+            <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
+          )}
+        </View>
       </View>
     </View>
   );
@@ -245,13 +232,13 @@ export default function SupportScreen({ navigation }: any) {
           </TouchableOpacity>
           
           <Image
-            source={require('../../assets/images/avatar_placeholder.png')}
+            source={avatarSource}
             style={styles.avatar}
           />
           
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>Customer Support</Text>
-            <Text style={styles.headerSubtitle}>last seen yesterday at 23:36</Text>
+            <Text style={styles.headerSubtitle}>last seen today at 08:11</Text>
           </View>
           
           <View style={styles.headerActions}>
@@ -296,11 +283,11 @@ export default function SupportScreen({ navigation }: any) {
         style={styles.inputContainer}
       >
         <View style={styles.inputRow}>
-          <TouchableOpacity style={styles.inputButton}>
-            <Feather name="smile" size={24} color="#8E8E93" />
-          </TouchableOpacity>
-          
           <View style={styles.textInputContainer}>
+            <TouchableOpacity style={styles.inputButton}>
+              <Feather name="smile" size={20} color="#8E8E93" />
+            </TouchableOpacity>
+            
             <TextInput
               style={styles.textInput}
               placeholder="Message"
@@ -310,11 +297,12 @@ export default function SupportScreen({ navigation }: any) {
               multiline
               maxLength={1000}
             />
+            
             <TouchableOpacity style={styles.attachButton}>
-              <Feather name="paperclip" size={20} color="#8E8E93" />
+              <Feather name="paperclip" size={18} color="#8E8E93" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.cameraButton}>
-              <Feather name="camera" size={20} color="#8E8E93" />
+              <Feather name="camera" size={18} color="#8E8E93" />
             </TouchableOpacity>
           </View>
           
@@ -326,9 +314,9 @@ export default function SupportScreen({ navigation }: any) {
             onPress={inputText.trim() ? sendMessage : undefined}
           >
             {inputText.trim() ? (
-              <Feather name="send" size={20} color="#fff" />
+              <Feather name="send" size={18} color="#fff" />
             ) : (
-              <Feather name="mic" size={20} color="#fff" />
+              <Feather name="mic" size={18} color="#fff" />
             )}
           </TouchableOpacity>
         </View>
@@ -428,124 +416,137 @@ const styles = StyleSheet.create({
   },
   messagesList: {
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
+  },
+  messageWrapper: {
+    marginVertical: 3,
   },
   messageContainer: {
-    maxWidth: '85%',
-    marginVertical: 2,
+    maxWidth: '80%',
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 18,
     elevation: 1,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
   },
   supportMessage: {
     alignSelf: 'flex-start',
-    backgroundColor: '#6B46C1',
+    backgroundColor: '#1F2C34',
     borderBottomLeftRadius: 4,
-    marginRight: '15%',
+    marginLeft: 4,
   },
   userMessage: {
     alignSelf: 'flex-end',
-    backgroundColor: '#5B21B6',
+    backgroundColor: '#6B46C1',
     borderBottomRightRadius: 4,
-    marginLeft: '15%',
+    marginRight: 4,
   },
   messageText: {
     color: '#fff',
     fontSize: 16,
     lineHeight: 20,
-  },
-  emojis: {
-    fontSize: 18,
+    paddingTop: 4,
   },
   voiceMessage: {
-    minWidth: 200,
-  },
-  voiceIndicator: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    minWidth: 160,
+    paddingVertical: 4,
   },
-  voiceLabel: {
-    color: '#B8B8B8',
-    fontSize: 14,
-    marginLeft: 6,
+  playButton: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
   },
   voiceWaveform: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    height: 24,
-    marginBottom: 4,
+    height: 20,
+    marginHorizontal: 4,
   },
   waveformBar: {
     width: 2,
-    backgroundColor: '#E1BEE7',
     borderRadius: 1,
-    marginHorizontal: 1,
+    marginHorizontal: 0.5,
+  },
+  voiceDuration: {
+    color: '#B8B8B8',
+    fontSize: 12,
+    marginLeft: 8,
   },
   messageFooter: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
-    marginTop: 4,
+    marginTop: 2,
   },
   timestamp: {
-    color: '#E1BEE7',
-    fontSize: 12,
+    color: '#8E8E93',
+    fontSize: 11,
     marginRight: 4,
   },
   inputContainer: {
-    backgroundColor: '#1F2C34',
+    backgroundColor: 'transparent',
     paddingHorizontal: 8,
     paddingVertical: 8,
-    paddingBottom: Platform.OS === 'ios' ? 24 : 8,
+    paddingBottom: Platform.OS === 'ios' ? 32 : 8,
   },
   inputRow: {
     flexDirection: 'row',
     alignItems: 'flex-end',
   },
-  inputButton: {
-    padding: 8,
-    marginRight: 8,
-  },
   textInputContainer: {
     flex: 1,
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    backgroundColor: '#2A3942',
+    alignItems: 'center',
+    backgroundColor: '#1F2C34',
     borderRadius: 25,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
     marginRight: 8,
     maxHeight: 100,
+    minHeight: 45,
+  },
+  inputButton: {
+    padding: 8,
+    marginLeft: 4,
   },
   textInput: {
     flex: 1,
     color: '#fff',
     fontSize: 16,
-    paddingVertical: 4,
-    paddingHorizontal: 4,
-    textAlignVertical: 'top',
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    textAlignVertical: 'center',
+    maxHeight: 80,
   },
   attachButton: {
-    padding: 4,
-    marginLeft: 8,
+    padding: 8,
   },
   cameraButton: {
-    padding: 4,
-    marginLeft: 8,
+    padding: 8,
+    marginRight: 4,
   },
   sendButton: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 45,
+    height: 45,
+    borderRadius: 22.5,
     justifyContent: 'center',
     alignItems: 'center',
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
   },
   sendButtonActive: {
     backgroundColor: '#7B3F98',
