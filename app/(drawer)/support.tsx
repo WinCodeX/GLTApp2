@@ -1,23 +1,25 @@
+import React, { useState, useRef, useEffect } from 'react';
 import {
-  Feather,
-  MaterialIcons
-} from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useEffect, useRef, useState } from 'react';
-import {
-  FlatList,
-  Image,
-  Keyboard,
-  KeyboardAvoidingView,
-  Platform,
-  SafeAreaView,
-  StatusBar,
-  StyleSheet,
+  View,
   Text,
+  StyleSheet,
+  FlatList,
   TextInput,
   TouchableOpacity,
-  View,
+  StatusBar,
+  SafeAreaView,
+  KeyboardAvoidingView,
+  Platform,
+  Image,
+  Keyboard,
 } from 'react-native';
+import {
+  Feather,
+  MaterialIcons,
+  Ionicons,
+} from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import colors from '../../theme/colors';
 
 interface Message {
   id: string;
@@ -384,15 +386,15 @@ const styles = StyleSheet.create({
   },
   headerTitle: {
     color: '#fff',
-    fontSize: 19,
-    fontWeight: '600',
-    lineHeight: 22,
+    fontSize: 17,
+    fontWeight: '500',
+    lineHeight: 20,
   },
   headerSubtitle: {
     color: '#E1BEE7',
-    fontSize: 13,
-    marginTop: 2,
-    lineHeight: 16,
+    fontSize: 12,
+    marginTop: 1,
+    lineHeight: 14,
   },
   headerActions: {
     flexDirection: 'row',
