@@ -140,7 +140,7 @@ return (
       label="Contacts"    
       labelStyle={styles.label}    
       icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-      onPress={() => props.navigation.navigate('contacts')}    
+      onPress={() => props.navigation.navigate('contact')}    
     />    
 
     {/* Settings */}    
