@@ -17,111 +17,45 @@ import {
   TextInput,
   TouchableOpacity,
   View,
+  Modal,
+  Alert,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
+import Toast from 'react-native-toast-message';
+import { supportApi, type Message, type Conversation } from '../services/supportApi';
 
-interface Message {
-  id: string;
-  text: string;
-  timestamp: string;
-  isSupport: boolean;
-  type?: 'text' | 'voice';
-  duration?: string;
-  emojis?: string;
+interface SupportScreenProps {
+  navigation: any;
+  route: {
+    params?: {
+      conversationId?: string;
+    };
+  };
 }
 
-export default function SupportScreen({ navigation }: any) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hello! Welcome to our customer support. How can I help you today?',
-      timestamp: '09:05',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '2',
-      text: 'Hi, I have an issue with my recent order. The tracking shows it was delivered but I never received it.',
-      timestamp: '09:07',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '3',
-      text: 'I\'m sorry to hear about this issue. Let me help you track down your package. Could you please provide me with your order number?',
-      timestamp: '09:08',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '4',
-      text: '',
-      timestamp: '09:09',
-      isSupport: false,
-      type: 'voice',
-      duration: '0:15',
-    },
-    {
-      id: '5',
-      text: 'Thank you for the voice message. I can see your order #12345. Let me check the delivery details for you.',
-      timestamp: '09:10',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '6',
-      text: 'I can see that the package was marked as delivered to your front door yesterday at 2:30 PM. Did you check with neighbors or any safe delivery locations?',
-      timestamp: '09:11',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '7',
-      text: 'Yes, I checked everywhere. No one has seen it. This is really frustrating 😤',
-      timestamp: '09:12',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '8',
-      text: '',
-      timestamp: '09:13',
-      isSupport: true,
-      type: 'voice',
-      duration: '0:32',
-    },
-    {
-      id: '9',
-      text: 'I completely understand your frustration. I\'m going to initiate a delivery investigation and process a replacement order for you right away.',
-      timestamp: '09:14',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '10',
-      text: 'Thank you so much! That would be great. How long will the replacement take?',
-      timestamp: '09:15',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '11',
-      text: 'Your replacement order will be shipped within 24 hours with priority delivery. You should receive it by Friday. I\'ll also email you the new tracking number.',
-      timestamp: '09:16',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '12',
-      text: 'Perfect! Thank you for the excellent customer service 👍',
-      timestamp: '09:17',
-      isSupport: false,
-      type: 'text',
-    },
-  ]);
+type TicketStep = 'category' | 'package-input' | 'creating' | 'complete';
 
+export default function SupportScreen({ navigation, route }: SupportScreenProps) {
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [conversation, setConversation] = useState<Conversation | null>(null);
   const [inputText, setInputText] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
+  
+  // Modal states
+  const [showTicketModal, setShowTicketModal] = useState(false);
+  const [ticketStep, setTicketStep] = useState<TicketStep>('category');
+  const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [packageCode, setPackageCode] = useState('');
+  const [validatingPackage, setValidatingPackage] = useState(false);
+  
   const flatListRef = useRef<FlatList>(null);
+  const slideAnimation = useRef(new Animated.Value(0)).current;
+  
+  // Get conversation ID from route params
+  const conversationId = route.params?.conversationId;
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -139,47 +73,274 @@ export default function SupportScreen({ navigation }: any) {
     };
   }, []);
 
-  const sendMessage = () => {
-    if (inputText.trim()) {
-      const newMessage: Message = {
-        id: Date.now().toString(),
-        text: inputText.trim(),
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: false,
-        type: 'text',
-      };
+  useEffect(() => {
+    initializeSupport();
+  }, [conversationId]);
 
-      setMessages(prev => [...prev, newMessage]);
-      setInputText('');
+  // Retry pending operations when screen loads
+  useEffect(() => {
+    const retryTimer = setTimeout(() => {
+      supportApi.retryPendingOperations();
+    }, 2000);
+
+    return () => clearTimeout(retryTimer);
+  }, []);
+
+  const initializeSupport = async () => {
+    try {
+      setLoading(true);
+
+      if (conversationId) {
+        // Load existing conversation
+        await loadConversation(conversationId);
+      } else {
+        // Check for active support conversation
+        const activeResponse = await supportApi.getActiveSupport();
+        
+        if (activeResponse.success && activeResponse.data?.conversation) {
+          setConversation(activeResponse.data.conversation);
+          await loadMessages(activeResponse.data.conversation_id!);
+        } else {
+          // Show ticket creation modal
+          setShowTicketModal(true);
+          animateModalIn();
+        }
+      }
+    } catch (error) {
+      console.error('Error initializing support:', error);
+      setShowTicketModal(true);
+      animateModalIn();
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const loadConversation = async (convId: string) => {
+    try {
+      const response = await supportApi.getConversation(convId);
       
-      // Auto-scroll to bottom
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
-
-      // Simulate support response after 2 seconds
-      setTimeout(() => {
-        const supportResponse: Message = {
-          id: (Date.now() + 1).toString(),
-          text: 'Thank you for providing that information. Let me check the status for you...',
-          timestamp: new Date().toLocaleTimeString('en-US', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          isSupport: true,
-          type: 'text',
-        };
-        setMessages(prev => [...prev, supportResponse]);
+      if (response.success && response.data) {
+        setConversation(response.data.conversation);
+        setMessages(response.data.messages || []);
         
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
+          flatListRef.current?.scrollToEnd({ animated: false });
         }, 100);
-      }, 2000);
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Connection Issue',
+          text2: response.message || 'Failed to load conversation',
+        });
+      }
+    } catch (error) {
+      console.error('Error loading conversation:', error);
+    }
+  };
+
+  const loadMessages = async (convId: string) => {
+    try {
+      const response = await supportApi.getConversation(convId);
+      
+      if (response.success && response.data) {
+        setMessages(response.data.messages || []);
+        
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }, 100);
+      }
+    } catch (error) {
+      console.error('Error loading messages:', error);
+    }
+  };
+
+  const animateModalIn = () => {
+    Animated.spring(slideAnimation, {
+      toValue: 1,
+      useNativeDriver: true,
+      tension: 50,
+      friction: 8,
+    }).start();
+  };
+
+  const animateModalOut = (callback?: () => void) => {
+    Animated.timing(slideAnimation, {
+      toValue: 0,
+      duration: 300,
+      useNativeDriver: true,
+    }).start(() => {
+      callback?.();
+    });
+  };
+
+  const handleCategorySelection = (category: 'basic' | 'package') => {
+    setSelectedCategory(category);
+    
+    if (category === 'basic') {
+      setTicketStep('creating');
+      createTicket('inquiry');
+    } else {
+      setTicketStep('package-input');
+    }
+  };
+
+  const validateAndCreatePackageTicket = async () => {
+    if (!packageCode.trim()) {
+      Toast.show({
+        type: 'error',
+        text1: 'Package Code Required',
+        text2: 'Please enter your package tracking code',
+      });
+      return;
+    }
+
+    setValidatingPackage(true);
+    
+    try {
+      // Validate package exists
+      const validateResponse = await supportApi.validatePackage(packageCode.trim());
+      
+      if (validateResponse.success && validateResponse.data?.valid) {
+        setTicketStep('creating');
+        createTicket('follow_up', validateResponse.data.package?.id);
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Package Not Found',
+          text2: 'Please check your tracking code and try again',
+        });
+      }
+    } catch (error) {
+      console.error('Error validating package:', error);
+      
+      // Allow creation anyway if validation fails (might be network issue)
+      Toast.show({
+        type: 'info',
+        text1: 'Creating Ticket',
+        text2: 'Unable to validate package, but creating ticket anyway',
+      });
+      
+      setTicketStep('creating');
+      createTicket('follow_up', packageCode.trim());
+    } finally {
+      setValidatingPackage(false);
+    }
+  };
+
+  const createTicket = async (category: string, packageId?: string) => {
+    try {
+      const response = await supportApi.createSupportTicket(category, packageId);
+      
+      if (response.success && response.data) {
+        setConversation(response.data.conversation);
+        await loadMessages(response.data.conversation_id);
+        
+        setTicketStep('complete');
+        
+        // Close modal after short delay
+        setTimeout(() => {
+          animateModalOut(() => {
+            setShowTicketModal(false);
+            setTicketStep('category');
+            setSelectedCategory('');
+            setPackageCode('');
+          });
+        }, 1500);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Support Ticket Created',
+          text2: `Ticket ${response.data.ticket_id} is ready!`,
+        });
+      } else {
+        Toast.show({
+          type: 'info',
+          text1: 'Ticket Saved',
+          text2: response.message || 'Ticket will be created when connection is restored',
+        });
+        
+        // Close modal even if cached
+        setTimeout(() => {
+          animateModalOut(() => {
+            setShowTicketModal(false);
+            setTicketStep('category');
+            setSelectedCategory('');
+            setPackageCode('');
+          });
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Error creating ticket:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Connection Issue',
+        text2: 'Ticket saved and will be created when online',
+      });
+    }
+  };
+
+  const sendMessage = async () => {
+    if (!inputText.trim() || !conversation || sending) return;
+
+    const messageText = inputText.trim();
+    setInputText('');
+    setSending(true);
+
+    // Optimistic UI update
+    const tempMessage: Message = {
+      id: `temp-${Date.now()}`,
+      content: messageText,
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      from_support: false,
+      message_type: 'text',
+      user: {
+        id: 'current-user',
+        name: 'You',
+        role: 'customer'
+      }
+    };
+
+    setMessages(prev => [...prev, tempMessage]);
+    
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    try {
+      const response = await supportApi.sendMessage(conversation.id, messageText);
+      
+      if (response.success && response.data) {
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === tempMessage.id ? response.data!.message : msg
+          )
+        );
+      } else {
+        // Keep temp message but show it as cached
+        setMessages(prev => 
+          prev.map(msg => 
+            msg.id === tempMessage.id 
+              ? { ...msg, user: { ...msg.user, name: 'You (sending...)' } }
+              : msg
+          )
+        );
+        
+        Toast.show({
+          type: 'info',
+          text1: 'Message Cached',
+          text2: 'Will send when connection is restored',
+        });
+      }
+    } catch (error) {
+      console.error('Error sending message:', error);
+      setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+    } finally {
+      setSending(false);
     }
   };
 
@@ -187,9 +348,9 @@ export default function SupportScreen({ navigation }: any) {
     <View style={styles.messageWrapper}>
       <View style={[
         styles.messageContainer,
-        item.isSupport ? styles.supportMessage : styles.userMessage
+        item.from_support ? styles.supportMessage : styles.userMessage
       ]}>
-        {item.type === 'voice' ? (
+        {item.message_type === 'voice' ? (
           <View style={styles.voiceMessage}>
             <TouchableOpacity style={styles.playButton}>
               <Feather name="play" size={12} color="#fff" />
@@ -202,26 +363,202 @@ export default function SupportScreen({ navigation }: any) {
                     styles.waveformBar,
                     { 
                       height: Math.random() * 16 + 4,
-                      backgroundColor: item.isSupport ? '#B8B8B8' : '#E1BEE7'
+                      backgroundColor: item.from_support ? '#B8B8B8' : '#E1BEE7'
                     }
                   ]} 
                 />
               ))}
             </View>
-            <Text style={styles.voiceDuration}>{item.duration}</Text>
+            <Text style={styles.voiceDuration}>0:15</Text>
           </View>
         ) : (
-          <Text style={styles.messageText}>{item.text}</Text>
+          <Text style={[
+            styles.messageText,
+            item.is_system && styles.systemMessageText
+          ]}>
+            {item.content}
+          </Text>
         )}
         <View style={styles.messageFooter}>
           <Text style={styles.timestamp}>{item.timestamp}</Text>
-          {!item.isSupport && (
+          {!item.from_support && !item.is_system && (
             <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
           )}
         </View>
       </View>
     </View>
   );
+
+  const renderTicketModal = () => (
+    <Modal
+      visible={showTicketModal}
+      transparent
+      animationType="none"
+      onRequestClose={() => {}}
+    >
+      <View style={styles.modalOverlay}>
+        <Animated.View
+          style={[
+            styles.modalContainer,
+            {
+              transform: [{
+                translateY: slideAnimation.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [400, 0],
+                }),
+              }],
+            },
+          ]}
+        >
+          {/* Modal Content */}
+          {ticketStep === 'category' && (
+            <>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalHandle} />
+                <Text style={styles.modalTitle}>How can we help you?</Text>
+                <Text style={styles.modalSubtitle}>
+                  Please select the type of assistance you need
+                </Text>
+              </View>
+
+              <View style={styles.modalContent}>
+                <TouchableOpacity
+                  style={styles.categoryButton}
+                  onPress={() => handleCategorySelection('basic')}
+                >
+                  <LinearGradient
+                    colors={['#7B3F98', '#6B46C1']}
+                    style={styles.categoryGradient}
+                  >
+                    <Feather name="help-circle" size={24} color="#fff" />
+                    <View style={styles.categoryTextContainer}>
+                      <Text style={styles.categoryTitle}>Basic Inquiry</Text>
+                      <Text style={styles.categorySubtitle}>
+                        General questions about GLT services
+                      </Text>
+                    </View>
+                    <Feather name="chevron-right" size={20} color="#fff" />
+                  </LinearGradient>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.categoryButton}
+                  onPress={() => handleCategorySelection('package')}
+                >
+                  <LinearGradient
+                    colors={['#7B3F98', '#6B46C1']}
+                    style={styles.categoryGradient}
+                  >
+                    <Feather name="package" size={24} color="#fff" />
+                    <View style={styles.categoryTextContainer}>
+                      <Text style={styles.categoryTitle}>About My Package</Text>
+                      <Text style={styles.categorySubtitle}>
+                        Track or inquire about your shipment
+                      </Text>
+                    </View>
+                    <Feather name="chevron-right" size={20} color="#fff" />
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {ticketStep === 'package-input' && (
+            <>
+              <View style={styles.modalHeader}>
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setTicketStep('category')}
+                >
+                  <Feather name="arrow-left" size={20} color="#7B3F98" />
+                </TouchableOpacity>
+                <Text style={styles.modalTitle}>Package Information</Text>
+                <Text style={styles.modalSubtitle}>
+                  Enter your package tracking code
+                </Text>
+              </View>
+
+              <View style={styles.modalContent}>
+                <View style={styles.inputContainer}>
+                  <TextInput
+                    style={styles.packageInput}
+                    placeholder="Enter package tracking code"
+                    placeholderTextColor="#8E8E93"
+                    value={packageCode}
+                    onChangeText={setPackageCode}
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.continueButton,
+                    (!packageCode.trim() || validatingPackage) && styles.continueButtonDisabled
+                  ]}
+                  onPress={validateAndCreatePackageTicket}
+                  disabled={!packageCode.trim() || validatingPackage}
+                >
+                  {validatingPackage ? (
+                    <ActivityIndicator color="#fff" size="small" />
+                  ) : (
+                    <Text style={styles.continueButtonText}>Continue</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+
+          {ticketStep === 'creating' && (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator size="large" color="#7B3F98" />
+              <Text style={styles.loadingText}>Creating your support ticket...</Text>
+            </View>
+          )}
+
+          {ticketStep === 'complete' && (
+            <View style={styles.successContainer}>
+              <View style={styles.successIcon}>
+                <Feather name="check" size={32} color="#fff" />
+              </View>
+              <Text style={styles.successTitle}>Support Ticket Created!</Text>
+              <Text style={styles.successSubtitle}>
+                You'll be connected with an agent shortly
+              </Text>
+            </View>
+          )}
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+
+  if (loading && !showTicketModal) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
+        <LinearGradient
+          colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
+            >
+              <Feather name="arrow-left" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Loading...</Text>
+          </View>
+        </LinearGradient>
+        <View style={styles.loadingScreen}>
+          <ActivityIndicator size="large" color="#7B3F98" />
+          <Text style={styles.loadingText}>Setting up your support chat...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView style={styles.container}>
@@ -237,7 +574,7 @@ export default function SupportScreen({ navigation }: any) {
         <View style={styles.headerContent}>
           <TouchableOpacity 
             onPress={() => navigation.goBack()}
-            style={styles.backButton}
+            style={styles.headerBackButton}
           >
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
@@ -248,16 +585,24 @@ export default function SupportScreen({ navigation }: any) {
           />
           
           <View style={styles.headerInfo}>
-            <Text style={styles.headerTitle}>Customer Support</Text>
-            <Text style={styles.headerSubtitle}>last seen today at 08:11</Text>
+            <Text style={styles.headerTitle}>
+              {conversation?.assigned_agent?.name || 'Customer Support'}
+            </Text>
+            <Text style={styles.headerSubtitle}>
+              {conversation?.status === 'assigned' 
+                ? `Ticket ${conversation.ticket_id} • Assigned`
+                : conversation?.status === 'pending'
+                ? `Ticket ${conversation.ticket_id} • Connecting...`
+                : conversation?.ticket_id
+                ? `Ticket ${conversation.ticket_id}`
+                : 'Getting ready...'
+              }
+            </Text>
           </View>
           
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.headerButton}>
-              <Feather name="video" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerButton}>
-              <Feather name="phone" size={22} color="#fff" />
+              <Feather name="info" size={22} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerButton}>
               <Feather name="more-vertical" size={22} color="#fff" />
@@ -266,81 +611,101 @@ export default function SupportScreen({ navigation }: any) {
         </View>
       </LinearGradient>
 
-      {/* Messages Container with Keyboard Avoidance */}
+      {/* Messages Container */}
       <KeyboardAvoidingView 
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {/* Messages */}
-        <View style={[styles.messagesContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
-          <FlatList
-            ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={styles.messagesList}
-            showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
-          />
+        <View style={styles.messagesContainer}>
+          {messages.length > 0 ? (
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              renderItem={renderMessage}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={styles.messagesList}
+              showsVerticalScrollIndicator={false}
+              onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+              onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            />
+          ) : (
+            <View style={styles.emptyMessagesContainer}>
+              <View style={styles.emptyIcon}>
+                <Feather name="message-circle" size={48} color="#7B3F98" />
+              </View>
+              <Text style={styles.emptyTitle}>Support Chat Ready</Text>
+              <Text style={styles.emptySubtitle}>
+                {conversation ? 'Start the conversation below' : 'Create a ticket to get started'}
+              </Text>
+            </View>
+          )}
         </View>
 
-        {/* Input Area - Fixed at bottom */}
-        <View style={[
-          styles.inputContainer,
-          { 
-            paddingBottom: Platform.OS === 'ios' 
-              ? (keyboardHeight > 0 ? 8 : 34) 
-              : 8 
-          }
-        ]}>
-          <View style={styles.inputRow}>
-            <View style={styles.textInputContainer}>
-              <TouchableOpacity style={styles.inputButton}>
-                <Feather name="smile" size={20} color="#8E8E93" />
-              </TouchableOpacity>
+        {/* Input Area */}
+        {conversation && (
+          <View style={[
+            styles.inputContainer,
+            { 
+              paddingBottom: Platform.OS === 'ios' 
+                ? (keyboardHeight > 0 ? 8 : 34) 
+                : 8 
+            }
+          ]}>
+            <View style={styles.inputRow}>
+              <View style={styles.textInputContainer}>
+                <TouchableOpacity style={styles.inputButton}>
+                  <Feather name="smile" size={20} color="#8E8E93" />
+                </TouchableOpacity>
+                
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Message"
+                  placeholderTextColor="#8E8E93"
+                  value={inputText}
+                  onChangeText={setInputText}
+                  multiline
+                  maxLength={1000}
+                  editable={!sending}
+                  onFocus={() => {
+                    setTimeout(() => {
+                      flatListRef.current?.scrollToEnd({ animated: true });
+                    }, 100);
+                  }}
+                />
+                
+                <TouchableOpacity style={styles.attachButton}>
+                  <Feather name="paperclip" size={18} color="#8E8E93" />
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.cameraButton}>
+                  <Feather name="camera" size={18} color="#8E8E93" />
+                </TouchableOpacity>
+              </View>
               
-              <TextInput
-                style={styles.textInput}
-                placeholder="Message"
-                placeholderTextColor="#8E8E93"
-                value={inputText}
-                onChangeText={setInputText}
-                multiline
-                maxLength={1000}
-                onFocus={() => {
-                  // Auto-scroll to bottom when input is focused
-                  setTimeout(() => {
-                    flatListRef.current?.scrollToEnd({ animated: true });
-                  }, 100);
-                }}
-              />
-              
-              <TouchableOpacity style={styles.attachButton}>
-                <Feather name="paperclip" size={18} color="#8E8E93" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cameraButton}>
-                <Feather name="camera" size={18} color="#8E8E93" />
+              <TouchableOpacity 
+                style={[
+                  styles.sendButton,
+                  inputText.trim() ? styles.sendButtonActive : styles.voiceButton,
+                  sending && styles.sendButtonDisabled
+                ]}
+                onPress={inputText.trim() ? sendMessage : undefined}
+                disabled={sending}
+              >
+                {sending ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : inputText.trim() ? (
+                  <Feather name="send" size={18} color="#fff" />
+                ) : (
+                  <Feather name="mic" size={18} color="#fff" />
+                )}
               </TouchableOpacity>
             </View>
-            
-            <TouchableOpacity 
-              style={[
-                styles.sendButton,
-                inputText.trim() ? styles.sendButtonActive : styles.voiceButton
-              ]}
-              onPress={inputText.trim() ? sendMessage : undefined}
-            >
-              {inputText.trim() ? (
-                <Feather name="send" size={18} color="#fff" />
-              ) : (
-                <Feather name="mic" size={18} color="#fff" />
-              )}
-            </TouchableOpacity>
           </View>
-        </View>
+        )}
       </KeyboardAvoidingView>
+
+      {/* Ticket Creation Modal */}
+      {renderTicketModal()}
     </SafeAreaView>
   );
 }
@@ -368,7 +733,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
-  backButton: {
+  headerBackButton: {
     marginRight: 12,
     padding: 4,
   },
@@ -399,11 +764,22 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 100,
+    minWidth: 80,
   },
   headerButton: {
     marginLeft: 16,
     padding: 6,
+  },
+  loadingScreen: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0B141B',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    marginTop: 16,
   },
   messagesContainer: {
     flex: 1,
@@ -413,6 +789,33 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 8,
     flexGrow: 1,
+  },
+  emptyMessagesContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+  },
+  emptyIcon: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  emptySubtitle: {
+    color: '#8E8E93',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 22,
   },
   messageWrapper: {
     marginVertical: 3,
@@ -445,6 +848,10 @@ const styles = StyleSheet.create({
     fontSize: 16,
     lineHeight: 20,
     paddingTop: 4,
+  },
+  systemMessageText: {
+    fontStyle: 'italic',
+    opacity: 0.8,
   },
   voiceMessage: {
     flexDirection: 'row',
@@ -555,5 +962,134 @@ const styles = StyleSheet.create({
   },
   voiceButton: {
     backgroundColor: '#7B3F98',
+  },
+  sendButtonDisabled: {
+    opacity: 0.6,
+  },
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    backgroundColor: '#1F2C34',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
+    maxHeight: '70%',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginTop: 12,
+    marginBottom: 20,
+  },
+  modalHeader: {
+    paddingHorizontal: 24,
+    paddingBottom: 24,
+    position: 'relative',
+  },
+  backButton: {
+    position: 'absolute',
+    left: 24,
+    top: 0,
+    zIndex: 1,
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 22,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  modalSubtitle: {
+    color: '#8E8E93',
+    fontSize: 16,
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  modalContent: {
+    paddingHorizontal: 24,
+  },
+  categoryButton: {
+    marginBottom: 16,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  categoryGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+  },
+  categoryTextContainer: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  categoryTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  categorySubtitle: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  packageInput: {
+    backgroundColor: '#2A3942',
+    borderRadius: 12,
+    padding: 16,
+    color: '#fff',
+    fontSize: 16,
+    marginBottom: 24,
+  },
+  continueButton: {
+    backgroundColor: '#7B3F98',
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 52,
+  },
+  continueButtonDisabled: {
+    opacity: 0.5,
+  },
+  continueButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  loadingContainer: {
+    padding: 48,
+    alignItems: 'center',
+  },
+  successContainer: {
+    padding: 48,
+    alignItems: 'center',
+  },
+  successIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: '#10B981',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 24,
+  },
+  successTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  successSubtitle: {
+    color: '#8E8E93',
+    fontSize: 16,
+    textAlign: 'center',
   },
 });
