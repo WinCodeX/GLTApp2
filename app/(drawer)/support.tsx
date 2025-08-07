@@ -5,13 +5,10 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
   FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   SafeAreaView,
   StatusBar,
@@ -19,14 +16,18 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
+  Modal,
+  Alert,
+  ActivityIndicator,
+  Animated,
 } from 'react-native';
 import Toast from 'react-native-toast-message';
-import { supportApi, type Conversation, type Message } from '../../services/supportApi';
+import { supportApi, type Message, type Conversation } from '../../services/supportApi';
 
 interface SupportScreenProps {
   navigation: any;
-  route: {
+  route?: {
     params?: {
       conversationId?: string;
     };
@@ -54,7 +55,7 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
   const slideAnimation = useRef(new Animated.Value(0)).current;
   
   // Get conversation ID from route params
-  const conversationId = route.params?.conversationId;
+  const conversationId = route?.params?.conversationId;
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -196,10 +197,10 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
     setValidatingPackage(true);
     
     try {
-      // Validate package exists
-      const validateResponse = await supportApi.validatePackage(packageCode.trim());
+      // Validate package exists (you might need to adjust this endpoint)
+      const validateResponse = await api.get(`/api/v1/packages/${packageCode.trim()}/validate`);
       
-      if (validateResponse.success && validateResponse.data?.valid) {
+      if (validateResponse.data.success && validateResponse.data.valid) {
         setTicketStep('creating');
         createTicket('follow_up', validateResponse.data.package?.id);
       } else {
@@ -228,9 +229,12 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
 
   const createTicket = async (category: string, packageId?: string) => {
     try {
-      const response = await supportApi.createSupportTicket(category, packageId);
+      const response = await api.post('/api/v1/conversations/support_ticket', {
+        category,
+        package_id: packageId,
+      });
       
-      if (response.success && response.data) {
+      if (response.data.success && response.data) {
         setConversation(response.data.conversation);
         await loadMessages(response.data.conversation_id);
         
@@ -253,20 +257,10 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
         });
       } else {
         Toast.show({
-          type: 'info',
-          text1: 'Ticket Saved',
-          text2: response.message || 'Ticket will be created when connection is restored',
+          type: 'error',
+          text1: 'Failed to Create Ticket',
+          text2: 'Please try again later',
         });
-        
-        // Close modal even if cached
-        setTimeout(() => {
-          animateModalOut(() => {
-            setShowTicketModal(false);
-            setTicketStep('category');
-            setSelectedCategory('');
-            setPackageCode('');
-          });
-        }, 2000);
       }
     } catch (error) {
       console.error('Error creating ticket:', error);
@@ -274,7 +268,7 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
       Toast.show({
         type: 'error',
         text1: 'Connection Issue',
-        text2: 'Ticket saved and will be created when online',
+        text2: 'Please check your internet connection',
       });
     }
   };
@@ -311,12 +305,18 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
     }, 100);
 
     try {
-      const response = await supportApi.sendMessage(conversation.id, messageText);
+      const response = await api.post(`/api/v1/conversations/${conversation.id}/messages`, {
+        message: {
+          content: messageText,
+          message_type: 'text',
+          metadata: {},
+        },
+      });
       
-      if (response.success && response.data) {
+      if (response.data.success && response.data) {
         setMessages(prev => 
           prev.map(msg => 
-            msg.id === tempMessage.id ? response.data!.message : msg
+            msg.id === tempMessage.id ? response.data.message : msg
           )
         );
       } else {
@@ -331,13 +331,27 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
         
         Toast.show({
           type: 'info',
-          text1: 'Message Cached',
+          text1: 'Message Queued',
           text2: 'Will send when connection is restored',
         });
       }
     } catch (error) {
       console.error('Error sending message:', error);
-      setMessages(prev => prev.filter(msg => msg.id !== tempMessage.id));
+      
+      // Keep temp message but show it as failed
+      setMessages(prev => 
+        prev.map(msg => 
+          msg.id === tempMessage.id 
+            ? { ...msg, user: { ...msg.user, name: 'You (failed)' } }
+            : msg
+        )
+      );
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to Send',
+        text2: 'Please check your connection',
+      });
     } finally {
       setSending(false);
     }
@@ -478,17 +492,15 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
               </View>
 
               <View style={styles.modalContent}>
-                <View style={styles.inputContainer}>
-                  <TextInput
-                    style={styles.packageInput}
-                    placeholder="Enter package tracking code"
-                    placeholderTextColor="#8E8E93"
-                    value={packageCode}
-                    onChangeText={setPackageCode}
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                  />
-                </View>
+                <TextInput
+                  style={styles.packageInput}
+                  placeholder="Enter package tracking code"
+                  placeholderTextColor="#8E8E93"
+                  value={packageCode}
+                  onChangeText={setPackageCode}
+                  autoCapitalize="characters"
+                  autoCorrect={false}
+                />
 
                 <TouchableOpacity
                   style={[
@@ -544,7 +556,7 @@ export default function SupportScreen({ navigation, route }: SupportScreenProps)
           <View style={styles.headerContent}>
             <TouchableOpacity 
               onPress={() => navigation.goBack()}
-              style={styles.backButton}
+              style={styles.headerBackButton}
             >
               <Feather name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
