@@ -471,7 +471,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handleBasicInquiry}
                 >
                   <LinearGradient
-                    colors={['#A855F7', '#9333EA', '#7C2D12']}
+                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
@@ -492,7 +492,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handlePackageInquiry}
                 >
                   <LinearGradient
-                    colors={['#A855F7', '#9333EA', '#7C2D12']}
+                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
