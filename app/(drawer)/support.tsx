@@ -386,8 +386,16 @@ export default function SupportScreen({ navigation }: any) {
         {/* Tagged message header for package inquiries */}
         {item.isTagged && item.packageCode && (
           <View style={styles.taggedHeader}>
-            <Feather name="package" size={12} color="#E1BEE7" />
-            <Text style={styles.taggedText}>Package: {item.packageCode}</Text>
+            <View style={styles.taggedQuote} />
+            <View style={styles.taggedContent}>
+              <View style={styles.taggedInfo}>
+                <Feather name="package" size={12} color="#E1BEE7" />
+                <Text style={styles.taggedText}>Package: {item.packageCode}</Text>
+              </View>
+              <Text style={styles.taggedMessage} numberOfLines={2}>
+                Package inquiry for {item.packageCode}
+              </Text>
+            </View>
           </View>
         )}
         
@@ -462,28 +470,42 @@ export default function SupportScreen({ navigation }: any) {
                   style={styles.optionButton}
                   onPress={handleBasicInquiry}
                 >
-                  <View style={styles.optionIcon}>
-                    <Feather name="help-circle" size={24} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.optionContent}>
-                    <Text style={styles.optionTitle}>Basic Inquiry</Text>
-                    <Text style={styles.optionDescription}>General questions about GLT services</Text>
-                  </View>
-                  <Feather name="chevron-right" size={20} color="#8E8E93" />
+                  <LinearGradient
+                    colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.optionButtonGradient}
+                  >
+                    <View style={styles.optionIcon}>
+                      <Feather name="help-circle" size={24} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={styles.optionTitle}>Basic Inquiry</Text>
+                      <Text style={styles.optionDescription}>General questions about GLT services</Text>
+                    </View>
+                    <Feather name="chevron-right" size={20} color="#FFFFFF" />
+                  </LinearGradient>
                 </TouchableOpacity>
 
                 <TouchableOpacity
                   style={styles.optionButton}
                   onPress={handlePackageInquiry}
                 >
-                  <View style={styles.optionIcon}>
-                    <Feather name="package" size={24} color="#FFFFFF" />
-                  </View>
-                  <View style={styles.optionContent}>
-                    <Text style={styles.optionTitle}>About My Package</Text>
-                    <Text style={styles.optionDescription}>Track or inquire about your shipment</Text>
-                  </View>
-                  <Feather name="chevron-right" size={20} color="#8E8E93" />
+                  <LinearGradient
+                    colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.optionButtonGradient}
+                  >
+                    <View style={styles.optionIcon}>
+                      <Feather name="package" size={24} color="#FFFFFF" />
+                    </View>
+                    <View style={styles.optionContent}>
+                      <Text style={styles.optionTitle}>About My Package</Text>
+                      <Text style={styles.optionDescription}>Track or inquire about your shipment</Text>
+                    </View>
+                    <Feather name="chevron-right" size={20} color="#FFFFFF" />
+                  </LinearGradient>
                 </TouchableOpacity>
               </>
             )}
@@ -628,7 +650,10 @@ export default function SupportScreen({ navigation }: any) {
           
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.headerButton}>
-              <Feather name="info" size={22} color="#fff" />
+              <Feather name="video" size={22} color="#fff" />
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.headerButton}>
+              <Feather name="phone" size={22} color="#fff" />
             </TouchableOpacity>
             <TouchableOpacity style={styles.headerButton}>
               <Feather name="more-vertical" size={22} color="#fff" />
@@ -773,7 +798,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 80,
+    minWidth: 120,
   },
   headerButton: {
     marginLeft: 16,
@@ -815,18 +840,40 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   taggedHeader: {
+    backgroundColor: 'rgba(225, 190, 231, 0.1)',
+    borderRadius: 8,
+    padding: 8,
+    marginBottom: 8,
+    borderLeftWidth: 3,
+    borderLeftColor: '#E1BEE7',
+  },
+  taggedQuote: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: 3,
+    backgroundColor: '#E1BEE7',
+    borderRadius: 2,
+  },
+  taggedContent: {
+    marginLeft: 8,
+  },
+  taggedInfo: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingBottom: 6,
     marginBottom: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(225, 190, 231, 0.2)',
   },
   taggedText: {
     color: '#E1BEE7',
     fontSize: 12,
     marginLeft: 6,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  taggedMessage: {
+    color: '#B8B8B8',
+    fontSize: 13,
+    fontStyle: 'italic',
   },
   messageText: {
     color: '#fff',
@@ -989,19 +1036,20 @@ const styles = StyleSheet.create({
     lineHeight: 22,
   },
   optionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#7B3F98',
     borderRadius: 16,
-    padding: 20,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+    elevation: 8,
     shadowColor: '#7B3F98',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+  },
+  optionButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    borderRadius: 16,
   },
   optionIcon: {
     width: 50,
