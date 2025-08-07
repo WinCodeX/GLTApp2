@@ -15,6 +15,7 @@ import {
   Modal,
   Animated,
   Dimensions,
+  BackHandler,
 } from 'react-native';
 import {
   Feather,
@@ -60,6 +61,7 @@ export default function SupportScreen() {
       router.replace('/(tabs)');
     }
   };
+
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
