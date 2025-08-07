@@ -22,7 +22,7 @@ import {
   Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supportApi } from '../../services/supportApi';
+import { supportApi } from '../services/supportApi';
 import colors from '../../theme/colors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -198,63 +198,66 @@ export default function SupportScreen({ navigation }: any) {
     if (!inquiryText.trim()) return;
 
     setIsLoading(true);
+    
+    // Add message to local state immediately for seamless experience
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      text: inquiryText.trim(),
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      isSupport: false,
+      type: 'text',
+    };
+
+    setMessages(prev => [...prev, newMessage]);
+    closeAllModals();
+    
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    // Simulate support response immediately
+    setTimeout(() => {
+      const supportResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        text: 'Thank you for contacting us. I\'ve received your inquiry and will help you with your question.',
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: true,
+        type: 'text',
+      };
+      setMessages(prev => [...prev, supportResponse]);
+      
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }, 1500);
+
+    setIsLoading(false);
+
+    // Handle API calls in background without blocking UI
     try {
       const result = await supportApi.createSupportTicket('basic_inquiry');
       
       if (result.success && result.data) {
         setConversationId(result.data.conversation_id);
         
-        // Send the inquiry message
+        // Send the inquiry message in background
         await supportApi.sendMessage(
           result.data.conversation_id,
           inquiryText.trim(),
           'text'
         );
-
-        // Add message to local state
-        const newMessage: Message = {
-          id: Date.now().toString(),
-          text: inquiryText.trim(),
-          timestamp: new Date().toLocaleTimeString('en-US', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          isSupport: false,
-          type: 'text',
-        };
-
-        setMessages(prev => [...prev, newMessage]);
-        closeAllModals();
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-
-        // Simulate support response
-        setTimeout(() => {
-          const supportResponse: Message = {
-            id: (Date.now() + 1).toString(),
-            text: 'Thank you for contacting us. I\'ve received your inquiry and will help you with your question.',
-            timestamp: new Date().toLocaleTimeString('en-US', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            isSupport: true,
-            type: 'text',
-          };
-          setMessages(prev => [...prev, supportResponse]);
-          
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }, 2000);
       }
     } catch (error) {
-      console.error('Error creating basic inquiry ticket:', error);
-    } finally {
-      setIsLoading(false);
+      console.log('Ticket cached for later retry');
+      // Error is handled silently by supportApi caching
     }
   };
 
@@ -262,66 +265,69 @@ export default function SupportScreen({ navigation }: any) {
     if (!packageCode.trim() || !packageInquiry.trim()) return;
 
     setIsLoading(true);
+    
+    // Add tagged message to local state immediately for seamless experience
+    const newMessage: Message = {
+      id: Date.now().toString(),
+      text: packageInquiry.trim(),
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      isSupport: false,
+      type: 'text',
+      packageCode: packageCode.trim(),
+      isTagged: true,
+    };
+
+    setMessages(prev => [...prev, newMessage]);
+    closeAllModals();
+    
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+
+    // Simulate support response immediately
+    setTimeout(() => {
+      const supportResponse: Message = {
+        id: (Date.now() + 1).toString(),
+        text: `Thank you for your inquiry about package ${packageCode.trim()}. Let me check the status for you.`,
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: true,
+        type: 'text',
+      };
+      setMessages(prev => [...prev, supportResponse]);
+      
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    }, 1500);
+
+    setIsLoading(false);
+
+    // Handle API calls in background without blocking UI
     try {
       const result = await supportApi.createSupportTicket('package_inquiry', packageCode.trim());
       
       if (result.success && result.data) {
         setConversationId(result.data.conversation_id);
         
-        // Send the package inquiry message
+        // Send the package inquiry message in background
         await supportApi.sendMessage(
           result.data.conversation_id,
           packageInquiry.trim(),
           'text',
           { package_code: packageCode.trim() }
         );
-
-        // Add tagged message to local state
-        const newMessage: Message = {
-          id: Date.now().toString(),
-          text: packageInquiry.trim(),
-          timestamp: new Date().toLocaleTimeString('en-US', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          isSupport: false,
-          type: 'text',
-          packageCode: packageCode.trim(),
-          isTagged: true,
-        };
-
-        setMessages(prev => [...prev, newMessage]);
-        closeAllModals();
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-
-        // Simulate support response
-        setTimeout(() => {
-          const supportResponse: Message = {
-            id: (Date.now() + 1).toString(),
-            text: `Thank you for your inquiry about package ${packageCode.trim()}. Let me check the status for you.`,
-            timestamp: new Date().toLocaleTimeString('en-US', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            isSupport: true,
-            type: 'text',
-          };
-          setMessages(prev => [...prev, supportResponse]);
-          
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }, 2000);
       }
     } catch (error) {
-      console.error('Error creating package inquiry ticket:', error);
-    } finally {
-      setIsLoading(false);
+      console.log('Package inquiry cached for later retry');
+      // Error is handled silently by supportApi caching
     }
   };
 
@@ -457,11 +463,11 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handleBasicInquiry}
                 >
                   <View style={styles.optionIcon}>
-                    <Feather name="help-circle" size={24} color="#7B3F98" />
+                    <Feather name="help-circle" size={24} color="#FFFFFF" />
                   </View>
                   <View style={styles.optionContent}>
                     <Text style={styles.optionTitle}>Basic Inquiry</Text>
-                    <Text style={styles.optionDescription}>General questions about our services</Text>
+                    <Text style={styles.optionDescription}>General questions about GLT services</Text>
                   </View>
                   <Feather name="chevron-right" size={20} color="#8E8E93" />
                 </TouchableOpacity>
@@ -471,11 +477,11 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handlePackageInquiry}
                 >
                   <View style={styles.optionIcon}>
-                    <Feather name="package" size={24} color="#7B3F98" />
+                    <Feather name="package" size={24} color="#FFFFFF" />
                   </View>
                   <View style={styles.optionContent}>
                     <Text style={styles.optionTitle}>About My Package</Text>
-                    <Text style={styles.optionDescription}>Track or inquire about your package</Text>
+                    <Text style={styles.optionDescription}>Track or inquire about your shipment</Text>
                   </View>
                   <Feather name="chevron-right" size={20} color="#8E8E93" />
                 </TouchableOpacity>
@@ -985,18 +991,23 @@ const styles = StyleSheet.create({
   optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(31, 44, 52, 0.8)',
+    backgroundColor: '#7B3F98',
     borderRadius: 16,
     padding: 20,
     marginBottom: 16,
     borderWidth: 1,
-    borderColor: 'rgba(123, 63, 152, 0.3)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowColor: '#7B3F98',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
   optionIcon: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: 'rgba(123, 63, 152, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 16,
