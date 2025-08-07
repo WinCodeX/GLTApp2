@@ -175,7 +175,7 @@ const ContactsScreen = ({ navigation }) => {
         <View style={styles.statusContainer}>
           {isRegistered ? (
             <View style={styles.registeredBadge}>
-              <Ionicons name="checkmark-circle" size={20} color="#25D366" />
+              <Ionicons name="checkmark-circle" size={20} color="#7B2CBF" />
             </View>
           ) : (
             <TouchableOpacity 
@@ -190,33 +190,20 @@ const ContactsScreen = ({ navigation }) => {
     );
   };
 
-  const renderHeader = () => (
-    <View style={styles.headerOptions}>
-      <TouchableOpacity style={styles.headerOption}>
-        <View style={styles.headerIconContainer}>
-          <Ionicons name="people" size={24} color="#25D366" />
-        </View>
-        <Text style={styles.headerOptionText}>New group</Text>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.headerOption}>
-        <View style={styles.headerIconContainer}>
-          <Ionicons name="person-add" size={24} color="#25D366" />
-        </View>
-        <Text style={styles.headerOptionText}>New contact</Text>
-        <View style={styles.qrCode}>
-          <Ionicons name="qr-code" size={16} color="#666" />
-        </View>
-      </TouchableOpacity>
-      
-      <TouchableOpacity style={styles.headerOption}>
-        <View style={styles.headerIconContainer}>
-          <Ionicons name="people-circle" size={24} color="#25D366" />
-        </View>
-        <Text style={styles.headerOptionText}>New community</Text>
-      </TouchableOpacity>
-      
-      <Text style={styles.sectionTitle}>Contacts on GLT</Text>
+  const renderSectionHeaders = () => {
+    const registeredContacts = filteredContacts.filter(contact => isContactRegistered(contact));
+    const unregisteredContacts = filteredContacts.filter(contact => !isContactRegistered(contact));
+    
+    return {
+      registeredContacts,
+      unregisteredContacts
+    };
+  };
+
+  const renderSectionHeader = (title, count) => (
+    <View style={styles.sectionHeaderContainer}>
+      <Text style={styles.sectionTitle}>{title}</Text>
+      <Text style={styles.sectionCount}>({count})</Text>
     </View>
   );
 
@@ -230,25 +217,57 @@ const ContactsScreen = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#075E54" />
+      <StatusBar barStyle="light-content" backgroundColor="#7B2CBF" />
       
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#666" style={styles.searchIcon} />
+        <Ionicons name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
         <TextInput
           style={styles.searchInput}
           placeholder="Search contacts..."
-          placeholderTextColor="#666"
+          placeholderTextColor="#9CA3AF"
           value={searchQuery}
           onChangeText={setSearchQuery}
         />
       </View>
 
+      {/* Contacts Sections */}
       <FlatList
-        data={filteredContacts}
-        renderItem={renderContact}
-        keyExtractor={(item) => item.id}
-        ListHeaderComponent={renderHeader}
+        data={(() => {
+          const { registeredContacts, unregisteredContacts } = renderSectionHeaders();
+          const sections = [];
+          
+          // Add registered contacts section
+          if (registeredContacts.length > 0) {
+            sections.push({
+              type: 'header',
+              id: 'registered-header',
+              title: 'Contacts on GLT',
+              count: registeredContacts.length
+            });
+            sections.push(...registeredContacts.map(contact => ({ ...contact, section: 'registered' })));
+          }
+          
+          // Add unregistered contacts section
+          if (unregisteredContacts.length > 0) {
+            sections.push({
+              type: 'header',
+              id: 'unregistered-header',
+              title: 'Invite to GLT',
+              count: unregisteredContacts.length
+            });
+            sections.push(...unregisteredContacts.map(contact => ({ ...contact, section: 'unregistered' })));
+          }
+          
+          return sections;
+        })()}
+        renderItem={({ item }) => {
+          if (item.type === 'header') {
+            return renderSectionHeader(item.title, item.count);
+          }
+          return renderContact({ item });
+        }}
+        keyExtractor={(item) => item.type === 'header' ? item.id : item.id}
         style={styles.contactsList}
         showsVerticalScrollIndicator={false}
       />
@@ -259,67 +278,57 @@ const ContactsScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#121212',
+    backgroundColor: '#0F0F0F',
   },
   centered: {
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
-    color: '#fff',
+    color: '#E5E7EB',
     fontSize: 16,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1e1e1e',
+    backgroundColor: '#1F1F1F',
     marginHorizontal: 16,
-    marginVertical: 8,
+    marginTop: 8,
+    marginBottom: 16,
     borderRadius: 25,
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: '#374151',
   },
   searchIcon: {
-    marginRight: 8,
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    color: '#fff',
+    color: '#E5E7EB',
     fontSize: 16,
   },
-  headerOptions: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  headerOption: {
+  sectionHeaderContainer: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingHorizontal: 16,
     paddingVertical: 12,
-  },
-  headerIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#25D366',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  headerOptionText: {
-    color: '#fff',
-    fontSize: 16,
-    flex: 1,
-  },
-  qrCode: {
-    marginLeft: 'auto',
+    backgroundColor: '#1F1F1F',
+    borderBottomWidth: 1,
+    borderBottomColor: '#374151',
   },
   sectionTitle: {
-    color: '#666',
-    fontSize: 14,
-    fontWeight: '500',
-    marginTop: 16,
-    marginBottom: 8,
+    color: '#7B2CBF',
+    fontSize: 16,
+    fontWeight: '600',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  sectionCount: {
+    color: '#9CA3AF',
+    fontSize: 14,
+    marginLeft: 8,
   },
   contactsList: {
     flex: 1,
@@ -328,8 +337,10 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#121212',
+    paddingVertical: 14,
+    backgroundColor: '#0F0F0F',
+    borderBottomWidth: 1,
+    borderBottomColor: '#1F1F1F',
   },
   avatarContainer: {
     marginRight: 16,
@@ -340,12 +351,14 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   defaultAvatar: {
-    backgroundColor: '#333',
+    backgroundColor: '#374151',
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#7B2CBF',
   },
   avatarText: {
-    color: '#fff',
+    color: '#E5E7EB',
     fontSize: 20,
     fontWeight: 'bold',
   },
@@ -353,19 +366,20 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   contactName: {
-    color: '#fff',
+    color: '#E5E7EB',
     fontSize: 16,
     fontWeight: '500',
   },
   contactPhone: {
-    color: '#666',
+    color: '#9CA3AF',
     fontSize: 14,
     marginTop: 2,
   },
   inviteText: {
-    color: '#25D366',
+    color: '#A855F7',
     fontSize: 12,
     marginTop: 2,
+    fontWeight: '500',
   },
   statusContainer: {
     alignItems: 'center',
@@ -375,15 +389,21 @@ const styles = StyleSheet.create({
     padding: 4,
   },
   inviteButton: {
-    backgroundColor: '#25D366',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 15,
+    backgroundColor: '#7B2CBF',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    shadowColor: '#7B2CBF',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 4,
   },
   inviteButtonText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 12,
     fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
 });
 
