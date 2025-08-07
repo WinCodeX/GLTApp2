@@ -40,6 +40,7 @@ interface Message {
 }
 
 export default function SupportScreen() {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -153,11 +154,24 @@ export default function SupportScreen() {
       () => setKeyboardHeight(0)
     );
 
+    // Handle Android back button
+    const backAction = () => {
+      if (showTicketModal || showInquiryModal || showPackageModal) {
+        closeAllModals();
+        return true;
+      }
+      router.back();
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
     return () => {
       keyboardDidHideListener.remove();
       keyboardDidShowListener.remove();
+      backHandler.remove();
     };
-  }, []);
+  }, [showTicketModal, showInquiryModal, showPackageModal]);
 
   useEffect(() => {
     if (showTicketModal || showInquiryModal || showPackageModal) {
