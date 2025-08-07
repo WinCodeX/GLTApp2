@@ -22,7 +22,7 @@ import {
   Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supportApi } from '../services/supportApi';
+import { supportApi } from '../../services/supportApi';
 import colors from '../../theme/colors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
