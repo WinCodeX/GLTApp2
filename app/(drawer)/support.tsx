@@ -471,7 +471,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handleBasicInquiry}
                 >
                   <LinearGradient
-                    colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.optionButtonGradient}
@@ -481,7 +481,7 @@ export default function SupportScreen({ navigation }: any) {
                     </View>
                     <View style={styles.optionContent}>
                       <Text style={styles.optionTitle}>Basic Inquiry</Text>
-                      <Text style={styles.optionDescription}>General questions about GLT services</Text>
+                      <Text style={styles.optionDescription}>General questions about our services</Text>
                     </View>
                     <Feather name="chevron-right" size={20} color="#FFFFFF" />
                   </LinearGradient>
@@ -492,7 +492,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handlePackageInquiry}
                 >
                   <LinearGradient
-                    colors={['#8B5CF6', '#7C3AED', '#6D28D9']}
+                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 1, y: 1 }}
                     style={styles.optionButtonGradient}
@@ -502,7 +502,7 @@ export default function SupportScreen({ navigation }: any) {
                     </View>
                     <View style={styles.optionContent}>
                       <Text style={styles.optionTitle}>About My Package</Text>
-                      <Text style={styles.optionDescription}>Track or inquire about your shipment</Text>
+                      <Text style={styles.optionDescription}>Track or inquire about your package</Text>
                     </View>
                     <Feather name="chevron-right" size={20} color="#FFFFFF" />
                   </LinearGradient>
