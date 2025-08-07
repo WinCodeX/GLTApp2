@@ -22,7 +22,7 @@ import {
   Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { supportApi } from '../../services/supportApi';
+import { supportApi } from '../services/supportApi';
 import colors from '../../theme/colors';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -471,9 +471,9 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handleBasicInquiry}
                 >
                   <LinearGradient
-                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
+                    colors={['#A855F7', '#9333EA', '#7C2D12']}
                     start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
+                    end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
                   >
                     <View style={styles.optionIcon}>
@@ -492,9 +492,9 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handlePackageInquiry}
                 >
                   <LinearGradient
-                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
+                    colors={['#A855F7', '#9333EA', '#7C2D12']}
                     start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
+                    end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
                   >
                     <View style={styles.optionIcon}>
