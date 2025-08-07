@@ -5,10 +5,13 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Animated,
   FlatList,
   Image,
   Keyboard,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   SafeAreaView,
   StatusBar,
@@ -16,14 +19,10 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
-  Modal,
-  Alert,
-  ActivityIndicator,
-  Animated,
+  View
 } from 'react-native';
 import Toast from 'react-native-toast-message';
-import { supportApi, type Message, type Conversation } from '../services/supportApi';
+import { supportApi, type Conversation, type Message } from '../../services/supportApi';
 
 interface SupportScreenProps {
   navigation: any;
