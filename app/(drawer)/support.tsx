@@ -471,7 +471,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handleBasicInquiry}
                 >
                   <LinearGradient
-                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
+                    colors={['#B794F6', '#9F7AEA', '#5B21B6']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
@@ -492,7 +492,7 @@ export default function SupportScreen({ navigation }: any) {
                   onPress={handlePackageInquiry}
                 >
                   <LinearGradient
-                    colors={['#B794F6', '#9F7AEA', '#805AD5']}
+                    colors={['#B794F6', '#9F7AEA', '#5B21B6']}
                     start={{ x: 0, y: 0 }}
                     end={{ x: 0, y: 1 }}
                     style={styles.optionButtonGradient}
@@ -1070,7 +1070,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   optionDescription: {
-    color: '#8E8E93',
+    color: '#E5E7EB',
     fontSize: 14,
     lineHeight: 18,
   },
