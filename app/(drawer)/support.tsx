@@ -41,6 +41,24 @@ interface Message {
 
 export default function SupportScreen() {
   const router = useRouter();
+
+  const handleGoBack = () => {
+    console.log('🔙 Support screen: navigating back');
+    
+    try {
+      if (router.canGoBack && router.canGoBack()) {
+        console.log('✅ Using router.back()');
+        router.back();
+      } else {
+        console.log('🏠 No back history, using router.replace(/(tabs))');
+        router.replace('/(tabs)');
+      }
+    } catch (error) {
+      console.error('❌ Navigation error:', error);
+      // Ultimate fallback
+      router.replace('/(tabs)');
+    }
+  };
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -160,7 +178,7 @@ export default function SupportScreen() {
         closeAllModals();
         return true;
       }
-      router.back();
+      handleGoBack();
       return true;
     };
 
@@ -648,7 +666,7 @@ export default function SupportScreen() {
           <TouchableOpacity 
             onPress={() => {
               console.log('Back button pressed');
-              router.back();
+              handleGoBack();
             }}
             style={styles.backButton}
             activeOpacity={0.7}
