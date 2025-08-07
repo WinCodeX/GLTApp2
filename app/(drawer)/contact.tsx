@@ -13,7 +13,7 @@ import {
 } from 'react-native';
 import * as Contacts from 'expo-contacts';
 import { Ionicons } from '@expo/vector-icons';
-import { checkRegisteredContacts, handleApiError } from '../lib/api';
+import { checkRegisteredContacts, handleApiError } from '../../lib/api';
 
 const ContactsScreen = ({ navigation }) => {
   const [contacts, setContacts] = useState([]);
