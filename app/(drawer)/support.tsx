@@ -39,7 +39,7 @@ interface Message {
   isTagged?: boolean;
 }
 
-export default function SupportScreen({ navigation }: any) {
+export default function SupportScreen() {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: '1',
@@ -632,8 +632,12 @@ export default function SupportScreen({ navigation }: any) {
       >
         <View style={styles.headerContent}>
           <TouchableOpacity 
-            onPress={() => navigation.goBack()}
+            onPress={() => {
+              console.log('Back button pressed');
+              router.back();
+            }}
             style={styles.backButton}
+            activeOpacity={0.7}
           >
             <Feather name="arrow-left" size={24} color="#fff" />
           </TouchableOpacity>
