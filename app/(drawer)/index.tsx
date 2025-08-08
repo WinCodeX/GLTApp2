@@ -10,10 +10,12 @@ import {
   ScrollView,
   Dimensions,
   Easing,
+  Alert,
 } from 'react-native';
 import { FAB } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import GLTHeader from '../../components/GLTHeader';
+import PackageCreationModal from '../../components/PackageCreationModal';
 import colors from '../../theme/colors';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -27,6 +29,12 @@ export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
   const [destination, setDestination] = useState('');
   const [cost, setCost] = useState<number | null>(null);
+  const [showPackageModal, setShowPackageModal] = useState(false);
+  
+  // Empty arrays for backend data - will be populated later
+  const [locationData, setLocationData] = useState([]);
+  const [agentData, setAgentData] = useState([]);
+  
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -62,7 +70,47 @@ export default function HomeScreen() {
   };
 
   const handleFabPress = () => {
-    console.log('FAB pressed');
+    console.log('📦 Opening package creation modal');
+    setShowPackageModal(true);
+  };
+
+  const handlePackageSubmit = async (packageData: any) => {
+    try {
+      console.log('📦 Creating package with data:', packageData);
+      
+      // TODO: Replace with actual API call when backend is ready
+      // const response = await packagesApi.createPackage(packageData);
+      
+      // Mock success response for now
+      const mockTrackingCode = `NRB-${String(Math.floor(Math.random() * 1000)).padStart(3, '0')}-KSM`;
+      
+      Alert.alert(
+        'Success! 🎉',
+        `Package created successfully!\n\nTracking Code: ${mockTrackingCode}\n\nStatus: Pending Payment`,
+        [
+          {
+            text: 'Create Another',
+            onPress: () => {
+              setTimeout(() => setShowPackageModal(true), 500);
+            }
+          },
+          { text: 'OK' }
+        ]
+      );
+      
+    } catch (error) {
+      console.error('❌ Error creating package:', error);
+      Alert.alert(
+        'Error',
+        'Failed to create package. Please try again.',
+        [{ text: 'OK' }]
+      );
+      throw error; // Re-throw to let modal handle it
+    }
+  };
+
+  const handleCloseModal = () => {
+    setShowPackageModal(false);
   };
 
   const LocationTag = ({ location }) => (
@@ -147,6 +195,15 @@ export default function HomeScreen() {
       <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
         <FAB icon="plus" style={styles.fab} onPress={handleFabPress} color="white" />
       </LinearGradient>
+
+      {/* Package Creation Modal */}
+      <PackageCreationModal
+        visible={showPackageModal}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmit}
+        locations={locationData}
+        agents={agentData}
+      />
     </SafeAreaView>
   );
 }
@@ -157,7 +214,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 24, fontWeight: 'bold', color: '#fff',
     textAlign: 'center', marginBottom: 15, opacity: 0.9,
-textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
