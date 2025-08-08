@@ -13,6 +13,7 @@ import {
   Platform,
   Alert,
   ActivityIndicator,
+  StyleSheet,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
