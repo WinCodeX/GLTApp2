@@ -1,6 +1,6 @@
 // services/supportApi.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import api from '../lib//api'; // Your existing axios setup
+import api from '../lib/api'; // Fixed: Removed double slash
 
 interface ApiResponse<T> {
   success: boolean;
@@ -69,10 +69,21 @@ class SupportApiService {
     try {
       console.log(`🎫 Creating support ticket: ${category}${packageId ? ` for package ${packageId}` : ''}`);
       
-      const response = await api.post('/api/v1/conversations/support_ticket', {
+      // Prepare request payload
+      const payload: any = {
         category,
-        package_id: packageId,
-      });
+      };
+      
+      // Only add package_id if it exists and is not empty
+      if (packageId && packageId.trim()) {
+        payload.package_id = packageId.trim();
+      }
+
+      console.log('📤 Support ticket payload:', payload);
+      
+      const response = await api.post('/api/v1/conversations/support_ticket', payload);
+
+      console.log('📥 Support ticket response:', response.data);
 
       if (response.data.success) {
         // Cache the active conversation
@@ -88,15 +99,25 @@ class SupportApiService {
       } else {
         throw new Error(response.data.message || 'Failed to create ticket');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error creating support ticket:', error);
       
-      // Cache the ticket creation for retry
-      await this.cachePendingTicket(category, packageId);
+      // Check if it's a network error vs server error
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        // Cache the ticket creation for retry
+        await this.cachePendingTicket(category, packageId);
+        
+        return {
+          success: false,
+          message: 'Ticket creation cached for retry. We\'ll connect you when network is available.',
+        };
+      }
       
+      // For server errors, return the actual error message
       return {
         success: false,
-        message: 'Ticket creation cached for retry. We\'ll connect you when network is available.',
+        message: error.response?.data?.message || error.message || 'Failed to create support ticket',
+        errors: error.response?.data?.errors,
       };
     }
   }
@@ -106,9 +127,12 @@ class SupportApiService {
     conversation_id: string | null;
   }>> {
     try {
+      console.log('🔍 Getting active support conversation...');
+      
       // First check cache
       const cachedConversation = await this.getCachedActiveConversation();
       if (cachedConversation) {
+        console.log('📋 Using cached active conversation');
         return {
           success: true,
           data: {
@@ -120,6 +144,8 @@ class SupportApiService {
 
       const response = await api.get('/api/v1/conversations/active_support');
       
+      console.log('📥 Active support response:', response.data);
+      
       if (response.data.success && response.data.conversation) {
         // Cache the active conversation
         await this.cacheActiveConversation(response.data);
@@ -129,7 +155,7 @@ class SupportApiService {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error getting active support:', error);
       
       // Return cached conversation if available
@@ -146,7 +172,7 @@ class SupportApiService {
 
       return {
         success: false,
-        message: 'Unable to load support conversation',
+        message: error.response?.data?.message || 'Unable to load support conversation',
       };
     }
   }
@@ -156,16 +182,21 @@ class SupportApiService {
     messages: Message[];
   }>> {
     try {
+      console.log(`🔍 Loading conversation: ${conversationId}`);
+      
       const response = await api.get(`/api/v1/conversations/${conversationId}`);
+      
+      console.log('📥 Conversation response:', response.data);
+      
       return {
         success: true,
         data: response.data,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error loading conversation:', error);
       return {
         success: false,
-        message: 'Failed to load conversation',
+        message: error.response?.data?.message || 'Failed to load conversation',
       };
     }
   }
@@ -179,13 +210,21 @@ class SupportApiService {
     message: Message;
   }>> {
     try {
-      const response = await api.post(`/api/v1/conversations/${conversationId}/messages`, {
+      console.log(`💬 Sending message to conversation: ${conversationId}`);
+      
+      const payload = {
         message: {
-          content,
+          content: content.trim(),
           message_type: messageType,
           metadata: metadata || {},
         },
-      });
+      };
+
+      console.log('📤 Message payload:', payload);
+
+      const response = await api.post(`/api/v1/conversations/${conversationId}/messages`, payload);
+
+      console.log('📥 Message response:', response.data);
 
       if (response.data.success) {
         return {
@@ -195,20 +234,28 @@ class SupportApiService {
       } else {
         throw new Error(response.data.message || 'Failed to send message');
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ Error sending message:', error);
       
-      // Cache the message for retry
-      await this.cachePendingMessage(conversationId, content, messageType);
+      // Check if it's a network error
+      if (error.code === 'NETWORK_ERROR' || error.message?.includes('Network Error')) {
+        // Cache the message for retry
+        await this.cachePendingMessage(conversationId, content, messageType);
+        
+        return {
+          success: false,
+          message: 'Message cached for retry',
+        };
+      }
       
       return {
         success: false,
-        message: 'Message cached for retry',
+        message: error.response?.data?.message || error.message || 'Failed to send message',
       };
     }
   }
 
-  // Package validation
+  // Package validation (Updated to match your routes)
   async validatePackage(packageCode: string): Promise<ApiResponse<{
     package: any;
     valid: boolean;
@@ -216,18 +263,91 @@ class SupportApiService {
     try {
       console.log(`📦 Validating package: ${packageCode}`);
       
-      // This endpoint should validate the package exists
-      const response = await api.get(`/api/v1/packages/${packageCode}/validate`);
+      // Use the packages show endpoint instead of a validate endpoint
+      const response = await api.get(`/api/v1/packages/${packageCode}`);
+      
+      return {
+        success: true,
+        data: {
+          package: response.data,
+          valid: true,
+        },
+      };
+    } catch (error: any) {
+      console.error('❌ Error validating package:', error);
+      
+      // If package not found, return valid: false instead of error
+      if (error.response?.status === 404) {
+        return {
+          success: true,
+          data: {
+            package: null,
+            valid: false,
+          },
+        };
+      }
+      
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Unable to validate package code',
+      };
+    }
+  }
+
+  // Close support ticket
+  async closeTicket(conversationId: string): Promise<ApiResponse<any>> {
+    try {
+      console.log(`🔒 Closing support ticket: ${conversationId}`);
+      
+      const response = await api.patch(`/api/v1/conversations/${conversationId}/close`);
       
       return {
         success: true,
         data: response.data,
       };
-    } catch (error) {
-      console.error('❌ Error validating package:', error);
+    } catch (error: any) {
+      console.error('❌ Error closing ticket:', error);
       return {
         success: false,
-        message: 'Unable to validate package code',
+        message: error.response?.data?.message || 'Failed to close ticket',
+      };
+    }
+  }
+
+  // Reopen support ticket
+  async reopenTicket(conversationId: string): Promise<ApiResponse<any>> {
+    try {
+      console.log(`🔓 Reopening support ticket: ${conversationId}`);
+      
+      const response = await api.patch(`/api/v1/conversations/${conversationId}/reopen`);
+      
+      return {
+        success: true,
+        data: response.data,
+      };
+    } catch (error: any) {
+      console.error('❌ Error reopening ticket:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to reopen ticket',
+      };
+    }
+  }
+
+  // Mark conversation as read
+  async markAsRead(conversationId: string): Promise<ApiResponse<any>> {
+    try {
+      const response = await api.patch(`/api/v1/conversations/${conversationId}/messages/mark_read`);
+      
+      return {
+        success: true,
+        data: response.data,
+      };
+    } catch (error: any) {
+      console.error('❌ Error marking as read:', error);
+      return {
+        success: false,
+        message: error.response?.data?.message || 'Failed to mark as read',
       };
     }
   }
@@ -277,6 +397,7 @@ class SupportApiService {
   private async cacheActiveConversation(conversationData: any): Promise<void> {
     try {
       await AsyncStorage.setItem(this.ACTIVE_CONVERSATION_KEY, JSON.stringify(conversationData));
+      console.log('💾 Cached active conversation');
     } catch (error) {
       console.error('❌ Error caching active conversation:', error);
     }
@@ -295,6 +416,7 @@ class SupportApiService {
   private async removePendingTicket(): Promise<void> {
     try {
       await AsyncStorage.removeItem(this.PENDING_TICKETS_KEY);
+      console.log('🗑️ Removed pending ticket from cache');
     } catch (error) {
       console.error('❌ Error removing pending ticket:', error);
     }
@@ -307,6 +429,20 @@ class SupportApiService {
     } catch (error) {
       console.error('❌ Error getting pending messages:', error);
       return [];
+    }
+  }
+
+  // Clear all cached data (useful for logout)
+  async clearCache(): Promise<void> {
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(this.PENDING_TICKETS_KEY),
+        AsyncStorage.removeItem(this.PENDING_MESSAGES_KEY),
+        AsyncStorage.removeItem(this.ACTIVE_CONVERSATION_KEY),
+      ]);
+      console.log('🧹 Cleared all support cache');
+    } catch (error) {
+      console.error('❌ Error clearing cache:', error);
     }
   }
 
@@ -381,6 +517,12 @@ class SupportApiService {
     } catch (error) {
       console.error('❌ Error retrying pending messages:', error);
     }
+  }
+
+  // Check network connectivity and retry operations
+  async handleNetworkReconnection(): Promise<void> {
+    console.log('🌐 Network reconnected, retrying pending operations...');
+    await this.retryPendingOperations();
   }
 }
 
