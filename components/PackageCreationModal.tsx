@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED VERSION
+// components/PackageCreationModal.tsx - SIMPLIFIED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -9,7 +9,6 @@ import {
   ScrollView,
   Animated,
   Dimensions,
-  KeyboardAvoidingView,
   Platform,
   Alert,
   ActivityIndicator,
@@ -35,15 +34,13 @@ interface PackageCreationModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
 }
 
-type DeliveryType = 'doorstep' | 'agent';
-
 const STEP_TITLES = [
-  'Origin Area',           // Step 0: Select where package is coming from
-  'Receiver Details',      // Step 1: Name and phone of receiver
-  'Delivery Method',       // Step 2: Choose agent pickup or doorstep
-  'Destination',          // Step 3: Select destination (agent or area)
-  'Delivery Location',    // Step 4: Exact location for doorstep delivery
-  'Confirm Details'       // Step 5: Review and submit
+  'Origin Area',
+  'Receiver Details',
+  'Delivery Method',
+  'Destination',
+  'Delivery Location',
+  'Confirm Details'
 ];
 
 export default function PackageCreationModal({
@@ -53,9 +50,9 @@ export default function PackageCreationModal({
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isPricingLoading, setIsPricingLoading] = useState(false);
+  
+  // Simple slide animation - only one animation
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const progressAnim = useRef(new Animated.Value(0)).current;
 
   // Data states
   const [locations, setLocations] = useState<Location[]>([]);
@@ -77,37 +74,24 @@ export default function PackageCreationModal({
     delivery_type: 'doorstep'
   });
 
-  const [deliveryLocation, setDeliveryLocation] = useState<string>(''); // For doorstep delivery
+  const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
-  const [pricingError, setPricingError] = useState<string | null>(null);
 
   // Load data when modal becomes visible
   useEffect(() => {
     if (visible) {
-      console.log('📦 Modal opened, initializing data...');
-      initializeModalData();
-    }
-  }, [visible]);
-
-  const initializeModalData = async () => {
-    resetForm();
-    
-    // Start entrance animation
-    Animated.parallel([
+      console.log('📦 Modal opened, loading data...');
+      resetForm();
+      loadModalData();
+      
+      // Simple slide up animation
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
         useNativeDriver: true,
-      }),
-      Animated.timing(progressAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }),
-    ]).start();
-
-    await loadModalData();
-  };
+      }).start();
+    }
+  }, [visible]);
 
   const loadModalData = async () => {
     try {
@@ -149,8 +133,6 @@ export default function PackageCreationModal({
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
-    setPricingError(null);
-    setIsPricingLoading(false);
     setIsSubmitting(false);
   };
 
@@ -164,68 +146,18 @@ export default function PackageCreationModal({
     });
   };
 
-  useEffect(() => {
-    Animated.timing(progressAnim, {
-      toValue: currentStep / (STEP_TITLES.length - 1),
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-  }, [currentStep]);
-
-  // Calculate pricing when we have enough info
-  useEffect(() => {
-    if (packageData.origin_area_id && 
-        ((packageData.delivery_type === 'agent' && packageData.destination_agent_id) ||
-         (packageData.delivery_type === 'doorstep' && packageData.destination_area_id))) {
-      fetchRealTimePricing();
-    } else {
-      setEstimatedCost(null);
-      setPricingError(null);
-    }
-  }, [packageData.origin_area_id, packageData.destination_area_id, packageData.destination_agent_id, packageData.delivery_type]);
-
-  const fetchRealTimePricing = async () => {
-    setIsPricingLoading(true);
-    setPricingError(null);
-
-    try {
-      let destinationAreaId = packageData.destination_area_id;
-      
-      // If agent delivery, get the area from the selected agent
-      if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
-        const selectedAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
-        destinationAreaId = selectedAgent?.area_id || '';
-      }
-
-      if (!destinationAreaId) {
-        setPricingError('Cannot calculate pricing');
-        return;
-      }
-
-      const pricingResponse = await getPackagePricing({
-        origin_area_id: packageData.origin_area_id,
-        destination_area_id: destinationAreaId,
-        delivery_type: packageData.delivery_type,
-      });
-
-      setEstimatedCost(pricingResponse.cost);
-      console.log('💰 Pricing fetched successfully:', pricingResponse);
-    } catch (error: any) {
-      console.error('❌ Failed to fetch pricing:', error);
-      setPricingError('Failed to load pricing');
-      calculateFallbackCost();
-    } finally {
-      setIsPricingLoading(false);
-    }
-  };
-
-  const calculateFallbackCost = () => {
+  // Calculate simple fallback cost when needed
+  const calculateCost = () => {
+    if (!packageData.origin_area_id) return;
+    
     let destinationAreaId = packageData.destination_area_id;
     
     if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
       const selectedAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
       destinationAreaId = selectedAgent?.area_id || '';
     }
+
+    if (!destinationAreaId) return;
 
     const originArea = areas.find(a => a.id === packageData.origin_area_id);
     const destinationArea = areas.find(a => a.id === destinationAreaId);
@@ -250,11 +182,6 @@ export default function PackageCreationModal({
 
   const updatePackageData = (field: keyof PackageData, value: string) => {
     setPackageData(prev => ({ ...prev, [field]: value }));
-  };
-
-  const getAgentsForDelivery = () => {
-    // Return all agents for destination selection
-    return agents;
   };
 
   const getSelectedOriginArea = () => {
@@ -288,7 +215,7 @@ export default function PackageCreationModal({
         if (packageData.delivery_type === 'doorstep') {
           return deliveryLocation.trim().length > 0;
         }
-        return true; // Skip this step for agent delivery
+        return true;
       case 5: return true;
       default: return false;
     }
@@ -298,18 +225,22 @@ export default function PackageCreationModal({
     if (currentStep < STEP_TITLES.length - 1 && isCurrentStepValid()) {
       // Skip delivery location step for agent delivery
       if (currentStep === 3 && packageData.delivery_type === 'agent') {
-        setCurrentStep(5); // Jump to confirmation
+        setCurrentStep(5);
+        calculateCost(); // Calculate cost when we reach confirmation
       } else {
-        setCurrentStep(prev => prev + 1);
+        setCurrentStep(prev => {
+          const newStep = prev + 1;
+          if (newStep === 5) calculateCost(); // Calculate cost when we reach confirmation
+          return newStep;
+        });
       }
     }
   };
 
   const prevStep = () => {
     if (currentStep > 0) {
-      // Handle skipping back over delivery location step for agent delivery
       if (currentStep === 5 && packageData.delivery_type === 'agent') {
-        setCurrentStep(3); // Jump back to destination selection
+        setCurrentStep(3);
       } else {
         setCurrentStep(prev => prev - 1);
       }
@@ -321,11 +252,10 @@ export default function PackageCreationModal({
 
     setIsSubmitting(true);
     try {
-      // Prepare final package data
       const finalPackageData = {
         ...packageData,
-        sender_name: 'Current User', // You can get this from user context
-        sender_phone: '+254700000000', // You can get this from user context
+        sender_name: 'Current User',
+        sender_phone: '+254700000000',
       };
 
       console.log('📦 Submitting package data:', finalPackageData);
@@ -363,7 +293,7 @@ export default function PackageCreationModal({
                 <ActivityIndicator size="large" color="#7c3aed" />
                 <Text style={styles.loadingTitle}>Loading Package Data</Text>
                 <Text style={styles.loadingSubtitle}>
-                  Fetching locations, areas, and agents from your backend...
+                  Fetching locations, areas, and agents...
                 </Text>
               </View>
             </LinearGradient>
@@ -416,19 +346,14 @@ export default function PackageCreationModal({
     );
   }
 
-  // Render methods for each step
+  // Simple progress indicator
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
-        <Animated.View
+        <View 
           style={[
             styles.progressForeground,
-            {
-              width: progressAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['0%', '100%'],
-              }),
-            },
+            { width: `${((currentStep + 1) / STEP_TITLES.length) * 100}%` }
           ]}
         />
       </View>
@@ -464,29 +389,22 @@ export default function PackageCreationModal({
             ]}
             onPress={() => updatePackageData('origin_area_id', area.id)}
           >
-            <LinearGradient
-              colors={packageData.origin_area_id === area.id ? 
-                ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-                ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-              style={styles.selectionItemGradient}
-            >
-              <View style={styles.selectionItemContent}>
-                <View style={styles.selectionInitials}>
-                  <Text style={styles.selectionInitialsText}>
-                    {area.initials || area.name.substring(0, 2).toUpperCase()}
-                  </Text>
-                </View>
-                <View style={styles.selectionInfo}>
-                  <Text style={styles.selectionName}>{area.name}</Text>
-                  {area.location && (
-                    <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                  )}
-                </View>
-                {packageData.origin_area_id === area.id && (
-                  <Feather name="check-circle" size={20} color="#10b981" />
+            <View style={styles.selectionItemContent}>
+              <View style={styles.selectionInitials}>
+                <Text style={styles.selectionInitialsText}>
+                  {area.initials || area.name.substring(0, 2).toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.selectionInfo}>
+                <Text style={styles.selectionName}>{area.name}</Text>
+                {area.location && (
+                  <Text style={styles.selectionLocation}>{area.location.name}</Text>
                 )}
               </View>
-            </LinearGradient>
+              {packageData.origin_area_id === area.id && (
+                <Feather name="check-circle" size={20} color="#10b981" />
+              )}
+            </View>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -500,27 +418,23 @@ export default function PackageCreationModal({
       <Text style={styles.stepSubtitle}>Who will receive this package?</Text>
       
       <View style={styles.formContainer}>
-        <LinearGradient colors={['rgba(124, 58, 237, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.inputGradientBorder}>
-          <TextInput
-            style={styles.input}
-            placeholder="Receiver's Full Name"
-            placeholderTextColor="#888"
-            value={packageData.receiver_name}
-            onChangeText={(value) => updatePackageData('receiver_name', value)}
-            autoCapitalize="words"
-          />
-        </LinearGradient>
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Full Name"
+          placeholderTextColor="#888"
+          value={packageData.receiver_name}
+          onChangeText={(value) => updatePackageData('receiver_name', value)}
+          autoCapitalize="words"
+        />
         
-        <LinearGradient colors={['rgba(124, 58, 237, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.inputGradientBorder}>
-          <TextInput
-            style={styles.input}
-            placeholder="Receiver's Phone (+254...)"
-            placeholderTextColor="#888"
-            value={packageData.receiver_phone}
-            onChangeText={(value) => updatePackageData('receiver_phone', value)}
-            keyboardType="phone-pad"
-          />
-        </LinearGradient>
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Phone (+254...)"
+          placeholderTextColor="#888"
+          value={packageData.receiver_phone}
+          onChangeText={(value) => updatePackageData('receiver_phone', value)}
+          keyboardType="phone-pad"
+        />
       </View>
     </View>
   );
@@ -539,23 +453,16 @@ export default function PackageCreationModal({
           ]}
           onPress={() => updatePackageData('delivery_type', 'agent')}
         >
-          <LinearGradient
-            colors={packageData.delivery_type === 'agent' ? 
-              ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-              ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-            style={styles.deliveryOptionGradient}
-          >
-            <View style={styles.deliveryOptionContent}>
-              <Feather name="user" size={24} color="#fff" />
-              <View style={styles.deliveryOptionText}>
-                <Text style={styles.deliveryOptionTitle}>Agent Pickup</Text>
-                <Text style={styles.deliveryOptionSubtitle}>Collect from our agent</Text>
-              </View>
-              {packageData.delivery_type === 'agent' && (
-                <Feather name="check-circle" size={20} color="#10b981" />
-              )}
+          <View style={styles.deliveryOptionContent}>
+            <Feather name="user" size={24} color="#fff" />
+            <View style={styles.deliveryOptionText}>
+              <Text style={styles.deliveryOptionTitle}>Agent Pickup</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Collect from our agent</Text>
             </View>
-          </LinearGradient>
+            {packageData.delivery_type === 'agent' && (
+              <Feather name="check-circle" size={20} color="#10b981" />
+            )}
+          </View>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -565,29 +472,22 @@ export default function PackageCreationModal({
           ]}
           onPress={() => updatePackageData('delivery_type', 'doorstep')}
         >
-          <LinearGradient
-            colors={packageData.delivery_type === 'doorstep' ? 
-              ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-              ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-            style={styles.deliveryOptionGradient}
-          >
-            <View style={styles.deliveryOptionContent}>
-              <Feather name="home" size={24} color="#fff" />
-              <View style={styles.deliveryOptionText}>
-                <Text style={styles.deliveryOptionTitle}>Doorstep Delivery</Text>
-                <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
-              </View>
-              {packageData.delivery_type === 'doorstep' && (
-                <Feather name="check-circle" size={20} color="#10b981" />
-              )}
+          <View style={styles.deliveryOptionContent}>
+            <Feather name="home" size={24} color="#fff" />
+            <View style={styles.deliveryOptionText}>
+              <Text style={styles.deliveryOptionTitle}>Doorstep Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
             </View>
-          </LinearGradient>
+            {packageData.delivery_type === 'doorstep' && (
+              <Feather name="check-circle" size={20} color="#10b981" />
+            )}
+          </View>
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  // Step 3: Destination Selection (Agent or Area)
+  // Step 3: Destination Selection
   const renderDestinationSelection = () => {
     if (packageData.delivery_type === 'agent') {
       return (
@@ -605,30 +505,23 @@ export default function PackageCreationModal({
                 ]}
                 onPress={() => updatePackageData('destination_agent_id', agent.id)}
               >
-                <LinearGradient
-                  colors={packageData.destination_agent_id === agent.id ? 
-                    ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-                    ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-                  style={styles.selectionItemGradient}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {agent.name.substring(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{agent.name}</Text>
-                      <Text style={styles.selectionLocation}>
-                        {agent.area?.name} • {agent.area?.location?.name}
-                      </Text>
-                      <Text style={styles.selectionPhone}>{agent.phone}</Text>
-                    </View>
-                    {packageData.destination_agent_id === agent.id && (
-                      <Feather name="check-circle" size={20} color="#10b981" />
-                    )}
+                <View style={styles.selectionItemContent}>
+                  <View style={styles.selectionInitials}>
+                    <Text style={styles.selectionInitialsText}>
+                      {agent.name.substring(0, 2).toUpperCase()}
+                    </Text>
                   </View>
-                </LinearGradient>
+                  <View style={styles.selectionInfo}>
+                    <Text style={styles.selectionName}>{agent.name}</Text>
+                    <Text style={styles.selectionLocation}>
+                      {agent.area?.name} • {agent.area?.location?.name}
+                    </Text>
+                    <Text style={styles.selectionPhone}>{agent.phone}</Text>
+                  </View>
+                  {packageData.destination_agent_id === agent.id && (
+                    <Feather name="check-circle" size={20} color="#10b981" />
+                  )}
+                </View>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -650,29 +543,22 @@ export default function PackageCreationModal({
                 ]}
                 onPress={() => updatePackageData('destination_area_id', area.id)}
               >
-                <LinearGradient
-                  colors={packageData.destination_area_id === area.id ? 
-                    ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-                    ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-                  style={styles.selectionItemGradient}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {area.initials || area.name.substring(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{area.name}</Text>
-                      {area.location && (
-                        <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                      )}
-                    </View>
-                    {packageData.destination_area_id === area.id && (
-                      <Feather name="check-circle" size={20} color="#10b981" />
+                <View style={styles.selectionItemContent}>
+                  <View style={styles.selectionInitials}>
+                    <Text style={styles.selectionInitialsText}>
+                      {area.initials || area.name.substring(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.selectionInfo}>
+                    <Text style={styles.selectionName}>{area.name}</Text>
+                    {area.location && (
+                      <Text style={styles.selectionLocation}>{area.location.name}</Text>
                     )}
                   </View>
-                </LinearGradient>
+                  {packageData.destination_area_id === area.id && (
+                    <Feather name="check-circle" size={20} color="#10b981" />
+                  )}
+                </View>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -681,25 +567,23 @@ export default function PackageCreationModal({
     }
   };
 
-  // Step 4: Delivery Location (only for doorstep delivery)
+  // Step 4: Delivery Location
   const renderDeliveryLocation = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
       <Text style={styles.stepSubtitle}>Provide the exact delivery address</Text>
       
       <View style={styles.formContainer}>
-        <LinearGradient colors={['rgba(124, 58, 237, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.inputGradientBorder}>
-          <TextInput
-            style={[styles.input, styles.textArea]}
-            placeholder="Enter specific address, building name, floor, etc."
-            placeholderTextColor="#888"
-            value={deliveryLocation}
-            onChangeText={setDeliveryLocation}
-            multiline
-            numberOfLines={4}
-            textAlignVertical="top"
-          />
-        </LinearGradient>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Enter specific address, building name, floor, etc."
+          placeholderTextColor="#888"
+          value={deliveryLocation}
+          onChangeText={setDeliveryLocation}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
       </View>
     </View>
   );
@@ -761,14 +645,7 @@ export default function PackageCreationModal({
         {/* Pricing Information */}
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Estimated Cost</Text>
-          {isPricingLoading ? (
-            <View style={styles.pricingLoader}>
-              <ActivityIndicator size="small" color="#7c3aed" />
-              <Text style={styles.pricingLoadingText}>Calculating...</Text>
-            </View>
-          ) : pricingError ? (
-            <Text style={styles.pricingError}>{pricingError}</Text>
-          ) : estimatedCost ? (
+          {estimatedCost ? (
             <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
@@ -860,19 +737,14 @@ export default function PackageCreationModal({
             colors={['#1a1a2e', '#16213e', '#0f1419']}
             style={styles.modalContent}
           >
-            <KeyboardAvoidingView
-              style={styles.keyboardAvoidingView}
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-            >
-              {renderHeader()}
-              {renderProgressBar()}
-              
-              <View style={styles.contentContainer}>
-                {renderCurrentStep()}
-              </View>
-              
-              {renderNavigationButtons()}
-            </KeyboardAvoidingView>
+            {renderHeader()}
+            {renderProgressBar()}
+            
+            <View style={styles.contentContainer}>
+              {renderCurrentStep()}
+            </View>
+            
+            {renderNavigationButtons()}
           </LinearGradient>
         </Animated.View>
       </View>
@@ -880,7 +752,7 @@ export default function PackageCreationModal({
   );
 }
 
-// StyleSheet
+// Simplified StyleSheet
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -896,9 +768,6 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
-  },
-  keyboardAvoidingView: {
-    flex: 1,
   },
   
   // Header styles
@@ -940,7 +809,7 @@ const styles = StyleSheet.create({
     width: 40,
   },
   
-  // Progress bar styles
+  // Simple progress bar
   progressContainer: {
     paddingHorizontal: 20,
     paddingVertical: 15,
@@ -949,7 +818,6 @@ const styles = StyleSheet.create({
     height: 4,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 2,
-    overflow: 'hidden',
   },
   progressForeground: {
     height: '100%',
@@ -990,21 +858,18 @@ const styles = StyleSheet.create({
   selectionItem: {
     marginBottom: 12,
     borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     overflow: 'hidden',
   },
   selectedItem: {
-    transform: [{ scale: 1.02 }],
-  },
-  selectionItemGradient: {
-    padding: 1,
-    borderRadius: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
   },
   selectionItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 11,
   },
   selectionInitials: {
     width: 50,
@@ -1043,18 +908,16 @@ const styles = StyleSheet.create({
   formContainer: {
     gap: 20,
   },
-  inputGradientBorder: {
-    padding: 1,
-    borderRadius: 12,
-  },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 11,
+    borderRadius: 12,
     paddingHorizontal: 16,
     paddingVertical: 16,
     fontSize: 16,
     color: '#fff',
     minHeight: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   textArea: {
     minHeight: 120,
@@ -1067,21 +930,19 @@ const styles = StyleSheet.create({
   },
   deliveryOption: {
     borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     overflow: 'hidden',
   },
   selectedDeliveryOption: {
-    transform: [{ scale: 1.02 }],
-  },
-  deliveryOptionGradient: {
-    padding: 1,
-    borderRadius: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
   },
   deliveryOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 20,
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 11,
   },
   deliveryOptionText: {
     flex: 1,
@@ -1164,15 +1025,6 @@ const styles = StyleSheet.create({
   },
   
   // Pricing styles
-  pricingLoader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  pricingLoadingText: {
-    fontSize: 14,
-    color: '#888',
-  },
   estimatedCost: {
     fontSize: 24,
     fontWeight: '700',
