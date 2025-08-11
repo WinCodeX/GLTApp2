@@ -105,6 +105,24 @@ export default function PackageCreationModal({
 
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
 
+  const resetForm = () => {
+    setCurrentStep(0);
+    setSelectedOriginLocation('');
+    setSelectedDestinationLocation('');
+    setPackageData({
+      sender_name: '',
+      sender_phone: '',
+      receiver_name: '',
+      receiver_phone: '',
+      origin_area_id: '',
+      destination_area_id: '',
+      origin_agent_id: '',
+      destination_agent_id: '',
+      delivery_type: 'doorstep'
+    });
+    setEstimatedCost(null);
+  };
+
   useEffect(() => {
     if (visible) {
       resetForm();
@@ -128,26 +146,7 @@ export default function PackageCreationModal({
         useNativeDriver: true,
       }).start();
     }
-});
- [visible]);
-
-  const resetForm = () => {
-    setCurrentStep(0);
-    setSelectedOriginLocation('');
-    setSelectedDestinationLocation('');
-    setPackageData({
-      sender_name: '',
-      sender_phone: '',
-      receiver_name: '',
-      receiver_phone: '',
-      origin_area_id: '',
-      destination_area_id: '',
-      origin_agent_id: '',
-      destination_agent_id: '',
-      delivery_type: 'doorstep'
-    });
-    setEstimatedCost(null);
-  };
+  }, [visible]); // Fixed: Added dependency array
 
   useEffect(() => {
     Animated.timing(progressAnim, {
@@ -905,3 +904,4 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
+});
