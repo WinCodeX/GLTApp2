@@ -1,3 +1,4 @@
+// lib/helpers/getAreas.ts
 import { getBaseUrl } from './getBaseUrl';
 
 export interface Area {
