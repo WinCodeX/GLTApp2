@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - SIMPLIFIED VERSION
+// components/PackageCreationModal.tsx - MINIMAL ADDITIONS ONLY
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -78,10 +78,8 @@ export default function PackageCreationModal({
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
 
-  // Search and filter states - only these, no duplicates
+  // ONLY add search - nothing else
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
-  const [sortBy, setSortBy] = useState<'name' | 'location'>('location');
 
   // Load data when modal becomes visible
   useEffect(() => {
@@ -140,10 +138,7 @@ export default function PackageCreationModal({
     setDeliveryLocation('');
     setEstimatedCost(null);
     setIsSubmitting(false);
-    // Reset search and filter states
-    setSearchQuery('');
-    setSelectedLocationFilter('all');
-    setSortBy('location');
+    setSearchQuery(''); // Reset search
   };
 
   const closeModal = () => {
@@ -210,36 +205,21 @@ export default function PackageCreationModal({
     return agents.find(agent => agent.id === packageData.destination_agent_id);
   };
 
-  // Simple search and group functionality
+  // ONLY add simple search filtering - nothing complex
   const getFilteredAreas = () => {
-    let filteredAreas = areas;
-
-    // Filter by search query
-    if (searchQuery.trim()) {
-      filteredAreas = filteredAreas.filter(area =>
-        area.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        area.location?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-      );
-    }
-
-    // Filter by location
-    if (selectedLocationFilter !== 'all') {
-      filteredAreas = filteredAreas.filter(area => area.location_id === selectedLocationFilter);
-    }
-
-    return filteredAreas;
+    if (!searchQuery.trim()) return areas;
+    
+    return areas.filter(area =>
+      area.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      area.location?.name?.toLowerCase().includes(searchQuery.toLowerCase())
+    );
   };
 
+  // ONLY add simple grouping by location - no complex sorting
   const getGroupedAreas = () => {
     const filteredAreas = getFilteredAreas();
     
-    if (sortBy !== 'location') {
-      // Sort by name only
-      const sortedAreas = [...filteredAreas].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-      return [{ locationName: 'All Areas', areas: sortedAreas }];
-    }
-
-    // Group by location and sort
+    // Group by location
     const grouped = filteredAreas.reduce((acc, area) => {
       const locationName = area.location?.name || 'Unknown Location';
       if (!acc[locationName]) {
@@ -249,7 +229,7 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, Area[]>);
 
-    // Sort locations alphabetically and areas within each location
+    // Return grouped areas, sorted by location name
     return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([locationName, areas]) => ({
@@ -347,6 +327,511 @@ export default function PackageCreationModal({
               colors={['#1a1a2e', '#16213e', '#0f1419']}
               style={styles.modalContent}
             >
+              {renderHeader()}
+              {renderProgressBar()}
+              
+              <ScrollView 
+                style={styles.contentContainer}
+                contentContainerStyle={styles.scrollContentContainer}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {renderCurrentStep()}
+              </ScrollView>
+              
+              {renderNavigationButtons()}
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// Styles - same as working version with MINIMAL additions
+const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    maxHeight: SCREEN_HEIGHT * 0.9,
+    minHeight: SCREEN_HEIGHT * 0.6,
+    width: SCREEN_WIDTH,
+  },
+  modalContent: {
+    flex: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  
+  // Header styles
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonAbsolute: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  placeholder: {
+    width: 40,
+  },
+  
+  // Progress bar
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  progressBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+  },
+  progressForeground: {
+    height: '100%',
+    backgroundColor: '#7c3aed',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  
+  // Content styles
+  contentContainer: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  stepContent: {
+    flex: 1,
+    minHeight: 400,
+  },
+  stepTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 30,
+  },
+  
+  // ONLY add search styles - minimal
+  searchContainer: {
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    paddingHorizontal: 16,
+    minHeight: 48,
+    gap: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 12,
+  },
+  
+  // ONLY add location header styles - minimal
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginTop: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  locationHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+  },
+  locationHeaderCount: {
+    fontSize: 12,
+    color: '#888',
+  },
+  
+  // Selection list styles - same as working version
+  selectionList: {
+    flex: 1,
+  },
+  selectionItem: {
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    overflow: 'hidden',
+  },
+  selectedItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  selectionItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  selectionInitials: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  selectionInitialsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  selectionInfo: {
+    flex: 1,
+  },
+  selectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  selectionLocation: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  selectionPhone: {
+    fontSize: 12,
+    color: '#666',
+  },
+  
+  // ONLY add simple no results - minimal
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+  },
+  
+  // Form styles - same as working version
+  formContainer: {
+    gap: 20,
+    paddingVertical: 10,
+  },
+  input: {
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: '#fff',
+    minHeight: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  textArea: {
+    minHeight: 120,
+    textAlignVertical: 'top',
+    paddingTop: 16,
+  },
+  
+  // Delivery options - same as working version
+  deliveryOptions: {
+    gap: 16,
+  },
+  deliveryOption: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+  },
+  selectedDeliveryOption: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  deliveryOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deliveryOptionText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  deliveryOptionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  deliveryOptionSubtitle: {
+    fontSize: 14,
+    color: '#888',
+  },
+  
+  // Confirmation styles - same as working version
+  confirmationContainer: {
+    gap: 24,
+  },
+  confirmationSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 20,
+  },
+  confirmationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 12,
+  },
+  confirmationDetail: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  confirmationSubDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 8,
+  },
+  routeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  routePoint: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeAreaInitials: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7c3aed',
+    marginBottom: 4,
+  },
+  routeAreaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  routeLocationName: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+  },
+  agentInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  deliveryLocationInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  estimatedCost: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  pricingError: {
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  
+  // Navigation - same as working version
+  navigationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  spacer: {
+    flex: 1,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  nextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    gap: 8,
+  },
+  nextButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+    gap: 8,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  disabledButtonText: {
+    color: '#666',
+  },
+  
+  // Loading and error - same as working version
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 20,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 30,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+  },
+  retryButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+});
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="large" color="#7c3aed" />
                 <Text style={styles.loadingTitle}>Loading Package Data</Text>
@@ -431,106 +916,84 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // Step 0: Origin Area Selection
+  // Step 0: Origin Area Selection with MINIMAL additions
   const renderOriginAreaSelection = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Select Origin Area</Text>
       <Text style={styles.stepSubtitle}>Where is the package coming from?</Text>
       
-      {/* Search Input */}
+      {/* ONLY add search input - simple */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color="#888" style={styles.searchIcon} />
+          <Feather name="search" size={20} color="#888" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search areas or locations..."
+            placeholder="Search areas..."
             placeholderTextColor="#888"
             value={searchQuery}
             onChangeText={setSearchQuery}
           />
           {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
               <Feather name="x" size={16} color="#888" />
             </TouchableOpacity>
           )}
         </View>
       </View>
-
-      {/* Filter and Sort Controls */}
-      <View style={styles.filterContainer}>
-        {/* Location Filter */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.locationFilterScroll}>
-          <TouchableOpacity
-            style={[
-              styles.filterChip,
-              selectedLocationFilter === 'all' && styles.filterChipActive
-            ]}
-            onPress={() => setSelectedLocationFilter('all')}
-          >
-            <Text style={[
-              styles.filterChipText,
-              selectedLocationFilter === 'all' && styles.filterChipTextActive
-            ]}>
-              All Locations
-            </Text>
-          </TouchableOpacity>
-          
-          {locations && locations.length > 0 && locations.map((location) => (
-            <TouchableOpacity
-              key={location.id}
-              style={[
-                styles.filterChip,
-                selectedLocationFilter === location.id && styles.filterChipActive
-              ]}
-              onPress={() => setSelectedLocationFilter(location.id)}
-            >
-              <Text style={[
-                styles.filterChipText,
-                selectedLocationFilter === location.id && styles.filterChipTextActive
-              ]}>
-                {location.name || 'Unknown'}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-
-        {/* Sort Toggle */}
-        <TouchableOpacity
-          style={styles.sortButton}
-          onPress={() => setSortBy(sortBy === 'location' ? 'name' : 'location')}
-        >
-          <Feather name={sortBy === 'location' ? 'map-pin' : 'type'} size={16} color="#7c3aed" />
-          <Text style={styles.sortButtonText}>
-            {sortBy === 'location' ? 'By Location' : 'By Name'}
-          </Text>
-        </TouchableOpacity>
-      </View>
       
-        {/* No Results Message */}
-        {areas && areas.length > 0 && getFilteredAreas().length === 0 && (
+      <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+        {getGroupedAreas().map((group, groupIndex) => (
+          <View key={groupIndex}>
+            {/* Simple location header */}
+            <View style={styles.locationHeader}>
+              <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+              <Text style={styles.locationHeaderCount}>({group.areas.length})</Text>
+            </View>
+            
+            {/* Areas in this location */}
+            {group.areas.map((area) => (
+              <TouchableOpacity
+                key={area.id}
+                style={[
+                  styles.selectionItem,
+                  packageData.origin_area_id === area.id && styles.selectedItem
+                ]}
+                onPress={() => updatePackageData('origin_area_id', area.id)}
+              >
+                <View style={styles.selectionItemContent}>
+                  <View style={styles.selectionInitials}>
+                    <Text style={styles.selectionInitialsText}>
+                      {area.initials || area.name?.substring(0, 2).toUpperCase() || 'AR'}
+                    </Text>
+                  </View>
+                  <View style={styles.selectionInfo}>
+                    <Text style={styles.selectionName}>{area.name || 'Unknown Area'}</Text>
+                    {area.location?.name && (
+                      <Text style={styles.selectionLocation}>{area.location.name}</Text>
+                    )}
+                  </View>
+                  {packageData.origin_area_id === area.id && (
+                    <Feather name="check-circle" size={20} color="#10b981" />
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        ))}
+        
+        {/* Simple no results */}
+        {getFilteredAreas().length === 0 && (
           <View style={styles.noResultsContainer}>
             <Feather name="search" size={48} color="#666" />
             <Text style={styles.noResultsTitle}>No areas found</Text>
-            <Text style={styles.noResultsText}>
-              Try adjusting your search or filter criteria
-            </Text>
-            {(searchQuery || selectedLocationFilter !== 'all') && (
-              <TouchableOpacity
-                style={styles.clearFiltersButton}
-                onPress={() => {
-                  setSearchQuery('');
-                  setSelectedLocationFilter('all');
-                }}
-              >
-                <Text style={styles.clearFiltersButtonText}>Clear filters</Text>
-              </TouchableOpacity>
-            )}
+            <Text style={styles.noResultsText}>Try a different search term</Text>
           </View>
         )}
+      </ScrollView>
     </View>
   );
 
-  // Step 1: Receiver Details
+  // All other steps remain exactly the same as working version
   const renderReceiverDetails = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -558,7 +1021,6 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // Step 2: Delivery Method Selection
   const renderDeliveryMethodSelection = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
@@ -606,7 +1068,6 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // Step 3: Destination Selection
   const renderDestinationSelection = () => {
     if (packageData.delivery_type === 'agent') {
       return (
@@ -686,7 +1147,6 @@ export default function PackageCreationModal({
     }
   };
 
-  // Step 4: Delivery Location
   const renderDeliveryLocation = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
@@ -707,14 +1167,12 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // Step 5: Confirmation
   const renderConfirmation = () => (
     <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.stepTitle}>Confirm Package Details</Text>
       <Text style={styles.stepSubtitle}>Review all information before submitting</Text>
       
       <View style={styles.confirmationContainer}>
-        {/* Route Information */}
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Route</Text>
           <View style={styles.routeDisplay}>
@@ -732,14 +1190,12 @@ export default function PackageCreationModal({
           </View>
         </View>
 
-        {/* Receiver Information */}
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Receiver</Text>
           <Text style={styles.confirmationDetail}>{packageData.receiver_name}</Text>
           <Text style={styles.confirmationDetail}>{packageData.receiver_phone}</Text>
         </View>
 
-        {/* Delivery Method */}
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
@@ -761,7 +1217,6 @@ export default function PackageCreationModal({
           )}
         </View>
 
-        {/* Pricing Information */}
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Estimated Cost</Text>
           {estimatedCost ? (
@@ -774,7 +1229,6 @@ export default function PackageCreationModal({
     </ScrollView>
   );
 
-  // Main render method that switches between steps
   const renderCurrentStep = () => {
     switch (currentStep) {
       case 0: return renderOriginAreaSelection();
@@ -787,7 +1241,6 @@ export default function PackageCreationModal({
     }
   };
 
-  // Navigation buttons
   const renderNavigationButtons = () => (
     <View style={styles.navigationContainer}>
       {currentStep > 0 && (
@@ -861,584 +1314,3 @@ export default function PackageCreationModal({
               colors={['#1a1a2e', '#16213e', '#0f1419']}
               style={styles.modalContent}
             >
-              {renderHeader()}
-              {renderProgressBar()}
-              
-              <ScrollView 
-                style={styles.contentContainer}
-                contentContainerStyle={styles.scrollContentContainer}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {renderCurrentStep()}
-              </ScrollView>
-              
-              {renderNavigationButtons()}
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-// Simplified StyleSheet
-const styles = StyleSheet.create({
-  keyboardContainer: {
-    flex: 1,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.9,
-    minHeight: SCREEN_HEIGHT * 0.6,
-    width: SCREEN_WIDTH,
-  },
-  modalContent: {
-    flex: 1,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  
-  // Header styles
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonAbsolute: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  placeholder: {
-    width: 40,
-  },
-  
-  // Simple progress bar
-  progressContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-  },
-  progressBackground: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 2,
-  },
-  progressForeground: {
-    height: '100%',
-    backgroundColor: '#7c3aed',
-    borderRadius: 2,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  
-  // Content styles
-  contentContainer: {
-    flex: 1,
-  },
-  scrollContentContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  stepContent: {
-    flex: 1,
-    minHeight: 400, // Ensure minimum height for keyboard scenarios
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  stepSubtitle: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 30,
-  },
-  
-  // Selection list styles
-  selectionList: {
-    flex: 1,
-  },
-  selectionItem: {
-    marginBottom: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    overflow: 'hidden',
-  },
-  selectedItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-  },
-  selectionItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  selectionInitials: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  selectionInitialsText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  selectionInfo: {
-    flex: 1,
-  },
-  selectionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  selectionLocation: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 2,
-  },
-  selectionPhone: {
-    fontSize: 12,
-    color: '#666',
-  },
-  
-  // Form styles
-  formContainer: {
-    gap: 20,
-    paddingVertical: 10,
-  },
-  input: {
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 16,
-    color: '#fff',
-    minHeight: 56,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-  },
-  textArea: {
-    minHeight: 120,
-    textAlignVertical: 'top',
-    paddingTop: 16, // Ensure text starts at top for multiline
-  },
-
-  // Simple search styles
-  searchContainer: {
-    marginBottom: 16,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    paddingHorizontal: 16,
-    minHeight: 48,
-    gap: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingVertical: 12,
-  },
-
-  // Filter styles
-  filterContainer: {
-    marginBottom: 20,
-  },
-  locationFilterScroll: {
-    marginBottom: 12,
-  },
-  filterChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginRight: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-  },
-  filterChipActive: {
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    borderColor: '#7c3aed',
-  },
-  filterChipText: {
-    fontSize: 14,
-    color: '#ccc',
-    fontWeight: '500',
-  },
-  filterChipTextActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    alignSelf: 'flex-end',
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-  },
-  sortButtonText: {
-    fontSize: 12,
-    color: '#7c3aed',
-    marginLeft: 6,
-    fontWeight: '600',
-  },
-
-  // Location grouping styles
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingVertical: 12,
-    marginTop: 16,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
-  },
-  locationHeaderText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#7c3aed',
-  },
-  locationHeaderCount: {
-    fontSize: 12,
-    color: '#888',
-  },
-
-  // No results styles
-  noResultsContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  noResultsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  noResultsText: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  clearButton: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-  },
-  clearButtonText: {
-    fontSize: 14,
-    color: '#7c3aed',
-    fontWeight: '600',
-  },
-  clearFiltersButton: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-  },
-  clearFiltersButtonText: {
-    fontSize: 14,
-    color: '#7c3aed',
-    fontWeight: '600',
-  },
-  
-  // Delivery options styles
-  deliveryOptions: {
-    gap: 16,
-  },
-  deliveryOption: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  selectedDeliveryOption: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: '#7c3aed',
-  },
-  deliveryOptionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-  },
-  deliveryOptionText: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  deliveryOptionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  deliveryOptionSubtitle: {
-    fontSize: 14,
-    color: '#888',
-  },
-  
-  // Confirmation styles
-  confirmationContainer: {
-    gap: 24,
-  },
-  confirmationSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 20,
-  },
-  confirmationSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#7c3aed',
-    marginBottom: 12,
-  },
-  confirmationDetail: {
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 4,
-  },
-  confirmationSubDetail: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 8,
-  },
-  routeDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  routePoint: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  routeAreaInitials: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#7c3aed',
-    marginBottom: 4,
-  },
-  routeAreaName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  routeLocationName: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  agentInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  deliveryLocationInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  
-  // Pricing styles
-  estimatedCost: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#10b981',
-  },
-  pricingError: {
-    fontSize: 14,
-    color: '#ef4444',
-  },
-  
-  // Navigation styles
-  navigationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  spacer: {
-    flex: 1,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 8,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-  },
-  nextButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#7c3aed',
-    gap: 8,
-  },
-  nextButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#10b981',
-    gap: 8,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  disabledButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  disabledButtonText: {
-    color: '#666',
-  },
-  
-  // Loading and error states
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  loadingTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  loadingSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ef4444',
-    marginTop: 20,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 30,
-  },
-  errorButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#7c3aed',
-  },
-  retryButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-  },
-});
