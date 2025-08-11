@@ -3,6 +3,8 @@
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
+import { createPackage, PackageData, PackageResponse } from './createPackage';
+import { getPackagePricing, PricingRequest, PricingResponse } from './getPackagePricing';
 
 export interface PackageFormData {
   locations: Location[];
@@ -30,7 +32,7 @@ export async function getPackageFormData(): Promise<PackageFormData> {
   }
 }
 
-// Export all types and functions
+// Re-export all types and functions from individual modules
 export type {
   Location,
   Area,
