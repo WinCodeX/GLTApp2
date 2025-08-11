@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - NEW STEP FLOW
+// components/PackageCreationModal.tsx - FIXED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -748,3 +748,567 @@ export default function PackageCreationModal({
               <Text style={styles.confirmationDetail}>Agent: {getSelectedDestinationAgent()?.name}</Text>
               <Text style={styles.confirmationSubDetail}>{getSelectedDestinationAgent()?.phone}</Text>
             </View>
+          )}
+
+          {packageData.delivery_type === 'doorstep' && deliveryLocation && (
+            <View style={styles.deliveryLocationInfo}>
+              <Text style={styles.confirmationSubDetail}>Delivery Address:</Text>
+              <Text style={styles.confirmationDetail}>{deliveryLocation}</Text>
+            </View>
+          )}
+        </View>
+
+        {/* Pricing Information */}
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Estimated Cost</Text>
+          {isPricingLoading ? (
+            <View style={styles.pricingLoader}>
+              <ActivityIndicator size="small" color="#7c3aed" />
+              <Text style={styles.pricingLoadingText}>Calculating...</Text>
+            </View>
+          ) : pricingError ? (
+            <Text style={styles.pricingError}>{pricingError}</Text>
+          ) : estimatedCost ? (
+            <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
+          ) : (
+            <Text style={styles.pricingError}>Unable to calculate cost</Text>
+          )}
+        </View>
+      </View>
+    </ScrollView>
+  );
+
+  // Main render method that switches between steps
+  const renderCurrentStep = () => {
+    switch (currentStep) {
+      case 0: return renderOriginAreaSelection();
+      case 1: return renderReceiverDetails();
+      case 2: return renderDeliveryMethodSelection();
+      case 3: return renderDestinationSelection();
+      case 4: return renderDeliveryLocation();
+      case 5: return renderConfirmation();
+      default: return renderOriginAreaSelection();
+    }
+  };
+
+  // Navigation buttons
+  const renderNavigationButtons = () => (
+    <View style={styles.navigationContainer}>
+      {currentStep > 0 && (
+        <TouchableOpacity onPress={prevStep} style={styles.backButton}>
+          <Feather name="arrow-left" size={20} color="#fff" />
+          <Text style={styles.backButtonText}>Back</Text>
+        </TouchableOpacity>
+      )}
+      
+      <View style={styles.spacer} />
+      
+      {currentStep < STEP_TITLES.length - 1 ? (
+        <TouchableOpacity 
+          onPress={nextStep} 
+          style={[
+            styles.nextButton,
+            !isCurrentStepValid() && styles.disabledButton
+          ]}
+          disabled={!isCurrentStepValid()}
+        >
+          <Text style={[
+            styles.nextButtonText,
+            !isCurrentStepValid() && styles.disabledButtonText
+          ]}>
+            Next
+          </Text>
+          <Feather name="arrow-right" size={20} color={isCurrentStepValid() ? "#fff" : "#666"} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity 
+          onPress={handleSubmit} 
+          style={[
+            styles.submitButton,
+            (!isCurrentStepValid() || isSubmitting) && styles.disabledButton
+          ]}
+          disabled={!isCurrentStepValid() || isSubmitting}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Text style={[
+                styles.submitButtonText,
+                (!isCurrentStepValid() || isSubmitting) && styles.disabledButtonText
+              ]}>
+                Create Package
+              </Text>
+              <Feather name="check" size={20} color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} />
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="none">
+      <View style={styles.overlay}>
+        <Animated.View
+          style={[
+            styles.modalContainer,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          <LinearGradient
+            colors={['#1a1a2e', '#16213e', '#0f1419']}
+            style={styles.modalContent}
+          >
+            <KeyboardAvoidingView
+              style={styles.keyboardAvoidingView}
+              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            >
+              {renderHeader()}
+              {renderProgressBar()}
+              
+              <View style={styles.contentContainer}>
+                {renderCurrentStep()}
+              </View>
+              
+              {renderNavigationButtons()}
+            </KeyboardAvoidingView>
+          </LinearGradient>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+}
+
+// StyleSheet
+const styles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    height: SCREEN_HEIGHT * 0.9,
+    width: SCREEN_WIDTH,
+  },
+  modalContent: {
+    flex: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+  
+  // Header styles
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonAbsolute: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  placeholder: {
+    width: 40,
+  },
+  
+  // Progress bar styles
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  progressBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressForeground: {
+    height: '100%',
+    backgroundColor: '#7c3aed',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  
+  // Content styles
+  contentContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  stepContent: {
+    flex: 1,
+  },
+  stepTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 30,
+  },
+  
+  // Selection list styles
+  selectionList: {
+    flex: 1,
+  },
+  selectionItem: {
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  selectedItem: {
+    transform: [{ scale: 1.02 }],
+  },
+  selectionItemGradient: {
+    padding: 1,
+    borderRadius: 12,
+  },
+  selectionItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 11,
+  },
+  selectionInitials: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  selectionInitialsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  selectionInfo: {
+    flex: 1,
+  },
+  selectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  selectionLocation: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  selectionPhone: {
+    fontSize: 12,
+    color: '#666',
+  },
+  
+  // Form styles
+  formContainer: {
+    gap: 20,
+  },
+  inputGradientBorder: {
+    padding: 1,
+    borderRadius: 12,
+  },
+  input: {
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 11,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: '#fff',
+    minHeight: 56,
+  },
+  textArea: {
+    minHeight: 120,
+    textAlignVertical: 'top',
+  },
+  
+  // Delivery options styles
+  deliveryOptions: {
+    gap: 16,
+  },
+  deliveryOption: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  selectedDeliveryOption: {
+    transform: [{ scale: 1.02 }],
+  },
+  deliveryOptionGradient: {
+    padding: 1,
+    borderRadius: 12,
+  },
+  deliveryOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 11,
+  },
+  deliveryOptionText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  deliveryOptionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  deliveryOptionSubtitle: {
+    fontSize: 14,
+    color: '#888',
+  },
+  
+  // Confirmation styles
+  confirmationContainer: {
+    gap: 24,
+  },
+  confirmationSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 20,
+  },
+  confirmationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 12,
+  },
+  confirmationDetail: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  confirmationSubDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 8,
+  },
+  routeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  routePoint: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeAreaInitials: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7c3aed',
+    marginBottom: 4,
+  },
+  routeAreaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  routeLocationName: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+  },
+  agentInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  deliveryLocationInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  
+  // Pricing styles
+  pricingLoader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pricingLoadingText: {
+    fontSize: 14,
+    color: '#888',
+  },
+  estimatedCost: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  pricingError: {
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  
+  // Navigation styles
+  navigationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  spacer: {
+    flex: 1,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  nextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    gap: 8,
+  },
+  nextButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+    gap: 8,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  disabledButtonText: {
+    color: '#666',
+  },
+  
+  // Loading and error states
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 20,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 30,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+  },
+  retryButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+});
