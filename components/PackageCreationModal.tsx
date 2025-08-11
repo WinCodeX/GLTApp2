@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED STRUCTURE
+// components/PackageCreationModal.tsx - ENHANCED WITH AGENT-CENTRIC FLOW
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -36,13 +36,16 @@ interface PackageCreationModalProps {
 }
 
 const STEP_TITLES = [
-  'Origin Area',
-  'Receiver Details',
+  'Origin Agent',
+  'Receiver Details', 
   'Delivery Method',
   'Destination',
   'Delivery Location',
   'Confirm Details'
 ];
+
+type SortOption = 'name' | 'location' | 'area';
+type SortDirection = 'asc' | 'desc';
 
 export default function PackageCreationModal({
   visible,
@@ -52,7 +55,6 @@ export default function PackageCreationModal({
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
   
-  // Simple slide animation - only one animation
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   // Data states
@@ -62,31 +64,43 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Form data
+  // Form data - Updated for agent-centric flow
   const [packageData, setPackageData] = useState<PackageData>({
     sender_name: '',
     sender_phone: '',
     receiver_name: '',
     receiver_phone: '',
-    origin_area_id: '',
+    origin_area_id: '', // Will be derived from origin agent
     destination_area_id: '',
-    origin_agent_id: '',
+    origin_agent_id: '', // Primary origin selection
     destination_agent_id: '',
     delivery_type: 'doorstep'
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  
+  // Enhanced search and sort states
+  const [searchQueries, setSearchQueries] = useState({
+    originAgent: '',
+    destinationAgent: '',
+    destinationArea: ''
+  });
+  
+  const [sortConfig, setSortConfig] = useState<{
+    field: SortOption;
+    direction: SortDirection;
+  }>({
+    field: 'name',
+    direction: 'asc'
+  });
 
-  // Load data when modal becomes visible
   useEffect(() => {
     if (visible) {
       console.log('📦 Modal opened, loading data...');
       resetForm();
       loadModalData();
       
-      // Simple slide up animation
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
@@ -136,7 +150,12 @@ export default function PackageCreationModal({
     setDeliveryLocation('');
     setEstimatedCost(null);
     setIsSubmitting(false);
-    setSearchQuery('');
+    setSearchQueries({
+      originAgent: '',
+      destinationAgent: '',
+      destinationArea: ''
+    });
+    setSortConfig({ field: 'name', direction: 'asc' });
   };
 
   const closeModal = () => {
@@ -149,45 +168,164 @@ export default function PackageCreationModal({
     });
   };
 
+  // Enhanced cost calculation for agent-to-agent pricing
   const calculateCost = () => {
-    if (!packageData.origin_area_id) return;
-    
+    const originAgent = agents.find(a => a.id === packageData.origin_agent_id);
+    if (!originAgent) return;
+
     let destinationAreaId = packageData.destination_area_id;
+    let destinationAgent = null;
     
     if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
-      const selectedAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
-      destinationAreaId = selectedAgent?.area_id || '';
+      destinationAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
+      destinationAreaId = destinationAgent?.area_id || '';
     }
 
     if (!destinationAreaId) return;
 
-    const originArea = areas.find(a => a.id === packageData.origin_area_id);
+    const originArea = areas.find(a => a.id === originAgent.area_id);
     const destinationArea = areas.find(a => a.id === destinationAreaId);
     
     if (!originArea || !destinationArea) return;
     
-    const isIntraArea = packageData.origin_area_id === destinationAreaId;
+    // Agent-to-Agent vs Agent-to-Area pricing logic
+    const isAgentToAgent = packageData.delivery_type === 'agent' && destinationAgent;
+    const isIntraArea = originAgent.area_id === destinationAreaId;
     const isIntraLocation = originArea.location_id === destinationArea.location_id;
     
     let baseCost = 0;
     
-    if (isIntraArea) {
-      baseCost = packageData.delivery_type === 'doorstep' ? 280 : 150;
-    } else if (isIntraLocation) {
-      baseCost = packageData.delivery_type === 'doorstep' ? 320 : 150;
+    if (isAgentToAgent) {
+      // Agent-to-Agent pricing (typically lower)
+      if (isIntraArea) {
+        baseCost = 120; // Same area agent transfer
+      } else if (isIntraLocation) {
+        baseCost = 150; // Same location, different areas
+      } else {
+        baseCost = 180; // Different locations
+      }
     } else {
-      baseCost = packageData.delivery_type === 'doorstep' ? 380 : 150;
+      // Agent-to-Doorstep pricing
+      if (isIntraArea) {
+        baseCost = 250;
+      } else if (isIntraLocation) {
+        baseCost = 300;
+      } else {
+        baseCost = 380;
+      }
     }
     
     setEstimatedCost(baseCost);
   };
 
   const updatePackageData = (field: keyof PackageData, value: string) => {
-    setPackageData(prev => ({ ...prev, [field]: value }));
+    setPackageData(prev => {
+      const updated = { ...prev, [field]: value };
+      
+      // Auto-update origin_area_id when origin_agent_id changes
+      if (field === 'origin_agent_id') {
+        const selectedAgent = agents.find(agent => agent.id === value);
+        updated.origin_area_id = selectedAgent?.area_id || '';
+      }
+      
+      return updated;
+    });
   };
 
-  const getSelectedOriginArea = () => {
-    return areas.find(area => area.id === packageData.origin_area_id);
+  const updateSearchQuery = (field: keyof typeof searchQueries, value: string) => {
+    setSearchQueries(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Enhanced sorting functionality
+  const applySortAndFilter = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
+    // Filter by search query
+    const filtered = items.filter(item => {
+      const searchLower = searchQuery.toLowerCase();
+      if (itemType === 'agent') {
+        const agent = item as Agent;
+        return (
+          agent.name?.toLowerCase().includes(searchLower) ||
+          agent.phone?.toLowerCase().includes(searchLower) ||
+          agent.area?.name?.toLowerCase().includes(searchLower) ||
+          agent.area?.location?.name?.toLowerCase().includes(searchLower)
+        );
+      } else {
+        const area = item as Area;
+        return (
+          area.name?.toLowerCase().includes(searchLower) ||
+          area.location?.name?.toLowerCase().includes(searchLower)
+        );
+      }
+    });
+
+    // Apply sorting
+    return filtered.sort((a, b) => {
+      let aValue = '';
+      let bValue = '';
+      
+      switch (sortConfig.field) {
+        case 'name':
+          aValue = a.name || '';
+          bValue = b.name || '';
+          break;
+        case 'location':
+          if (itemType === 'agent') {
+            aValue = (a as Agent).area?.location?.name || '';
+            bValue = (b as Agent).area?.location?.name || '';
+          } else {
+            aValue = (a as Area).location?.name || '';
+            bValue = (b as Area).location?.name || '';
+          }
+          break;
+        case 'area':
+          if (itemType === 'agent') {
+            aValue = (a as Agent).area?.name || '';
+            bValue = (b as Agent).area?.name || '';
+          }
+          break;
+      }
+      
+      const comparison = aValue.localeCompare(bValue);
+      return sortConfig.direction === 'asc' ? comparison : -comparison;
+    });
+  };
+
+  // Group filtered and sorted items by location
+  const getGroupedItems = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
+    const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
+    
+    const grouped = sortedFiltered.reduce((acc, item) => {
+      let locationName = '';
+      if (itemType === 'agent') {
+        locationName = (item as Agent).area?.location?.name || 'Unknown Location';
+      } else {
+        locationName = (item as Area).location?.name || 'Unknown Location';
+      }
+      
+      if (!acc[locationName]) {
+        acc[locationName] = [];
+      }
+      acc[locationName].push(item);
+      return acc;
+    }, {} as Record<string, typeof items>);
+
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([locationName, items]) => ({
+        locationName,
+        items
+      }));
+  };
+
+  const handleSortChange = (field: SortOption) => {
+    setSortConfig(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const getSelectedOriginAgent = () => {
+    return agents.find(agent => agent.id === packageData.origin_agent_id);
   };
 
   const getSelectedDestinationArea = () => {
@@ -202,38 +340,9 @@ export default function PackageCreationModal({
     return agents.find(agent => agent.id === packageData.destination_agent_id);
   };
 
-  const getFilteredAreas = () => {
-    if (!searchQuery.trim()) return areas;
-    
-    return areas.filter(area =>
-      area.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      area.location?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  };
-
-  const getGroupedAreas = () => {
-    const filteredAreas = getFilteredAreas();
-    
-    const grouped = filteredAreas.reduce((acc, area) => {
-      const locationName = area.location?.name || 'Unknown Location';
-      if (!acc[locationName]) {
-        acc[locationName] = [];
-      }
-      acc[locationName].push(area);
-      return acc;
-    }, {} as Record<string, Area[]>);
-
-    return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([locationName, areas]) => ({
-        locationName,
-        areas: areas.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-      }));
-  };
-
   const isCurrentStepValid = () => {
     switch (currentStep) {
-      case 0: return packageData.origin_area_id.length > 0;
+      case 0: return packageData.origin_agent_id.length > 0;
       case 1: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
       case 2: return packageData.delivery_type.length > 0;
       case 3: 
@@ -304,7 +413,64 @@ export default function PackageCreationModal({
     loadModalData();
   };
 
-  // Simple progress indicator
+  // Enhanced Search and Sort Header Component
+  const renderSearchAndSortHeader = (
+    searchValue: string,
+    onSearchChange: (value: string) => void,
+    placeholder: string,
+    showSort: boolean = true
+  ) => (
+    <View style={styles.searchAndSortContainer}>
+      <View style={styles.searchInputContainer}>
+        <Feather name="search" size={20} color="#888" />
+        <TextInput
+          style={styles.searchInput}
+          placeholder={placeholder}
+          placeholderTextColor="#888"
+          value={searchValue}
+          onChangeText={onSearchChange}
+        />
+        {searchValue.length > 0 && (
+          <TouchableOpacity onPress={() => onSearchChange('')}>
+            <Feather name="x" size={16} color="#888" />
+          </TouchableOpacity>
+        )}
+      </View>
+      
+      {showSort && (
+        <View style={styles.sortContainer}>
+          <Text style={styles.sortLabel}>Sort by:</Text>
+          <View style={styles.sortButtons}>
+            {(['name', 'location', 'area'] as SortOption[]).map((option) => (
+              <TouchableOpacity
+                key={option}
+                style={[
+                  styles.sortButton,
+                  sortConfig.field === option && styles.activeSortButton
+                ]}
+                onPress={() => handleSortChange(option)}
+              >
+                <Text style={[
+                  styles.sortButtonText,
+                  sortConfig.field === option && styles.activeSortButtonText
+                ]}>
+                  {option.charAt(0).toUpperCase() + option.slice(1)}
+                </Text>
+                {sortConfig.field === option && (
+                  <Feather 
+                    name={sortConfig.direction === 'asc' ? 'arrow-up' : 'arrow-down'} 
+                    size={12} 
+                    color="#7c3aed" 
+                  />
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -331,59 +497,49 @@ export default function PackageCreationModal({
     </View>
   );
 
-  const renderOriginAreaSelection = () => (
+  // Step 0: Origin Agent Selection (Replaces Origin Area)
+  const renderOriginAgentSelection = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Select Origin Area</Text>
-      <Text style={styles.stepSubtitle}>Where is the package coming from?</Text>
+      <Text style={styles.stepTitle}>Select Origin Agent</Text>
+      <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
       
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputContainer}>
-          <Feather name="search" size={20} color="#888" />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search areas..."
-            placeholderTextColor="#888"
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={16} color="#888" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+      {renderSearchAndSortHeader(
+        searchQueries.originAgent,
+        (value) => updateSearchQuery('originAgent', value),
+        'Search agents by name, area, or location...'
+      )}
       
       <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-        {getGroupedAreas().map((group, groupIndex) => (
+        {getGroupedItems(agents, searchQueries.originAgent, 'agent').map((group, groupIndex) => (
           <View key={groupIndex}>
             <View style={styles.locationHeader}>
               <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-              <Text style={styles.locationHeaderCount}>({group.areas.length})</Text>
+              <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
             </View>
             
-            {group.areas.map((area) => (
+            {group.items.map((agent) => (
               <TouchableOpacity
-                key={area.id}
+                key={agent.id}
                 style={[
                   styles.selectionItem,
-                  packageData.origin_area_id === area.id && styles.selectedItem
+                  packageData.origin_agent_id === agent.id && styles.selectedItem
                 ]}
-                onPress={() => updatePackageData('origin_area_id', area.id)}
+                onPress={() => updatePackageData('origin_agent_id', agent.id)}
               >
                 <View style={styles.selectionItemContent}>
                   <View style={styles.selectionInitials}>
                     <Text style={styles.selectionInitialsText}>
-                      {area.initials || area.name?.substring(0, 2).toUpperCase() || 'AR'}
+                      {(agent as Agent).name.substring(0, 2).toUpperCase()}
                     </Text>
                   </View>
                   <View style={styles.selectionInfo}>
-                    <Text style={styles.selectionName}>{area.name || 'Unknown Area'}</Text>
-                    {area.location?.name && (
-                      <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                    )}
+                    <Text style={styles.selectionName}>{(agent as Agent).name}</Text>
+                    <Text style={styles.selectionLocation}>
+                      {(agent as Agent).area?.name} • {(agent as Agent).area?.location?.name}
+                    </Text>
+                    <Text style={styles.selectionPhone}>{(agent as Agent).phone}</Text>
                   </View>
-                  {packageData.origin_area_id === area.id && (
+                  {packageData.origin_agent_id === agent.id && (
                     <Feather name="check-circle" size={20} color="#10b981" />
                   )}
                 </View>
@@ -392,11 +548,11 @@ export default function PackageCreationModal({
           </View>
         ))}
         
-        {getFilteredAreas().length === 0 && (
+        {applySortAndFilter(agents, searchQueries.originAgent, 'agent').length === 0 && (
           <View style={styles.noResultsContainer}>
             <Feather name="search" size={48} color="#666" />
-            <Text style={styles.noResultsTitle}>No areas found</Text>
-            <Text style={styles.noResultsText}>Try a different search term</Text>
+            <Text style={styles.noResultsTitle}>No agents found</Text>
+            <Text style={styles.noResultsText}>Try a different search term or adjust filters</Text>
           </View>
         )}
       </ScrollView>
@@ -446,8 +602,8 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="user" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Agent Pickup</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Collect from our agent</Text>
+              <Text style={styles.deliveryOptionTitle}>Agent to Agent</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Collect from destination agent</Text>
             </View>
             {packageData.delivery_type === 'agent' && (
               <Feather name="check-circle" size={20} color="#10b981" />
@@ -465,7 +621,7 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="home" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Doorstep Delivery</Text>
+              <Text style={styles.deliveryOptionTitle}>Agent to Doorstep</Text>
               <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
             </View>
             {packageData.delivery_type === 'doorstep' && (
@@ -481,37 +637,52 @@ export default function PackageCreationModal({
     if (packageData.delivery_type === 'agent') {
       return (
         <View style={styles.stepContent}>
-          <Text style={styles.stepTitle}>Select Receiving Agent</Text>
-          <Text style={styles.stepSubtitle}>Which agent will handle delivery?</Text>
+          <Text style={styles.stepTitle}>Select Destination Agent</Text>
+          <Text style={styles.stepSubtitle}>Which agent will handle final delivery?</Text>
+          
+          {renderSearchAndSortHeader(
+            searchQueries.destinationAgent,
+            (value) => updateSearchQuery('destinationAgent', value),
+            'Search destination agents...'
+          )}
           
           <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-            {agents.map((agent) => (
-              <TouchableOpacity
-                key={agent.id}
-                style={[
-                  styles.selectionItem,
-                  packageData.destination_agent_id === agent.id && styles.selectedItem
-                ]}
-                onPress={() => updatePackageData('destination_agent_id', agent.id)}
-              >
-                <View style={styles.selectionItemContent}>
-                  <View style={styles.selectionInitials}>
-                    <Text style={styles.selectionInitialsText}>
-                      {agent.name.substring(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.selectionInfo}>
-                    <Text style={styles.selectionName}>{agent.name}</Text>
-                    <Text style={styles.selectionLocation}>
-                      {agent.area?.name} • {agent.area?.location?.name}
-                    </Text>
-                    <Text style={styles.selectionPhone}>{agent.phone}</Text>
-                  </View>
-                  {packageData.destination_agent_id === agent.id && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
+            {getGroupedItems(agents, searchQueries.destinationAgent, 'agent').map((group, groupIndex) => (
+              <View key={groupIndex}>
+                <View style={styles.locationHeader}>
+                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
                 </View>
-              </TouchableOpacity>
+                
+                {group.items.map((agent) => (
+                  <TouchableOpacity
+                    key={agent.id}
+                    style={[
+                      styles.selectionItem,
+                      packageData.destination_agent_id === agent.id && styles.selectedItem
+                    ]}
+                    onPress={() => updatePackageData('destination_agent_id', agent.id)}
+                  >
+                    <View style={styles.selectionItemContent}>
+                      <View style={styles.selectionInitials}>
+                        <Text style={styles.selectionInitialsText}>
+                          {(agent as Agent).name.substring(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.selectionInfo}>
+                        <Text style={styles.selectionName}>{(agent as Agent).name}</Text>
+                        <Text style={styles.selectionLocation}>
+                          {(agent as Agent).area?.name} • {(agent as Agent).area?.location?.name}
+                        </Text>
+                        <Text style={styles.selectionPhone}>{(agent as Agent).phone}</Text>
+                      </View>
+                      {packageData.destination_agent_id === agent.id && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </ScrollView>
         </View>
@@ -522,33 +693,48 @@ export default function PackageCreationModal({
           <Text style={styles.stepTitle}>Select Destination Area</Text>
           <Text style={styles.stepSubtitle}>Which area should we deliver to?</Text>
           
+          {renderSearchAndSortHeader(
+            searchQueries.destinationArea,
+            (value) => updateSearchQuery('destinationArea', value),
+            'Search destination areas...'
+          )}
+          
           <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-            {areas.map((area) => (
-              <TouchableOpacity
-                key={area.id}
-                style={[
-                  styles.selectionItem,
-                  packageData.destination_area_id === area.id && styles.selectedItem
-                ]}
-                onPress={() => updatePackageData('destination_area_id', area.id)}
-              >
-                <View style={styles.selectionItemContent}>
-                  <View style={styles.selectionInitials}>
-                    <Text style={styles.selectionInitialsText}>
-                      {area.initials || area.name.substring(0, 2).toUpperCase()}
-                    </Text>
-                  </View>
-                  <View style={styles.selectionInfo}>
-                    <Text style={styles.selectionName}>{area.name}</Text>
-                    {area.location && (
-                      <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                    )}
-                  </View>
-                  {packageData.destination_area_id === area.id && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
+            {getGroupedItems(areas, searchQueries.destinationArea, 'area').map((group, groupIndex) => (
+              <View key={groupIndex}>
+                <View style={styles.locationHeader}>
+                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
                 </View>
-              </TouchableOpacity>
+                
+                {group.items.map((area) => (
+                  <TouchableOpacity
+                    key={area.id}
+                    style={[
+                      styles.selectionItem,
+                      packageData.destination_area_id === area.id && styles.selectedItem
+                    ]}
+                    onPress={() => updatePackageData('destination_area_id', area.id)}
+                  >
+                    <View style={styles.selectionItemContent}>
+                      <View style={styles.selectionInitials}>
+                        <Text style={styles.selectionInitialsText}>
+                          {(area as Area).initials || (area as Area).name?.substring(0, 2).toUpperCase() || 'AR'}
+                        </Text>
+                      </View>
+                      <View style={styles.selectionInfo}>
+                        <Text style={styles.selectionName}>{(area as Area).name}</Text>
+                        <Text style={styles.selectionLocation}>
+                          {(area as Area).location?.name}
+                        </Text>
+                      </View>
+                      {packageData.destination_area_id === area.id && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </View>
+                  </TouchableOpacity>
+                ))}
+              </View>
             ))}
           </ScrollView>
         </View>
@@ -586,15 +772,33 @@ export default function PackageCreationModal({
           <Text style={styles.confirmationSectionTitle}>Route</Text>
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
-              <Text style={styles.routeAreaInitials}>{getSelectedOriginArea()?.initials || '--'}</Text>
-              <Text style={styles.routeAreaName}>{getSelectedOriginArea()?.name || 'Unknown'}</Text>
-              <Text style={styles.routeLocationName}>{getSelectedOriginArea()?.location?.name || 'Unknown'}</Text>
+              <Text style={styles.routeAreaInitials}>
+                {getSelectedOriginAgent()?.name?.substring(0, 2).toUpperCase() || '--'}
+              </Text>
+              <Text style={styles.routeAreaName}>{getSelectedOriginAgent()?.name || 'Unknown'}</Text>
+              <Text style={styles.routeLocationName}>
+                {getSelectedOriginAgent()?.area?.name} • {getSelectedOriginAgent()?.area?.location?.name}
+              </Text>
             </View>
             <Feather name="arrow-right" size={20} color="#7c3aed" />
             <View style={styles.routePoint}>
-              <Text style={styles.routeAreaInitials}>{getSelectedDestinationArea()?.initials || '--'}</Text>
-              <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name || 'Unknown'}</Text>
-              <Text style={styles.routeLocationName}>{getSelectedDestinationArea()?.location?.name || 'Unknown'}</Text>
+              {packageData.delivery_type === 'agent' ? (
+                <>
+                  <Text style={styles.routeAreaInitials}>
+                    {getSelectedDestinationAgent()?.name?.substring(0, 2).toUpperCase() || '--'}
+                  </Text>
+                  <Text style={styles.routeAreaName}>{getSelectedDestinationAgent()?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeLocationName}>
+                    {getSelectedDestinationAgent()?.area?.name} • {getSelectedDestinationAgent()?.area?.location?.name}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.routeAreaInitials}>{getSelectedDestinationArea()?.initials || '--'}</Text>
+                  <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeLocationName}>{getSelectedDestinationArea()?.location?.name || 'Unknown'}</Text>
+                </>
+              )}
             </View>
           </View>
         </View>
@@ -608,12 +812,12 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Pickup'}
+            {packageData.delivery_type === 'doorstep' ? 'Agent to Doorstep' : 'Agent to Agent'}
           </Text>
           
           {packageData.delivery_type === 'agent' && getSelectedDestinationAgent() && (
             <View style={styles.agentInfo}>
-              <Text style={styles.confirmationDetail}>Agent: {getSelectedDestinationAgent()?.name}</Text>
+              <Text style={styles.confirmationDetail}>Destination Agent: {getSelectedDestinationAgent()?.name}</Text>
               <Text style={styles.confirmationSubDetail}>{getSelectedDestinationAgent()?.phone}</Text>
             </View>
           )}
@@ -640,13 +844,13 @@ export default function PackageCreationModal({
 
   const renderCurrentStep = () => {
     switch (currentStep) {
-      case 0: return renderOriginAreaSelection();
+      case 0: return renderOriginAgentSelection();
       case 1: return renderReceiverDetails();
       case 2: return renderDeliveryMethodSelection();
       case 3: return renderDestinationSelection();
       case 4: return renderDeliveryLocation();
       case 5: return renderConfirmation();
-      default: return renderOriginAreaSelection();
+      default: return renderOriginAgentSelection();
     }
   };
 
@@ -705,7 +909,7 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // MAIN CONTENT RENDERING - Fixed conditional structure
+  // MAIN CONTENT RENDERING
   const renderMainContent = () => {
     if (isDataLoading) {
       return (
@@ -745,7 +949,6 @@ export default function PackageCreationModal({
       );
     }
 
-    // Normal flow - render the full modal
     return (
       <>
         {renderHeader()}
@@ -792,7 +995,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Styles remain exactly the same
+// Enhanced Styles with new search and sort components
 const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
@@ -900,9 +1103,9 @@ const styles = StyleSheet.create({
     marginBottom: 30,
   },
   
-  // Search styles
-  searchContainer: {
-    marginBottom: 16,
+  // Enhanced Search and Sort styles
+  searchAndSortContainer: {
+    marginBottom: 20,
   },
   searchInputContainer: {
     flexDirection: 'row',
@@ -914,12 +1117,54 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     minHeight: 48,
     gap: 12,
+    marginBottom: 12,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: '#fff',
     paddingVertical: 12,
+  },
+  
+  // Sort container styles
+  sortContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  sortLabel: {
+    fontSize: 14,
+    color: '#888',
+    fontWeight: '500',
+  },
+  sortButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 4,
+  },
+  activeSortButton: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  activeSortButtonText: {
+    color: '#7c3aed',
+    fontWeight: '600',
   },
   
   // Location header styles
