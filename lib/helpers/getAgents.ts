@@ -1,3 +1,4 @@
+// lib/helpers/getAgents.ts - FIXED
 import api from '../api';
 
 export interface Agent {
@@ -26,11 +27,23 @@ export async function getAgents(): Promise<Agent[]> {
   try {
     console.log('👥 Fetching agents...');
     const response = await api.get('/api/v1/agents');
-    console.log('👥 Agents response:', response.data);
+    console.log('👥 Raw agents response:', response.data);
     
-    // Handle different response formats
+    // Handle the new response structure with serializers
+    if (response.data.success && response.data.agents) {
+      const agents = response.data.agents;
+      console.log('👥 Parsed agents:', agents.length, 'items');
+      
+      if (agents.length > 0) {
+        console.log('👥 Sample agent:', agents[0]);
+      }
+      
+      return agents;
+    }
+    
+    // Fallback for old response format
     const agents = response.data.agents || response.data || [];
-    console.log('👥 Parsed agents:', agents);
+    console.log('👥 Fallback parsed agents:', agents.length, 'items');
     
     return agents;
   } catch (error: any) {
