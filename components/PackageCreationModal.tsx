@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - SELF-LOADING VERSION
+// components/PackageCreationModal.tsx - FIXED VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -20,6 +20,7 @@ import { Feather } from '@expo/vector-icons';
 import { 
   getPackageFormData,
   getPackagePricing, 
+  validatePackageFormData,
   type Location, 
   type Area, 
   type Agent,
@@ -148,6 +149,13 @@ export default function PackageCreationModal({
         agents: formData.agents.length
       });
 
+      // Validate the data structure
+      const validation = validatePackageFormData(formData);
+      if (!validation.isValid) {
+        console.warn('⚠️ Data validation issues:', validation.issues);
+        // Still proceed but log warnings
+      }
+
       // Log sample data for debugging
       if (formData.locations.length > 0) {
         console.log('📍 Sample location:', formData.locations[0]);
@@ -159,9 +167,12 @@ export default function PackageCreationModal({
         console.log('👥 Sample agent:', formData.agents[0]);
       }
       
+      // Set the state - this should trigger re-render
       setLocations(formData.locations);
       setAreas(formData.areas);
       setAgents(formData.agents);
+      
+      console.log('📦 State updated with data, modal should now show items');
       
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
@@ -289,7 +300,10 @@ export default function PackageCreationModal({
   };
 
   const getAreasForLocation = (locationId: string) => {
-    return areas.filter(area => area.location_id === locationId);
+    console.log(`🔍 Filtering areas for location ${locationId}:`, areas.length, 'total areas');
+    const filtered = areas.filter(area => area.location_id === locationId);
+    console.log(`🔍 Found ${filtered.length} areas for location ${locationId}`);
+    return filtered;
   };
 
   const getOriginAreas = () => {
@@ -480,83 +494,141 @@ export default function PackageCreationModal({
     onSelect: (id: string) => void,
     title: string,
     data: Location[]
-  ) => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>{title}</Text>
-      <Text style={styles.dataDebugText}>Loaded {data.length} locations</Text>
-      <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
-        {data.map((location) => (
-          <TouchableOpacity
-            key={location.id}
-            style={[
-              styles.locationItem,
-              selectedId === location.id && styles.selectedLocationItem
-            ]}
-            onPress={() => onSelect(location.id)}
-          >
-            <LinearGradient
-              colors={selectedId === location.id ? 
-                ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-                ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-              style={styles.locationItemGradient}
-            >
-              <View style={styles.locationItemContent}>
-                <View style={styles.locationInitials}>
-                  <Text style={styles.locationInitialsText}>{location.initials}</Text>
-                </View>
-                <Text style={styles.locationName}>{location.name}</Text>
-                {selectedId === location.id && (
-                  <Feather name="check-circle" size={20} color="#10b981" />
-                )}
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
+  ) => {
+    console.log(`📍 Rendering location selection with ${data.length} items`);
+    
+    return (
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={styles.dataDebugText}>
+          Available: {data.length} locations
+        </Text>
+        
+        {data.length === 0 ? (
+          <View style={styles.emptyStateContainer}>
+            <Feather name="map-pin" size={48} color="#6b7280" />
+            <Text style={styles.emptyStateTitle}>No Locations Available</Text>
+            <Text style={styles.emptyStateMessage}>
+              Please check if locations are configured in your system.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
+            {data.map((location) => {
+              console.log(`📍 Rendering location: ${location.name} (ID: ${location.id})`);
+              return (
+                <TouchableOpacity
+                  key={location.id}
+                  style={[
+                    styles.locationItem,
+                    selectedId === location.id && styles.selectedLocationItem
+                  ]}
+                  onPress={() => {
+                    console.log(`📍 Selected location: ${location.name} (ID: ${location.id})`);
+                    onSelect(location.id);
+                  }}
+                >
+                  <LinearGradient
+                    colors={selectedId === location.id ? 
+                      ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
+                      ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
+                    style={styles.locationItemGradient}
+                  >
+                    <View style={styles.locationItemContent}>
+                      <View style={styles.locationInitials}>
+                        <Text style={styles.locationInitialsText}>
+                          {location.initials || location.name.substring(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.locationName}>{location.name}</Text>
+                      {selectedId === location.id && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
 
   const renderAreaSelection = (
     selectedId: string,
     onSelect: (id: string) => void,
     title: string,
     data: Area[]
-  ) => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>{title}</Text>
-      <Text style={styles.dataDebugText}>Loaded {data.length} areas</Text>
-      <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
-        {data.map((area) => (
-          <TouchableOpacity
-            key={area.id}
-            style={[
-              styles.locationItem,
-              selectedId === area.id && styles.selectedLocationItem
-            ]}
-            onPress={() => onSelect(area.id)}
-          >
-            <LinearGradient
-              colors={selectedId === area.id ? 
-                ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
-                ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
-              style={styles.locationItemGradient}
-            >
-              <View style={styles.locationItemContent}>
-                <View style={styles.locationInitials}>
-                  <Text style={styles.locationInitialsText}>{area.initials}</Text>
-                </View>
-                <Text style={styles.locationName}>{area.name}</Text>
-                {selectedId === area.id && (
-                  <Feather name="check-circle" size={20} color="#10b981" />
-                )}
-              </View>
-            </LinearGradient>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
-  );
+  ) => {
+    console.log(`🏢 Rendering area selection with ${data.length} items`);
+    
+    return (
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>{title}</Text>
+        <Text style={styles.dataDebugText}>
+          Available: {data.length} areas
+        </Text>
+        
+        {data.length === 0 ? (
+          <View style={styles.emptyStateContainer}>
+            <Feather name="map" size={48} color="#6b7280" />
+            <Text style={styles.emptyStateTitle}>No Areas Available</Text>
+            <Text style={styles.emptyStateMessage}>
+              Please select a location first, or check if areas are configured for this location.
+            </Text>
+          </View>
+        ) : (
+          <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
+            {data.map((area) => {
+              console.log(`🏢 Rendering area: ${area.name} (ID: ${area.id})`);
+              return (
+                <TouchableOpacity
+                  key={area.id}
+                  style={[
+                    styles.locationItem,
+                    selectedId === area.id && styles.selectedLocationItem
+                  ]}
+                  onPress={() => {
+                    console.log(`🏢 Selected area: ${area.name} (ID: ${area.id})`);
+                    onSelect(area.id);
+                  }}
+                >
+                  <LinearGradient
+                    colors={selectedId === area.id ? 
+                      ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
+                      ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
+                    style={styles.locationItemGradient}
+                  >
+                    <View style={styles.locationItemContent}>
+                      <View style={styles.locationInitials}>
+                        <Text style={styles.locationInitialsText}>
+                          {area.initials || area.name.substring(0, 2).toUpperCase()}
+                        </Text>
+                      </View>
+                      <View style={styles.areaInfo}>
+                        <Text style={styles.locationName}>{area.name}</Text>
+                        {area.location && (
+                          <Text style={styles.areaLocationText}>
+                            {area.location.name}
+                          </Text>
+                        )}
+                      </View>
+                      {selectedId === area.id && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </View>
+                  </LinearGradient>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        )}
+      </View>
+    );
+  };
 
+  // Rest of the render methods remain the same...
   const renderDetailsForm = (
     nameValue: string,
     phoneValue: string,
@@ -711,6 +783,9 @@ export default function PackageCreationModal({
   );
 
   const renderCurrentStep = () => {
+    console.log(`🎯 Rendering step ${currentStep}: ${STEP_TITLES[currentStep]}`);
+    console.log(`📊 Current data counts: locations=${locations.length}, areas=${areas.length}, agents=${agents.length}`);
+    
     switch (currentStep) {
       case 0:
         return renderLocationSelection(
@@ -797,6 +872,9 @@ export default function PackageCreationModal({
       </View>
     </View>
   );
+
+  // Debug render to check if we have data
+  console.log(`🔍 Modal render check - visible: ${visible}, isDataLoading: ${isDataLoading}, dataError: ${dataError}, locations: ${locations.length}, areas: ${areas.length}, agents: ${agents.length}`);
 
   return (
     <Modal visible={visible} transparent animationType="none">
@@ -922,6 +1000,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
+  // Empty States
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+  },
+  emptyStateTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+    textAlign: 'center',
+  },
+  emptyStateMessage: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+
   // Progress Bar
   progressContainer: {
     paddingHorizontal: 20,
@@ -1036,6 +1136,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
+  },
+  
+  // Area specific styles
+  areaInfo: {
+    flex: 1,
+  },
+  areaLocationText: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
   },
 
   // Forms
