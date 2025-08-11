@@ -13,7 +13,7 @@ export const debugApiConnection = async () => {
     console.log('🔑 API Headers:', api.defaults.headers);
     
     // Test basic connectivity
-    const response = await api.get('/ping');
+    const response = await api.get('api/v1/ping');
     console.log('✅ API ping successful:', response.data);
     return true;
   } catch (error: any) {
