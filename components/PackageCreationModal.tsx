@@ -344,7 +344,7 @@ export default function PackageCreationModal({
           </Animated.View>
         </View>
       </KeyboardAvoidingView>
-    <Modal>
+    </Modal>
   );
 }
 
