@@ -11,26 +11,17 @@ import {
   Dimensions,
   Easing,
   Alert,
-  ActivityIndicator,
 } from 'react-native';
 import { FAB } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
-import { 
-  getPackageFormData,
-  createPackage,
-  type Location, 
-  type Area, 
-  type Agent, 
-  type PackageData 
-} from '../../lib/helpers/packageHelpers';
+import { createPackage, type PackageData } from '../../lib/helpers/packageHelpers';
 import colors from '../../theme/colors';
 
 const { width: screenWidth } = Dimensions.get('window');
 
-// Static locations for display animation
-const displayLocations = [
+const locations = [
   'Nairobi', 'Mombasa', 'Kisumu', 'Eldoret', 'Nakuru',
   'Thika', 'Machakos', 'Kisii', 'Kakamega', 'Meru',
 ];
@@ -41,18 +32,11 @@ export default function HomeScreen() {
   const [cost, setCost] = useState<number | null>(null);
   const [showPackageModal, setShowPackageModal] = useState(false);
   
-  // Backend data for modal
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [isDataLoading, setIsDataLoading] = useState(false);
-  const [dataError, setDataError] = useState<string | null>(null);
-  
   const scrollX = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const locationTagWidth = 120;
-    const visibleSetWidth = displayLocations.length * locationTagWidth;
+    const visibleSetWidth = locations.length * locationTagWidth;
     const repeatedList = 5;
     const scrollDistance = visibleSetWidth * repeatedList;
 
@@ -73,41 +57,9 @@ export default function HomeScreen() {
     return () => scrollX.stopAnimation();
   }, [scrollX]);
 
-  // Load data when component mounts
-  useEffect(() => {
-    loadPackageData();
-  }, []);
-
-  const loadPackageData = async () => {
-    try {
-      setIsDataLoading(true);
-      setDataError(null);
-      
-      console.log('🔄 Loading package form data for modal...');
-      
-      const formData = await getPackageFormData();
-      
-      setLocations(formData.locations);
-      setAreas(formData.areas);
-      setAgents(formData.agents);
-      
-      console.log('✅ Package data loaded successfully:', {
-        locations: formData.locations.length,
-        areas: formData.areas.length,
-        agents: formData.agents.length
-      });
-      
-    } catch (error: any) {
-      console.error('❌ Failed to load package data:', error);
-      setDataError(error.message || 'Failed to load data');
-    } finally {
-      setIsDataLoading(false);
-    }
-  };
-
   const calculateCost = () => {
     if (origin && destination) {
-      const estimatedCost = 500 + Math.abs(displayLocations.indexOf(origin) - displayLocations.indexOf(destination)) * 100;
+      const estimatedCost = 500 + Math.abs(locations.indexOf(origin) - locations.indexOf(destination)) * 100;
       setCost(estimatedCost);
     } else {
       setCost(null);
@@ -116,57 +68,6 @@ export default function HomeScreen() {
 
   const handleFabPress = () => {
     console.log('📦 Opening package creation modal');
-    console.log('📊 Data status:', {
-      locations: locations.length,
-      areas: areas.length,
-      agents: agents.length,
-      isLoading: isDataLoading,
-      hasError: !!dataError
-    });
-
-    // Check if data is available
-    if (isDataLoading) {
-      Alert.alert('Please Wait', 'Data is still loading. Please try again in a moment.');
-      return;
-    }
-
-    if (dataError) {
-      Alert.alert(
-        'Data Error', 
-        `Failed to load required data: ${dataError}\n\nWould you like to retry?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: loadPackageData }
-        ]
-      );
-      return;
-    }
-
-    if (locations.length === 0) {
-      Alert.alert(
-        'No Data Available', 
-        'No locations available. Please check your internet connection and try again.',
-        [
-          { text: 'OK' },
-          { text: 'Retry', onPress: loadPackageData }
-        ]
-      );
-      return;
-    }
-
-    if (areas.length === 0) {
-      Alert.alert(
-        'No Data Available', 
-        'No areas available. Please check your internet connection and try again.',
-        [
-          { text: 'OK' },
-          { text: 'Retry', onPress: loadPackageData }
-        ]
-      );
-      return;
-    }
-
-    console.log('✅ All data checks passed, opening modal');
     setShowPackageModal(true);
   };
 
@@ -174,14 +75,14 @@ export default function HomeScreen() {
     try {
       console.log('📦 Creating package with data:', packageData);
       
-      // Use the fixed createPackage function that handles data conversion
+      // Use the fixed createPackage function that handles all the data conversion
       const response = await createPackage(packageData);
       
       console.log('✅ Package created successfully:', response);
       
       Alert.alert(
         'Success! 🎉',
-        `Package created successfully!\n\nTracking Code: ${response.tracking_number || 'N/A'}\n\nStatus: ${response.status || 'Pending Payment'}`,
+        `Package created successfully!\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
         [
           {
             text: 'Create Another',
@@ -205,6 +106,7 @@ export default function HomeScreen() {
   };
 
   const handleCloseModal = () => {
+    console.log('❌ Closing package modal');
     setShowPackageModal(false);
   };
 
@@ -229,24 +131,6 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* Data Loading Indicator */}
-      {isDataLoading && (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="small" color="#7c3aed" />
-          <Text style={styles.loadingText}>Loading package data...</Text>
-        </View>
-      )}
-
-      {/* Data Error Indicator */}
-      {dataError && (
-        <View style={styles.errorContainer}>
-          <Text style={styles.errorText}>⚠️ Data loading failed</Text>
-          <TouchableOpacity onPress={loadPackageData} style={styles.retryButton}>
-            <Text style={styles.retryText}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
       {/* Animated Scrolling Section */}
       <View style={styles.locationsContainer}>
         <Text style={styles.sectionTitle}>Currently Reaching</Text>
@@ -257,7 +141,7 @@ export default function HomeScreen() {
               { transform: [{ translateX: scrollX }] },
             ]}
           >
-            {Array(5).fill(displayLocations).flat().map((location, index) => (
+            {Array(5).fill(locations).flat().map((location, index) => (
               <LocationTag key={`${location}-${index}`} location={location} />
             ))}
           </Animated.View>
@@ -304,44 +188,23 @@ export default function HomeScreen() {
         </View>
       </ScrollView>
 
-      {/* FAB with data status indicator */}
+      {/* FAB */}
       <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
-        <FAB 
-          icon="plus" 
-          style={[
-            styles.fab,
-            (isDataLoading || dataError || locations.length === 0) && styles.fabDisabled
-          ]} 
-          onPress={handleFabPress} 
-          color="white"
-          disabled={isDataLoading}
-        />
-        {/* Data status indicator on FAB */}
-        {isDataLoading && (
-          <View style={styles.fabLoadingIndicator}>
-            <ActivityIndicator size="small" color="#fff" />
-          </View>
-        )}
-        {!isDataLoading && locations.length > 0 && (
-          <View style={styles.fabStatusIndicator}>
-            <Text style={styles.fabStatusText}>✓</Text>
-          </View>
-        )}
-        {!isDataLoading && dataError && (
-          <View style={[styles.fabStatusIndicator, styles.fabErrorIndicator]}>
-            <Text style={styles.fabStatusText}>!</Text>
-          </View>
-        )}
+        <FAB icon="plus" style={styles.fab} onPress={handleFabPress} color="white" />
       </LinearGradient>
 
-      {/* Package Creation Modal - NOW WITH PROPER DATA! */}
+      {/* 
+        Self-Loading Package Creation Modal 
+        - No need to pass data props!
+        - Modal loads its own data from helpers
+        - Just pass the required callbacks
+      */}
       <PackageCreationModal
         visible={showPackageModal}
         onClose={handleCloseModal}
         onSubmit={handlePackageSubmit}
-        locations={locations}  // ✅ Real data from API
-        areas={areas}          // ✅ Real data from API  
-        agents={agents}        // ✅ Real data from API
+        // No locations, areas, or agents props needed!
+        // Modal will load its own data
       />
     </SafeAreaView>
   );
@@ -349,53 +212,6 @@ export default function HomeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0a0a0f' },
-  
-  // Loading and Error States
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 8,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    marginHorizontal: 20,
-    marginVertical: 5,
-    borderRadius: 8,
-  },
-  loadingText: {
-    color: '#7c3aed',
-    fontSize: 12,
-    marginLeft: 8,
-  },
-  errorContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 8,
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
-    marginHorizontal: 20,
-    marginVertical: 5,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-  },
-  errorText: {
-    color: '#ef4444',
-    fontSize: 12,
-    flex: 1,
-  },
-  retryButton: {
-    backgroundColor: '#ef4444',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 4,
-  },
-  retryText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
-  },
-
-  // Existing styles
   locationsContainer: { paddingTop: 20, paddingBottom: 20 },
   sectionTitle: {
     fontSize: 24, fontWeight: 'bold', color: '#fff',
@@ -449,49 +265,10 @@ const styles = StyleSheet.create({
   costText: {
     fontSize: 18, fontWeight: '600', color: '#fff', textAlign: 'center',
   },
-  
-  // FAB styles
   fabGradient: {
     position: 'absolute', right: 20, bottom: 30, borderRadius: 28,
     shadowColor: '#7c3aed', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4, shadowRadius: 8, elevation: 8,
   },
-  fab: { 
-    backgroundColor: 'transparent', 
-    elevation: 0, 
-    shadowOpacity: 0 
-  },
-  fabDisabled: {
-    opacity: 0.6,
-  },
-  fabLoadingIndicator: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#7c3aed',
-    borderRadius: 12,
-    width: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fabStatusIndicator: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#10b981',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  fabErrorIndicator: {
-    backgroundColor: '#ef4444',
-  },
-  fabStatusText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
+  fab: { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 },
 });
