@@ -17,53 +17,26 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import { 
+  getPackagePricing, 
+  type Location, 
+  type Area, 
+  type Agent,
+  type PackageData 
+} from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
-
-interface Location {
-  id: string;
-  name: string;
-  initials: string;
-}
-
-interface Area {
-  id: string;
-  name: string;
-  initials: string;
-  location_id: string;
-  location: Location;
-}
-
-interface Agent {
-  id: string;
-  name: string;
-  phone: string;
-  area_id: string;
-  area: Area;
-}
 
 interface PackageCreationModalProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (packageData: any) => Promise<void>;
+  onSubmit: (packageData: PackageData) => Promise<void>;
   locations: Location[];
   areas: Area[];
   agents: Agent[];
 }
 
 type DeliveryType = 'doorstep' | 'agent' | 'mixed';
-
-interface PackageData {
-  sender_name: string;
-  sender_phone: string;
-  receiver_name: string;
-  receiver_phone: string;
-  origin_area_id: string;
-  destination_area_id: string;
-  origin_agent_id?: string;
-  destination_agent_id?: string;
-  delivery_type: DeliveryType;
-}
 
 const STEP_TITLES = [
   'Origin Location',
@@ -86,6 +59,7 @@ export default function PackageCreationModal({
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [isPricingLoading, setIsPricingLoading] = useState(false);
   const [selectedOriginLocation, setSelectedOriginLocation] = useState<string>('');
   const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<string>('');
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
@@ -104,6 +78,7 @@ export default function PackageCreationModal({
   });
 
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
+  const [pricingError, setPricingError] = useState<string | null>(null);
 
   const resetForm = () => {
     setCurrentStep(0);
@@ -121,6 +96,8 @@ export default function PackageCreationModal({
       delivery_type: 'doorstep'
     });
     setEstimatedCost(null);
+    setPricingError(null);
+    setIsPricingLoading(false);
   };
 
   useEffect(() => {
@@ -146,7 +123,7 @@ export default function PackageCreationModal({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]); // Fixed: Added dependency array
+  }, [visible]);
 
   useEffect(() => {
     Animated.timing(progressAnim, {
@@ -159,11 +136,48 @@ export default function PackageCreationModal({
   useEffect(() => {
     // Calculate estimated cost when origin, destination, and delivery type are set
     if (packageData.origin_area_id && packageData.destination_area_id && packageData.delivery_type) {
-      calculateEstimatedCost();
+      fetchRealTimePricing();
+    } else {
+      setEstimatedCost(null);
+      setPricingError(null);
     }
   }, [packageData.origin_area_id, packageData.destination_area_id, packageData.delivery_type]);
 
-  const calculateEstimatedCost = () => {
+  const fetchRealTimePricing = async () => {
+    if (!packageData.origin_area_id || !packageData.destination_area_id || !packageData.delivery_type) {
+      return;
+    }
+
+    setIsPricingLoading(true);
+    setPricingError(null);
+
+    try {
+      console.log('Fetching pricing for:', {
+        origin_area_id: packageData.origin_area_id,
+        destination_area_id: packageData.destination_area_id,
+        delivery_type: packageData.delivery_type
+      });
+
+      const pricingResponse = await getPackagePricing({
+        origin_area_id: packageData.origin_area_id,
+        destination_area_id: packageData.destination_area_id,
+        delivery_type: packageData.delivery_type,
+      });
+
+      setEstimatedCost(pricingResponse.cost);
+      console.log('Pricing fetched successfully:', pricingResponse);
+    } catch (error: any) {
+      console.error('Failed to fetch pricing:', error);
+      setPricingError('Failed to load pricing');
+      
+      // Fallback to local calculation
+      calculateFallbackCost();
+    } finally {
+      setIsPricingLoading(false);
+    }
+  };
+
+  const calculateFallbackCost = () => {
     const originArea = areas.find(a => a.id === packageData.origin_area_id);
     const destinationArea = areas.find(a => a.id === packageData.destination_area_id);
     
@@ -262,10 +276,12 @@ export default function PackageCreationModal({
 
     setIsSubmitting(true);
     try {
+      console.log('Submitting package data:', packageData);
       await onSubmit(packageData);
       onClose();
-    } catch (error) {
-      Alert.alert('Error', 'Failed to create package. Please try again.');
+    } catch (error: any) {
+      console.error('Failed to submit package:', error);
+      Alert.alert('Error', error.message || 'Failed to create package. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -510,14 +526,27 @@ export default function PackageCreationModal({
         </View>
 
         {/* Estimated Cost */}
-        {estimatedCost && (
-          <View style={styles.costSection}>
-            <LinearGradient colors={['rgba(16, 185, 129, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.costGradientBg}>
-              <Text style={styles.costLabel}>Estimated Cost</Text>
+        <View style={styles.costSection}>
+          <LinearGradient colors={['rgba(16, 185, 129, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.costGradientBg}>
+            <Text style={styles.costLabel}>Estimated Cost</Text>
+            
+            {isPricingLoading ? (
+              <View style={styles.costLoadingContainer}>
+                <ActivityIndicator size="small" color="#7c3aed" />
+                <Text style={styles.costLoadingText}>Calculating...</Text>
+              </View>
+            ) : pricingError ? (
+              <View style={styles.costErrorContainer}>
+                <Feather name="alert-circle" size={16} color="#ef4444" />
+                <Text style={styles.costErrorText}>{pricingError}</Text>
+              </View>
+            ) : estimatedCost ? (
               <Text style={styles.costAmount}>KSh {estimatedCost.toLocaleString()}</Text>
-            </LinearGradient>
-          </View>
-        )}
+            ) : (
+              <Text style={styles.costAmount}>KSh --</Text>
+            )}
+          </LinearGradient>
+        </View>
       </View>
     </ScrollView>
   );
@@ -864,6 +893,24 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  costLoadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  costLoadingText: {
+    color: '#888',
+    fontSize: 16,
+  },
+  costErrorContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  costErrorText: {
+    color: '#ef4444',
+    fontSize: 14,
   },
   footer: {
     padding: 20,
