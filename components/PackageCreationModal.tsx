@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx
+// components/PackageCreationModal.tsx - QUICK FIX
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -31,9 +31,10 @@ interface PackageCreationModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  locations: Location[];
-  areas: Area[];
-  agents: Agent[];
+  // Make these optional with default values
+  locations?: Location[];
+  areas?: Area[];
+  agents?: Agent[];
 }
 
 type DeliveryType = 'doorstep' | 'agent' | 'mixed';
@@ -53,9 +54,9 @@ export default function PackageCreationModal({
   visible,
   onClose,
   onSubmit,
-  locations,
-  areas,
-  agents
+  locations = [], // Default empty array
+  areas = [],     // Default empty array
+  agents = []     // Default empty array
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -287,6 +288,43 @@ export default function PackageCreationModal({
     }
   };
 
+  // Show empty state if no data
+  if (locations.length === 0 && areas.length === 0 && agents.length === 0) {
+    return (
+      <Modal visible={visible} transparent animationType="none">
+        <View style={styles.overlay}>
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { transform: [{ translateY: slideAnim }] }
+            ]}
+          >
+            <LinearGradient
+              colors={['#1a1a2e', '#16213e', '#0f1419']}
+              style={styles.modalContent}
+            >
+              <View style={styles.emptyStateContainer}>
+                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+                
+                <Feather name="package" size={64} color="#7c3aed" />
+                <Text style={styles.emptyStateTitle}>No Data Available</Text>
+                <Text style={styles.emptyStateMessage}>
+                  Unable to load package data. Please check your internet connection and try again.
+                </Text>
+                
+                <TouchableOpacity onPress={onClose} style={styles.emptyStateButton}>
+                  <Text style={styles.emptyStateButtonText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </Modal>
+    );
+  }
+
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -489,15 +527,15 @@ export default function PackageCreationModal({
           <Text style={styles.confirmationSectionTitle}>Route</Text>
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
-              <Text style={styles.routeLocationInitials}>{getSelectedOriginLocation()?.initials}</Text>
-              <Text style={styles.routeLocationName}>{getSelectedOriginLocation()?.name}</Text>
-              <Text style={styles.routeAreaName}>{getSelectedOriginArea()?.name}</Text>
+              <Text style={styles.routeLocationInitials}>{getSelectedOriginLocation()?.initials || '--'}</Text>
+              <Text style={styles.routeLocationName}>{getSelectedOriginLocation()?.name || 'Unknown'}</Text>
+              <Text style={styles.routeAreaName}>{getSelectedOriginArea()?.name || 'Unknown'}</Text>
             </View>
             <Feather name="arrow-right" size={20} color="#7c3aed" />
             <View style={styles.routePoint}>
-              <Text style={styles.routeLocationInitials}>{getSelectedDestinationLocation()?.initials}</Text>
-              <Text style={styles.routeLocationName}>{getSelectedDestinationLocation()?.name}</Text>
-              <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name}</Text>
+              <Text style={styles.routeLocationInitials}>{getSelectedDestinationLocation()?.initials || '--'}</Text>
+              <Text style={styles.routeLocationName}>{getSelectedDestinationLocation()?.name || 'Unknown'}</Text>
+              <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name || 'Unknown'}</Text>
             </View>
           </View>
         </View>
@@ -540,7 +578,7 @@ export default function PackageCreationModal({
                 <Feather name="alert-circle" size={16} color="#ef4444" />
                 <Text style={styles.costErrorText}>{pricingError}</Text>
               </View>
-            ) : estimatedCost ? (
+            ) : estimatedCost !== null ? (
               <Text style={styles.costAmount}>KSh {estimatedCost.toLocaleString()}</Text>
             ) : (
               <Text style={styles.costAmount}>KSh --</Text>
@@ -683,6 +721,42 @@ const styles = StyleSheet.create({
   modalContent: {
     flex: 1,
   },
+  
+  // Empty State
+  emptyStateContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    position: 'relative',
+  },
+  emptyStateTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  emptyStateMessage: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 12,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  emptyStateButton: {
+    backgroundColor: '#7c3aed',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 30,
+  },
+  emptyStateButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+
   progressContainer: {
     paddingHorizontal: 20,
     paddingTop: 15,
