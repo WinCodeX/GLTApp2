@@ -1,5 +1,4 @@
-// lib/helpers/getAreas.ts
-import { getBaseUrl } from './getBaseUrl';
+import { api } from '../api';
 
 export interface Area {
   id: string;
@@ -17,23 +16,18 @@ export interface Area {
 
 export async function getAreas(): Promise<Area[]> {
   try {
-    const baseUrl = getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/v1/areas`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.areas || data; // Handle different response formats
-  } catch (error) {
-    console.error('Error fetching areas:', error);
-    throw new Error('Failed to fetch areas');
+    console.log('🏢 Fetching areas...');
+    const response = await api.get('/api/v1/areas');
+    console.log('🏢 Areas response:', response.data);
+    
+    // Handle different response formats
+    const areas = response.data.areas || response.data || [];
+    console.log('🏢 Parsed areas:', areas);
+    
+    return areas;
+  } catch (error: any) {
+    console.error('❌ Error fetching areas:', error);
+    console.error('❌ Error response:', error.response?.data);
+    throw new Error(`Failed to fetch areas: ${error.message}`);
   }
 }
