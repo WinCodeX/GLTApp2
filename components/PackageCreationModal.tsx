@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - MINIMAL ADDITIONS ONLY
+// components/PackageCreationModal.tsx - FIXED STRUCTURE
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -77,8 +77,6 @@ export default function PackageCreationModal({
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
-
-  // ONLY add search - nothing else
   const [searchQuery, setSearchQuery] = useState<string>('');
 
   // Load data when modal becomes visible
@@ -138,7 +136,7 @@ export default function PackageCreationModal({
     setDeliveryLocation('');
     setEstimatedCost(null);
     setIsSubmitting(false);
-    setSearchQuery(''); // Reset search
+    setSearchQuery('');
   };
 
   const closeModal = () => {
@@ -151,7 +149,6 @@ export default function PackageCreationModal({
     });
   };
 
-  // Calculate simple fallback cost when needed
   const calculateCost = () => {
     if (!packageData.origin_area_id) return;
     
@@ -205,7 +202,6 @@ export default function PackageCreationModal({
     return agents.find(agent => agent.id === packageData.destination_agent_id);
   };
 
-  // ONLY add simple search filtering - nothing complex
   const getFilteredAreas = () => {
     if (!searchQuery.trim()) return areas;
     
@@ -215,11 +211,9 @@ export default function PackageCreationModal({
     );
   };
 
-  // ONLY add simple grouping by location - no complex sorting
   const getGroupedAreas = () => {
     const filteredAreas = getFilteredAreas();
     
-    // Group by location
     const grouped = filteredAreas.reduce((acc, area) => {
       const locationName = area.location?.name || 'Unknown Location';
       if (!acc[locationName]) {
@@ -229,7 +223,6 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, Area[]>);
 
-    // Return grouped areas, sorted by location name
     return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([locationName, areas]) => ({
@@ -261,14 +254,13 @@ export default function PackageCreationModal({
 
   const nextStep = () => {
     if (currentStep < STEP_TITLES.length - 1 && isCurrentStepValid()) {
-      // Skip delivery location step for agent delivery
       if (currentStep === 3 && packageData.delivery_type === 'agent') {
         setCurrentStep(5);
-        calculateCost(); // Calculate cost when we reach confirmation
+        calculateCost();
       } else {
         setCurrentStep(prev => {
           const newStep = prev + 1;
-          if (newStep === 5) calculateCost(); // Calculate cost when we reach confirmation
+          if (newStep === 5) calculateCost();
           return newStep;
         });
       }
@@ -312,583 +304,6 @@ export default function PackageCreationModal({
     loadModalData();
   };
 
-  // Show loading state while fetching data
-  if (isDataLoading) {
-    return (
-      <Modal visible={visible} transparent animationType="none">
-        <View style={styles.overlay}>
-          <Animated.View
-            style={[
-              styles.modalContainer,
-              { transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <LinearGradient
-              colors={['#1a1a2e', '#16213e', '#0f1419']}
-              style={styles.modalContent}
-            >
-              {renderHeader()}
-              {renderProgressBar()}
-              
-              <ScrollView 
-                style={styles.contentContainer}
-                contentContainerStyle={styles.scrollContentContainer}
-                keyboardShouldPersistTaps="handled"
-                showsVerticalScrollIndicator={false}
-              >
-                {renderCurrentStep()}
-              </ScrollView>
-              
-              {renderNavigationButtons()}
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
-    </Modal>
-  );
-}
-
-// Styles - same as working version with MINIMAL additions
-const styles = StyleSheet.create({
-  keyboardContainer: {
-    flex: 1,
-  },
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'flex-end',
-  },
-  modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.9,
-    minHeight: SCREEN_HEIGHT * 0.6,
-    width: SCREEN_WIDTH,
-  },
-  modalContent: {
-    flex: 1,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  
-  // Header styles
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonAbsolute: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-  },
-  placeholder: {
-    width: 40,
-  },
-  
-  // Progress bar
-  progressContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-  },
-  progressBackground: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 2,
-  },
-  progressForeground: {
-    height: '100%',
-    backgroundColor: '#7c3aed',
-    borderRadius: 2,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  
-  // Content styles
-  contentContainer: {
-    flex: 1,
-  },
-  scrollContentContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  stepContent: {
-    flex: 1,
-    minHeight: 400,
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  stepSubtitle: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 30,
-  },
-  
-  // ONLY add search styles - minimal
-  searchContainer: {
-    marginBottom: 16,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    paddingHorizontal: 16,
-    minHeight: 48,
-    gap: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingVertical: 12,
-  },
-  
-  // ONLY add location header styles - minimal
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-    marginTop: 12,
-    marginBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
-  },
-  locationHeaderText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#7c3aed',
-  },
-  locationHeaderCount: {
-    fontSize: 12,
-    color: '#888',
-  },
-  
-  // Selection list styles - same as working version
-  selectionList: {
-    flex: 1,
-  },
-  selectionItem: {
-    marginBottom: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    overflow: 'hidden',
-  },
-  selectedItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-  },
-  selectionItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-  },
-  selectionInitials: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  selectionInitialsText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  selectionInfo: {
-    flex: 1,
-  },
-  selectionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  selectionLocation: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 2,
-  },
-  selectionPhone: {
-    fontSize: 12,
-    color: '#666',
-  },
-  
-  // ONLY add simple no results - minimal
-  noResultsContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 60,
-  },
-  noResultsTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#666',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  noResultsText: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-  },
-  
-  // Form styles - same as working version
-  formContainer: {
-    gap: 20,
-    paddingVertical: 10,
-  },
-  input: {
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-    fontSize: 16,
-    color: '#fff',
-    minHeight: 56,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-  },
-  textArea: {
-    minHeight: 120,
-    textAlignVertical: 'top',
-    paddingTop: 16,
-  },
-  
-  // Delivery options - same as working version
-  deliveryOptions: {
-    gap: 16,
-  },
-  deliveryOption: {
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  selectedDeliveryOption: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: '#7c3aed',
-  },
-  deliveryOptionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-  },
-  deliveryOptionText: {
-    flex: 1,
-    marginLeft: 16,
-  },
-  deliveryOptionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  deliveryOptionSubtitle: {
-    fontSize: 14,
-    color: '#888',
-  },
-  
-  // Confirmation styles - same as working version
-  confirmationContainer: {
-    gap: 24,
-  },
-  confirmationSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 20,
-  },
-  confirmationSectionTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#7c3aed',
-    marginBottom: 12,
-  },
-  confirmationDetail: {
-    fontSize: 16,
-    color: '#fff',
-    marginBottom: 4,
-  },
-  confirmationSubDetail: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 8,
-  },
-  routeDisplay: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  routePoint: {
-    alignItems: 'center',
-    flex: 1,
-  },
-  routeAreaInitials: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#7c3aed',
-    marginBottom: 4,
-  },
-  routeAreaName: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  routeLocationName: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  agentInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  deliveryLocationInfo: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  estimatedCost: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#10b981',
-  },
-  pricingError: {
-    fontSize: 14,
-    color: '#ef4444',
-  },
-  
-  // Navigation - same as working version
-  navigationContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  spacer: {
-    flex: 1,
-  },
-  backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 8,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-  },
-  nextButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#7c3aed',
-    gap: 8,
-  },
-  nextButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#10b981',
-    gap: 8,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  disabledButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  disabledButtonText: {
-    color: '#666',
-  },
-  
-  // Loading and error - same as working version
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  loadingTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  loadingSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ef4444',
-    marginTop: 20,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 30,
-  },
-  errorButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#7c3aed',
-  },
-  retryButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
-  },
-});
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="large" color="#7c3aed" />
-                <Text style={styles.loadingTitle}>Loading Package Data</Text>
-                <Text style={styles.loadingSubtitle}>
-                  Fetching locations, areas, and agents...
-                </Text>
-              </View>
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </Modal>
-    );
-  }
-
-  // Show error state if data loading failed
-  if (dataError) {
-    return (
-      <Modal visible={visible} transparent animationType="none">
-        <View style={styles.overlay}>
-          <Animated.View
-            style={[
-              styles.modalContainer,
-              { transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <LinearGradient
-              colors={['#1a1a2e', '#16213e', '#0f1419']}
-              style={styles.modalContent}
-            >
-              <View style={styles.errorContainer}>
-                <TouchableOpacity onPress={closeModal} style={styles.closeButtonAbsolute}>
-                  <Feather name="x" size={24} color="#fff" />
-                </TouchableOpacity>
-                
-                <Feather name="alert-circle" size={64} color="#ef4444" />
-                <Text style={styles.errorTitle}>Failed to Load Data</Text>
-                <Text style={styles.errorMessage}>
-                  {dataError}
-                  {'\n\n'}Check your internet connection and make sure your API is running.
-                </Text>
-                
-                <View style={styles.errorButtons}>
-                  <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
-                    <Text style={styles.retryButtonText}>Retry</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
-                    <Text style={styles.cancelButtonText}>Cancel</Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </Modal>
-    );
-  }
-
   // Simple progress indicator
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
@@ -916,13 +331,11 @@ const styles = StyleSheet.create({
     </View>
   );
 
-  // Step 0: Origin Area Selection with MINIMAL additions
   const renderOriginAreaSelection = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Select Origin Area</Text>
       <Text style={styles.stepSubtitle}>Where is the package coming from?</Text>
       
-      {/* ONLY add search input - simple */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <Feather name="search" size={20} color="#888" />
@@ -944,13 +357,11 @@ const styles = StyleSheet.create({
       <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
         {getGroupedAreas().map((group, groupIndex) => (
           <View key={groupIndex}>
-            {/* Simple location header */}
             <View style={styles.locationHeader}>
               <Text style={styles.locationHeaderText}>{group.locationName}</Text>
               <Text style={styles.locationHeaderCount}>({group.areas.length})</Text>
             </View>
             
-            {/* Areas in this location */}
             {group.areas.map((area) => (
               <TouchableOpacity
                 key={area.id}
@@ -981,7 +392,6 @@ const styles = StyleSheet.create({
           </View>
         ))}
         
-        {/* Simple no results */}
         {getFilteredAreas().length === 0 && (
           <View style={styles.noResultsContainer}>
             <Feather name="search" size={48} color="#666" />
@@ -993,7 +403,6 @@ const styles = StyleSheet.create({
     </View>
   );
 
-  // All other steps remain exactly the same as working version
   const renderReceiverDetails = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -1296,6 +705,66 @@ const styles = StyleSheet.create({
     </View>
   );
 
+  // MAIN CONTENT RENDERING - Fixed conditional structure
+  const renderMainContent = () => {
+    if (isDataLoading) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#7c3aed" />
+          <Text style={styles.loadingTitle}>Loading Package Data</Text>
+          <Text style={styles.loadingSubtitle}>
+            Fetching locations, areas, and agents...
+          </Text>
+        </View>
+      );
+    }
+
+    if (dataError) {
+      return (
+        <View style={styles.errorContainer}>
+          <TouchableOpacity onPress={closeModal} style={styles.closeButtonAbsolute}>
+            <Feather name="x" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <Feather name="alert-circle" size={64} color="#ef4444" />
+          <Text style={styles.errorTitle}>Failed to Load Data</Text>
+          <Text style={styles.errorMessage}>
+            {dataError}
+            {'\n\n'}Check your internet connection and make sure your API is running.
+          </Text>
+          
+          <View style={styles.errorButtons}>
+            <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
+    // Normal flow - render the full modal
+    return (
+      <>
+        {renderHeader()}
+        {renderProgressBar()}
+        
+        <ScrollView 
+          style={styles.contentContainer}
+          contentContainerStyle={styles.scrollContentContainer}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {renderCurrentStep()}
+        </ScrollView>
+        
+        {renderNavigationButtons()}
+      </>
+    );
+  };
+
   return (
     <Modal visible={visible} transparent animationType="none">
       <KeyboardAvoidingView 
@@ -1314,3 +783,496 @@ const styles = StyleSheet.create({
               colors={['#1a1a2e', '#16213e', '#0f1419']}
               style={styles.modalContent}
             >
+              {renderMainContent()}
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </KeyboardAvoidingView>
+    </Modal>
+  );
+}
+
+// Styles remain exactly the same
+const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    maxHeight: SCREEN_HEIGHT * 0.9,
+    minHeight: SCREEN_HEIGHT * 0.6,
+    width: SCREEN_WIDTH,
+  },
+  modalContent: {
+    flex: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  
+  // Header styles
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonAbsolute: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  placeholder: {
+    width: 40,
+  },
+  
+  // Progress bar
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 15,
+  },
+  progressBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+  },
+  progressForeground: {
+    height: '100%',
+    backgroundColor: '#7c3aed',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 8,
+  },
+  
+  // Content styles
+  contentContainer: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+  },
+  stepContent: {
+    flex: 1,
+    minHeight: 400,
+  },
+  stepTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  stepSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 30,
+  },
+  
+  // Search styles
+  searchContainer: {
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    paddingHorizontal: 16,
+    minHeight: 48,
+    gap: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 12,
+  },
+  
+  // Location header styles
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginTop: 12,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  locationHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+  },
+  locationHeaderCount: {
+    fontSize: 12,
+    color: '#888',
+  },
+  
+  // Selection list styles
+  selectionList: {
+    flex: 1,
+  },
+  selectionItem: {
+    marginBottom: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    overflow: 'hidden',
+  },
+  selectedItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  selectionItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  selectionInitials: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
+  selectionInitialsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  selectionInfo: {
+    flex: 1,
+  },
+  selectionName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  selectionLocation: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  selectionPhone: {
+    fontSize: 12,
+    color: '#666',
+  },
+  
+  // No results styles
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+  },
+  
+  // Form styles
+  formContainer: {
+    gap: 20,
+    paddingVertical: 10,
+  },
+  input: {
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    fontSize: 16,
+    color: '#fff',
+    minHeight: 56,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  textArea: {
+    minHeight: 120,
+    textAlignVertical: 'top',
+    paddingTop: 16,
+  },
+  
+  // Delivery options
+  deliveryOptions: {
+    gap: 16,
+  },
+  deliveryOption: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+  },
+  selectedDeliveryOption: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  deliveryOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+  },
+  deliveryOptionText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  deliveryOptionTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  deliveryOptionSubtitle: {
+    fontSize: 14,
+    color: '#888',
+  },
+  
+  // Confirmation styles
+  confirmationContainer: {
+    gap: 24,
+  },
+  confirmationSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 20,
+  },
+  confirmationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 12,
+  },
+  confirmationDetail: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  confirmationSubDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 8,
+  },
+  routeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  routePoint: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeAreaInitials: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7c3aed',
+    marginBottom: 4,
+  },
+  routeAreaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  routeLocationName: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+  },
+  agentInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  deliveryLocationInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  estimatedCost: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  pricingError: {
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  
+  // Navigation
+  navigationContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  spacer: {
+    flex: 1,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  nextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    gap: 8,
+  },
+  nextButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+    gap: 8,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  disabledButtonText: {
+    color: '#666',
+  },
+  
+  // Loading and error
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 20,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 30,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+  },
+  retryButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+});
