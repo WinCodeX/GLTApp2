@@ -1,5 +1,4 @@
-// lib/helpers/getLocations.ts
-import { getBaseUrl } from './getBaseUrl';
+import { api } from '../api';
 
 export interface Location {
   id: string;
@@ -11,23 +10,18 @@ export interface Location {
 
 export async function getLocations(): Promise<Location[]> {
   try {
-    const baseUrl = getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/v1/locations`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.locations || data; // Handle different response formats
-  } catch (error) {
-    console.error('Error fetching locations:', error);
-    throw new Error('Failed to fetch locations');
+    console.log('📍 Fetching locations...');
+    const response = await api.get('/api/v1/locations');
+    console.log('📍 Locations response:', response.data);
+    
+    // Handle different response formats
+    const locations = response.data.locations || response.data || [];
+    console.log('📍 Parsed locations:', locations);
+    
+    return locations;
+  } catch (error: any) {
+    console.error('❌ Error fetching locations:', error);
+    console.error('❌ Error response:', error.response?.data);
+    throw new Error(`Failed to fetch locations: ${error.message}`);
   }
 }
