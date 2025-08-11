@@ -1,3 +1,4 @@
+// lib/helpers/createPackage.ts
 import { getBaseUrl } from './getBaseUrl';
 
 export interface PackageData {
