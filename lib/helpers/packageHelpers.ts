@@ -1,125 +1,174 @@
-// lib/helpers/packageHelpers.ts - FIXED VERSION
+// lib/helpers/packageHelpers.ts - DEBUG VERSION
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
 import { getPackagePricing as getApiPricing, PricingRequest, PricingResponse } from './getPackagePricing';
 import { api } from '../api';
 
-// =================================================================
-// UNIFIED TYPES FOR MODAL COMPATIBILITY
-// =================================================================
-
-// Modal expects this interface
-export interface PackageData {
-  sender_name: string;
-  sender_phone: string;
-  receiver_name: string;
-  receiver_phone: string;
-  origin_area_id: string;
-  destination_area_id: string;
-  origin_agent_id: string;
-  destination_agent_id: string;
-  delivery_type: 'doorstep' | 'agent' | 'mixed';
-}
-
-// API expects this different interface
-interface ApiPackageData {
-  receiverName: string;
-  receiverPhone: string;
-  originAgent: any;
-  destinationAgent: any;
-  originArea: any;
-  destinationArea: any;
-  deliveryType: 'doorstep' | 'agent' | 'mixed';
-  cost: number;
-}
-
-export interface PackageResponse {
-  id: string;
-  status: string;
-  tracking_number: string;
-  cost: number;
-  created_at: string;
-}
-
-export interface PackageFormData {
-  locations: Location[];
-  areas: Area[];
-  agents: Agent[];
-}
-
-// =================================================================
-// UNIFIED FUNCTIONS
-// =================================================================
-
-// Wrapper function that converts modal data to API format
-export const createPackage = async (modalPackageData: PackageData): Promise<PackageResponse> => {
+// Debug function to check API configuration
+export const debugApiConnection = async () => {
   try {
-    console.log('🔄 Converting modal data to API format...');
-    console.log('📤 Modal data received:', modalPackageData);
-
-    // Get the area and agent objects for the API
-    const [locations, areas, agents] = await Promise.all([
-      getLocations(),
-      getAreas(),
-      getAgents(),
-    ]);
-
-    const originArea = areas.find(a => a.id === modalPackageData.origin_area_id);
-    const destinationArea = areas.find(a => a.id === modalPackageData.destination_area_id);
-    const originAgent = agents.find(a => a.id === modalPackageData.origin_agent_id);
-    const destinationAgent = agents.find(a => a.id === modalPackageData.destination_agent_id);
-
-    if (!originArea || !destinationArea) {
-      throw new Error('Origin or destination area not found');
-    }
-
-    // Get pricing
-    const pricing = await getPackagePricing({
-      origin_area_id: modalPackageData.origin_area_id,
-      destination_area_id: modalPackageData.destination_area_id,
-      delivery_type: modalPackageData.delivery_type,
-    });
-
-    // Convert to API format
-    const apiPackageData: ApiPackageData = {
-      receiverName: modalPackageData.receiver_name,
-      receiverPhone: modalPackageData.receiver_phone,
-      originAgent: originAgent || null,
-      destinationAgent: destinationAgent || null,
-      originArea: originArea,
-      destinationArea: destinationArea,
-      deliveryType: modalPackageData.delivery_type,
-      cost: pricing.cost,
-    };
-
-    console.log('🔄 Converted API data:', apiPackageData);
-
-    // Call your existing API
-    const response = await api.post('/api/v1/packages', {
-      package: apiPackageData,
-    });
-
-    console.log('✅ Package created successfully:', response.data);
-    return response.data;
-
+    console.log('🔍 Testing API connection...');
+    console.log('📍 API Base URL:', api.defaults.baseURL);
+    console.log('🔑 API Headers:', api.defaults.headers);
+    
+    // Test basic connectivity
+    const response = await api.get('/ping');
+    console.log('✅ API ping successful:', response.data);
+    return true;
   } catch (error: any) {
-    console.error('❌ Error creating package:', error);
-    if (error.response?.data?.errors) {
-      throw new Error(`API Error: ${error.response.data.errors.join(', ')}`);
-    }
-    throw new Error(error.message || 'Failed to create package');
+    console.error('❌ API ping failed:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      status: error.response?.status,
+      statusText: error.response?.statusText,
+      data: error.response?.data,
+      config: {
+        url: error.config?.url,
+        method: error.config?.method,
+        baseURL: error.config?.baseURL,
+        headers: error.config?.headers
+      }
+    });
+    return false;
   }
 };
 
-// Wrapper function that provides consistent pricing interface for modal
+// Enhanced getPackageFormData with detailed debugging
+export async function getPackageFormData(): Promise<{
+  locations: Location[];
+  areas: Area[];
+  agents: Agent[];
+}> {
+  try {
+    console.log('🔄 Starting getPackageFormData...');
+    
+    // First, test API connectivity
+    const apiConnected = await debugApiConnection();
+    if (!apiConnected) {
+      throw new Error('API connection failed - check your server and network');
+    }
+
+    console.log('🔄 API connection successful, fetching data...');
+    
+    // Fetch data with individual error handling
+    const results = await Promise.allSettled([
+      fetchLocationsWithDebug(),
+      fetchAreasWithDebug(),
+      fetchAgentsWithDebug(),
+    ]);
+
+    // Process results
+    const locations = results[0].status === 'fulfilled' ? results[0].value : [];
+    const areas = results[1].status === 'fulfilled' ? results[1].value : [];
+    const agents = results[2].status === 'fulfilled' ? results[2].value : [];
+
+    // Log results
+    results.forEach((result, index) => {
+      const names = ['locations', 'areas', 'agents'];
+      if (result.status === 'rejected') {
+        console.error(`❌ Failed to fetch ${names[index]}:`, result.reason);
+      } else {
+        console.log(`✅ ${names[index]} fetched:`, result.value.length, 'items');
+      }
+    });
+
+    // Check if we have any data
+    if (locations.length === 0 && areas.length === 0 && agents.length === 0) {
+      throw new Error('No data received from any endpoints. Check your API endpoints and data.');
+    }
+
+    console.log('✅ Package form data completed:', {
+      locations: locations.length,
+      areas: areas.length,
+      agents: agents.length
+    });
+
+    return { locations, areas, agents };
+
+  } catch (error: any) {
+    console.error('❌ getPackageFormData failed:', error);
+    throw new Error(`Failed to fetch package form data: ${error.message}`);
+  }
+}
+
+// Debug wrapper for getLocations
+async function fetchLocationsWithDebug(): Promise<Location[]> {
+  try {
+    console.log('📍 Fetching locations...');
+    console.log('📍 Calling getLocations() from helper...');
+    
+    const locations = await getLocations();
+    
+    console.log('📍 Raw locations response:', locations);
+    console.log('📍 Locations type:', typeof locations);
+    console.log('📍 Locations length:', locations?.length);
+    
+    if (locations && locations.length > 0) {
+      console.log('📍 Sample location:', locations[0]);
+    }
+    
+    return locations || [];
+  } catch (error: any) {
+    console.error('❌ getLocations error:', error);
+    throw error;
+  }
+}
+
+// Debug wrapper for getAreas
+async function fetchAreasWithDebug(): Promise<Area[]> {
+  try {
+    console.log('🏢 Fetching areas...');
+    console.log('🏢 Calling getAreas() from helper...');
+    
+    const areas = await getAreas();
+    
+    console.log('🏢 Raw areas response:', areas);
+    console.log('🏢 Areas type:', typeof areas);
+    console.log('🏢 Areas length:', areas?.length);
+    
+    if (areas && areas.length > 0) {
+      console.log('🏢 Sample area:', areas[0]);
+    }
+    
+    return areas || [];
+  } catch (error: any) {
+    console.error('❌ getAreas error:', error);
+    throw error;
+  }
+}
+
+// Debug wrapper for getAgents
+async function fetchAgentsWithDebug(): Promise<Agent[]> {
+  try {
+    console.log('👥 Fetching agents...');
+    console.log('👥 Calling getAgents() from helper...');
+    
+    const agents = await getAgents();
+    
+    console.log('👥 Raw agents response:', agents);
+    console.log('👥 Agents type:', typeof agents);
+    console.log('👥 Agents length:', agents?.length);
+    
+    if (agents && agents.length > 0) {
+      console.log('👥 Sample agent:', agents[0]);
+    }
+    
+    return agents || [];
+  } catch (error: any) {
+    console.error('❌ getAgents error:', error);
+    throw error;
+  }
+}
+
+// Enhanced pricing with debugging
 export const getPackagePricing = async (data: {
   origin_area_id: string;
   destination_area_id: string;
   delivery_type: string;
 }): Promise<{ cost: number }> => {
   try {
-    console.log('💰 Fetching pricing with modal format:', data);
+    console.log('💰 Fetching pricing with data:', data);
     
     // Convert to your API's expected format
     const pricingRequest: PricingRequest = {
@@ -128,20 +177,29 @@ export const getPackagePricing = async (data: {
       delivery_type: data.delivery_type as 'doorstep' | 'agent' | 'mixed',
     };
     
+    console.log('💰 Formatted pricing request:', pricingRequest);
+    console.log('💰 Calling getApiPricing...');
+    
     // Call your existing pricing function
     const response: PricingResponse = await getApiPricing(pricingRequest);
     
-    console.log('💰 Pricing response:', response);
+    console.log('💰 Pricing API response:', response);
     
     // Return in format expected by modal
     return { cost: response.cost };
     
   } catch (error: any) {
     console.error('❌ Pricing error:', error);
+    console.error('❌ Pricing error details:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
     
     // Fallback calculation if API fails
     console.log('🔄 Using fallback pricing calculation...');
     const fallbackCost = calculateFallbackPricing(data);
+    console.log('💰 Fallback cost calculated:', fallbackCost);
     return { cost: fallbackCost };
   }
 };
@@ -170,42 +228,7 @@ const calculateFallbackPricing = (data: {
   return baseCost;
 };
 
-// =================================================================
-// DATA FETCHING
-// =================================================================
-
-export async function getPackageFormData(): Promise<PackageFormData> {
-  try {
-    console.log('🔄 Fetching all package form data...');
-    
-    // Fetch all data in parallel for better performance
-    const [locations, areas, agents] = await Promise.all([
-      getLocations(),
-      getAreas(),
-      getAgents(),
-    ]);
-
-    console.log('✅ All package data fetched successfully:', {
-      locations: locations.length,
-      areas: areas.length,
-      agents: agents.length
-    });
-
-    return {
-      locations,
-      areas,
-      agents,
-    };
-  } catch (error: any) {
-    console.error('❌ Error fetching package form data:', error);
-    throw new Error(`Failed to fetch package form data: ${error.message}`);
-  }
-}
-
-// =================================================================
-// RE-EXPORTS FOR COMPATIBILITY
-// =================================================================
-
+// Re-export types for compatibility
 export type {
   Location,
   Area,
