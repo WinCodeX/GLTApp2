@@ -1,5 +1,4 @@
-// lib/helpers/createPackage.ts
-import { getBaseUrl } from './getBaseUrl';
+import { api } from '../api';
 
 export interface PackageData {
   sender_name: string;
@@ -19,32 +18,33 @@ export interface PackageResponse {
   cost: number;
   state: string;
   created_at: string;
-  // Add other fields as needed
+  updated_at: string;
+  sender_name: string;
+  receiver_name: string;
+  delivery_type: string;
 }
 
 export async function createPackage(packageData: PackageData): Promise<PackageResponse> {
   try {
-    const baseUrl = getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/v1/packages`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-      body: JSON.stringify({
-        package: packageData
-      }),
+    console.log('📦 Creating package...');
+    console.log('📦 Package data:', packageData);
+    
+    const response = await api.post('/api/v1/packages', {
+      package: packageData
     });
-
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.message || `HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.package || data;
-  } catch (error) {
-    console.error('Error creating package:', error);
-    throw error;
+    
+    console.log('📦 Package creation response:', response.data);
+    
+    const packageResponse = response.data.package || response.data;
+    return packageResponse;
+  } catch (error: any) {
+    console.error('❌ Error creating package:', error);
+    console.error('❌ Error response:', error.response?.data);
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.response?.data?.error || 
+                        error.message || 
+                        'Failed to create package';
+    throw new Error(errorMessage);
   }
 }
