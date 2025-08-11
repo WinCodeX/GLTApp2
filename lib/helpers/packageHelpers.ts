@@ -1,3 +1,5 @@
+// lib/helpers/packageHelpers.ts
+// Combined helper for fetching all package-related data
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
