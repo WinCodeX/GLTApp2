@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - QUICK FIX
+// components/PackageCreationModal.tsx - SELF-LOADING VERSION
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -18,6 +18,7 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { 
+  getPackageFormData,
   getPackagePricing, 
   type Location, 
   type Area, 
@@ -31,7 +32,7 @@ interface PackageCreationModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  // Make these optional with default values
+  // Optional props for backwards compatibility
   locations?: Location[];
   areas?: Area[];
   agents?: Agent[];
@@ -54,9 +55,9 @@ export default function PackageCreationModal({
   visible,
   onClose,
   onSubmit,
-  locations = [], // Default empty array
-  areas = [],     // Default empty array
-  agents = []     // Default empty array
+  locations: propLocations = [],
+  areas: propAreas = [],
+  agents: propAgents = []
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -65,6 +66,13 @@ export default function PackageCreationModal({
   const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<string>('');
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
+
+  // Internal data loading states
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
 
   const [packageData, setPackageData] = useState<PackageData>({
     sender_name: '',
@@ -80,6 +88,93 @@ export default function PackageCreationModal({
 
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
   const [pricingError, setPricingError] = useState<string | null>(null);
+
+  // Load data when modal becomes visible
+  useEffect(() => {
+    if (visible) {
+      console.log('📦 Modal opened, initializing data...');
+      initializeModalData();
+    }
+  }, [visible]);
+
+  const initializeModalData = async () => {
+    // Reset form state
+    resetForm();
+    
+    // Start entrance animation
+    Animated.parallel([
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.timing(progressAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }),
+    ]).start();
+
+    // Check if we have prop data, otherwise load from API
+    if (propLocations.length > 0 && propAreas.length > 0 && propAgents.length > 0) {
+      console.log('📦 Using data from props:', {
+        locations: propLocations.length,
+        areas: propAreas.length,
+        agents: propAgents.length
+      });
+      setLocations(propLocations);
+      setAreas(propAreas);
+      setAgents(propAgents);
+      setDataError(null);
+    } else {
+      console.log('📦 No prop data available, loading from helpers...');
+      await loadModalData();
+    }
+  };
+
+  const loadModalData = async () => {
+    try {
+      setIsDataLoading(true);
+      setDataError(null);
+      
+      console.log('🔄 Calling getPackageFormData() from helpers...');
+      
+      // This will call your actual helper functions
+      const formData = await getPackageFormData();
+      
+      console.log('✅ Data loaded from helpers:', {
+        locations: formData.locations.length,
+        areas: formData.areas.length,
+        agents: formData.agents.length
+      });
+
+      // Log sample data for debugging
+      if (formData.locations.length > 0) {
+        console.log('📍 Sample location:', formData.locations[0]);
+      }
+      if (formData.areas.length > 0) {
+        console.log('🏢 Sample area:', formData.areas[0]);
+      }
+      if (formData.agents.length > 0) {
+        console.log('👥 Sample agent:', formData.agents[0]);
+      }
+      
+      setLocations(formData.locations);
+      setAreas(formData.areas);
+      setAgents(formData.agents);
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load modal data:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response?.data
+      });
+      setDataError(error.message || 'Failed to load data');
+    } finally {
+      setIsDataLoading(false);
+    }
+  };
 
   const resetForm = () => {
     setCurrentStep(0);
@@ -99,32 +194,18 @@ export default function PackageCreationModal({
     setEstimatedCost(null);
     setPricingError(null);
     setIsPricingLoading(false);
+    setIsSubmitting(false);
   };
 
-  useEffect(() => {
-    if (visible) {
-      resetForm();
-      
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(progressAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: false,
-        }),
-      ]).start();
-    } else {
-      Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
-    }
-  }, [visible]);
+  const closeModal = () => {
+    Animated.timing(slideAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
+    });
+  };
 
   useEffect(() => {
     Animated.timing(progressAnim, {
@@ -153,7 +234,7 @@ export default function PackageCreationModal({
     setPricingError(null);
 
     try {
-      console.log('Fetching pricing for:', {
+      console.log('💰 Fetching pricing for:', {
         origin_area_id: packageData.origin_area_id,
         destination_area_id: packageData.destination_area_id,
         delivery_type: packageData.delivery_type
@@ -166,9 +247,9 @@ export default function PackageCreationModal({
       });
 
       setEstimatedCost(pricingResponse.cost);
-      console.log('Pricing fetched successfully:', pricingResponse);
+      console.log('💰 Pricing fetched successfully:', pricingResponse);
     } catch (error: any) {
-      console.error('Failed to fetch pricing:', error);
+      console.error('❌ Failed to fetch pricing:', error);
       setPricingError('Failed to load pricing');
       
       // Fallback to local calculation
@@ -190,15 +271,12 @@ export default function PackageCreationModal({
     let baseCost = 0;
     
     if (isIntraArea) {
-      // Same area delivery
       baseCost = packageData.delivery_type === 'doorstep' ? 280 : 
                  packageData.delivery_type === 'agent' ? 150 : 215;
     } else if (isIntraLocation) {
-      // Same location (city), different areas
       baseCost = packageData.delivery_type === 'doorstep' ? 320 : 
                  packageData.delivery_type === 'agent' ? 150 : 235;
     } else {
-      // Different locations (inter-city)
       baseCost = packageData.delivery_type === 'doorstep' ? 380 : 
                  packageData.delivery_type === 'agent' ? 150 : 265;
     }
@@ -277,19 +355,24 @@ export default function PackageCreationModal({
 
     setIsSubmitting(true);
     try {
-      console.log('Submitting package data:', packageData);
+      console.log('📦 Submitting package data:', packageData);
       await onSubmit(packageData);
-      onClose();
+      closeModal();
     } catch (error: any) {
-      console.error('Failed to submit package:', error);
+      console.error('❌ Failed to submit package:', error);
       Alert.alert('Error', error.message || 'Failed to create package. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  // Show empty state if no data
-  if (locations.length === 0 && areas.length === 0 && agents.length === 0) {
+  const retryDataLoad = () => {
+    console.log('🔄 Retrying data load...');
+    loadModalData();
+  };
+
+  // Show loading state while fetching data
+  if (isDataLoading) {
     return (
       <Modal visible={visible} transparent animationType="none">
         <View style={styles.overlay}>
@@ -303,20 +386,12 @@ export default function PackageCreationModal({
               colors={['#1a1a2e', '#16213e', '#0f1419']}
               style={styles.modalContent}
             >
-              <View style={styles.emptyStateContainer}>
-                <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-                  <Feather name="x" size={24} color="#fff" />
-                </TouchableOpacity>
-                
-                <Feather name="package" size={64} color="#7c3aed" />
-                <Text style={styles.emptyStateTitle}>No Data Available</Text>
-                <Text style={styles.emptyStateMessage}>
-                  Unable to load package data. Please check your internet connection and try again.
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator size="large" color="#7c3aed" />
+                <Text style={styles.loadingTitle}>Loading Package Data</Text>
+                <Text style={styles.loadingSubtitle}>
+                  Fetching locations, areas, and agents from your backend...
                 </Text>
-                
-                <TouchableOpacity onPress={onClose} style={styles.emptyStateButton}>
-                  <Text style={styles.emptyStateButtonText}>Close</Text>
-                </TouchableOpacity>
               </View>
             </LinearGradient>
           </Animated.View>
@@ -325,6 +400,50 @@ export default function PackageCreationModal({
     );
   }
 
+  // Show error state if data loading failed
+  if (dataError) {
+    return (
+      <Modal visible={visible} transparent animationType="none">
+        <View style={styles.overlay}>
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { transform: [{ translateY: slideAnim }] }
+            ]}
+          >
+            <LinearGradient
+              colors={['#1a1a2e', '#16213e', '#0f1419']}
+              style={styles.modalContent}
+            >
+              <View style={styles.errorContainer}>
+                <TouchableOpacity onPress={closeModal} style={styles.closeButtonAbsolute}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+                
+                <Feather name="alert-circle" size={64} color="#ef4444" />
+                <Text style={styles.errorTitle}>Failed to Load Data</Text>
+                <Text style={styles.errorMessage}>
+                  {dataError}
+                  {'\n\n'}Check your internet connection and make sure your API is running.
+                </Text>
+                
+                <View style={styles.errorButtons}>
+                  <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
+                    <Text style={styles.cancelButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </Modal>
+    );
+  }
+
+  // Main modal content - only render when data is successfully loaded
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -348,7 +467,7 @@ export default function PackageCreationModal({
 
   const renderHeader = () => (
     <View style={styles.header}>
-      <TouchableOpacity onPress={onClose} style={styles.closeButton}>
+      <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
@@ -364,6 +483,7 @@ export default function PackageCreationModal({
   ) => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>{title}</Text>
+      <Text style={styles.dataDebugText}>Loaded {data.length} locations</Text>
       <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
         {data.map((location) => (
           <TouchableOpacity
@@ -404,6 +524,7 @@ export default function PackageCreationModal({
   ) => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>{title}</Text>
+      <Text style={styles.dataDebugText}>Loaded {data.length} areas</Text>
       <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
         {data.map((area) => (
           <TouchableOpacity
@@ -722,41 +843,86 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  // Empty State
-  emptyStateContainer: {
+  // Loading States
+  loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     padding: 40,
-    position: 'relative',
   },
-  emptyStateTitle: {
+  loadingTitle: {
     color: '#fff',
     fontSize: 20,
     fontWeight: 'bold',
     marginTop: 20,
     textAlign: 'center',
   },
-  emptyStateMessage: {
+  loadingSubtitle: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 8,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  
+  // Error States
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 40,
+    position: 'relative',
+  },
+  closeButtonAbsolute: {
+    position: 'absolute',
+    top: 20,
+    right: 20,
+    padding: 10,
+    zIndex: 1,
+  },
+  errorTitle: {
+    color: '#ef4444',
+    fontSize: 20,
+    fontWeight: 'bold',
+    marginTop: 20,
+    textAlign: 'center',
+  },
+  errorMessage: {
     color: '#888',
     fontSize: 14,
     marginTop: 12,
     textAlign: 'center',
     lineHeight: 20,
   },
-  emptyStateButton: {
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 30,
+  },
+  retryButton: {
     backgroundColor: '#7c3aed',
     paddingHorizontal: 24,
     paddingVertical: 12,
     borderRadius: 8,
-    marginTop: 30,
   },
-  emptyStateButtonText: {
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cancelButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+  },
+  cancelButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
 
+  // Progress Bar
   progressContainer: {
     paddingHorizontal: 20,
     paddingTop: 15,
@@ -778,6 +944,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     textAlign: 'center',
   },
+
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -798,6 +966,8 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 34,
   },
+
+  // Content
   content: {
     flex: 1,
   },
@@ -818,6 +988,15 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 30,
   },
+  dataDebugText: {
+    color: '#7c3aed',
+    fontSize: 12,
+    textAlign: 'center',
+    marginBottom: 16,
+    fontStyle: 'italic',
+  },
+
+  // Location/Area Lists
   locationsList: {
     flex: 1,
   },
@@ -858,6 +1037,8 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
   },
+
+  // Forms
   formContainer: {
     gap: 20,
   },
@@ -872,6 +1053,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     fontSize: 16,
   },
+
+  // Delivery Options
   deliveryOptions: {
     gap: 16,
   },
@@ -906,6 +1089,8 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 14,
   },
+
+  // Confirmation
   confirmationContainer: {
     gap: 20,
   },
@@ -950,6 +1135,8 @@ const styles = StyleSheet.create({
     color: '#888',
     fontSize: 12,
   },
+
+  // Cost Section
   costSection: {
     marginTop: 10,
   },
@@ -986,6 +1173,8 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontSize: 14,
   },
+
+  // Footer
   footer: {
     padding: 20,
     paddingBottom: 30,
