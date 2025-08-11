@@ -13,6 +13,7 @@ import {
   Alert,
   ActivityIndicator,
   StyleSheet,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -77,6 +78,11 @@ export default function PackageCreationModal({
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
 
+  // Search and filter states
+  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
+  const [sortBy, setSortBy] = useState<'name' | 'location'>('location');
+
   // Load data when modal becomes visible
   useEffect(() => {
     if (visible) {
@@ -134,6 +140,10 @@ export default function PackageCreationModal({
     setDeliveryLocation('');
     setEstimatedCost(null);
     setIsSubmitting(false);
+    // Reset search and filter states
+    setSearchQuery('');
+    setSelectedLocationFilter('all');
+    setSortBy('location');
   };
 
   const closeModal = () => {
@@ -198,6 +208,62 @@ export default function PackageCreationModal({
 
   const getSelectedDestinationAgent = () => {
     return agents.find(agent => agent.id === packageData.destination_agent_id);
+  };
+
+  // Filter and sort areas
+  const getFilteredAndSortedAreas = () => {
+    let filteredAreas = areas;
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      filteredAreas = filteredAreas.filter(area =>
+        area.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        area.location?.name.toLowerCase().includes(searchQuery.toLowerCase())
+      );
+    }
+
+    // Filter by location
+    if (selectedLocationFilter !== 'all') {
+      filteredAreas = filteredAreas.filter(area => area.location_id === selectedLocationFilter);
+    }
+
+    // Sort areas
+    if (sortBy === 'location') {
+      filteredAreas = filteredAreas.sort((a, b) => {
+        // First sort by location name
+        const locationCompare = (a.location?.name || '').localeCompare(b.location?.name || '');
+        if (locationCompare !== 0) return locationCompare;
+        // Then by area name within the same location
+        return a.name.localeCompare(b.name);
+      });
+    } else {
+      filteredAreas = filteredAreas.sort((a, b) => a.name.localeCompare(b.name));
+    }
+
+    return filteredAreas;
+  };
+
+  // Group areas by location for better display
+  const getGroupedAreas = () => {
+    const filteredAreas = getFilteredAndSortedAreas();
+    
+    if (sortBy !== 'location') {
+      return [{ locationName: 'All Areas', areas: filteredAreas }];
+    }
+
+    const grouped = filteredAreas.reduce((acc, area) => {
+      const locationName = area.location?.name || 'Unknown Location';
+      if (!acc[locationName]) {
+        acc[locationName] = [];
+      }
+      acc[locationName].push(area);
+      return acc;
+    }, {} as Record<string, Area[]>);
+
+    return Object.entries(grouped).map(([locationName, areas]) => ({
+      locationName,
+      areas
+    }));
   };
 
   const isCurrentStepValid = () => {
@@ -379,34 +445,139 @@ export default function PackageCreationModal({
       <Text style={styles.stepTitle}>Select Origin Area</Text>
       <Text style={styles.stepSubtitle}>Where is the package coming from?</Text>
       
-      <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-        {areas.map((area) => (
+      {/* Search Input */}
+      <View style={styles.searchContainer}>
+        <View style={styles.searchInputContainer}>
+          <Feather name="search" size={20} color="#888" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search areas or locations..."
+            placeholderTextColor="#888"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} style={styles.clearButton}>
+              <Feather name="x" size={16} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
+      </View>
+
+      {/* Filter and Sort Controls */}
+      <View style={styles.filterContainer}>
+        {/* Location Filter */}
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.locationFilterScroll}>
           <TouchableOpacity
-            key={area.id}
             style={[
-              styles.selectionItem,
-              packageData.origin_area_id === area.id && styles.selectedItem
+              styles.filterChip,
+              selectedLocationFilter === 'all' && styles.filterChipActive
             ]}
-            onPress={() => updatePackageData('origin_area_id', area.id)}
+            onPress={() => setSelectedLocationFilter('all')}
           >
-            <View style={styles.selectionItemContent}>
-              <View style={styles.selectionInitials}>
-                <Text style={styles.selectionInitialsText}>
-                  {area.initials || area.name.substring(0, 2).toUpperCase()}
-                </Text>
-              </View>
-              <View style={styles.selectionInfo}>
-                <Text style={styles.selectionName}>{area.name}</Text>
-                {area.location && (
-                  <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                )}
-              </View>
-              {packageData.origin_area_id === area.id && (
-                <Feather name="check-circle" size={20} color="#10b981" />
-              )}
-            </View>
+            <Text style={[
+              styles.filterChipText,
+              selectedLocationFilter === 'all' && styles.filterChipTextActive
+            ]}>
+              All Locations
+            </Text>
           </TouchableOpacity>
+          
+          {locations.map((location) => (
+            <TouchableOpacity
+              key={location.id}
+              style={[
+                styles.filterChip,
+                selectedLocationFilter === location.id && styles.filterChipActive
+              ]}
+              onPress={() => setSelectedLocationFilter(location.id)}
+            >
+              <Text style={[
+                styles.filterChipText,
+                selectedLocationFilter === location.id && styles.filterChipTextActive
+              ]}>
+                {location.name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+
+        {/* Sort Toggle */}
+        <TouchableOpacity
+          style={styles.sortButton}
+          onPress={() => setSortBy(sortBy === 'location' ? 'name' : 'location')}
+        >
+          <Feather name={sortBy === 'location' ? 'map-pin' : 'type'} size={16} color="#7c3aed" />
+          <Text style={styles.sortButtonText}>
+            {sortBy === 'location' ? 'By Location' : 'By Name'}
+          </Text>
+        </TouchableOpacity>
+      </View>
+      
+      {/* Areas List */}
+      <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+        {getGroupedAreas().map((group, groupIndex) => (
+          <View key={groupIndex}>
+            {/* Location Header (only show if grouping by location and more than one group) */}
+            {sortBy === 'location' && getGroupedAreas().length > 1 && (
+              <View style={styles.locationHeader}>
+                <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                <Text style={styles.locationHeaderCount}>({group.areas.length} areas)</Text>
+              </View>
+            )}
+            
+            {/* Areas in this location */}
+            {group.areas.map((area) => (
+              <TouchableOpacity
+                key={area.id}
+                style={[
+                  styles.selectionItem,
+                  packageData.origin_area_id === area.id && styles.selectedItem
+                ]}
+                onPress={() => updatePackageData('origin_area_id', area.id)}
+              >
+                <View style={styles.selectionItemContent}>
+                  <View style={styles.selectionInitials}>
+                    <Text style={styles.selectionInitialsText}>
+                      {area.initials || area.name.substring(0, 2).toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.selectionInfo}>
+                    <Text style={styles.selectionName}>{area.name}</Text>
+                    {area.location && (
+                      <Text style={styles.selectionLocation}>{area.location.name}</Text>
+                    )}
+                  </View>
+                  {packageData.origin_area_id === area.id && (
+                    <Feather name="check-circle" size={20} color="#10b981" />
+                  )}
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
         ))}
+        
+        {/* No Results Message */}
+        {getFilteredAndSortedAreas().length === 0 && (
+          <View style={styles.noResultsContainer}>
+            <Feather name="search" size={48} color="#666" />
+            <Text style={styles.noResultsTitle}>No areas found</Text>
+            <Text style={styles.noResultsText}>
+              Try adjusting your search or filter criteria
+            </Text>
+            {(searchQuery || selectedLocationFilter !== 'all') && (
+              <TouchableOpacity
+                style={styles.clearFiltersButton}
+                onPress={() => {
+                  setSearchQuery('');
+                  setSelectedLocationFilter('all');
+                }}
+              >
+                <Text style={styles.clearFiltersButtonText}>Clear filters</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -726,41 +897,56 @@ export default function PackageCreationModal({
 
   return (
     <Modal visible={visible} transparent animationType="none">
-      <View style={styles.overlay}>
-        <Animated.View
-          style={[
-            styles.modalContainer,
-            { transform: [{ translateY: slideAnim }] }
-          ]}
-        >
-          <LinearGradient
-            colors={['#1a1a2e', '#16213e', '#0f1419']}
-            style={styles.modalContent}
+      <KeyboardAvoidingView 
+        style={styles.keyboardContainer}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+      >
+        <View style={styles.overlay}>
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { transform: [{ translateY: slideAnim }] }
+            ]}
           >
-            {renderHeader()}
-            {renderProgressBar()}
-            
-            <View style={styles.contentContainer}>
-              {renderCurrentStep()}
-            </View>
-            
-            {renderNavigationButtons()}
-          </LinearGradient>
-        </Animated.View>
-      </View>
+            <LinearGradient
+              colors={['#1a1a2e', '#16213e', '#0f1419']}
+              style={styles.modalContent}
+            >
+              {renderHeader()}
+              {renderProgressBar()}
+              
+              <ScrollView 
+                style={styles.contentContainer}
+                contentContainerStyle={styles.scrollContentContainer}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                {renderCurrentStep()}
+              </ScrollView>
+              
+              {renderNavigationButtons()}
+            </LinearGradient>
+          </Animated.View>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 // Simplified StyleSheet
 const styles = StyleSheet.create({
+  keyboardContainer: {
+    flex: 1,
+  },
   overlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    height: SCREEN_HEIGHT * 0.9,
+    maxHeight: SCREEN_HEIGHT * 0.9,
+    minHeight: SCREEN_HEIGHT * 0.6,
     width: SCREEN_WIDTH,
   },
   modalContent: {
@@ -834,10 +1020,15 @@ const styles = StyleSheet.create({
   // Content styles
   contentContainer: {
     flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
     paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   stepContent: {
     flex: 1,
+    minHeight: 400, // Ensure minimum height for keyboard scenarios
   },
   stepTitle: {
     fontSize: 24,
@@ -907,6 +1098,7 @@ const styles = StyleSheet.create({
   // Form styles
   formContainer: {
     gap: 20,
+    paddingVertical: 10,
   },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
@@ -922,6 +1114,131 @@ const styles = StyleSheet.create({
   textArea: {
     minHeight: 120,
     textAlignVertical: 'top',
+    paddingTop: 16, // Ensure text starts at top for multiline
+  },
+
+  // Search and filter styles
+  searchContainer: {
+    marginBottom: 16,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    paddingHorizontal: 16,
+    minHeight: 48,
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 12,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  filterContainer: {
+    marginBottom: 20,
+  },
+  locationFilterScroll: {
+    marginBottom: 12,
+  },
+  filterChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginRight: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  filterChipActive: {
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    borderColor: '#7c3aed',
+  },
+  filterChipText: {
+    fontSize: 14,
+    color: '#ccc',
+    fontWeight: '500',
+  },
+  filterChipTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    color: '#7c3aed',
+    marginLeft: 6,
+    fontWeight: '600',
+  },
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 12,
+    marginTop: 16,
+    marginBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  locationHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+  },
+  locationHeaderCount: {
+    fontSize: 12,
+    color: '#888',
+  },
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  clearFiltersButton: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  clearFiltersButtonText: {
+    fontSize: 14,
+    color: '#7c3aed',
+    fontWeight: '600',
   },
   
   // Delivery options styles
