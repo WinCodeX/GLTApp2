@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - DEBUG VERSION
+// lib/helpers/packageHelpers.ts - UPDATED for FastJSON
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
@@ -10,10 +10,10 @@ export const debugApiConnection = async () => {
   try {
     console.log('🔍 Testing API connection...');
     console.log('📍 API Base URL:', api.defaults.baseURL);
-    console.log('🔑 API Headers:', api.defaults.headers);
+    console.log('🔑 API Headers:', JSON.stringify(api.defaults.headers, null, 2));
     
-    // Test basic connectivity
-    const response = await api.get('api/v1/ping');
+    // Test basic connectivity with correct endpoint
+    const response = await api.get('/api/v1/ping');
     console.log('✅ API ping successful:', response.data);
     return true;
   } catch (error: any) {
@@ -42,6 +42,7 @@ export async function getPackageFormData(): Promise<{
 }> {
   try {
     console.log('🔄 Starting getPackageFormData...');
+    console.log('🔄 Using FastJSON API with updated parsers...');
     
     // First, test API connectivity
     const apiConnected = await debugApiConnection();
@@ -51,66 +52,108 @@ export async function getPackageFormData(): Promise<{
 
     console.log('🔄 API connection successful, fetching data...');
     
-    // Fetch data with individual error handling
+    // Fetch data with individual error handling and better error messages
     const results = await Promise.allSettled([
       fetchLocationsWithDebug(),
       fetchAreasWithDebug(),
       fetchAgentsWithDebug(),
     ]);
 
-    // Process results
+    // Process results with detailed logging
     const locations = results[0].status === 'fulfilled' ? results[0].value : [];
     const areas = results[1].status === 'fulfilled' ? results[1].value : [];
     const agents = results[2].status === 'fulfilled' ? results[2].value : [];
 
-    // Log results
+    // Log results with more detail
     results.forEach((result, index) => {
       const names = ['locations', 'areas', 'agents'];
       if (result.status === 'rejected') {
-        console.error(`❌ Failed to fetch ${names[index]}:`, result.reason);
+        console.error(`❌ Failed to fetch ${names[index]}:`, result.reason?.message || result.reason);
+        console.error(`❌ ${names[index]} error details:`, result.reason);
       } else {
         console.log(`✅ ${names[index]} fetched:`, result.value.length, 'items');
+        if (result.value.length > 0) {
+          console.log(`✅ Sample ${names[index]}:`, result.value[0]);
+        }
       }
     });
 
-    // Check if we have any data
+    // Provide more specific guidance if no data is received
     if (locations.length === 0 && areas.length === 0 && agents.length === 0) {
+      console.error('❌ No data received from any endpoints');
+      console.error('❌ Check the following:');
+      console.error('   1. Rails server is running');
+      console.error('   2. Database has locations, areas, and agents');
+      console.error('   3. Authentication token is valid');
+      console.error('   4. API endpoints are correctly configured');
       throw new Error('No data received from any endpoints. Check your API endpoints and data.');
+    }
+
+    // Warn about missing data types
+    if (locations.length === 0) {
+      console.warn('⚠️ No locations found - package creation may not work');
+    }
+    if (areas.length === 0) {
+      console.warn('⚠️ No areas found - package creation may not work');
+    }
+    if (agents.length === 0) {
+      console.warn('⚠️ No agents found - some delivery options may not be available');
     }
 
     console.log('✅ Package form data completed:', {
       locations: locations.length,
       areas: areas.length,
-      agents: agents.length
+      agents: agents.length,
+      totalItems: locations.length + areas.length + agents.length
     });
 
     return { locations, areas, agents };
 
   } catch (error: any) {
     console.error('❌ getPackageFormData failed:', error);
-    throw new Error(`Failed to fetch package form data: ${error.message}`);
+    
+    // Provide actionable error message
+    if (error.message.includes('Network Error') || error.message.includes('ECONNREFUSED')) {
+      throw new Error('Cannot connect to server. Please check if your Rails server is running on the correct port.');
+    } else if (error.message.includes('401') || error.message.includes('Unauthorized')) {
+      throw new Error('Authentication failed. Please check your login token and try logging in again.');
+    } else if (error.message.includes('500')) {
+      throw new Error('Server error occurred. Please check your Rails server logs for details.');
+    } else {
+      throw new Error(`Failed to fetch package form data: ${error.message}`);
+    }
   }
 }
 
 // Debug wrapper for getLocations
 async function fetchLocationsWithDebug(): Promise<Location[]> {
   try {
-    console.log('📍 Fetching locations...');
-    console.log('📍 Calling getLocations() from helper...');
+    console.log('📍 Fetching locations with FastJSON parser...');
     
     const locations = await getLocations();
     
-    console.log('📍 Raw locations response:', locations);
-    console.log('📍 Locations type:', typeof locations);
-    console.log('📍 Locations length:', locations?.length);
+    console.log('📍 FastJSON locations parsed successfully');
+    console.log('📍 Locations count:', locations?.length || 0);
     
     if (locations && locations.length > 0) {
-      console.log('📍 Sample location:', locations[0]);
+      console.log('📍 Sample location structure:', locations[0]);
+      
+      // Validate location structure
+      const sampleLocation = locations[0];
+      if (!sampleLocation.id || !sampleLocation.name) {
+        console.warn('⚠️ Location structure may be incomplete:', sampleLocation);
+      }
+    } else {
+      console.warn('⚠️ No locations returned from API');
     }
     
     return locations || [];
   } catch (error: any) {
     console.error('❌ getLocations error:', error);
+    console.error('❌ This usually indicates:');
+    console.error('   - FastJSON response format issue');
+    console.error('   - Server returned unexpected data structure');
+    console.error('   - Network connectivity problem');
     throw error;
   }
 }
@@ -118,22 +161,35 @@ async function fetchLocationsWithDebug(): Promise<Location[]> {
 // Debug wrapper for getAreas
 async function fetchAreasWithDebug(): Promise<Area[]> {
   try {
-    console.log('🏢 Fetching areas...');
-    console.log('🏢 Calling getAreas() from helper...');
+    console.log('🏢 Fetching areas with FastJSON parser...');
     
     const areas = await getAreas();
     
-    console.log('🏢 Raw areas response:', areas);
-    console.log('🏢 Areas type:', typeof areas);
-    console.log('🏢 Areas length:', areas?.length);
+    console.log('🏢 FastJSON areas parsed successfully');
+    console.log('🏢 Areas count:', areas?.length || 0);
     
     if (areas && areas.length > 0) {
-      console.log('🏢 Sample area:', areas[0]);
+      console.log('🏢 Sample area structure:', areas[0]);
+      
+      // Validate area structure and relationships
+      const sampleArea = areas[0];
+      if (!sampleArea.id || !sampleArea.name || !sampleArea.location_id) {
+        console.warn('⚠️ Area structure may be incomplete:', sampleArea);
+      }
+      if (!sampleArea.location || !sampleArea.location.id) {
+        console.warn('⚠️ Area location relationship may be missing:', sampleArea);
+      }
+    } else {
+      console.warn('⚠️ No areas returned from API');
     }
     
     return areas || [];
   } catch (error: any) {
     console.error('❌ getAreas error:', error);
+    console.error('❌ This usually indicates:');
+    console.error('   - FastJSON include relationships not working');
+    console.error('   - Areas table is empty');
+    console.error('   - Location relationship missing');
     throw error;
   }
 }
@@ -141,27 +197,43 @@ async function fetchAreasWithDebug(): Promise<Area[]> {
 // Debug wrapper for getAgents
 async function fetchAgentsWithDebug(): Promise<Agent[]> {
   try {
-    console.log('👥 Fetching agents...');
-    console.log('👥 Calling getAgents() from helper...');
+    console.log('👥 Fetching agents with FastJSON parser...');
     
     const agents = await getAgents();
     
-    console.log('👥 Raw agents response:', agents);
-    console.log('👥 Agents type:', typeof agents);
-    console.log('👥 Agents length:', agents?.length);
+    console.log('👥 FastJSON agents parsed successfully');
+    console.log('👥 Agents count:', agents?.length || 0);
     
     if (agents && agents.length > 0) {
-      console.log('👥 Sample agent:', agents[0]);
+      console.log('👥 Sample agent structure:', agents[0]);
+      
+      // Validate agent structure and nested relationships
+      const sampleAgent = agents[0];
+      if (!sampleAgent.id || !sampleAgent.name || !sampleAgent.area_id) {
+        console.warn('⚠️ Agent structure may be incomplete:', sampleAgent);
+      }
+      if (!sampleAgent.area || !sampleAgent.area.id) {
+        console.warn('⚠️ Agent area relationship may be missing:', sampleAgent);
+      }
+      if (sampleAgent.area && (!sampleAgent.area.location || !sampleAgent.area.location.id)) {
+        console.warn('⚠️ Agent area location relationship may be missing:', sampleAgent);
+      }
+    } else {
+      console.warn('⚠️ No agents returned from API');
     }
     
     return agents || [];
   } catch (error: any) {
     console.error('❌ getAgents error:', error);
+    console.error('❌ This usually indicates:');
+    console.error('   - FastJSON nested includes not working (area.location)');
+    console.error('   - Agents table is empty');
+    console.error('   - Area or Location relationships missing');
     throw error;
   }
 }
 
-// Enhanced pricing with debugging
+// Enhanced pricing with debugging and better error handling
 export const getPackagePricing = async (data: {
   origin_area_id: string;
   destination_area_id: string;
@@ -169,6 +241,11 @@ export const getPackagePricing = async (data: {
 }): Promise<{ cost: number }> => {
   try {
     console.log('💰 Fetching pricing with data:', data);
+    
+    // Validate input data
+    if (!data.origin_area_id || !data.destination_area_id) {
+      throw new Error('Origin and destination area IDs are required for pricing');
+    }
     
     // Convert to your API's expected format
     const pricingRequest: PricingRequest = {
@@ -178,22 +255,29 @@ export const getPackagePricing = async (data: {
     };
     
     console.log('💰 Formatted pricing request:', pricingRequest);
-    console.log('💰 Calling getApiPricing...');
+    console.log('💰 Calling pricing API...');
     
-    // Call your existing pricing function
+    // Call your pricing API endpoint
     const response: PricingResponse = await getApiPricing(pricingRequest);
     
     console.log('💰 Pricing API response:', response);
+    
+    // Validate response
+    if (typeof response.cost !== 'number' || response.cost < 0) {
+      console.warn('⚠️ Invalid cost received from API, using fallback');
+      throw new Error('Invalid pricing response');
+    }
     
     // Return in format expected by modal
     return { cost: response.cost };
     
   } catch (error: any) {
-    console.error('❌ Pricing error:', error);
+    console.error('❌ Pricing API error:', error);
     console.error('❌ Pricing error details:', {
       message: error.message,
       status: error.response?.status,
-      data: error.response?.data
+      data: error.response?.data,
+      url: error.config?.url
     });
     
     // Fallback calculation if API fails
@@ -204,7 +288,7 @@ export const getPackagePricing = async (data: {
   }
 };
 
-// Fallback pricing calculation
+// Enhanced fallback pricing calculation
 const calculateFallbackPricing = (data: {
   origin_area_id: string;
   destination_area_id: string;
@@ -216,16 +300,75 @@ const calculateFallbackPricing = (data: {
   
   if (isIntraArea) {
     // Same area delivery
-    baseCost = data.delivery_type === 'doorstep' ? 280 : 
-               data.delivery_type === 'agent' ? 150 : 215;
+    switch (data.delivery_type) {
+      case 'doorstep':
+        baseCost = 280;
+        break;
+      case 'agent':
+        baseCost = 150;
+        break;
+      case 'mixed':
+        baseCost = 215;
+        break;
+      default:
+        baseCost = 150;
+    }
   } else {
     // Different areas - simplified calculation
-    baseCost = data.delivery_type === 'doorstep' ? 350 : 
-               data.delivery_type === 'agent' ? 200 : 275;
+    switch (data.delivery_type) {
+      case 'doorstep':
+        baseCost = 350;
+        break;
+      case 'agent':
+        baseCost = 200;
+        break;
+      case 'mixed':
+        baseCost = 275;
+        break;
+      default:
+        baseCost = 200;
+    }
   }
   
-  console.log(`💰 Fallback pricing calculated: ${baseCost} for ${data.delivery_type} delivery`);
+  console.log(`💰 Fallback pricing: ${baseCost} KSh for ${data.delivery_type} delivery (${isIntraArea ? 'intra-area' : 'inter-area'})`);
   return baseCost;
+};
+
+// Utility function to validate package form data
+export const validatePackageFormData = (data: {
+  locations: Location[];
+  areas: Area[];
+  agents: Agent[];
+}): { isValid: boolean; issues: string[] } => {
+  const issues: string[] = [];
+  
+  if (data.locations.length === 0) {
+    issues.push('No locations available');
+  }
+  
+  if (data.areas.length === 0) {
+    issues.push('No areas available');
+  }
+  
+  if (data.agents.length === 0) {
+    issues.push('No agents available');
+  }
+  
+  // Check for proper relationships
+  const areasWithoutLocations = data.areas.filter(area => !area.location || !area.location.id);
+  if (areasWithoutLocations.length > 0) {
+    issues.push(`${areasWithoutLocations.length} areas missing location data`);
+  }
+  
+  const agentsWithoutAreas = data.agents.filter(agent => !agent.area || !agent.area.id);
+  if (agentsWithoutAreas.length > 0) {
+    issues.push(`${agentsWithoutAreas.length} agents missing area data`);
+  }
+  
+  return {
+    isValid: issues.length === 0,
+    issues
+  };
 };
 
 // Re-export types for compatibility
