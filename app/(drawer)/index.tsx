@@ -194,17 +194,19 @@ export default function HomeScreen() {
       </LinearGradient>
 
       {/* 
-        Self-Loading Package Creation Modal 
-        - No need to pass data props!
-        - Modal loads its own data from helpers
-        - Just pass the required callbacks
+        Package Creation Modal - NOW WITH SAFE DEFAULTS
+        - Optional props with empty array defaults
+        - Shows empty state if no data available
+        - No crash if props are missing
       */}
       <PackageCreationModal
         visible={showPackageModal}
         onClose={handleCloseModal}
         onSubmit={handlePackageSubmit}
-        // No locations, areas, or agents props needed!
-        // Modal will load its own data
+        // Optional props - modal will show empty state gracefully
+        // locations={[]}  // Optional
+        // areas={[]}      // Optional  
+        // agents={[]}     // Optional
       />
     </SafeAreaView>
   );
