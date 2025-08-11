@@ -1,5 +1,3 @@
-// lib/helpers/packageHelpers.ts
-// Combined helper for fetching all package-related data
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
@@ -14,6 +12,8 @@ export interface PackageFormData {
 
 export async function getPackageFormData(): Promise<PackageFormData> {
   try {
+    console.log('🔄 Fetching all package form data...');
+    
     // Fetch all data in parallel for better performance
     const [locations, areas, agents] = await Promise.all([
       getLocations(),
@@ -21,14 +21,20 @@ export async function getPackageFormData(): Promise<PackageFormData> {
       getAgents(),
     ]);
 
+    console.log('✅ All package data fetched successfully:', {
+      locations: locations.length,
+      areas: areas.length,
+      agents: agents.length
+    });
+
     return {
       locations,
       areas,
       agents,
     };
-  } catch (error) {
-    console.error('Error fetching package form data:', error);
-    throw new Error('Failed to fetch package form data');
+  } catch (error: any) {
+    console.error('❌ Error fetching package form data:', error);
+    throw new Error(`Failed to fetch package form data: ${error.message}`);
   }
 }
 
