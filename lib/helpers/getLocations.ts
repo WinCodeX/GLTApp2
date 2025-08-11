@@ -1,3 +1,4 @@
+// lib/helpers/getLocations.ts - FIXED
 import api from '../api';
 
 export interface Location {
@@ -12,11 +13,23 @@ export async function getLocations(): Promise<Location[]> {
   try {
     console.log('📍 Fetching locations...');
     const response = await api.get('/api/v1/locations');
-    console.log('📍 Locations response:', response.data);
+    console.log('📍 Raw locations response:', response.data);
     
-    // Handle different response formats
+    // Handle the new response structure with serializers
+    if (response.data.success && response.data.locations) {
+      const locations = response.data.locations;
+      console.log('📍 Parsed locations:', locations.length, 'items');
+      
+      if (locations.length > 0) {
+        console.log('📍 Sample location:', locations[0]);
+      }
+      
+      return locations;
+    }
+    
+    // Fallback for old response format
     const locations = response.data.locations || response.data || [];
-    console.log('📍 Parsed locations:', locations);
+    console.log('📍 Fallback parsed locations:', locations.length, 'items');
     
     return locations;
   } catch (error: any) {
