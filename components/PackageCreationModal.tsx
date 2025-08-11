@@ -78,10 +78,7 @@ export default function PackageCreationModal({
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
   const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
 
-  // Simple search state - only for origin area selection
-  const [searchQuery, setSearchQuery] = useState<string>('');
-
-  // Search and filter states
+  // Search and filter states - only these, no duplicates
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedLocationFilter, setSelectedLocationFilter] = useState<string>('all');
   const [sortBy, setSortBy] = useState<'name' | 'location'>('location');
@@ -215,38 +212,6 @@ export default function PackageCreationModal({
 
   // Simple search and group functionality
   const getFilteredAreas = () => {
-    if (!searchQuery.trim()) return areas;
-    
-    return areas.filter(area =>
-      area.name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      area.location?.name?.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  };
-
-  const getGroupedAreas = () => {
-    const filteredAreas = getFilteredAreas();
-    
-    // Group by location
-    const grouped = filteredAreas.reduce((acc, area) => {
-      const locationName = area.location?.name || 'Unknown Location';
-      if (!acc[locationName]) {
-        acc[locationName] = [];
-      }
-      acc[locationName].push(area);
-      return acc;
-    }, {} as Record<string, Area[]>);
-
-    // Sort locations alphabetically and areas within each location
-    return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([locationName, areas]) => ({
-        locationName,
-        areas: areas.sort((a, b) => a.name?.localeCompare(b.name || '') || 0)
-      }));
-  };
-
-  // Filter and sort areas
-  const getFilteredAndSortedAreas = () => {
     let filteredAreas = areas;
 
     // Filter by search query
@@ -262,32 +227,19 @@ export default function PackageCreationModal({
       filteredAreas = filteredAreas.filter(area => area.location_id === selectedLocationFilter);
     }
 
-    // Sort areas
-    if (sortBy === 'location') {
-      filteredAreas = [...filteredAreas].sort((a, b) => {
-        // First sort by location name
-        const aLocationName = a.location?.name || 'Unknown';
-        const bLocationName = b.location?.name || 'Unknown';
-        const locationCompare = aLocationName.localeCompare(bLocationName);
-        if (locationCompare !== 0) return locationCompare;
-        // Then by area name within the same location
-        return (a.name || '').localeCompare(b.name || '');
-      });
-    } else {
-      filteredAreas = [...filteredAreas].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
-    }
-
     return filteredAreas;
   };
 
-  // Group areas by location for better display
   const getGroupedAreas = () => {
-    const filteredAreas = getFilteredAndSortedAreas();
+    const filteredAreas = getFilteredAreas();
     
     if (sortBy !== 'location') {
-      return [{ locationName: 'All Areas', areas: filteredAreas }];
+      // Sort by name only
+      const sortedAreas = [...filteredAreas].sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+      return [{ locationName: 'All Areas', areas: sortedAreas }];
     }
 
+    // Group by location and sort
     const grouped = filteredAreas.reduce((acc, area) => {
       const locationName = area.location?.name || 'Unknown Location';
       if (!acc[locationName]) {
@@ -297,10 +249,13 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, Area[]>);
 
-    return Object.entries(grouped).map(([locationName, areas]) => ({
-      locationName,
-      areas
-    }));
+    // Sort locations alphabetically and areas within each location
+    return Object.entries(grouped)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([locationName, areas]) => ({
+        locationName,
+        areas: areas.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+      }));
   };
 
   const isCurrentStepValid = () => {
@@ -551,61 +506,8 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       </View>
       
-      {/* Areas List */}
-      <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-        {areas && areas.length > 0 ? (
-          getGroupedAreas().map((group, groupIndex) => (
-            <View key={groupIndex}>
-              {/* Location Header (only show if grouping by location and more than one group) */}
-              {sortBy === 'location' && getGroupedAreas().length > 1 && (
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.areas.length} areas)</Text>
-                </View>
-              )}
-              
-              {/* Areas in this location */}
-              {group.areas.map((area) => (
-                <TouchableOpacity
-                  key={area.id}
-                  style={[
-                    styles.selectionItem,
-                    packageData.origin_area_id === area.id && styles.selectedItem
-                  ]}
-                  onPress={() => updatePackageData('origin_area_id', area.id)}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {area.initials || (area.name ? area.name.substring(0, 2).toUpperCase() : 'AR')}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{area.name || 'Unknown Area'}</Text>
-                      {area.location && area.location.name && (
-                        <Text style={styles.selectionLocation}>{area.location.name}</Text>
-                      )}
-                    </View>
-                    {packageData.origin_area_id === area.id && (
-                      <Feather name="check-circle" size={20} color="#10b981" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))
-        ) : (
-          <View style={styles.noResultsContainer}>
-            <Feather name="map-pin" size={48} color="#666" />
-            <Text style={styles.noResultsTitle}>No areas available</Text>
-            <Text style={styles.noResultsText}>
-              Areas data is still loading or not available
-            </Text>
-          </View>
-        )}
-        
         {/* No Results Message */}
-        {areas && areas.length > 0 && getFilteredAndSortedAreas().length === 0 && (
+        {areas && areas.length > 0 && getFilteredAreas().length === 0 && (
           <View style={styles.noResultsContainer}>
             <Feather name="search" size={48} color="#666" />
             <Text style={styles.noResultsTitle}>No areas found</Text>
@@ -625,7 +527,6 @@ export default function PackageCreationModal({
             )}
           </View>
         )}
-      </ScrollView>
     </View>
   );
 
@@ -1164,7 +1065,7 @@ const styles = StyleSheet.create({
     paddingTop: 16, // Ensure text starts at top for multiline
   },
 
-  // Search and filter styles
+  // Simple search styles
   searchContainer: {
     marginBottom: 16,
   },
@@ -1177,9 +1078,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
     paddingHorizontal: 16,
     minHeight: 48,
-  },
-  searchIcon: {
-    marginRight: 12,
+    gap: 12,
   },
   searchInput: {
     flex: 1,
@@ -1187,10 +1086,8 @@ const styles = StyleSheet.create({
     color: '#fff',
     paddingVertical: 12,
   },
-  clearButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
+
+  // Filter styles
   filterContainer: {
     marginBottom: 20,
   },
@@ -1236,6 +1133,8 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontWeight: '600',
   },
+
+  // Location grouping styles
   locationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1256,6 +1155,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
   },
+
+  // No results styles
   noResultsContainer: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1273,6 +1174,19 @@ const styles = StyleSheet.create({
     color: '#888',
     textAlign: 'center',
     marginBottom: 20,
+  },
+  clearButton: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  clearButtonText: {
+    fontSize: 14,
+    color: '#7c3aed',
+    fontWeight: '600',
   },
   clearFiltersButton: {
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
