@@ -3,7 +3,7 @@ import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
 import { getPackagePricing as getApiPricing, PricingRequest, PricingResponse } from './getPackagePricing';
-import { api } from '../api';
+import api from '../api';
 
 // Debug function to check API configuration
 export const debugApiConnection = async () => {
