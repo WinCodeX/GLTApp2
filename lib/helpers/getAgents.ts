@@ -1,5 +1,4 @@
-// lib/helpers/getAgents.ts
-import { getBaseUrl } from './getBaseUrl';
+import { api } from '../api';
 
 export interface Agent {
   id: string;
@@ -25,23 +24,18 @@ export interface Agent {
 
 export async function getAgents(): Promise<Agent[]> {
   try {
-    const baseUrl = getBaseUrl();
-    const response = await fetch(`${baseUrl}/api/v1/agents`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-
-    const data = await response.json();
-    return data.agents || data; // Handle different response formats
-  } catch (error) {
-    console.error('Error fetching agents:', error);
-    throw new Error('Failed to fetch agents');
+    console.log('👥 Fetching agents...');
+    const response = await api.get('/api/v1/agents');
+    console.log('👥 Agents response:', response.data);
+    
+    // Handle different response formats
+    const agents = response.data.agents || response.data || [];
+    console.log('👥 Parsed agents:', agents);
+    
+    return agents;
+  } catch (error: any) {
+    console.error('❌ Error fetching agents:', error);
+    console.error('❌ Error response:', error.response?.data);
+    throw new Error(`Failed to fetch agents: ${error.message}`);
   }
 }
