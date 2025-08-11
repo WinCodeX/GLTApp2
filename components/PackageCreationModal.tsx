@@ -26,11 +26,20 @@ interface Location {
   initials: string;
 }
 
+interface Area {
+  id: string;
+  name: string;
+  initials: string;
+  location_id: string;
+  location: Location;
+}
+
 interface Agent {
   id: string;
   name: string;
   phone: string;
   area_id: string;
+  area: Area;
 }
 
 interface PackageCreationModalProps {
@@ -38,6 +47,7 @@ interface PackageCreationModalProps {
   onClose: () => void;
   onSubmit: (packageData: any) => Promise<void>;
   locations: Location[];
+  areas: Area[];
   agents: Agent[];
 }
 
@@ -57,8 +67,10 @@ interface PackageData {
 
 const STEP_TITLES = [
   'Origin Location',
+  'Origin Area',
   'Sender Details',
-  'Destination Location',
+  'Destination Location', 
+  'Destination Area',
   'Receiver Details',
   'Delivery Method',
   'Confirm Details'
@@ -69,10 +81,13 @@ export default function PackageCreationModal({
   onClose,
   onSubmit,
   locations,
+  areas,
   agents
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedOriginLocation, setSelectedOriginLocation] = useState<string>('');
+  const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<string>('');
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const progressAnim = useRef(new Animated.Value(0)).current;
 
@@ -92,19 +107,7 @@ export default function PackageCreationModal({
 
   useEffect(() => {
     if (visible) {
-      setCurrentStep(0);
-      setPackageData({
-        sender_name: '',
-        sender_phone: '',
-        receiver_name: '',
-        receiver_phone: '',
-        origin_area_id: '',
-        destination_area_id: '',
-        origin_agent_id: '',
-        destination_agent_id: '',
-        delivery_type: 'doorstep'
-      });
-      setEstimatedCost(null);
+      resetForm();
       
       Animated.parallel([
         Animated.timing(slideAnim, {
@@ -125,7 +128,26 @@ export default function PackageCreationModal({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]);
+});
+ [visible]);
+
+  const resetForm = () => {
+    setCurrentStep(0);
+    setSelectedOriginLocation('');
+    setSelectedDestinationLocation('');
+    setPackageData({
+      sender_name: '',
+      sender_phone: '',
+      receiver_name: '',
+      receiver_phone: '',
+      origin_area_id: '',
+      destination_area_id: '',
+      origin_agent_id: '',
+      destination_agent_id: '',
+      delivery_type: 'doorstep'
+    });
+    setEstimatedCost(null);
+  };
 
   useEffect(() => {
     Animated.timing(progressAnim, {
@@ -143,15 +165,28 @@ export default function PackageCreationModal({
   }, [packageData.origin_area_id, packageData.destination_area_id, packageData.delivery_type]);
 
   const calculateEstimatedCost = () => {
+    const originArea = areas.find(a => a.id === packageData.origin_area_id);
+    const destinationArea = areas.find(a => a.id === packageData.destination_area_id);
+    
+    if (!originArea || !destinationArea) return;
+    
+    const isIntraLocation = originArea.location_id === destinationArea.location_id;
     const isIntraArea = packageData.origin_area_id === packageData.destination_area_id;
     
     let baseCost = 0;
+    
     if (isIntraArea) {
-      baseCost = packageData.delivery_type === 'doorstep' ? 150 : 
-                 packageData.delivery_type === 'agent' ? 100 : 125;
+      // Same area delivery
+      baseCost = packageData.delivery_type === 'doorstep' ? 280 : 
+                 packageData.delivery_type === 'agent' ? 150 : 215;
+    } else if (isIntraLocation) {
+      // Same location (city), different areas
+      baseCost = packageData.delivery_type === 'doorstep' ? 320 : 
+                 packageData.delivery_type === 'agent' ? 150 : 235;
     } else {
-      baseCost = packageData.delivery_type === 'doorstep' ? 300 : 
-                 packageData.delivery_type === 'agent' ? 200 : 250;
+      // Different locations (inter-city)
+      baseCost = packageData.delivery_type === 'doorstep' ? 380 : 
+                 packageData.delivery_type === 'agent' ? 150 : 265;
     }
     
     setEstimatedCost(baseCost);
@@ -161,14 +196,52 @@ export default function PackageCreationModal({
     setPackageData(prev => ({ ...prev, [field]: value }));
   };
 
+  const getAreasForLocation = (locationId: string) => {
+    return areas.filter(area => area.location_id === locationId);
+  };
+
+  const getOriginAreas = () => {
+    return getAreasForLocation(selectedOriginLocation);
+  };
+
+  const getDestinationAreas = () => {
+    return getAreasForLocation(selectedDestinationLocation);
+  };
+
+  const getOriginAgents = () => {
+    return agents.filter(agent => agent.area_id === packageData.origin_area_id);
+  };
+
+  const getDestinationAgents = () => {
+    return agents.filter(agent => agent.area_id === packageData.destination_area_id);
+  };
+
+  const getSelectedOriginArea = () => {
+    return areas.find(area => area.id === packageData.origin_area_id);
+  };
+
+  const getSelectedDestinationArea = () => {
+    return areas.find(area => area.id === packageData.destination_area_id);
+  };
+
+  const getSelectedOriginLocation = () => {
+    return locations.find(loc => loc.id === selectedOriginLocation);
+  };
+
+  const getSelectedDestinationLocation = () => {
+    return locations.find(loc => loc.id === selectedDestinationLocation);
+  };
+
   const isCurrentStepValid = () => {
     switch (currentStep) {
-      case 0: return packageData.origin_area_id.length > 0;
-      case 1: return packageData.sender_name.trim().length > 0 && packageData.sender_phone.trim().length > 0;
-      case 2: return packageData.destination_area_id.length > 0;
-      case 3: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
-      case 4: return packageData.delivery_type.length > 0;
-      case 5: return true;
+      case 0: return selectedOriginLocation.length > 0;
+      case 1: return packageData.origin_area_id.length > 0;
+      case 2: return packageData.sender_name.trim().length > 0 && packageData.sender_phone.trim().length > 0;
+      case 3: return selectedDestinationLocation.length > 0;
+      case 4: return packageData.destination_area_id.length > 0;
+      case 5: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
+      case 6: return packageData.delivery_type.length > 0;
+      case 7: return true;
       default: return false;
     }
   };
@@ -197,22 +270,6 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const getOriginAgents = () => {
-    return agents.filter(agent => agent.area_id === packageData.origin_area_id);
-  };
-
-  const getDestinationAgents = () => {
-    return agents.filter(agent => agent.area_id === packageData.destination_area_id);
-  };
-
-  const getSelectedOriginLocation = () => {
-    return locations.find(loc => loc.id === packageData.origin_area_id);
-  };
-
-  const getSelectedDestinationLocation = () => {
-    return locations.find(loc => loc.id === packageData.destination_area_id);
   };
 
   const renderProgressBar = () => (
@@ -249,12 +306,13 @@ export default function PackageCreationModal({
   const renderLocationSelection = (
     selectedId: string,
     onSelect: (id: string) => void,
-    title: string
+    title: string,
+    data: Location[]
   ) => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>{title}</Text>
       <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
-        {locations.map((location) => (
+        {data.map((location) => (
           <TouchableOpacity
             key={location.id}
             style={[
@@ -275,6 +333,46 @@ export default function PackageCreationModal({
                 </View>
                 <Text style={styles.locationName}>{location.name}</Text>
                 {selectedId === location.id && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </View>
+            </LinearGradient>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
+  const renderAreaSelection = (
+    selectedId: string,
+    onSelect: (id: string) => void,
+    title: string,
+    data: Area[]
+  ) => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>{title}</Text>
+      <ScrollView style={styles.locationsList} showsVerticalScrollIndicator={false}>
+        {data.map((area) => (
+          <TouchableOpacity
+            key={area.id}
+            style={[
+              styles.locationItem,
+              selectedId === area.id && styles.selectedLocationItem
+            ]}
+            onPress={() => onSelect(area.id)}
+          >
+            <LinearGradient
+              colors={selectedId === area.id ? 
+                ['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)'] : 
+                ['rgba(255, 255, 255, 0.05)', 'rgba(255, 255, 255, 0.02)']}
+              style={styles.locationItemGradient}
+            >
+              <View style={styles.locationItemContent}>
+                <View style={styles.locationInitials}>
+                  <Text style={styles.locationInitialsText}>{area.initials}</Text>
+                </View>
+                <Text style={styles.locationName}>{area.name}</Text>
+                {selectedId === area.id && (
                   <Feather name="check-circle" size={20} color="#10b981" />
                 )}
               </View>
@@ -312,7 +410,7 @@ export default function PackageCreationModal({
         <LinearGradient colors={['rgba(124, 58, 237, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.inputGradientBorder}>
           <TextInput
             style={styles.input}
-            placeholder="Phone Number"
+            placeholder="Phone Number (+254...)"
             placeholderTextColor="#888"
             value={phoneValue}
             onChangeText={onPhoneChange}
@@ -378,11 +476,13 @@ export default function PackageCreationModal({
             <View style={styles.routePoint}>
               <Text style={styles.routeLocationInitials}>{getSelectedOriginLocation()?.initials}</Text>
               <Text style={styles.routeLocationName}>{getSelectedOriginLocation()?.name}</Text>
+              <Text style={styles.routeAreaName}>{getSelectedOriginArea()?.name}</Text>
             </View>
             <Feather name="arrow-right" size={20} color="#7c3aed" />
             <View style={styles.routePoint}>
               <Text style={styles.routeLocationInitials}>{getSelectedDestinationLocation()?.initials}</Text>
               <Text style={styles.routeLocationName}>{getSelectedDestinationLocation()?.name}</Text>
+              <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name}</Text>
             </View>
           </View>
         </View>
@@ -427,11 +527,19 @@ export default function PackageCreationModal({
     switch (currentStep) {
       case 0:
         return renderLocationSelection(
-          packageData.origin_area_id,
-          (id) => updatePackageData('origin_area_id', id),
-          'Select origin location'
+          selectedOriginLocation,
+          setSelectedOriginLocation,
+          'Select origin location',
+          locations
         );
       case 1:
+        return renderAreaSelection(
+          packageData.origin_area_id,
+          (id) => updatePackageData('origin_area_id', id),
+          'Select origin area',
+          getOriginAreas()
+        );
+      case 2:
         return renderDetailsForm(
           packageData.sender_name,
           packageData.sender_phone,
@@ -440,13 +548,21 @@ export default function PackageCreationModal({
           'Sender Information',
           'Enter the sender\'s details'
         );
-      case 2:
+      case 3:
         return renderLocationSelection(
+          selectedDestinationLocation,
+          setSelectedDestinationLocation,
+          'Select destination location',
+          locations
+        );
+      case 4:
+        return renderAreaSelection(
           packageData.destination_area_id,
           (id) => updatePackageData('destination_area_id', id),
-          'Select destination location'
+          'Select destination area',
+          getDestinationAreas()
         );
-      case 3:
+      case 5:
         return renderDetailsForm(
           packageData.receiver_name,
           packageData.receiver_phone,
@@ -455,9 +571,9 @@ export default function PackageCreationModal({
           'Receiver Information',
           'Enter the receiver\'s details'
         );
-      case 4:
+      case 6:
         return renderDeliveryMethod();
-      case 5:
+      case 7:
         return renderConfirmation();
       default:
         return null;
@@ -726,6 +842,11 @@ const styles = StyleSheet.create({
   routeLocationName: {
     color: '#fff',
     fontSize: 14,
+    marginBottom: 2,
+  },
+  routeAreaName: {
+    color: '#888',
+    fontSize: 12,
   },
   costSection: {
     marginTop: 10,
@@ -784,4 +905,3 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-});
