@@ -1,3 +1,4 @@
+// lib/helpers/getPackagePricing.ts
 import { getBaseUrl } from './getBaseUrl';
 
 export interface PricingRequest {
