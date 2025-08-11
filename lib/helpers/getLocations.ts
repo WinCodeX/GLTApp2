@@ -1,3 +1,4 @@
+// lib/helpers/getLocations.ts
 import { getBaseUrl } from './getBaseUrl';
 
 export interface Location {
