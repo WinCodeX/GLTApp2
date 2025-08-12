@@ -269,26 +269,67 @@ export default function PackageCreationModal({
     });
   };
 
-  // Enhanced area-based cost calculation
+  // Enhanced area-based cost calculation with detailed debugging
   const calculateCost = () => {
+    console.log('💰 Starting cost calculation...');
+    
     const originAgent = agents.find(a => a.id === packageData.origin_agent_id);
     if (!originAgent) {
       console.log('❌ Origin agent not found for cost calculation');
+      console.log('📊 Available agents:', agents.map(a => ({ id: a.id, name: a.name })));
+      console.log('🎯 Looking for agent ID:', packageData.origin_agent_id);
       return;
     }
 
-    const originArea = areas.find(a => a.id === originAgent.area_id);
+    console.log('✅ Origin agent found:', {
+      agentId: originAgent.id,
+      agentName: originAgent.name,
+      agentAreaId: originAgent.area_id,
+      agentAreaIdType: typeof originAgent.area_id
+    });
+
+    // Enhanced area lookup with debugging
+    console.log('🔍 Searching for origin area...');
+    console.log('📊 Available areas:', areas.map(a => ({ id: a.id, name: a.name, idType: typeof a.id })));
+    console.log('🎯 Looking for area ID:', originAgent.area_id, 'Type:', typeof originAgent.area_id);
+    
+    const originArea = areas.find(a => {
+      console.log(`🔍 Comparing area ${a.id} (${typeof a.id}) with ${originAgent.area_id} (${typeof originAgent.area_id})`);
+      // Try both strict and loose comparison
+      return a.id === originAgent.area_id || a.id == originAgent.area_id || 
+             String(a.id) === String(originAgent.area_id);
+    });
+    
     if (!originArea) {
       console.log('❌ Origin area not found for cost calculation');
+      console.log('🔍 Debug info:', {
+        agentAreaId: originAgent.area_id,
+        agentAreaIdType: typeof originAgent.area_id,
+        availableAreaIds: areas.map(a => ({ id: a.id, type: typeof a.id, name: a.name }))
+      });
       return;
     }
+
+    console.log('✅ Origin area found:', {
+      areaId: originArea.id,
+      areaName: originArea.name,
+      locationId: originArea.location_id,
+      locationName: originArea.location?.name
+    });
 
     let destinationAreaId = packageData.destination_area_id;
     let destinationAgent = null;
     
     if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
       destinationAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
-      destinationAreaId = destinationAgent?.area_id || '';
+      if (destinationAgent) {
+        destinationAreaId = destinationAgent.area_id || '';
+        console.log('✅ Destination agent found:', {
+          agentId: destinationAgent.id,
+          agentName: destinationAgent.name,
+          agentAreaId: destinationAgent.area_id
+        });
+      }
     }
 
     if (!destinationAreaId) {
@@ -296,11 +337,28 @@ export default function PackageCreationModal({
       return;
     }
 
-    const destinationArea = areas.find(a => a.id === destinationAreaId);
+    console.log('🔍 Searching for destination area...');
+    const destinationArea = areas.find(a => {
+      return a.id === destinationAreaId || a.id == destinationAreaId || 
+             String(a.id) === String(destinationAreaId);
+    });
+    
     if (!destinationArea) {
       console.log('❌ Destination area not found for cost calculation');
+      console.log('🔍 Debug info:', {
+        destinationAreaId,
+        destinationAreaIdType: typeof destinationAreaId,
+        availableAreaIds: areas.map(a => ({ id: a.id, type: typeof a.id, name: a.name }))
+      });
       return;
     }
+
+    console.log('✅ Destination area found:', {
+      areaId: destinationArea.id,
+      areaName: destinationArea.name,
+      locationId: destinationArea.location_id,
+      locationName: destinationArea.location?.name
+    });
     
     // Enhanced logging for debugging
     console.log('💰 Calculating cost with areas:', {
@@ -313,8 +371,17 @@ export default function PackageCreationModal({
     });
     
     // Area-based pricing logic - both agent-to-agent and agent-to-doorstep use area calculations
-    const isIntraArea = originAgent.area_id === destinationAreaId;
-    const isIntraLocation = originArea.location_id === destinationArea.location_id;
+    const isIntraArea = String(originArea.id) === String(destinationArea.id);
+    const isIntraLocation = String(originArea.location_id) === String(destinationArea.location_id);
+    
+    console.log('🔍 Pricing logic checks:', {
+      originAreaId: originArea.id,
+      destinationAreaId: destinationArea.id,
+      originLocationId: originArea.location_id,
+      destinationLocationId: destinationArea.location_id,
+      isIntraArea,
+      isIntraLocation
+    });
     
     let baseCost = 0;
     
@@ -322,23 +389,29 @@ export default function PackageCreationModal({
       // Agent-to-Agent pricing (typically lower due to no last-mile delivery)
       if (isIntraArea) {
         baseCost = 120; // Same area agent transfer
+        console.log('💰 Same area agent transfer: KES 120');
       } else if (isIntraLocation) {
         baseCost = 150; // Same location (e.g., within Nairobi), different areas
+        console.log('💰 Same location, different areas agent transfer: KES 150');
       } else {
         baseCost = 180; // Different locations (e.g., Nairobi to Mombasa)
+        console.log('💰 Different locations agent transfer: KES 180');
       }
     } else {
       // Agent-to-Doorstep pricing (higher due to last-mile delivery)
       if (isIntraArea) {
         baseCost = 250; // Same area doorstep delivery
+        console.log('💰 Same area doorstep delivery: KES 250');
       } else if (isIntraLocation) {
         baseCost = 300; // Same location, different areas, doorstep delivery
+        console.log('💰 Same location, different areas doorstep delivery: KES 300');
       } else {
         baseCost = 380; // Different locations, doorstep delivery
+        console.log('💰 Different locations doorstep delivery: KES 380');
       }
     }
     
-    console.log('💰 Cost calculation result:', {
+    console.log('💰 Final cost calculation result:', {
       isIntraArea,
       isIntraLocation,
       deliveryType: packageData.delivery_type,
