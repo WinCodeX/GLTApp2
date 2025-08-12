@@ -202,23 +202,44 @@ export default function PackageCreationModal({
       
       // Fetch fresh data if cache is invalid or missing
       console.log('🌐 Fetching fresh data from API...');
+      console.log('🔗 API Call: getPackageFormData()');
+      
       const formData = await getPackageFormData();
       
-      setLocations(formData.locations);
-      setAreas(formData.areas);
-      setAgents(formData.agents);
+      // DEBUG: Log the raw API response
+      console.log('📦 RAW API Response:', JSON.stringify(formData, null, 2));
+      console.log('📊 API Response Structure:', {
+        hasLocations: !!formData.locations,
+        hasAreas: !!formData.areas,
+        hasAgents: !!formData.agents,
+        locationsType: typeof formData.locations,
+        areasType: typeof formData.areas,
+        agentsType: typeof formData.agents,
+        locationsLength: formData.locations?.length || 0,
+        areasLength: formData.areas?.length || 0,
+        agentsLength: formData.agents?.length || 0
+      });
+      
+      setLocations(formData.locations || []);
+      setAreas(formData.areas || []);
+      setAgents(formData.agents || []);
       
       // Save to cache
       await saveToCache(formData);
       
       console.log('✅ Fresh data loaded and cached:', {
-        locations: formData.locations.length,
-        areas: formData.areas.length,
-        agents: formData.agents.length
+        locations: (formData.locations || []).length,
+        areas: (formData.areas || []).length,
+        agents: (formData.agents || []).length
       });
       
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
       setDataError(error.message || 'Failed to load data');
       
       // Try to load cached data as fallback even if expired
