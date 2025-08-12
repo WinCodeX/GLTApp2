@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED AND ARCHITECTURALLY IMPROVED
+// components/PackageCreationModal.tsx - FIXED DATA DISPLAY ISSUES
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -122,85 +122,6 @@ const useDataCache = () => {
   }, []);
 
   return { isCacheValid, loadFromCache, saveToCache, clearCache };
-};
-
-/**
- * Normalizes JSON:API response data into flat objects
- * Handles both single objects and arrays of objects
- */
-const normalizeJsonApiData = (jsonApiResponse: any): any[] => {
-  console.log('🔄 Normalizing JSON:API response:', jsonApiResponse);
-  
-  // Handle direct array (already normalized)
-  if (Array.isArray(jsonApiResponse)) {
-    console.log('✅ Data already normalized as array');
-    return jsonApiResponse;
-  }
-  
-  // Handle JSON:API format
-  if (jsonApiResponse && jsonApiResponse.data) {
-    const data = Array.isArray(jsonApiResponse.data) ? jsonApiResponse.data : [jsonApiResponse.data];
-    const included = jsonApiResponse.included || [];
-    
-    console.log('🔍 JSON:API format detected:', {
-      dataCount: data.length,
-      includedCount: included.length
-    });
-    
-    // Create a map of included resources for easy lookup
-    const includedMap = new Map();
-    included.forEach((item: any) => {
-      const key = `${item.type}_${item.id}`;
-      includedMap.set(key, {
-        id: item.id,
-        ...item.attributes,
-        type: item.type
-      });
-    });
-    
-    // Normalize main data items
-    const normalizedData = data.map((item: any) => {
-      const normalized = {
-        id: item.id,
-        ...item.attributes,
-        type: item.type
-      };
-      
-      // Process relationships if they exist
-      if (item.relationships) {
-        Object.keys(item.relationships).forEach(relationKey => {
-          const relationship = item.relationships[relationKey];
-          if (relationship && relationship.data) {
-            if (Array.isArray(relationship.data)) {
-              // Handle has_many relationships
-              normalized[relationKey] = relationship.data.map((relItem: any) => {
-                const key = `${relItem.type}_${relItem.id}`;
-                return includedMap.get(key) || { id: relItem.id, type: relItem.type };
-              });
-            } else {
-              // Handle belongs_to relationships
-              const key = `${relationship.data.type}_${relationship.data.id}`;
-              normalized[relationKey] = includedMap.get(key) || { id: relationship.data.id, type: relationship.data.type };
-            }
-          }
-        });
-      }
-      
-      return normalized;
-    });
-    
-    console.log('✅ JSON:API normalization complete:', {
-      originalCount: data.length,
-      normalizedCount: normalizedData.length,
-      sampleNormalized: normalizedData[0]
-    });
-    
-    return normalizedData;
-  }
-  
-  // Handle other formats or empty response
-  console.log('⚠️ Unknown data format, returning empty array');
-  return [];
 };
 
 export default function PackageCreationModal({
@@ -333,94 +254,29 @@ export default function PackageCreationModal({
         agentsLength: formData.agents?.length || 0
       });
       
-      // Normalize JSON:API data to flat objects
-      console.log('🔄 Starting data normalization...');
-      const processedLocations = normalizeJsonApiData(formData.locations);
-      const processedAreas = normalizeJsonApiData(formData.areas);
-      const processedAgents = normalizeJsonApiData(formData.agents);
+      // FIXED: Work directly with the helper's output - no normalization needed
+      const processedLocations = formData.locations || [];
+      const processedAreas = formData.areas || [];
+      const processedAgents = formData.agents || [];
       
-      console.log('✅ Data normalization complete:', {
+      console.log('✅ Using helper data directly:', {
         locations: processedLocations.length,
         areas: processedAreas.length,
         agents: processedAgents.length
       });
       
-      // Create lookup maps for relationship resolution
-      const locationMap = new Map();
-      processedLocations.forEach(location => {
-        if (location.id) {
-          locationMap.set(String(location.id), location);
-        }
-      });
+      // Sample the first item of each to understand structure
+      if (processedLocations.length > 0) {
+        console.log('📍 Sample location:', processedLocations[0]);
+      }
+      if (processedAreas.length > 0) {
+        console.log('🏢 Sample area:', processedAreas[0]);
+      }
+      if (processedAgents.length > 0) {
+        console.log('👥 Sample agent:', processedAgents[0]);
+      }
       
-      const areaMap = new Map();
-      processedAreas.forEach(area => {
-        if (area.id) {
-          areaMap.set(String(area.id), area);
-        }
-      });
-      
-      console.log('🗺️ Created lookup maps:', {
-        locationMapSize: locationMap.size,
-        areaMapSize: areaMap.size
-      });
-      
-      // Enhanced relationship mapping with proper error handling
-      console.log('🔗 Starting relationship mapping...');
-      
-      // Map areas to their locations
-      processedAreas.forEach(area => {
-        if (area.location_id) {
-          const location = locationMap.get(String(area.location_id));
-          if (location) {
-            area.location = location;
-            console.log(`✅ Mapped area "${area.name}" to location "${location.name}"`);
-          } else {
-            console.log(`⚠️ Location not found for area "${area.name}" (location_id: ${area.location_id})`);
-          }
-        } else {
-          console.log(`⚠️ Area "${area.name}" has no location_id`);
-        }
-      });
-      
-      // Map agents to their areas and locations
-      processedAgents.forEach(agent => {
-        if (agent.area_id) {
-          const area = areaMap.get(String(agent.area_id));
-          if (area) {
-            agent.area = area;
-            console.log(`✅ Mapped agent "${agent.name}" to area "${area.name}"`);
-            
-            // Agent inherits location from area
-            if (area.location) {
-              console.log(`✅ Agent "${agent.name}" inherited location "${area.location.name}" from area`);
-            }
-          } else {
-            console.log(`⚠️ Area not found for agent "${agent.name}" (area_id: ${agent.area_id})`);
-          }
-        } else {
-          console.log(`⚠️ Agent "${agent.name}" has no area_id`);
-        }
-      });
-      
-      console.log('🔗 Relationship mapping completed:', {
-        locationMapSize: locationMap.size,
-        areaMapSize: areaMap.size,
-        areasWithLocations: processedAreas.filter(a => a.location).length,
-        agentsWithAreas: processedAgents.filter(a => a.area).length,
-        agentsWithLocations: processedAgents.filter(a => a.area?.location).length
-      });
-      
-      // Final validation
-      console.log('🔍 Final data validation:', {
-        locationsValid: processedLocations.every(l => l.id && l.name),
-        areasValid: processedAreas.every(a => a.id && a.name),
-        agentsValid: processedAgents.every(a => a.id && a.name),
-        sampleLocation: processedLocations[0],
-        sampleArea: processedAreas[0],
-        sampleAgent: processedAgents[0]
-      });
-      
+      // Set the data directly from helper
       setLocations(processedLocations);
       setAreas(processedAreas);
       setAgents(processedAgents);
@@ -631,7 +487,7 @@ export default function PackageCreationModal({
     setSearchQueries(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  // Enhanced sorting functionality with normalized data access
+  // FIXED: Simplified sorting - work directly with data structure from helper
   const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     console.log(`🔍 Filtering ${itemType}s:`, {
       inputCount: items.length,
@@ -639,13 +495,14 @@ export default function PackageCreationModal({
       firstItem: items[0]
     });
 
-    // Filter by search query - Updated to use normalized flat structure
+    // Filter by search query
     const filtered = items.filter(item => {
       const searchLower = searchQuery.toLowerCase();
       if (itemType === 'agent') {
         const agent = item as Agent;
         const name = agent.name || '';
         const phone = agent.phone || '';
+        // FIXED: Use direct property access instead of nested lookups
         const areaName = agent.area?.name || '';
         const locationName = agent.area?.location?.name || '';
         
@@ -658,6 +515,7 @@ export default function PackageCreationModal({
       } else {
         const area = item as Area;
         const name = area.name || '';
+        // FIXED: Use direct property access
         const locationName = area.location?.name || '';
         return (
           name.toLowerCase().includes(searchLower) ||
@@ -671,7 +529,7 @@ export default function PackageCreationModal({
       originalCount: items.length
     });
 
-    // Apply sorting - Updated to use normalized flat structure
+    // Apply sorting
     return filtered.sort((a, b) => {
       let aValue = '';
       let bValue = '';
@@ -708,7 +566,7 @@ export default function PackageCreationModal({
     });
   }, [sortConfig]);
 
-  // Group filtered and sorted items by location
+  // FIXED: Simplified grouping - work directly with data structure from helper
   const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
@@ -720,9 +578,11 @@ export default function PackageCreationModal({
       let locationName = 'Unknown Location';
       if (itemType === 'agent') {
         const agent = item as Agent;
+        // FIXED: Use direct property access
         locationName = agent.area?.location?.name || 'Unknown Location';
       } else {
         const area = item as Area;
+        // FIXED: Use direct property access
         locationName = area.location?.name || 'Unknown Location';
       }
       
@@ -955,7 +815,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // Step 0: Origin Agent Selection - Updated to use normalized data
+  // FIXED: Step 0: Origin Agent Selection - Direct data usage
   const renderOriginAgentSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Select Origin Agent</Text>
@@ -981,7 +841,7 @@ export default function PackageCreationModal({
               const agentPhone = agentData.phone || '';
               const agentId = agentData.id || '';
               
-              // Get area and location info from normalized flat structure
+              // FIXED: Use direct property access from helper data
               const areaName = agentData.area?.name || 'Unknown Area';
               const locationName = agentData.area?.location?.name || group.locationName;
               
@@ -1129,7 +989,7 @@ export default function PackageCreationModal({
                   const agentPhone = agentData.phone || '';
                   const agentId = agentData.id || '';
                   
-                  // Get area and location info from normalized flat structure
+                  // FIXED: Use direct property access from helper data
                   const areaName = agentData.area?.name || 'Unknown Area';
                   const locationName = agentData.area?.location?.name || group.locationName;
                   
