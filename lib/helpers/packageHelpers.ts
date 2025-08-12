@@ -1,9 +1,35 @@
-// lib/helpers/packageHelpers.ts - UPDATED for FastJSON
+// lib/helpers/packageHelpers.ts - UPDATED for FastJSON with createPackage
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
 import { getPackagePricing as getApiPricing, PricingRequest, PricingResponse } from './getPackagePricing';
 import api from '../api';
+
+// Package-related types
+export interface PackageData {
+  sender_name: string;
+  sender_phone: string;
+  receiver_name: string;
+  receiver_phone: string;
+  origin_area_id: string;
+  destination_area_id: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+  delivery_type: 'doorstep' | 'agent' | 'mixed';
+  delivery_location?: string; // For doorstep delivery address
+}
+
+export interface PackageResponse {
+  id: string;
+  tracking_code: string;
+  cost: number;
+  state: string;
+  created_at: string;
+  updated_at: string;
+  sender_name: string;
+  receiver_name: string;
+  delivery_type: string;
+}
 
 // Debug function to check API configuration
 export const debugApiConnection = async () => {
@@ -334,6 +360,59 @@ const calculateFallbackPricing = (data: {
   return baseCost;
 };
 
+// CREATE PACKAGE FUNCTION - This was missing!
+export async function createPackage(packageData: PackageData): Promise<PackageResponse> {
+  try {
+    console.log('📦 Creating package...');
+    console.log('📦 Package data:', packageData);
+    
+    // Prepare the request payload according to your Rails API structure
+    const payload = {
+      package: {
+        sender_name: packageData.sender_name,
+        sender_phone: packageData.sender_phone,
+        receiver_name: packageData.receiver_name,
+        receiver_phone: packageData.receiver_phone,
+        origin_area_id: packageData.origin_area_id,
+        destination_area_id: packageData.destination_area_id,
+        origin_agent_id: packageData.origin_agent_id,
+        destination_agent_id: packageData.destination_agent_id,
+        delivery_type: packageData.delivery_type,
+        delivery_location: packageData.delivery_location
+      }
+    };
+    
+    console.log('📦 API payload:', payload);
+    
+    const response = await api.post('/api/v1/packages', payload);
+    
+    console.log('📦 Package creation response:', response.data);
+    
+    // Handle both response.data.data (FastJSON) and response.data.package (legacy) formats
+    const packageResponse = response.data.data?.package || 
+                           response.data.package || 
+                           response.data;
+    
+    if (!packageResponse) {
+      throw new Error('Invalid response format from server');
+    }
+    
+    return packageResponse;
+  } catch (error: any) {
+    console.error('❌ Error creating package:', error);
+    console.error('❌ Error response:', error.response?.data);
+    
+    // Extract meaningful error message
+    const errorMessage = error.response?.data?.message || 
+                        error.response?.data?.error || 
+                        error.response?.data?.errors?.[0] ||
+                        error.message || 
+                        'Failed to create package';
+    
+    throw new Error(errorMessage);
+  }
+}
+
 // Utility function to validate package form data
 export const validatePackageFormData = (data: {
   locations: Location[];
@@ -378,10 +457,18 @@ export type {
   Agent,
   PricingRequest,
   PricingResponse,
+  PackageData,
+  PackageResponse,
 };
 
+// Export all functions - FIXED: Added createPackage
 export {
   getLocations,
   getAreas,
   getAgents,
+  createPackage, // This was missing!
+  debugApiConnection,
+  getPackageFormData,
+  getPackagePricing,
+  validatePackageFormData,
 };
