@@ -151,7 +151,7 @@ export default function Track() {
     }
   }, [selectedStatus]);
 
-  // Load QR codes for multiple packages
+  // Load QR codes for multiple packages with client-side fallback
   const loadQRCodesForPackages = useCallback(async (packagesToLoad: Package[]) => {
     const newLoadingSet = new Set(loadingQRCodes);
     
@@ -163,16 +163,42 @@ export default function Track() {
     
     setLoadingQRCodes(newLoadingSet);
     
-    // Load QR codes concurrently
+    // Load QR codes concurrently with fallback
     const qrPromises = packagesToLoad
       .filter(pkg => !qrCodeCache[pkg.code])
       .map(async (pkg) => {
         try {
+          console.log(`🔲 Loading QR for package: ${pkg.code}`);
           const qrData = await getPackageQRCode(pkg.code);
+          
+          // If backend QR generation failed, create client-side fallback
+          if (!qrData.data.qr_code_base64) {
+            console.log(`🔄 Backend QR failed for ${pkg.code}, using tracking URL fallback`);
+            return { 
+              packageCode: pkg.code, 
+              data: {
+                ...qrData.data,
+                qr_code_base64: null, // Will show tracking URL instead
+              }
+            };
+          }
+          
+          console.log(`✅ QR loaded successfully for ${pkg.code}`);
           return { packageCode: pkg.code, data: qrData.data };
         } catch (error) {
           console.warn(`⚠️ Failed to load QR for ${pkg.code}:`, error);
-          return { packageCode: pkg.code, data: null };
+          
+          // Create fallback data with tracking URL
+          return { 
+            packageCode: pkg.code, 
+            data: {
+              qr_code_base64: null,
+              tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${pkg.code}`,
+              package_code: pkg.code,
+              package_state: pkg.state,
+              route_description: pkg.route_description
+            }
+          };
         }
       });
 
@@ -308,6 +334,18 @@ export default function Track() {
                   Tap to view tracking page
                 </Text>
               </TouchableOpacity>
+            ) : qrData?.tracking_url ? (
+              <View style={styles.qrCodeFallback}>
+                <Feather name="link" size={32} color={colors.primary} />
+                <Text style={styles.qrCodeFallbackTitle}>QR Code Unavailable</Text>
+                <Text style={styles.qrCodeFallbackSubtitle}>
+                  Use tracking code: {item.code}
+                </Text>
+                <TouchableOpacity style={styles.trackingUrlButton}>
+                  <Feather name="external-link" size={16} color="#fff" />
+                  <Text style={styles.trackingUrlButtonText}>Open Tracking Page</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={styles.qrCodePlaceholder}>
                 <Feather name="alert-circle" size={20} color="#666" />
@@ -771,6 +809,40 @@ const styles = StyleSheet.create({
   qrCodeErrorText: {
     fontSize: 12,
     color: '#666',
+  },
+  
+  // QR Code fallback styles
+  qrCodeFallback: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  qrCodeFallbackTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#888',
+    marginTop: 8,
+  },
+  qrCodeFallbackSubtitle: {
+    fontSize: 12,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 12,
+  },
+  trackingUrlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    gap: 6,
+  },
+  trackingUrlButtonText: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '600',
   },
   
   // Action buttons
