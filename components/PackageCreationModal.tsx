@@ -614,9 +614,8 @@ export default function PackageCreationModal({
       
       // Show success toast
       Toast.show({
-        type: 'success',
+        type: 'successToast',
         text1: 'Package Created Successfully!',
-        text2: 'Your package has been scheduled for delivery',
         position: 'top',
         visibilityTime: 4000,
       });
@@ -627,9 +626,8 @@ export default function PackageCreationModal({
       
       // Show error toast instead of Alert
       Toast.show({
-        type: 'error',
+        type: 'errorToast',
         text1: 'Failed to Create Package',
-        text2: error.message || 'Please check your connection and try again',
         position: 'top',
         visibilityTime: 4000,
       });
@@ -656,9 +654,8 @@ export default function PackageCreationModal({
       
       // Show cache cleared toast
       Toast.show({
-        type: 'info',
+        type: 'defaultToast',
         text1: 'Cache Cleared',
-        text2: 'Reloading fresh data...',
         position: 'top',
         visibilityTime: 2000,
       });
@@ -668,9 +665,8 @@ export default function PackageCreationModal({
       console.error('Error clearing cache:', error);
       
       Toast.show({
-        type: 'error',
+        type: 'errorToast',
         text1: 'Failed to Clear Cache',
-        text2: 'Please try again',
         position: 'top',
         visibilityTime: 3000,
       });
