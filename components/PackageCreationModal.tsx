@@ -655,12 +655,14 @@ export default function PackageCreationModal({
       // Show cache cleared toast
       Toast.show({
         type: 'defaultToast',
-        text1: 'Cache Cleared',
+        text1: 'Cache Cleared - Refreshing Data',
         position: 'top',
         visibilityTime: 2000,
       });
       
-      loadModalData(); // Reload fresh data
+      // Immediately reload fresh data after clearing cache
+      await loadModalData();
+      
     } catch (error) {
       console.error('Error clearing cache:', error);
       
