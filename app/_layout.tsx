@@ -6,8 +6,10 @@ import {
   ThemeProvider,
   DarkTheme as NavigationDarkTheme,
 } from '@react-navigation/native';
-// ✅ Add GestureHandlerRootView import
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+// ✅ Add Toast imports
+import Toast from 'react-native-toast-message';
+import { toastConfig } from '@/lib/toastConfig';
 
 import { UserProvider } from '@/context/UserContext';
 import colors from '@/theme/colors';
@@ -27,7 +29,6 @@ const CustomDarkTheme = {
 
 export default function Layout() {
   return (
-    // ✅ Wrap everything with GestureHandlerRootView
     <GestureHandlerRootView style={{ flex: 1 }}>
       <PaperProvider>
         <ThemeProvider value={CustomDarkTheme}>
@@ -36,6 +37,8 @@ export default function Layout() {
           </UserProvider>
         </ThemeProvider>
       </PaperProvider>
+      {/* ✅ Add Toast component at the very end */}
+      <Toast config={toastConfig} />
     </GestureHandlerRootView>
   );
 }
