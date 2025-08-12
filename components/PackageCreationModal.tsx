@@ -703,9 +703,6 @@ export default function PackageCreationModal({
       const packageResponse = await createPackage(finalPackageData);
       console.log('✅ Package created successfully:', packageResponse);
       
-      // Call the parent's onSubmit if needed for additional processing
-      await onSubmit(finalPackageData);
-      
       // Show success toast
       Toast.show({
         type: 'successToast',
