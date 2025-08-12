@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - ENHANCED WITH AREA-BASED PRICING & STORAGE
+// components/PackageCreationModal.tsx - ENHANCED WITH TOAST NOTIFICATIONS
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -10,7 +10,6 @@ import {
   Animated,
   Dimensions,
   Platform,
-  Alert,
   ActivityIndicator,
   StyleSheet,
   KeyboardAvoidingView,
@@ -18,6 +17,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
 import { 
   getPackageFormData,
   getPackagePricing, 
@@ -611,10 +611,28 @@ export default function PackageCreationModal({
 
       console.log('📦 Submitting package data:', finalPackageData);
       await onSubmit(finalPackageData);
+      
+      // Show success toast
+      Toast.show({
+        type: 'success',
+        text1: 'Package Created Successfully!',
+        text2: 'Your package has been scheduled for delivery',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+      
       closeModal();
     } catch (error: any) {
       console.error('❌ Failed to submit package:', error);
-      Alert.alert('Error', error.message || 'Failed to create package. Please try again.');
+      
+      // Show error toast instead of Alert
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to Create Package',
+        text2: error.message || 'Please check your connection and try again',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -635,9 +653,27 @@ export default function PackageCreationModal({
         AsyncStorage.removeItem(STORAGE_KEYS.LAST_UPDATED)
       ]);
       console.log('🗑️ Cache cleared');
+      
+      // Show cache cleared toast
+      Toast.show({
+        type: 'info',
+        text1: 'Cache Cleared',
+        text2: 'Reloading fresh data...',
+        position: 'top',
+        visibilityTime: 2000,
+      });
+      
       loadModalData(); // Reload fresh data
     } catch (error) {
       console.error('Error clearing cache:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to Clear Cache',
+        text2: 'Please try again',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
