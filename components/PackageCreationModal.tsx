@@ -471,24 +471,43 @@ export default function PackageCreationModal({
 
   // Enhanced sorting functionality
   const applySortAndFilter = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
+    // Debug log the input
+    console.log(`🔍 Filtering ${itemType}s:`, {
+      inputCount: items.length,
+      searchQuery,
+      firstItem: items[0]
+    });
+
     // Filter by search query
     const filtered = items.filter(item => {
       const searchLower = searchQuery.toLowerCase();
       if (itemType === 'agent') {
         const agent = item as Agent;
+        const name = agent.name || agent.attributes?.name || '';
+        const phone = agent.phone || agent.attributes?.phone || '';
+        const areaName = agent.area?.name || agent.relationships?.area?.data?.name || '';
+        const locationName = agent.area?.location?.name || '';
+        
         return (
-          agent.name?.toLowerCase().includes(searchLower) ||
-          agent.phone?.toLowerCase().includes(searchLower) ||
-          agent.area?.name?.toLowerCase().includes(searchLower) ||
-          agent.area?.location?.name?.toLowerCase().includes(searchLower)
+          name.toLowerCase().includes(searchLower) ||
+          phone.toLowerCase().includes(searchLower) ||
+          areaName.toLowerCase().includes(searchLower) ||
+          locationName.toLowerCase().includes(searchLower)
         );
       } else {
         const area = item as Area;
+        const name = area.name || area.attributes?.name || '';
+        const locationName = area.location?.name || '';
         return (
-          area.name?.toLowerCase().includes(searchLower) ||
-          area.location?.name?.toLowerCase().includes(searchLower)
+          name.toLowerCase().includes(searchLower) ||
+          locationName.toLowerCase().includes(searchLower)
         );
       }
+    });
+
+    console.log(`✅ Filtered ${itemType}s:`, {
+      filteredCount: filtered.length,
+      originalCount: items.length
     });
 
     // Apply sorting
@@ -498,8 +517,13 @@ export default function PackageCreationModal({
       
       switch (sortConfig.field) {
         case 'name':
-          aValue = a.name || '';
-          bValue = b.name || '';
+          if (itemType === 'agent') {
+            aValue = (a as Agent).name || (a as Agent).attributes?.name || '';
+            bValue = (b as Agent).name || (b as Agent).attributes?.name || '';
+          } else {
+            aValue = (a as Area).name || (a as Area).attributes?.name || '';
+            bValue = (b as Area).name || (b as Area).attributes?.name || '';
+          }
           break;
         case 'location':
           if (itemType === 'agent') {
@@ -527,12 +551,18 @@ export default function PackageCreationModal({
   const getGroupedItems = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
+    console.log(`📋 Grouping ${itemType}s:`, {
+      sortedFilteredCount: sortedFiltered.length
+    });
+    
     const grouped = sortedFiltered.reduce((acc, item) => {
-      let locationName = '';
+      let locationName = 'Unknown Location';
       if (itemType === 'agent') {
-        locationName = (item as Agent).area?.location?.name || 'Unknown Location';
+        const agent = item as Agent;
+        locationName = agent.area?.location?.name || 'Unknown Location';
       } else {
-        locationName = (item as Area).location?.name || 'Unknown Location';
+        const area = item as Area;
+        locationName = area.location?.name || 'Unknown Location';
       }
       
       if (!acc[locationName]) {
@@ -542,12 +572,19 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, typeof items>);
 
-    return Object.entries(grouped)
+    const result = Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([locationName, items]) => ({
         locationName,
         items
       }));
+
+    console.log(`✅ Grouped ${itemType}s:`, {
+      groupCount: result.length,
+      groups: result.map(g => ({ location: g.locationName, count: g.items.length }))
+    });
+
+    return result;
   };
 
   const handleSortChange = (field: SortOption) => {
@@ -800,34 +837,41 @@ export default function PackageCreationModal({
               <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
             </View>
             
-            {group.items.map((agent) => (
-              <TouchableOpacity
-                key={agent.id}
-                style={[
-                  styles.selectionItem,
-                  packageData.origin_agent_id === agent.id && styles.selectedItem
-                ]}
-                onPress={() => updatePackageData('origin_agent_id', agent.id)}
-              >
-                <View style={styles.selectionItemContent}>
-                  <View style={styles.selectionInitials}>
-                    <Text style={styles.selectionInitialsText}>
-                      {(agent as Agent).name.substring(0, 2).toUpperCase()}
-                    </Text>
+            {group.items.map((agent) => {
+              const agentData = agent as Agent;
+              const agentName = agentData.name || agentData.attributes?.name || 'Unknown Agent';
+              const agentPhone = agentData.phone || agentData.attributes?.phone || '';
+              const agentId = agentData.id || agentData.attributes?.id || '';
+              
+              return (
+                <TouchableOpacity
+                  key={agentId}
+                  style={[
+                    styles.selectionItem,
+                    packageData.origin_agent_id === agentId && styles.selectedItem
+                  ]}
+                  onPress={() => updatePackageData('origin_agent_id', agentId)}
+                >
+                  <View style={styles.selectionItemContent}>
+                    <View style={styles.selectionInitials}>
+                      <Text style={styles.selectionInitialsText}>
+                        {agentName.substring(0, 2).toUpperCase()}
+                      </Text>
+                    </View>
+                    <View style={styles.selectionInfo}>
+                      <Text style={styles.selectionName}>{agentName}</Text>
+                      <Text style={styles.selectionLocation}>
+                        {agentData.area?.name || 'Unknown Area'} • {group.locationName}
+                      </Text>
+                      <Text style={styles.selectionPhone}>{agentPhone}</Text>
+                    </View>
+                    {packageData.origin_agent_id === agentId && (
+                      <Feather name="check-circle" size={20} color="#10b981" />
+                    )}
                   </View>
-                  <View style={styles.selectionInfo}>
-                    <Text style={styles.selectionName}>{(agent as Agent).name}</Text>
-                    <Text style={styles.selectionLocation}>
-                      {(agent as Agent).area?.name} • {(agent as Agent).area?.location?.name}
-                    </Text>
-                    <Text style={styles.selectionPhone}>{(agent as Agent).phone}</Text>
-                  </View>
-                  {packageData.origin_agent_id === agent.id && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </View>
-              </TouchableOpacity>
-            ))}
+                </TouchableOpacity>
+              );
+            })}
           </View>
         ))}
         
@@ -937,34 +981,41 @@ export default function PackageCreationModal({
                   <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
                 </View>
                 
-                {group.items.map((agent) => (
-                  <TouchableOpacity
-                    key={agent.id}
-                    style={[
-                      styles.selectionItem,
-                      packageData.destination_agent_id === agent.id && styles.selectedItem
-                    ]}
-                    onPress={() => updatePackageData('destination_agent_id', agent.id)}
-                  >
-                    <View style={styles.selectionItemContent}>
-                      <View style={styles.selectionInitials}>
-                        <Text style={styles.selectionInitialsText}>
-                          {(agent as Agent).name.substring(0, 2).toUpperCase()}
-                        </Text>
+                {group.items.map((agent) => {
+                  const agentData = agent as Agent;
+                  const agentName = agentData.name || agentData.attributes?.name || 'Unknown Agent';
+                  const agentPhone = agentData.phone || agentData.attributes?.phone || '';
+                  const agentId = agentData.id || agentData.attributes?.id || '';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={agentId}
+                      style={[
+                        styles.selectionItem,
+                        packageData.destination_agent_id === agentId && styles.selectedItem
+                      ]}
+                      onPress={() => updatePackageData('destination_agent_id', agentId)}
+                    >
+                      <View style={styles.selectionItemContent}>
+                        <View style={styles.selectionInitials}>
+                          <Text style={styles.selectionInitialsText}>
+                            {agentName.substring(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.selectionInfo}>
+                          <Text style={styles.selectionName}>{agentName}</Text>
+                          <Text style={styles.selectionLocation}>
+                            {agentData.area?.name || 'Unknown Area'} • {group.locationName}
+                          </Text>
+                          <Text style={styles.selectionPhone}>{agentPhone}</Text>
+                        </View>
+                        {packageData.destination_agent_id === agentId && (
+                          <Feather name="check-circle" size={20} color="#10b981" />
+                        )}
                       </View>
-                      <View style={styles.selectionInfo}>
-                        <Text style={styles.selectionName}>{(agent as Agent).name}</Text>
-                        <Text style={styles.selectionLocation}>
-                          {(agent as Agent).area?.name} • {(agent as Agent).area?.location?.name}
-                        </Text>
-                        <Text style={styles.selectionPhone}>{(agent as Agent).phone}</Text>
-                      </View>
-                      {packageData.destination_agent_id === agent.id && (
-                        <Feather name="check-circle" size={20} color="#10b981" />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             ))}
           </ScrollView>
