@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED DATA DISPLAY ISSUES
+// components/PackageCreationModal.tsx - ENHANCED with better debugging and data handling
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -22,6 +22,7 @@ import {
   getPackageFormData,
   getPackagePricing, 
   validatePackageFormData,
+  createPackage,
   type Location, 
   type Area, 
   type Agent,
@@ -142,15 +143,15 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Form data - Updated for agent-centric flow with area-based pricing
+  // Form data
   const [packageData, setPackageData] = useState<PackageData>({
     sender_name: '',
     sender_phone: '',
     receiver_name: '',
     receiver_phone: '',
-    origin_area_id: '', // Will be derived from origin agent
+    origin_area_id: '',
     destination_area_id: '',
-    origin_agent_id: '', // Primary origin selection
+    origin_agent_id: '',
     destination_agent_id: '',
     delivery_type: 'doorstep'
   });
@@ -229,70 +230,69 @@ export default function PackageCreationModal({
             agents: cachedData.agents.length
           });
           
+          // ENHANCED: Validate cached data structure
+          const validation = validatePackageFormData(cachedData);
+          if (!validation.isValid) {
+            console.warn('⚠️ Cached data validation failed:', validation.issues);
+            // Clear cache and fetch fresh data
+            await clearCache();
+            throw new Error('Cached data is invalid, fetching fresh data...');
+          }
+          
           setIsDataLoading(false);
           return;
         }
       }
       
-      // Fetch fresh data if cache is invalid or missing
-      console.log('🌐 Fetching fresh data from API...');
+      // Fetch fresh data using the proper helper function
+      console.log('🌐 Fetching fresh data from API using helper...');
       console.log('🔗 API Call: getPackageFormData()');
       
       const formData = await getPackageFormData();
       
-      // DEBUG: Log the raw API response
-      console.log('📦 RAW API Response:', JSON.stringify(formData, null, 2));
-      console.log('📊 API Response Structure:', {
+      // ENHANCED: Debug the helper response
+      console.log('📦 Helper Response Structure:', {
         hasLocations: !!formData.locations,
         hasAreas: !!formData.areas,
         hasAgents: !!formData.agents,
-        locationsType: typeof formData.locations,
-        areasType: typeof formData.areas,
-        agentsType: typeof formData.agents,
         locationsLength: formData.locations?.length || 0,
         areasLength: formData.areas?.length || 0,
         agentsLength: formData.agents?.length || 0
       });
       
-      // FIXED: Work directly with the helper's output - no normalization needed
-      const processedLocations = formData.locations || [];
-      const processedAreas = formData.areas || [];
-      const processedAgents = formData.agents || [];
-      
-      console.log('✅ Using helper data directly:', {
-        locations: processedLocations.length,
-        areas: processedAreas.length,
-        agents: processedAgents.length
-      });
-      
-      // Sample the first item of each to understand structure
-      if (processedLocations.length > 0) {
-        console.log('📍 Sample location:', processedLocations[0]);
-      }
-      if (processedAreas.length > 0) {
-        console.log('🏢 Sample area:', processedAreas[0]);
-      }
-      if (processedAgents.length > 0) {
-        console.log('👥 Sample agent:', processedAgents[0]);
+      // Validate the data before setting it
+      const validation = validatePackageFormData(formData);
+      if (!validation.isValid) {
+        console.error('❌ Fresh data validation failed:', validation.issues);
+        setDataError(`Data validation failed: ${validation.issues.join(', ')}`);
+        return;
       }
       
       // Set the data directly from helper
-      setLocations(processedLocations);
-      setAreas(processedAreas);
-      setAgents(processedAgents);
+      setLocations(formData.locations);
+      setAreas(formData.areas);
+      setAgents(formData.agents);
       
       // Save to cache
       await saveToCache({
-        locations: processedLocations,
-        areas: processedAreas,
-        agents: processedAgents
+        locations: formData.locations,
+        areas: formData.areas,
+        agents: formData.agents
       });
       
-      console.log('✅ Fresh data loaded and cached:', {
-        locations: processedLocations.length,
-        areas: processedAreas.length,
-        agents: processedAgents.length
+      console.log('✅ Fresh data loaded and cached successfully:', {
+        locations: formData.locations.length,
+        areas: formData.areas.length,
+        agents: formData.agents.length
       });
+      
+      // ENHANCED: Sample data structure for debugging
+      if (formData.agents.length > 0) {
+        console.log('🔍 Sample agent structure:', JSON.stringify(formData.agents[0], null, 2));
+      }
+      if (formData.areas.length > 0) {
+        console.log('🔍 Sample area structure:', JSON.stringify(formData.areas[0], null, 2));
+      }
       
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
@@ -315,7 +315,7 @@ export default function PackageCreationModal({
     } finally {
       setIsDataLoading(false);
     }
-  }, [isCacheValid, loadFromCache, saveToCache]);
+  }, [isCacheValid, loadFromCache, saveToCache, clearCache]);
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
@@ -409,7 +409,7 @@ export default function PackageCreationModal({
       deliveryType: packageData.delivery_type
     });
     
-    // Area-based pricing logic - both agent-to-agent and agent-to-doorstep use area calculations
+    // Area-based pricing logic
     const isIntraArea = String(originArea.id) === String(selectedDestinationArea.id);
     const isIntraLocation = String(originArea.location_id) === String(selectedDestinationArea.location_id);
     
@@ -425,27 +425,27 @@ export default function PackageCreationModal({
     let baseCost = 0;
     
     if (packageData.delivery_type === 'agent') {
-      // Agent-to-Agent pricing (typically lower due to no last-mile delivery)
+      // Agent-to-Agent pricing
       if (isIntraArea) {
-        baseCost = 120; // Same area agent transfer
+        baseCost = 120;
         console.log('💰 Same area agent transfer: KES 120');
       } else if (isIntraLocation) {
-        baseCost = 150; // Same location (e.g., within Nairobi), different areas
+        baseCost = 150;
         console.log('💰 Same location, different areas agent transfer: KES 150');
       } else {
-        baseCost = 180; // Different locations (e.g., Nairobi to Mombasa)
+        baseCost = 180;
         console.log('💰 Different locations agent transfer: KES 180');
       }
     } else {
-      // Agent-to-Doorstep pricing (higher due to last-mile delivery)
+      // Agent-to-Doorstep pricing
       if (isIntraArea) {
-        baseCost = 250; // Same area doorstep delivery
+        baseCost = 250;
         console.log('💰 Same area doorstep delivery: KES 250');
       } else if (isIntraLocation) {
-        baseCost = 300; // Same location, different areas, doorstep delivery
+        baseCost = 300;
         console.log('💰 Same location, different areas doorstep delivery: KES 300');
       } else {
-        baseCost = 380; // Different locations, doorstep delivery
+        baseCost = 380;
         console.log('💰 Different locations doorstep delivery: KES 380');
       }
     }
@@ -487,13 +487,18 @@ export default function PackageCreationModal({
     setSearchQueries(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  // FIXED: Simplified sorting - work directly with data structure from helper
+  // ENHANCED: Better sorting and filtering with detailed logging
   const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
-    console.log(`🔍 Filtering ${itemType}s:`, {
+    console.log(`🔍 Starting filter for ${itemType}s:`, {
       inputCount: items.length,
       searchQuery,
-      firstItem: items[0]
+      hasSearchQuery: searchQuery.length > 0
     });
+
+    if (items.length === 0) {
+      console.warn(`⚠️ No ${itemType}s to filter`);
+      return [];
+    }
 
     // Filter by search query
     const filtered = items.filter(item => {
@@ -502,35 +507,47 @@ export default function PackageCreationModal({
         const agent = item as Agent;
         const name = agent.name || '';
         const phone = agent.phone || '';
-        // FIXED: Use direct property access instead of nested lookups
         const areaName = agent.area?.name || '';
         const locationName = agent.area?.location?.name || '';
         
-        return (
+        const matches = (
           name.toLowerCase().includes(searchLower) ||
           phone.toLowerCase().includes(searchLower) ||
           areaName.toLowerCase().includes(searchLower) ||
           locationName.toLowerCase().includes(searchLower)
         );
+        
+        if (searchQuery && matches) {
+          console.log(`✅ Agent match: ${name} (${areaName})`);
+        }
+        
+        return matches;
       } else {
         const area = item as Area;
         const name = area.name || '';
-        // FIXED: Use direct property access
         const locationName = area.location?.name || '';
-        return (
+        
+        const matches = (
           name.toLowerCase().includes(searchLower) ||
           locationName.toLowerCase().includes(searchLower)
         );
+        
+        if (searchQuery && matches) {
+          console.log(`✅ Area match: ${name} (${locationName})`);
+        }
+        
+        return matches;
       }
     });
 
     console.log(`✅ Filtered ${itemType}s:`, {
       filteredCount: filtered.length,
-      originalCount: items.length
+      originalCount: items.length,
+      hasResults: filtered.length > 0
     });
 
     // Apply sorting
-    return filtered.sort((a, b) => {
+    const sorted = filtered.sort((a, b) => {
       let aValue = '';
       let bValue = '';
       
@@ -564,25 +581,32 @@ export default function PackageCreationModal({
       const comparison = aValue.localeCompare(bValue);
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
+
+    console.log(`🔄 Sorted ${itemType}s by ${sortConfig.field} (${sortConfig.direction}):`, sorted.length);
+
+    return sorted;
   }, [sortConfig]);
 
-  // FIXED: Simplified grouping - work directly with data structure from helper
+  // ENHANCED: Better grouping with detailed logging
   const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
-    console.log(`📋 Grouping ${itemType}s:`, {
+    console.log(`📋 Starting grouping for ${itemType}s:`, {
       sortedFilteredCount: sortedFiltered.length
     });
+    
+    if (sortedFiltered.length === 0) {
+      console.warn(`⚠️ No ${itemType}s to group`);
+      return [];
+    }
     
     const grouped = sortedFiltered.reduce((acc, item) => {
       let locationName = 'Unknown Location';
       if (itemType === 'agent') {
         const agent = item as Agent;
-        // FIXED: Use direct property access
         locationName = agent.area?.location?.name || 'Unknown Location';
       } else {
         const area = item as Area;
-        // FIXED: Use direct property access
         locationName = area.location?.name || 'Unknown Location';
       }
       
@@ -670,15 +694,23 @@ export default function PackageCreationModal({
         ...packageData,
         sender_name: 'Current User',
         sender_phone: '+254700000000',
+        delivery_location: deliveryLocation
       };
 
       console.log('📦 Submitting package data:', finalPackageData);
+      
+      // ENHANCED: Use the helper function directly
+      const packageResponse = await createPackage(finalPackageData);
+      console.log('✅ Package created successfully:', packageResponse);
+      
+      // Call the parent's onSubmit if needed for additional processing
       await onSubmit(finalPackageData);
       
       // Show success toast
       Toast.show({
         type: 'successToast',
         text1: 'Package Created Successfully!',
+        text2: `Tracking: ${packageResponse.tracking_code}`,
         position: 'top',
         visibilityTime: 4000,
       });
@@ -687,17 +719,18 @@ export default function PackageCreationModal({
     } catch (error: any) {
       console.error('❌ Failed to submit package:', error);
       
-      // Show error toast instead of Alert
+      // Show error toast
       Toast.show({
         type: 'errorToast',
         text1: 'Failed to Create Package',
+        text2: error.message,
         position: 'top',
         visibilityTime: 4000,
       });
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, onSubmit, closeModal]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, onSubmit, closeModal]);
 
   const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
@@ -815,79 +848,115 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // FIXED: Step 0: Origin Agent Selection - Direct data usage
-  const renderOriginAgentSelection = useCallback(() => (
-    <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Select Origin Agent</Text>
-      <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
-      
-      {renderSearchAndSortHeader(
-        searchQueries.originAgent,
-        (value) => updateSearchQuery('originAgent', value),
-        'Search agents by name, area, or location...'
-      )}
-      
-      <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-        {getGroupedItems(agents, searchQueries.originAgent, 'agent').map((group, groupIndex) => (
-          <View key={groupIndex}>
-            <View style={styles.locationHeader}>
-              <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-              <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-            </View>
-            
-            {group.items.map((agent) => {
-              const agentData = agent as Agent;
-              const agentName = agentData.name || 'Unknown Agent';
-              const agentPhone = agentData.phone || '';
-              const agentId = agentData.id || '';
-              
-              // FIXED: Use direct property access from helper data
-              const areaName = agentData.area?.name || 'Unknown Area';
-              const locationName = agentData.area?.location?.name || group.locationName;
-              
-              return (
-                <TouchableOpacity
-                  key={agentId}
-                  style={[
-                    styles.selectionItem,
-                    packageData.origin_agent_id === agentId && styles.selectedItem
-                  ]}
-                  onPress={() => updatePackageData('origin_agent_id', agentId)}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {agentName.substring(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{agentName}</Text>
-                      <Text style={styles.selectionLocation}>
-                        {areaName} • {locationName}
-                      </Text>
-                      <Text style={styles.selectionPhone}>{agentPhone}</Text>
-                    </View>
-                    {packageData.origin_agent_id === agentId && (
-                      <Feather name="check-circle" size={20} color="#10b981" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        ))}
+  // ENHANCED: Step 0: Origin Agent Selection with better error handling and data validation
+  const renderOriginAgentSelection = useCallback(() => {
+    console.log('🎯 Rendering origin agent selection...');
+    console.log('🎯 Agents available:', agents.length);
+    console.log('🎯 Search query:', searchQueries.originAgent);
+    
+    const groupedAgents = getGroupedItems(agents, searchQueries.originAgent, 'agent');
+    console.log('🎯 Grouped agents result:', groupedAgents.length, 'groups');
+    
+    return (
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>Select Origin Agent</Text>
+        <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
         
-        {applySortAndFilter(agents, searchQueries.originAgent, 'agent').length === 0 && (
-          <View style={styles.noResultsContainer}>
-            <Feather name="search" size={48} color="#666" />
-            <Text style={styles.noResultsTitle}>No agents found</Text>
-            <Text style={styles.noResultsText}>Try a different search term or adjust filters</Text>
-          </View>
+        {/* ENHANCED: Show data loading/count info */}
+        <View style={styles.dataInfoContainer}>
+          <Text style={styles.dataInfoText}>
+            {agents.length} agents available
+          </Text>
+          {searchQueries.originAgent && (
+            <Text style={styles.dataInfoText}>
+              Search: "{searchQueries.originAgent}"
+            </Text>
+          )}
+        </View>
+        
+        {renderSearchAndSortHeader(
+          searchQueries.originAgent,
+          (value) => updateSearchQuery('originAgent', value),
+          'Search agents by name, area, or location...'
         )}
-      </ScrollView>
-    </View>
-  ), [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, applySortAndFilter, updatePackageData]);
+        
+        <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+          {groupedAgents.length > 0 ? (
+            groupedAgents.map((group, groupIndex) => (
+              <View key={groupIndex}>
+                <View style={styles.locationHeader}>
+                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                </View>
+                
+                {group.items.map((agent) => {
+                  const agentData = agent as Agent;
+                  const agentName = agentData.name || 'Unknown Agent';
+                  const agentPhone = agentData.phone || '';
+                  const agentId = agentData.id || '';
+                  
+                  const areaName = agentData.area?.name || 'Unknown Area';
+                  const locationName = agentData.area?.location?.name || group.locationName;
+                  
+                  return (
+                    <TouchableOpacity
+                      key={agentId}
+                      style={[
+                        styles.selectionItem,
+                        packageData.origin_agent_id === agentId && styles.selectedItem
+                      ]}
+                      onPress={() => updatePackageData('origin_agent_id', agentId)}
+                    >
+                      <View style={styles.selectionItemContent}>
+                        <View style={styles.selectionInitials}>
+                          <Text style={styles.selectionInitialsText}>
+                            {agentName.substring(0, 2).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.selectionInfo}>
+                          <Text style={styles.selectionName}>{agentName}</Text>
+                          <Text style={styles.selectionLocation}>
+                            {areaName} • {locationName}
+                          </Text>
+                          <Text style={styles.selectionPhone}>{agentPhone}</Text>
+                        </View>
+                        {packageData.origin_agent_id === agentId && (
+                          <Feather name="check-circle" size={20} color="#10b981" />
+                        )}
+                      </View>
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))
+          ) : (
+            <View style={styles.noResultsContainer}>
+              <Feather name="search" size={48} color="#666" />
+              <Text style={styles.noResultsTitle}>
+                {searchQueries.originAgent ? 'No agents found' : 'No agents available'}
+              </Text>
+              <Text style={styles.noResultsText}>
+                {searchQueries.originAgent 
+                  ? 'Try a different search term or clear the search' 
+                  : 'Check your data connection and try refreshing'
+                }
+              </Text>
+              {searchQueries.originAgent && (
+                <TouchableOpacity
+                  style={styles.clearSearchButton}
+                  onPress={() => updateSearchQuery('originAgent', '')}
+                >
+                  <Text style={styles.clearSearchButtonText}>Clear Search</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery]);
 
+  // Keep the rest of the render methods the same as they're working...
   const renderReceiverDetails = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -989,7 +1058,6 @@ export default function PackageCreationModal({
                   const agentPhone = agentData.phone || '';
                   const agentId = agentData.id || '';
                   
-                  // FIXED: Use direct property access from helper data
                   const areaName = agentData.area?.name || 'Unknown Area';
                   const locationName = agentData.area?.location?.name || group.locationName;
                   
@@ -1357,7 +1425,7 @@ export default function PackageCreationModal({
   );
 }
 
-// FIXED STYLES - Properly structured StyleSheet
+// Enhanced styles with additional components
 const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
@@ -1377,6 +1445,37 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
+  },
+  
+  // ENHANCED: Data info container
+  dataInfoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginBottom: 12,
+  },
+  dataInfoText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  
+  // ENHANCED: Clear search button
+  clearSearchButton: {
+    marginTop: 16,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  clearSearchButtonText: {
+    fontSize: 14,
+    color: '#7c3aed',
+    fontWeight: '600',
+    textAlign: 'center',
   },
   
   // Header styles
@@ -1625,6 +1724,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#888',
     textAlign: 'center',
+    lineHeight: 20,
   },
   
   // Form styles
