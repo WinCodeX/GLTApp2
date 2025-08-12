@@ -38,8 +38,13 @@ export const debugApiConnection = async () => {
     console.log('📍 API Base URL:', api.defaults.baseURL);
     console.log('🔑 API Headers:', JSON.stringify(api.defaults.headers, null, 2));
     
-    // Test basic connectivity with correct endpoint
-    const response = await api.get('/api/v1/ping');
+    // Test basic connectivity with correct endpoint and headers
+    const response = await api.get('/api/v1/ping', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
     console.log('✅ API ping successful:', response.data);
     return true;
   } catch (error: any) {
@@ -156,7 +161,18 @@ async function fetchLocationsWithDebug(): Promise<Location[]> {
   try {
     console.log('📍 Fetching locations with FastJSON parser...');
     
-    const locations = await getLocations();
+    // Ensure JSON headers are sent
+    const response = await api.get('/api/v1/locations', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('📍 Raw API response:', response.data);
+    
+    // Parse the response data directly since we're not using the helper functions
+    const locations = response.data.data || response.data.locations || response.data;
     
     console.log('📍 FastJSON locations parsed successfully');
     console.log('📍 Locations count:', locations?.length || 0);
@@ -189,7 +205,18 @@ async function fetchAreasWithDebug(): Promise<Area[]> {
   try {
     console.log('🏢 Fetching areas with FastJSON parser...');
     
-    const areas = await getAreas();
+    // Ensure JSON headers are sent
+    const response = await api.get('/api/v1/areas', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🏢 Raw API response:', response.data);
+    
+    // Parse the response data directly since we're not using the helper functions
+    const areas = response.data.data || response.data.areas || response.data;
     
     console.log('🏢 FastJSON areas parsed successfully');
     console.log('🏢 Areas count:', areas?.length || 0);
@@ -225,7 +252,18 @@ async function fetchAgentsWithDebug(): Promise<Agent[]> {
   try {
     console.log('👥 Fetching agents with FastJSON parser...');
     
-    const agents = await getAgents();
+    // Ensure JSON headers are sent
+    const response = await api.get('/api/v1/agents', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('👥 Raw API response:', response.data);
+    
+    // Parse the response data directly since we're not using the helper functions
+    const agents = response.data.data || response.data.agents || response.data;
     
     console.log('👥 FastJSON agents parsed successfully');
     console.log('👥 Agents count:', agents?.length || 0);
@@ -384,7 +422,12 @@ export async function createPackage(packageData: PackageData): Promise<PackageRe
     
     console.log('📦 API payload:', payload);
     
-    const response = await api.post('/api/v1/packages', payload);
+    const response = await api.post('/api/v1/packages', payload, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
     
     console.log('📦 Package creation response:', response.data);
     
