@@ -918,7 +918,7 @@ export default function PackageCreationModal({
   );
 
   const renderConfirmation = () => (
-    <ScrollView style={styles.stepContent} showsVerticalScrollIndicator={false}>
+    <View style={[styles.stepContent, styles.stepContentConfirmation]}>
       <Text style={styles.stepTitle}>Confirm Package Details</Text>
       <Text style={styles.stepSubtitle}>Review all information before submitting</Text>
       
@@ -1009,7 +1009,7 @@ export default function PackageCreationModal({
           )}
         </View>
       </View>
-    </ScrollView>
+    </View>
   );
 
   const renderCurrentStep = () => {
@@ -1183,8 +1183,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.9,
-    minHeight: SCREEN_HEIGHT * 0.6,
+    maxHeight: SCREEN_HEIGHT * 0.95, // Increased from 0.9 to 0.95
+    minHeight: SCREEN_HEIGHT * 0.7,  // Increased from 0.6 to 0.7
     width: SCREEN_WIDTH,
   },
   modalContent: {
@@ -1267,6 +1267,10 @@ const styles = StyleSheet.create({
   stepContent: {
     flex: 1,
     minHeight: 400,
+  },
+  stepContentConfirmation: {
+    flex: 1,
+    minHeight: 600, // Larger height specifically for confirmation step
   },
   stepTitle: {
     fontSize: 24,
@@ -1495,14 +1499,14 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // Confirmation styles
+  // Confirmation styles - Enhanced for better visibility
   confirmationContainer: {
-    gap: 24,
+    gap: 20, // Reduced from 24 to 20 for tighter spacing
   },
   confirmationSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
-    padding: 20,
+    padding: 16, // Reduced from 20 to 16 for more compact sections
   },
   confirmationSectionTitle: {
     fontSize: 16,
