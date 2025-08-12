@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - ENHANCED WITH AGENT-CENTRIC FLOW
+// components/PackageCreationModal.tsx - ENHANCED WITH AREA-BASED PRICING & STORAGE
 import React, { useState, useRef, useEffect } from 'react';
 import {
   Modal,
@@ -15,6 +15,7 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { 
@@ -47,6 +48,17 @@ const STEP_TITLES = [
 type SortOption = 'name' | 'location' | 'area';
 type SortDirection = 'asc' | 'desc';
 
+// Storage keys for caching
+const STORAGE_KEYS = {
+  LOCATIONS: 'package_modal_locations',
+  AREAS: 'package_modal_areas',
+  AGENTS: 'package_modal_agents',
+  LAST_UPDATED: 'package_modal_last_updated'
+};
+
+// Cache duration (24 hours)
+const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
 export default function PackageCreationModal({
   visible,
   onClose,
@@ -64,7 +76,7 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Form data - Updated for agent-centric flow
+  // Form data - Updated for agent-centric flow with area-based pricing
   const [packageData, setPackageData] = useState<PackageData>({
     sender_name: '',
     sender_phone: '',
@@ -109,18 +121,97 @@ export default function PackageCreationModal({
     }
   }, [visible]);
 
+  // Check if cached data is still valid
+  const isCacheValid = async (): Promise<boolean> => {
+    try {
+      const lastUpdated = await AsyncStorage.getItem(STORAGE_KEYS.LAST_UPDATED);
+      if (!lastUpdated) return false;
+      
+      const timeDiff = Date.now() - parseInt(lastUpdated);
+      return timeDiff < CACHE_DURATION;
+    } catch (error) {
+      console.error('Error checking cache validity:', error);
+      return false;
+    }
+  };
+
+  // Load data from cache
+  const loadFromCache = async (): Promise<{ locations: Location[], areas: Area[], agents: Agent[] } | null> => {
+    try {
+      const [locationsStr, areasStr, agentsStr] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.LOCATIONS),
+        AsyncStorage.getItem(STORAGE_KEYS.AREAS),
+        AsyncStorage.getItem(STORAGE_KEYS.AGENTS)
+      ]);
+
+      if (!locationsStr || !areasStr || !agentsStr) return null;
+
+      return {
+        locations: JSON.parse(locationsStr),
+        areas: JSON.parse(areasStr),
+        agents: JSON.parse(agentsStr)
+      };
+    } catch (error) {
+      console.error('Error loading from cache:', error);
+      return null;
+    }
+  };
+
+  // Save data to cache
+  const saveToCache = async (data: { locations: Location[], areas: Area[], agents: Agent[] }): Promise<void> => {
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(data.locations)),
+        AsyncStorage.setItem(STORAGE_KEYS.AREAS, JSON.stringify(data.areas)),
+        AsyncStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(data.agents)),
+        AsyncStorage.setItem(STORAGE_KEYS.LAST_UPDATED, Date.now().toString())
+      ]);
+      console.log('✅ Data cached successfully');
+    } catch (error) {
+      console.error('Error saving to cache:', error);
+    }
+  };
+
   const loadModalData = async () => {
     try {
       setIsDataLoading(true);
       setDataError(null);
       
+      // Check cache first
+      const cacheValid = await isCacheValid();
+      console.log('🔍 Cache valid:', cacheValid);
+      
+      if (cacheValid) {
+        const cachedData = await loadFromCache();
+        if (cachedData) {
+          console.log('📋 Loading from cache...');
+          setLocations(cachedData.locations);
+          setAreas(cachedData.areas);
+          setAgents(cachedData.agents);
+          
+          console.log('✅ Cached data loaded:', {
+            locations: cachedData.locations.length,
+            areas: cachedData.areas.length,
+            agents: cachedData.agents.length
+          });
+          
+          setIsDataLoading(false);
+          return;
+        }
+      }
+      
+      // Fetch fresh data if cache is invalid or missing
+      console.log('🌐 Fetching fresh data from API...');
       const formData = await getPackageFormData();
       
       setLocations(formData.locations);
       setAreas(formData.areas);
       setAgents(formData.agents);
       
-      console.log('✅ Data loaded:', {
+      // Save to cache
+      await saveToCache(formData);
+      
+      console.log('✅ Fresh data loaded and cached:', {
         locations: formData.locations.length,
         areas: formData.areas.length,
         agents: formData.agents.length
@@ -129,6 +220,16 @@ export default function PackageCreationModal({
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
       setDataError(error.message || 'Failed to load data');
+      
+      // Try to load cached data as fallback even if expired
+      const cachedData = await loadFromCache();
+      if (cachedData) {
+        console.log('📋 Using expired cache as fallback...');
+        setLocations(cachedData.locations);
+        setAreas(cachedData.areas);
+        setAgents(cachedData.agents);
+        setDataError(null); // Clear error since we have fallback data
+      }
     } finally {
       setIsDataLoading(false);
     }
@@ -168,10 +269,19 @@ export default function PackageCreationModal({
     });
   };
 
-  // Enhanced cost calculation for agent-to-agent pricing
+  // Enhanced area-based cost calculation
   const calculateCost = () => {
     const originAgent = agents.find(a => a.id === packageData.origin_agent_id);
-    if (!originAgent) return;
+    if (!originAgent) {
+      console.log('❌ Origin agent not found for cost calculation');
+      return;
+    }
+
+    const originArea = areas.find(a => a.id === originAgent.area_id);
+    if (!originArea) {
+      console.log('❌ Origin area not found for cost calculation');
+      return;
+    }
 
     let destinationAreaId = packageData.destination_area_id;
     let destinationAgent = null;
@@ -181,39 +291,59 @@ export default function PackageCreationModal({
       destinationAreaId = destinationAgent?.area_id || '';
     }
 
-    if (!destinationAreaId) return;
+    if (!destinationAreaId) {
+      console.log('❌ Destination area ID not found for cost calculation');
+      return;
+    }
 
-    const originArea = areas.find(a => a.id === originAgent.area_id);
     const destinationArea = areas.find(a => a.id === destinationAreaId);
+    if (!destinationArea) {
+      console.log('❌ Destination area not found for cost calculation');
+      return;
+    }
     
-    if (!originArea || !destinationArea) return;
+    // Enhanced logging for debugging
+    console.log('💰 Calculating cost with areas:', {
+      originAgent: originAgent.name,
+      originArea: originArea.name,
+      originLocation: originArea.location?.name,
+      destinationArea: destinationArea.name,
+      destinationLocation: destinationArea.location?.name,
+      deliveryType: packageData.delivery_type
+    });
     
-    // Agent-to-Agent vs Agent-to-Area pricing logic
-    const isAgentToAgent = packageData.delivery_type === 'agent' && destinationAgent;
+    // Area-based pricing logic - both agent-to-agent and agent-to-doorstep use area calculations
     const isIntraArea = originAgent.area_id === destinationAreaId;
     const isIntraLocation = originArea.location_id === destinationArea.location_id;
     
     let baseCost = 0;
     
-    if (isAgentToAgent) {
-      // Agent-to-Agent pricing (typically lower)
+    if (packageData.delivery_type === 'agent') {
+      // Agent-to-Agent pricing (typically lower due to no last-mile delivery)
       if (isIntraArea) {
         baseCost = 120; // Same area agent transfer
       } else if (isIntraLocation) {
-        baseCost = 150; // Same location, different areas
+        baseCost = 150; // Same location (e.g., within Nairobi), different areas
       } else {
-        baseCost = 180; // Different locations
+        baseCost = 180; // Different locations (e.g., Nairobi to Mombasa)
       }
     } else {
-      // Agent-to-Doorstep pricing
+      // Agent-to-Doorstep pricing (higher due to last-mile delivery)
       if (isIntraArea) {
-        baseCost = 250;
+        baseCost = 250; // Same area doorstep delivery
       } else if (isIntraLocation) {
-        baseCost = 300;
+        baseCost = 300; // Same location, different areas, doorstep delivery
       } else {
-        baseCost = 380;
+        baseCost = 380; // Different locations, doorstep delivery
       }
     }
+    
+    console.log('💰 Cost calculation result:', {
+      isIntraArea,
+      isIntraLocation,
+      deliveryType: packageData.delivery_type,
+      baseCost
+    });
     
     setEstimatedCost(baseCost);
   };
@@ -225,7 +355,16 @@ export default function PackageCreationModal({
       // Auto-update origin_area_id when origin_agent_id changes
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
-        updated.origin_area_id = selectedAgent?.area_id || '';
+        if (selectedAgent) {
+          updated.origin_area_id = selectedAgent.area_id || '';
+          console.log('🎯 Origin agent selected:', {
+            agentName: selectedAgent.name,
+            agentId: selectedAgent.id,
+            areaId: selectedAgent.area_id,
+            areaName: selectedAgent.area?.name,
+            locationName: selectedAgent.area?.location?.name
+          });
+        }
       }
       
       return updated;
@@ -413,6 +552,22 @@ export default function PackageCreationModal({
     loadModalData();
   };
 
+  // Clear cache function for debugging/maintenance
+  const clearCache = async () => {
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(STORAGE_KEYS.LOCATIONS),
+        AsyncStorage.removeItem(STORAGE_KEYS.AREAS),
+        AsyncStorage.removeItem(STORAGE_KEYS.AGENTS),
+        AsyncStorage.removeItem(STORAGE_KEYS.LAST_UPDATED)
+      ]);
+      console.log('🗑️ Cache cleared');
+      loadModalData(); // Reload fresh data
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+    }
+  };
+
   // Enhanced Search and Sort Header Component
   const renderSearchAndSortHeader = (
     searchValue: string,
@@ -497,7 +652,7 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // Step 0: Origin Agent Selection (Replaces Origin Area)
+  // Step 0: Origin Agent Selection with enhanced area logging
   const renderOriginAgentSelection = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Select Origin Agent</Text>
@@ -837,6 +992,21 @@ export default function PackageCreationModal({
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
           )}
+          
+          {/* Debug information for cost calculation */}
+          {__DEV__ && getSelectedOriginAgent() && (
+            <View style={styles.debugInfo}>
+              <Text style={styles.debugText}>
+                Debug: {getSelectedOriginAgent()?.area?.name} → {getSelectedDestinationArea()?.name}
+              </Text>
+              <Text style={styles.debugText}>
+                Same Area: {getSelectedOriginAgent()?.area_id === getSelectedDestinationArea()?.id ? 'Yes' : 'No'}
+              </Text>
+              <Text style={styles.debugText}>
+                Same Location: {getSelectedOriginAgent()?.area?.location_id === getSelectedDestinationArea()?.location_id ? 'Yes' : 'No'}
+              </Text>
+            </View>
+          )}
         </View>
       </View>
     </ScrollView>
@@ -864,6 +1034,13 @@ export default function PackageCreationModal({
       )}
       
       <View style={styles.spacer} />
+      
+      {/* Debug cache clear button in development */}
+      {__DEV__ && currentStep === 0 && (
+        <TouchableOpacity onPress={clearCache} style={styles.debugButton}>
+          <Text style={styles.debugButtonText}>Clear Cache</Text>
+        </TouchableOpacity>
+      )}
       
       {currentStep < STEP_TITLES.length - 1 ? (
         <TouchableOpacity 
@@ -995,7 +1172,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced Styles with new search and sort components
+// Enhanced Styles with new search and sort components + debug styles
 const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
@@ -1390,6 +1567,31 @@ const styles = StyleSheet.create({
   pricingError: {
     fontSize: 14,
     color: '#ef4444',
+  },
+  
+  // Debug styles (only visible in development)
+  debugInfo: {
+    marginTop: 12,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 0, 0.1)',
+    borderRadius: 8,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#ffeb3b',
+    marginBottom: 2,
+  },
+  debugButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 193, 7, 0.2)',
+    marginRight: 8,
+  },
+  debugButtonText: {
+    fontSize: 12,
+    color: '#ffc107',
+    fontWeight: '600',
   },
   
   // Navigation
