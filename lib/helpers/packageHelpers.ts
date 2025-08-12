@@ -387,6 +387,225 @@ export const validatePackageFormData = (data: {
   };
 };
 
+// Package listing and tracking types
+export interface Package {
+  id: string;
+  code: string;
+  state: string;
+  state_display: string;
+  sender_name: string;
+  receiver_name: string;
+  cost: number;
+  delivery_type: string;
+  route_description: string;
+  created_at: string;
+  updated_at: string;
+  sender_phone?: string;
+  receiver_phone?: string;
+  origin_area?: Area;
+  destination_area?: Area;
+  origin_agent?: Agent;
+  destination_agent?: Agent;
+  delivery_location?: string;
+}
+
+export interface PackageListResponse {
+  success: boolean;
+  data: Package[];
+  pagination: {
+    current_page: number;
+    per_page: number;
+    total_count: number;
+    total_pages: number;
+    has_next: boolean;
+    has_prev: boolean;
+  };
+}
+
+export interface QRCodeResponse {
+  success: boolean;
+  data: {
+    qr_code_base64: string | null;
+    tracking_url: string;
+    package_code: string;
+    package_state: string;
+    route_description: string;
+  };
+}
+
+// State mapping from drawer to API states
+export const STATE_MAPPING = {
+  'pending': 'pending_unpaid',
+  'paid': 'pending',
+  'submitted': 'submitted',
+  'in-transit': 'in_transit',
+  'delivered': 'delivered',
+  'collected': 'collected',
+  'rejected': 'rejected'
+} as const;
+
+export type DrawerState = keyof typeof STATE_MAPPING;
+export type ApiState = typeof STATE_MAPPING[DrawerState];
+
+// GET PACKAGES FUNCTION
+export async function getPackages(filters?: {
+  state?: string;
+  page?: number;
+  per_page?: number;
+  search?: string;
+}): Promise<PackageListResponse> {
+  try {
+    console.log('📦 Fetching packages with filters:', filters);
+    
+    // Build query parameters
+    const params = new URLSearchParams();
+    
+    if (filters?.state) {
+      // Map drawer state to API state
+      const apiState = STATE_MAPPING[filters.state as DrawerState] || filters.state;
+      params.append('state', apiState);
+      console.log(`🔍 Mapping drawer state "${filters.state}" to API state "${apiState}"`);
+    }
+    
+    if (filters?.page) params.append('page', filters.page.toString());
+    if (filters?.per_page) params.append('per_page', filters.per_page.toString());
+    if (filters?.search) params.append('search', filters.search);
+    
+    const queryString = params.toString();
+    const url = `/api/v1/packages${queryString ? `?${queryString}` : ''}`;
+    
+    console.log('📦 API URL:', url);
+    
+    const response = await api.get(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('📦 Packages API response:', response.data);
+    
+    // Handle the response format from your Rails API
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to fetch packages');
+    }
+    
+    return response.data as PackageListResponse;
+    
+  } catch (error: any) {
+    console.error('❌ Error fetching packages:', error);
+    console.error('❌ Error details:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.message || 
+                        'Failed to fetch packages';
+    
+    throw new Error(errorMessage);
+  }
+}
+
+// GET PACKAGE QR CODE FUNCTION
+export async function getPackageQRCode(packageCode: string): Promise<QRCodeResponse> {
+  try {
+    console.log('🔲 Fetching QR code for package:', packageCode);
+    
+    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🔲 QR code API response:', response.data);
+    
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to fetch QR code');
+    }
+    
+    return response.data as QRCodeResponse;
+    
+  } catch (error: any) {
+    console.error('❌ Error fetching QR code:', error);
+    console.error('❌ QR code error details:', {
+      message: error.message,
+      status: error.response?.status,
+      data: error.response?.data
+    });
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.message || 
+                        'Failed to fetch QR code';
+    
+    throw new Error(errorMessage);
+  }
+}
+
+// GET SINGLE PACKAGE FUNCTION
+export async function getPackageDetails(packageCode: string): Promise<Package> {
+  try {
+    console.log('📦 Fetching package details for:', packageCode);
+    
+    const response = await api.get(`/api/v1/packages/${packageCode}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('📦 Package details API response:', response.data);
+    
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to fetch package details');
+    }
+    
+    return response.data.data as Package;
+    
+  } catch (error: any) {
+    console.error('❌ Error fetching package details:', error);
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.message || 
+                        'Failed to fetch package details';
+    
+    throw new Error(errorMessage);
+  }
+}
+
+// SEARCH PACKAGES FUNCTION
+export async function searchPackages(query: string): Promise<Package[]> {
+  try {
+    console.log('🔍 Searching packages with query:', query);
+    
+    const response = await api.get(`/api/v1/packages/search?query=${encodeURIComponent(query)}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    console.log('🔍 Search API response:', response.data);
+    
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Search failed');
+    }
+    
+    return response.data.data as Package[];
+    
+  } catch (error: any) {
+    console.error('❌ Error searching packages:', error);
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.message || 
+                        'Search failed';
+    
+    throw new Error(errorMessage);
+  }
+}
+
 // Re-export types for compatibility
 export type {
   Location,
@@ -396,6 +615,11 @@ export type {
   PricingResponse,
   PackageData,
   PackageResponse,
+  Package,
+  PackageListResponse,
+  QRCodeResponse,
+  DrawerState,
+  ApiState,
 };
 
 // Export all functions
@@ -404,8 +628,13 @@ export {
   getAreas,
   getAgents,
   createPackage,
+  getPackages,
+  getPackageQRCode,
+  getPackageDetails,
+  searchPackages,
   debugApiConnection,
   getPackageFormData,
   getPackagePricing,
   validatePackageFormData,
+  STATE_MAPPING,
 };
