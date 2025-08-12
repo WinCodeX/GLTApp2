@@ -1,5 +1,5 @@
-// components/PackageCreationModal.tsx - ENHANCED WITH TOAST NOTIFICATIONS
-import React, { useState, useRef, useEffect } from 'react';
+// components/PackageCreationModal.tsx - FIXED AND ARCHITECTURALLY IMPROVED
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -54,10 +54,154 @@ const STORAGE_KEYS = {
   AREAS: 'package_modal_areas',
   AGENTS: 'package_modal_agents',
   LAST_UPDATED: 'package_modal_last_updated'
-};
+} as const;
 
 // Cache duration (24 hours)
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+// Custom hooks for better separation of concerns
+const useDataCache = () => {
+  const isCacheValid = useCallback(async (): Promise<boolean> => {
+    try {
+      const lastUpdated = await AsyncStorage.getItem(STORAGE_KEYS.LAST_UPDATED);
+      if (!lastUpdated) return false;
+      
+      const timeDiff = Date.now() - parseInt(lastUpdated);
+      return timeDiff < CACHE_DURATION;
+    } catch (error) {
+      console.error('Error checking cache validity:', error);
+      return false;
+    }
+  }, []);
+
+  const loadFromCache = useCallback(async () => {
+    try {
+      const [locationsStr, areasStr, agentsStr] = await Promise.all([
+        AsyncStorage.getItem(STORAGE_KEYS.LOCATIONS),
+        AsyncStorage.getItem(STORAGE_KEYS.AREAS),
+        AsyncStorage.getItem(STORAGE_KEYS.AGENTS)
+      ]);
+
+      if (!locationsStr || !areasStr || !agentsStr) return null;
+
+      return {
+        locations: JSON.parse(locationsStr),
+        areas: JSON.parse(areasStr),
+        agents: JSON.parse(agentsStr)
+      };
+    } catch (error) {
+      console.error('Error loading from cache:', error);
+      return null;
+    }
+  }, []);
+
+  const saveToCache = useCallback(async (data: { locations: Location[], areas: Area[], agents: Agent[] }) => {
+    try {
+      await Promise.all([
+        AsyncStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(data.locations)),
+        AsyncStorage.setItem(STORAGE_KEYS.AREAS, JSON.stringify(data.areas)),
+        AsyncStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(data.agents)),
+        AsyncStorage.setItem(STORAGE_KEYS.LAST_UPDATED, Date.now().toString())
+      ]);
+      console.log('✅ Data cached successfully');
+    } catch (error) {
+      console.error('Error saving to cache:', error);
+    }
+  }, []);
+
+  const clearCache = useCallback(async () => {
+    try {
+      await Promise.all(Object.values(STORAGE_KEYS).map(key => 
+        AsyncStorage.removeItem(key)
+      ));
+      console.log('🗑️ Cache cleared');
+    } catch (error) {
+      console.error('Error clearing cache:', error);
+      throw error;
+    }
+  }, []);
+
+  return { isCacheValid, loadFromCache, saveToCache, clearCache };
+};
+
+/**
+ * Normalizes JSON:API response data into flat objects
+ * Handles both single objects and arrays of objects
+ */
+const normalizeJsonApiData = (jsonApiResponse: any): any[] => {
+  console.log('🔄 Normalizing JSON:API response:', jsonApiResponse);
+  
+  // Handle direct array (already normalized)
+  if (Array.isArray(jsonApiResponse)) {
+    console.log('✅ Data already normalized as array');
+    return jsonApiResponse;
+  }
+  
+  // Handle JSON:API format
+  if (jsonApiResponse && jsonApiResponse.data) {
+    const data = Array.isArray(jsonApiResponse.data) ? jsonApiResponse.data : [jsonApiResponse.data];
+    const included = jsonApiResponse.included || [];
+    
+    console.log('🔍 JSON:API format detected:', {
+      dataCount: data.length,
+      includedCount: included.length
+    });
+    
+    // Create a map of included resources for easy lookup
+    const includedMap = new Map();
+    included.forEach((item: any) => {
+      const key = `${item.type}_${item.id}`;
+      includedMap.set(key, {
+        id: item.id,
+        ...item.attributes,
+        type: item.type
+      });
+    });
+    
+    // Normalize main data items
+    const normalizedData = data.map((item: any) => {
+      const normalized = {
+        id: item.id,
+        ...item.attributes,
+        type: item.type
+      };
+      
+      // Process relationships if they exist
+      if (item.relationships) {
+        Object.keys(item.relationships).forEach(relationKey => {
+          const relationship = item.relationships[relationKey];
+          if (relationship && relationship.data) {
+            if (Array.isArray(relationship.data)) {
+              // Handle has_many relationships
+              normalized[relationKey] = relationship.data.map((relItem: any) => {
+                const key = `${relItem.type}_${relItem.id}`;
+                return includedMap.get(key) || { id: relItem.id, type: relItem.type };
+              });
+            } else {
+              // Handle belongs_to relationships
+              const key = `${relationship.data.type}_${relationship.data.id}`;
+              normalized[relationKey] = includedMap.get(key) || { id: relationship.data.id, type: relationship.data.type };
+            }
+          }
+        });
+      }
+      
+      return normalized;
+    });
+    
+    console.log('✅ JSON:API normalization complete:', {
+      originalCount: data.length,
+      normalizedCount: normalizedData.length,
+      sampleNormalized: normalizedData[0]
+    });
+    
+    return normalizedData;
+  }
+  
+  // Handle other formats or empty response
+  console.log('⚠️ Unknown data format, returning empty array');
+  return [];
+};
 
 export default function PackageCreationModal({
   visible,
@@ -68,6 +212,7 @@ export default function PackageCreationModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  const { isCacheValid, loadFromCache, saveToCache, clearCache } = useDataCache();
 
   // Data states
   const [locations, setLocations] = useState<Location[]>([]);
@@ -107,6 +252,25 @@ export default function PackageCreationModal({
     direction: 'asc'
   });
 
+  // Memoized selectors for better performance
+  const selectedOriginAgent = useMemo(() => 
+    agents.find(agent => agent.id === packageData.origin_agent_id),
+    [agents, packageData.origin_agent_id]
+  );
+
+  const selectedDestinationArea = useMemo(() => {
+    if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
+      const selectedAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
+      return areas.find(area => area.id === selectedAgent?.area_id);
+    }
+    return areas.find(area => area.id === packageData.destination_area_id);
+  }, [agents, areas, packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id]);
+
+  const selectedDestinationAgent = useMemo(() =>
+    agents.find(agent => agent.id === packageData.destination_agent_id),
+    [agents, packageData.destination_agent_id]
+  );
+
   useEffect(() => {
     if (visible) {
       console.log('📦 Modal opened, loading data...');
@@ -121,58 +285,7 @@ export default function PackageCreationModal({
     }
   }, [visible]);
 
-  // Check if cached data is still valid
-  const isCacheValid = async (): Promise<boolean> => {
-    try {
-      const lastUpdated = await AsyncStorage.getItem(STORAGE_KEYS.LAST_UPDATED);
-      if (!lastUpdated) return false;
-      
-      const timeDiff = Date.now() - parseInt(lastUpdated);
-      return timeDiff < CACHE_DURATION;
-    } catch (error) {
-      console.error('Error checking cache validity:', error);
-      return false;
-    }
-  };
-
-  // Load data from cache
-  const loadFromCache = async (): Promise<{ locations: Location[], areas: Area[], agents: Agent[] } | null> => {
-    try {
-      const [locationsStr, areasStr, agentsStr] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.LOCATIONS),
-        AsyncStorage.getItem(STORAGE_KEYS.AREAS),
-        AsyncStorage.getItem(STORAGE_KEYS.AGENTS)
-      ]);
-
-      if (!locationsStr || !areasStr || !agentsStr) return null;
-
-      return {
-        locations: JSON.parse(locationsStr),
-        areas: JSON.parse(areasStr),
-        agents: JSON.parse(agentsStr)
-      };
-    } catch (error) {
-      console.error('Error loading from cache:', error);
-      return null;
-    }
-  };
-
-  // Save data to cache
-  const saveToCache = async (data: { locations: Location[], areas: Area[], agents: Agent[] }): Promise<void> => {
-    try {
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(data.locations)),
-        AsyncStorage.setItem(STORAGE_KEYS.AREAS, JSON.stringify(data.areas)),
-        AsyncStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(data.agents)),
-        AsyncStorage.setItem(STORAGE_KEYS.LAST_UPDATED, Date.now().toString())
-      ]);
-      console.log('✅ Data cached successfully');
-    } catch (error) {
-      console.error('Error saving to cache:', error);
-    }
-  };
-
-  const loadModalData = async () => {
+  const loadModalData = useCallback(async () => {
     try {
       setIsDataLoading(true);
       setDataError(null);
@@ -220,51 +333,92 @@ export default function PackageCreationModal({
         agentsLength: formData.agents?.length || 0
       });
       
-      // Process and map relationships
-      const processedLocations = formData.locations || [];
-      const processedAreas = formData.areas || [];
-      const processedAgents = formData.agents || [];
+      // Normalize JSON:API data to flat objects
+      console.log('🔄 Starting data normalization...');
+      const processedLocations = normalizeJsonApiData(formData.locations);
+      const processedAreas = normalizeJsonApiData(formData.areas);
+      const processedAgents = normalizeJsonApiData(formData.agents);
       
-      // Create lookup maps for faster relationship resolution
+      console.log('✅ Data normalization complete:', {
+        locations: processedLocations.length,
+        areas: processedAreas.length,
+        agents: processedAgents.length
+      });
+      
+      // Create lookup maps for relationship resolution
       const locationMap = new Map();
       processedLocations.forEach(location => {
-        const id = location.id || location.attributes?.id;
-        if (id) locationMap.set(String(id), location);
+        if (location.id) {
+          locationMap.set(String(location.id), location);
+        }
       });
       
       const areaMap = new Map();
       processedAreas.forEach(area => {
-        const id = area.id || area.attributes?.id;
-        if (id) areaMap.set(String(id), area);
+        if (area.id) {
+          areaMap.set(String(area.id), area);
+        }
       });
+      
+      console.log('🗺️ Created lookup maps:', {
+        locationMapSize: locationMap.size,
+        areaMapSize: areaMap.size
+      });
+      
+      // Enhanced relationship mapping with proper error handling
+      console.log('🔗 Starting relationship mapping...');
       
       // Map areas to their locations
       processedAreas.forEach(area => {
-        const locationId = area.location_id || area.attributes?.location_id || area.relationships?.location?.data?.id;
-        if (locationId) {
-          area.location = locationMap.get(String(locationId));
+        if (area.location_id) {
+          const location = locationMap.get(String(area.location_id));
+          if (location) {
+            area.location = location;
+            console.log(`✅ Mapped area "${area.name}" to location "${location.name}"`);
+          } else {
+            console.log(`⚠️ Location not found for area "${area.name}" (location_id: ${area.location_id})`);
+          }
+        } else {
+          console.log(`⚠️ Area "${area.name}" has no location_id`);
         }
       });
       
       // Map agents to their areas and locations
       processedAgents.forEach(agent => {
-        const areaId = agent.area_id || agent.attributes?.area_id || agent.relationships?.area?.data?.id;
-        if (areaId) {
-          agent.area = areaMap.get(String(areaId));
-          if (agent.area) {
-            const locationId = agent.area.location_id || agent.area.attributes?.location_id || agent.area.relationships?.location?.data?.id;
-            if (locationId) {
-              agent.area.location = locationMap.get(String(locationId));
+        if (agent.area_id) {
+          const area = areaMap.get(String(agent.area_id));
+          if (area) {
+            agent.area = area;
+            console.log(`✅ Mapped agent "${agent.name}" to area "${area.name}"`);
+            
+            // Agent inherits location from area
+            if (area.location) {
+              console.log(`✅ Agent "${agent.name}" inherited location "${area.location.name}" from area`);
             }
+          } else {
+            console.log(`⚠️ Area not found for agent "${agent.name}" (area_id: ${agent.area_id})`);
           }
+        } else {
+          console.log(`⚠️ Agent "${agent.name}" has no area_id`);
         }
       });
       
       console.log('🔗 Relationship mapping completed:', {
         locationMapSize: locationMap.size,
         areaMapSize: areaMap.size,
+        areasWithLocations: processedAreas.filter(a => a.location).length,
         agentsWithAreas: processedAgents.filter(a => a.area).length,
         agentsWithLocations: processedAgents.filter(a => a.area?.location).length
+      });
+      
+      // Final validation
+      console.log('🔍 Final data validation:', {
+        locationsValid: processedLocations.every(l => l.id && l.name),
+        areasValid: processedAreas.every(a => a.id && a.name),
+        agentsValid: processedAgents.every(a => a.id && a.name),
+        sampleLocation: processedLocations[0],
+        sampleArea: processedAreas[0],
+        sampleAgent: processedAgents[0]
       });
       
       setLocations(processedLocations);
@@ -305,9 +459,9 @@ export default function PackageCreationModal({
     } finally {
       setIsDataLoading(false);
     }
-  };
+  }, [isCacheValid, loadFromCache, saveToCache]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setCurrentStep(0);
     setPackageData({
       sender_name: '',
@@ -329,9 +483,9 @@ export default function PackageCreationModal({
       destinationArea: ''
     });
     setSortConfig({ field: 'name', direction: 'asc' });
-  };
+  }, []);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
       duration: 250,
@@ -339,46 +493,34 @@ export default function PackageCreationModal({
     }).start(() => {
       onClose();
     });
-  };
+  }, [slideAnim, onClose]);
 
   // Enhanced area-based cost calculation with detailed debugging
-  const calculateCost = () => {
+  const calculateCost = useCallback(() => {
     console.log('💰 Starting cost calculation...');
     
-    const originAgent = agents.find(a => a.id === packageData.origin_agent_id);
-    if (!originAgent) {
+    if (!selectedOriginAgent) {
       console.log('❌ Origin agent not found for cost calculation');
-      console.log('📊 Available agents:', agents.map(a => ({ id: a.id, name: a.name })));
-      console.log('🎯 Looking for agent ID:', packageData.origin_agent_id);
       return;
     }
 
     console.log('✅ Origin agent found:', {
-      agentId: originAgent.id,
-      agentName: originAgent.name,
-      agentAreaId: originAgent.area_id,
-      agentAreaIdType: typeof originAgent.area_id
+      agentId: selectedOriginAgent.id,
+      agentName: selectedOriginAgent.name,
+      agentAreaId: selectedOriginAgent.area_id,
+      agentAreaIdType: typeof selectedOriginAgent.area_id
     });
 
     // Enhanced area lookup with debugging
     console.log('🔍 Searching for origin area...');
-    console.log('📊 Available areas:', areas.map(a => ({ id: a.id, name: a.name, idType: typeof a.id })));
-    console.log('🎯 Looking for area ID:', originAgent.area_id, 'Type:', typeof originAgent.area_id);
-    
     const originArea = areas.find(a => {
-      console.log(`🔍 Comparing area ${a.id} (${typeof a.id}) with ${originAgent.area_id} (${typeof originAgent.area_id})`);
-      // Try both strict and loose comparison
-      return a.id === originAgent.area_id || a.id == originAgent.area_id || 
-             String(a.id) === String(originAgent.area_id);
+      return a.id === selectedOriginAgent.area_id || 
+             a.id == selectedOriginAgent.area_id || 
+             String(a.id) === String(selectedOriginAgent.area_id);
     });
     
     if (!originArea) {
       console.log('❌ Origin area not found for cost calculation');
-      console.log('🔍 Debug info:', {
-        agentAreaId: originAgent.area_id,
-        agentAreaIdType: typeof originAgent.area_id,
-        availableAreaIds: areas.map(a => ({ id: a.id, type: typeof a.id, name: a.name }))
-      });
       return;
     }
 
@@ -389,68 +531,37 @@ export default function PackageCreationModal({
       locationName: originArea.location?.name
     });
 
-    let destinationAreaId = packageData.destination_area_id;
-    let destinationAgent = null;
-    
-    if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
-      destinationAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
-      if (destinationAgent) {
-        destinationAreaId = destinationAgent.area_id || '';
-        console.log('✅ Destination agent found:', {
-          agentId: destinationAgent.id,
-          agentName: destinationAgent.name,
-          agentAreaId: destinationAgent.area_id
-        });
-      }
-    }
-
-    if (!destinationAreaId) {
-      console.log('❌ Destination area ID not found for cost calculation');
-      return;
-    }
-
-    console.log('🔍 Searching for destination area...');
-    const destinationArea = areas.find(a => {
-      return a.id === destinationAreaId || a.id == destinationAreaId || 
-             String(a.id) === String(destinationAreaId);
-    });
-    
-    if (!destinationArea) {
+    if (!selectedDestinationArea) {
       console.log('❌ Destination area not found for cost calculation');
-      console.log('🔍 Debug info:', {
-        destinationAreaId,
-        destinationAreaIdType: typeof destinationAreaId,
-        availableAreaIds: areas.map(a => ({ id: a.id, type: typeof a.id, name: a.name }))
-      });
       return;
     }
 
     console.log('✅ Destination area found:', {
-      areaId: destinationArea.id,
-      areaName: destinationArea.name,
-      locationId: destinationArea.location_id,
-      locationName: destinationArea.location?.name
+      areaId: selectedDestinationArea.id,
+      areaName: selectedDestinationArea.name,
+      locationId: selectedDestinationArea.location_id,
+      locationName: selectedDestinationArea.location?.name
     });
     
     // Enhanced logging for debugging
     console.log('💰 Calculating cost with areas:', {
-      originAgent: originAgent.name,
+      originAgent: selectedOriginAgent.name,
       originArea: originArea.name,
       originLocation: originArea.location?.name,
-      destinationArea: destinationArea.name,
-      destinationLocation: destinationArea.location?.name,
+      destinationArea: selectedDestinationArea.name,
+      destinationLocation: selectedDestinationArea.location?.name,
       deliveryType: packageData.delivery_type
     });
     
     // Area-based pricing logic - both agent-to-agent and agent-to-doorstep use area calculations
-    const isIntraArea = String(originArea.id) === String(destinationArea.id);
-    const isIntraLocation = String(originArea.location_id) === String(destinationArea.location_id);
+    const isIntraArea = String(originArea.id) === String(selectedDestinationArea.id);
+    const isIntraLocation = String(originArea.location_id) === String(selectedDestinationArea.location_id);
     
     console.log('🔍 Pricing logic checks:', {
       originAreaId: originArea.id,
-      destinationAreaId: destinationArea.id,
+      destinationAreaId: selectedDestinationArea.id,
       originLocationId: originArea.location_id,
-      destinationLocationId: destinationArea.location_id,
+      destinationLocationId: selectedDestinationArea.location_id,
       isIntraArea,
       isIntraLocation
     });
@@ -491,9 +602,9 @@ export default function PackageCreationModal({
     });
     
     setEstimatedCost(baseCost);
-  };
+  }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type]);
 
-  const updatePackageData = (field: keyof PackageData, value: string) => {
+  const updatePackageData = useCallback((field: keyof PackageData, value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
@@ -514,29 +625,28 @@ export default function PackageCreationModal({
       
       return updated;
     });
-  };
+  }, [agents]);
 
-  const updateSearchQuery = (field: keyof typeof searchQueries, value: string) => {
+  const updateSearchQuery = useCallback((field: keyof typeof searchQueries, value: string) => {
     setSearchQueries(prev => ({ ...prev, [field]: value }));
-  };
+  }, []);
 
-  // Enhanced sorting functionality
-  const applySortAndFilter = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
-    // Debug log the input
+  // Enhanced sorting functionality with normalized data access
+  const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     console.log(`🔍 Filtering ${itemType}s:`, {
       inputCount: items.length,
       searchQuery,
       firstItem: items[0]
     });
 
-    // Filter by search query
+    // Filter by search query - Updated to use normalized flat structure
     const filtered = items.filter(item => {
       const searchLower = searchQuery.toLowerCase();
       if (itemType === 'agent') {
         const agent = item as Agent;
-        const name = agent.name || agent.attributes?.name || '';
-        const phone = agent.phone || agent.attributes?.phone || '';
-        const areaName = agent.area?.name || agent.relationships?.area?.data?.name || '';
+        const name = agent.name || '';
+        const phone = agent.phone || '';
+        const areaName = agent.area?.name || '';
         const locationName = agent.area?.location?.name || '';
         
         return (
@@ -547,7 +657,7 @@ export default function PackageCreationModal({
         );
       } else {
         const area = item as Area;
-        const name = area.name || area.attributes?.name || '';
+        const name = area.name || '';
         const locationName = area.location?.name || '';
         return (
           name.toLowerCase().includes(searchLower) ||
@@ -561,7 +671,7 @@ export default function PackageCreationModal({
       originalCount: items.length
     });
 
-    // Apply sorting
+    // Apply sorting - Updated to use normalized flat structure
     return filtered.sort((a, b) => {
       let aValue = '';
       let bValue = '';
@@ -569,11 +679,11 @@ export default function PackageCreationModal({
       switch (sortConfig.field) {
         case 'name':
           if (itemType === 'agent') {
-            aValue = (a as Agent).name || (a as Agent).attributes?.name || '';
-            bValue = (b as Agent).name || (b as Agent).attributes?.name || '';
+            aValue = (a as Agent).name || '';
+            bValue = (b as Agent).name || '';
           } else {
-            aValue = (a as Area).name || (a as Area).attributes?.name || '';
-            bValue = (b as Area).name || (b as Area).attributes?.name || '';
+            aValue = (a as Area).name || '';
+            bValue = (b as Area).name || '';
           }
           break;
         case 'location':
@@ -596,10 +706,10 @@ export default function PackageCreationModal({
       const comparison = aValue.localeCompare(bValue);
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
-  };
+  }, [sortConfig]);
 
   // Group filtered and sorted items by location
-  const getGroupedItems = (items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
+  const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
     console.log(`📋 Grouping ${itemType}s:`, {
@@ -636,32 +746,16 @@ export default function PackageCreationModal({
     });
 
     return result;
-  };
+  }, [applySortAndFilter]);
 
-  const handleSortChange = (field: SortOption) => {
+  const handleSortChange = useCallback((field: SortOption) => {
     setSortConfig(prev => ({
       field,
       direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
-  };
+  }, []);
 
-  const getSelectedOriginAgent = () => {
-    return agents.find(agent => agent.id === packageData.origin_agent_id);
-  };
-
-  const getSelectedDestinationArea = () => {
-    if (packageData.delivery_type === 'agent' && packageData.destination_agent_id) {
-      const selectedAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
-      return areas.find(area => area.id === selectedAgent?.area_id);
-    }
-    return areas.find(area => area.id === packageData.destination_area_id);
-  };
-
-  const getSelectedDestinationAgent = () => {
-    return agents.find(agent => agent.id === packageData.destination_agent_id);
-  };
-
-  const isCurrentStepValid = () => {
+  const isCurrentStepValid = useCallback(() => {
     switch (currentStep) {
       case 0: return packageData.origin_agent_id.length > 0;
       case 1: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
@@ -680,9 +774,9 @@ export default function PackageCreationModal({
       case 5: return true;
       default: return false;
     }
-  };
+  }, [currentStep, packageData, deliveryLocation]);
 
-  const nextStep = () => {
+  const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isCurrentStepValid()) {
       if (currentStep === 3 && packageData.delivery_type === 'agent') {
         setCurrentStep(5);
@@ -695,9 +789,9 @@ export default function PackageCreationModal({
         });
       }
     }
-  };
+  }, [currentStep, isCurrentStepValid, packageData.delivery_type, calculateCost]);
 
-  const prevStep = () => {
+  const prevStep = useCallback(() => {
     if (currentStep > 0) {
       if (currentStep === 5 && packageData.delivery_type === 'agent') {
         setCurrentStep(3);
@@ -705,9 +799,9 @@ export default function PackageCreationModal({
         setCurrentStep(prev => prev - 1);
       }
     }
-  };
+  }, [currentStep, packageData.delivery_type]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
     setIsSubmitting(true);
@@ -743,23 +837,16 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  };
+  }, [isCurrentStepValid, packageData, onSubmit, closeModal]);
 
-  const retryDataLoad = () => {
+  const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
     loadModalData();
-  };
+  }, [loadModalData]);
 
-  // Clear cache function for debugging/maintenance
-  const clearCache = async () => {
+  const handleClearCache = useCallback(async () => {
     try {
-      await Promise.all([
-        AsyncStorage.removeItem(STORAGE_KEYS.LOCATIONS),
-        AsyncStorage.removeItem(STORAGE_KEYS.AREAS),
-        AsyncStorage.removeItem(STORAGE_KEYS.AGENTS),
-        AsyncStorage.removeItem(STORAGE_KEYS.LAST_UPDATED)
-      ]);
-      console.log('🗑️ Cache cleared');
+      await clearCache();
       
       // Show cache cleared toast
       Toast.show({
@@ -782,10 +869,10 @@ export default function PackageCreationModal({
         visibilityTime: 3000,
       });
     }
-  };
+  }, [clearCache, loadModalData]);
 
   // Enhanced Search and Sort Header Component
-  const renderSearchAndSortHeader = (
+  const renderSearchAndSortHeader = useCallback((
     searchValue: string,
     onSearchChange: (value: string) => void,
     placeholder: string,
@@ -840,9 +927,9 @@ export default function PackageCreationModal({
         </View>
       )}
     </View>
-  );
+  ), [sortConfig, handleSortChange]);
 
-  const renderProgressBar = () => (
+  const renderProgressBar = useCallback(() => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
         <View 
@@ -856,9 +943,9 @@ export default function PackageCreationModal({
         Step {currentStep + 1} of {STEP_TITLES.length}
       </Text>
     </View>
-  );
+  ), [currentStep]);
 
-  const renderHeader = () => (
+  const renderHeader = useCallback(() => (
     <View style={styles.header}>
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
@@ -866,10 +953,10 @@ export default function PackageCreationModal({
       <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
       <View style={styles.placeholder} />
     </View>
-  );
+  ), [closeModal, currentStep]);
 
-  // Step 0: Origin Agent Selection with enhanced area logging
-  const renderOriginAgentSelection = () => (
+  // Step 0: Origin Agent Selection - Updated to use normalized data
+  const renderOriginAgentSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Select Origin Agent</Text>
       <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
@@ -890,13 +977,13 @@ export default function PackageCreationModal({
             
             {group.items.map((agent) => {
               const agentData = agent as Agent;
-              const agentName = agentData.name || agentData.attributes?.name || 'Unknown Agent';
-              const agentPhone = agentData.phone || agentData.attributes?.phone || '';
-              const agentId = agentData.id || agentData.attributes?.id || '';
+              const agentName = agentData.name || 'Unknown Agent';
+              const agentPhone = agentData.phone || '';
+              const agentId = agentData.id || '';
               
-              // Get area and location info with better fallbacks
-              const areaName = agentData.area?.name || agentData.area?.attributes?.name || 'Unknown Area';
-              const locationName = agentData.area?.location?.name || agentData.area?.location?.attributes?.name || group.locationName;
+              // Get area and location info from normalized flat structure
+              const areaName = agentData.area?.name || 'Unknown Area';
+              const locationName = agentData.area?.location?.name || group.locationName;
               
               return (
                 <TouchableOpacity
@@ -939,9 +1026,9 @@ export default function PackageCreationModal({
         )}
       </ScrollView>
     </View>
-  );
+  ), [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, applySortAndFilter, updatePackageData]);
 
-  const renderReceiverDetails = () => (
+  const renderReceiverDetails = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
       <Text style={styles.stepSubtitle}>Who will receive this package?</Text>
@@ -966,9 +1053,9 @@ export default function PackageCreationModal({
         />
       </View>
     </View>
-  );
+  ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  const renderDeliveryMethodSelection = () => (
+  const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
       <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
@@ -1013,9 +1100,9 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       </View>
     </View>
-  );
+  ), [packageData.delivery_type, updatePackageData]);
 
-  const renderDestinationSelection = () => {
+  const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
       return (
         <View style={styles.stepContent}>
@@ -1038,13 +1125,13 @@ export default function PackageCreationModal({
                 
                 {group.items.map((agent) => {
                   const agentData = agent as Agent;
-                  const agentName = agentData.name || agentData.attributes?.name || 'Unknown Agent';
-                  const agentPhone = agentData.phone || agentData.attributes?.phone || '';
-                  const agentId = agentData.id || agentData.attributes?.id || '';
+                  const agentName = agentData.name || 'Unknown Agent';
+                  const agentPhone = agentData.phone || '';
+                  const agentId = agentData.id || '';
                   
-                  // Get area and location info with better fallbacks
-                  const areaName = agentData.area?.name || agentData.area?.attributes?.name || 'Unknown Area';
-                  const locationName = agentData.area?.location?.name || agentData.area?.location?.attributes?.name || group.locationName;
+                  // Get area and location info from normalized flat structure
+                  const areaName = agentData.area?.name || 'Unknown Area';
+                  const locationName = agentData.area?.location?.name || group.locationName;
                   
                   return (
                     <TouchableOpacity
@@ -1133,9 +1220,9 @@ export default function PackageCreationModal({
         </View>
       );
     }
-  };
+  }, [packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id, agents, areas, searchQueries.destinationAgent, searchQueries.destinationArea, renderSearchAndSortHeader, getGroupedItems, updatePackageData]);
 
-  const renderDeliveryLocation = () => (
+  const renderDeliveryLocation = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
       <Text style={styles.stepSubtitle}>Provide the exact delivery address</Text>
@@ -1153,9 +1240,9 @@ export default function PackageCreationModal({
         />
       </View>
     </View>
-  );
+  ), [deliveryLocation]);
 
-  const renderConfirmation = () => (
+  const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
       <Text style={styles.stepTitle}>Confirm Package Details</Text>
       <Text style={styles.stepSubtitle}>Review all information before submitting</Text>
@@ -1166,11 +1253,11 @@ export default function PackageCreationModal({
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
               <Text style={styles.routeAreaInitials}>
-                {getSelectedOriginAgent()?.name?.substring(0, 2).toUpperCase() || '--'}
+                {selectedOriginAgent?.name?.substring(0, 2).toUpperCase() || '--'}
               </Text>
-              <Text style={styles.routeAreaName}>{getSelectedOriginAgent()?.name || 'Unknown'}</Text>
+              <Text style={styles.routeAreaName}>{selectedOriginAgent?.name || 'Unknown'}</Text>
               <Text style={styles.routeLocationName}>
-                {getSelectedOriginAgent()?.area?.name} • {getSelectedOriginAgent()?.area?.location?.name}
+                {selectedOriginAgent?.area?.name} • {selectedOriginAgent?.area?.location?.name}
               </Text>
             </View>
             <Feather name="arrow-right" size={20} color="#7c3aed" />
@@ -1178,18 +1265,18 @@ export default function PackageCreationModal({
               {packageData.delivery_type === 'agent' ? (
                 <>
                   <Text style={styles.routeAreaInitials}>
-                    {getSelectedDestinationAgent()?.name?.substring(0, 2).toUpperCase() || '--'}
+                    {selectedDestinationAgent?.name?.substring(0, 2).toUpperCase() || '--'}
                   </Text>
-                  <Text style={styles.routeAreaName}>{getSelectedDestinationAgent()?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeAreaName}>{selectedDestinationAgent?.name || 'Unknown'}</Text>
                   <Text style={styles.routeLocationName}>
-                    {getSelectedDestinationAgent()?.area?.name} • {getSelectedDestinationAgent()?.area?.location?.name}
+                    {selectedDestinationAgent?.area?.name} • {selectedDestinationAgent?.area?.location?.name}
                   </Text>
                 </>
               ) : (
                 <>
-                  <Text style={styles.routeAreaInitials}>{getSelectedDestinationArea()?.initials || '--'}</Text>
-                  <Text style={styles.routeAreaName}>{getSelectedDestinationArea()?.name || 'Unknown'}</Text>
-                  <Text style={styles.routeLocationName}>{getSelectedDestinationArea()?.location?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeAreaInitials}>{selectedDestinationArea?.initials || '--'}</Text>
+                  <Text style={styles.routeAreaName}>{selectedDestinationArea?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeLocationName}>{selectedDestinationArea?.location?.name || 'Unknown'}</Text>
                 </>
               )}
             </View>
@@ -1208,10 +1295,10 @@ export default function PackageCreationModal({
             {packageData.delivery_type === 'doorstep' ? 'Agent to Doorstep' : 'Agent to Agent'}
           </Text>
           
-          {packageData.delivery_type === 'agent' && getSelectedDestinationAgent() && (
+          {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
             <View style={styles.agentInfo}>
-              <Text style={styles.confirmationDetail}>Destination Agent: {getSelectedDestinationAgent()?.name}</Text>
-              <Text style={styles.confirmationSubDetail}>{getSelectedDestinationAgent()?.phone}</Text>
+              <Text style={styles.confirmationDetail}>Destination Agent: {selectedDestinationAgent?.name}</Text>
+              <Text style={styles.confirmationSubDetail}>{selectedDestinationAgent?.phone}</Text>
             </View>
           )}
 
@@ -1232,25 +1319,25 @@ export default function PackageCreationModal({
           )}
           
           {/* Debug information for cost calculation */}
-          {__DEV__ && getSelectedOriginAgent() && (
+          {__DEV__ && selectedOriginAgent && (
             <View style={styles.debugInfo}>
               <Text style={styles.debugText}>
-                Debug: {getSelectedOriginAgent()?.area?.name} → {getSelectedDestinationArea()?.name}
+                Debug: {selectedOriginAgent?.area?.name} → {selectedDestinationArea?.name}
               </Text>
               <Text style={styles.debugText}>
-                Same Area: {getSelectedOriginAgent()?.area_id === getSelectedDestinationArea()?.id ? 'Yes' : 'No'}
+                Same Area: {selectedOriginAgent?.area_id === selectedDestinationArea?.id ? 'Yes' : 'No'}
               </Text>
               <Text style={styles.debugText}>
-                Same Location: {getSelectedOriginAgent()?.area?.location_id === getSelectedDestinationArea()?.location_id ? 'Yes' : 'No'}
+                Same Location: {selectedOriginAgent?.area?.location_id === selectedDestinationArea?.location_id ? 'Yes' : 'No'}
               </Text>
             </View>
           )}
         </View>
       </View>
     </View>
-  );
+  ), [selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, deliveryLocation, estimatedCost]);
 
-  const renderCurrentStep = () => {
+  const renderCurrentStep = useCallback(() => {
     switch (currentStep) {
       case 0: return renderOriginAgentSelection();
       case 1: return renderReceiverDetails();
@@ -1260,9 +1347,9 @@ export default function PackageCreationModal({
       case 5: return renderConfirmation();
       default: return renderOriginAgentSelection();
     }
-  };
+  }, [currentStep, renderOriginAgentSelection, renderReceiverDetails, renderDeliveryMethodSelection, renderDestinationSelection, renderDeliveryLocation, renderConfirmation]);
 
-  const renderNavigationButtons = () => (
+  const renderNavigationButtons = useCallback(() => (
     <View style={styles.navigationContainer}>
       {currentStep > 0 && (
         <TouchableOpacity onPress={prevStep} style={styles.backButton}>
@@ -1275,7 +1362,7 @@ export default function PackageCreationModal({
       
       {/* Debug cache clear button in development */}
       {__DEV__ && currentStep === 0 && (
-        <TouchableOpacity onPress={clearCache} style={styles.debugButton}>
+        <TouchableOpacity onPress={handleClearCache} style={styles.debugButton}>
           <Text style={styles.debugButtonText}>Clear Cache</Text>
         </TouchableOpacity>
       )}
@@ -1322,10 +1409,10 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       )}
     </View>
-  );
+  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache]);
 
   // MAIN CONTENT RENDERING
-  const renderMainContent = () => {
+  const renderMainContent = useCallback(() => {
     if (isDataLoading) {
       return (
         <View style={styles.loadingContainer}>
@@ -1381,7 +1468,7 @@ export default function PackageCreationModal({
         {renderNavigationButtons()}
       </>
     );
-  };
+  }, [isDataLoading, dataError, closeModal, retryDataLoad, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
 
   return (
     <Modal visible={visible} transparent animationType="none">
@@ -1410,7 +1497,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced Styles with new search and sort components + debug styles
+// FIXED STYLES - Properly structured StyleSheet
 const styles = StyleSheet.create({
   keyboardContainer: {
     flex: 1,
@@ -1421,8 +1508,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.95, // Increased from 0.9 to 0.95
-    minHeight: SCREEN_HEIGHT * 0.7,  // Increased from 0.6 to 0.7
+    maxHeight: SCREEN_HEIGHT * 0.95,
+    minHeight: SCREEN_HEIGHT * 0.7,
     width: SCREEN_WIDTH,
   },
   modalContent: {
@@ -1465,7 +1552,7 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    textAlign: 'center',
+    marginTop: 8,
   },
   placeholder: {
     width: 40,
@@ -1508,7 +1595,7 @@ const styles = StyleSheet.create({
   },
   stepContentConfirmation: {
     flex: 1,
-    minHeight: 600, // Larger height specifically for confirmation step
+    minHeight: 600,
   },
   stepTitle: {
     fontSize: 24,
@@ -1737,14 +1824,14 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // Confirmation styles - Enhanced for better visibility
+  // Confirmation styles
   confirmationContainer: {
-    gap: 20, // Reduced from 24 to 20 for tighter spacing
+    gap: 20,
   },
   confirmationSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
-    padding: 16, // Reduced from 20 to 16 for more compact sections
+    padding: 16,
   },
   confirmationSectionTitle: {
     fontSize: 16,
