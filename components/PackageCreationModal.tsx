@@ -220,17 +220,68 @@ export default function PackageCreationModal({
         agentsLength: formData.agents?.length || 0
       });
       
-      setLocations(formData.locations || []);
-      setAreas(formData.areas || []);
-      setAgents(formData.agents || []);
+      // Process and map relationships
+      const processedLocations = formData.locations || [];
+      const processedAreas = formData.areas || [];
+      const processedAgents = formData.agents || [];
+      
+      // Create lookup maps for faster relationship resolution
+      const locationMap = new Map();
+      processedLocations.forEach(location => {
+        const id = location.id || location.attributes?.id;
+        if (id) locationMap.set(String(id), location);
+      });
+      
+      const areaMap = new Map();
+      processedAreas.forEach(area => {
+        const id = area.id || area.attributes?.id;
+        if (id) areaMap.set(String(id), area);
+      });
+      
+      // Map areas to their locations
+      processedAreas.forEach(area => {
+        const locationId = area.location_id || area.attributes?.location_id || area.relationships?.location?.data?.id;
+        if (locationId) {
+          area.location = locationMap.get(String(locationId));
+        }
+      });
+      
+      // Map agents to their areas and locations
+      processedAgents.forEach(agent => {
+        const areaId = agent.area_id || agent.attributes?.area_id || agent.relationships?.area?.data?.id;
+        if (areaId) {
+          agent.area = areaMap.get(String(areaId));
+          if (agent.area) {
+            const locationId = agent.area.location_id || agent.area.attributes?.location_id || agent.area.relationships?.location?.data?.id;
+            if (locationId) {
+              agent.area.location = locationMap.get(String(locationId));
+            }
+          }
+        }
+      });
+      
+      console.log('🔗 Relationship mapping completed:', {
+        locationMapSize: locationMap.size,
+        areaMapSize: areaMap.size,
+        agentsWithAreas: processedAgents.filter(a => a.area).length,
+        agentsWithLocations: processedAgents.filter(a => a.area?.location).length
+      });
+      
+      setLocations(processedLocations);
+      setAreas(processedAreas);
+      setAgents(processedAgents);
       
       // Save to cache
-      await saveToCache(formData);
+      await saveToCache({
+        locations: processedLocations,
+        areas: processedAreas,
+        agents: processedAgents
+      });
       
       console.log('✅ Fresh data loaded and cached:', {
-        locations: (formData.locations || []).length,
-        areas: (formData.areas || []).length,
-        agents: (formData.agents || []).length
+        locations: processedLocations.length,
+        areas: processedAreas.length,
+        agents: processedAgents.length
       });
       
     } catch (error: any) {
@@ -843,6 +894,10 @@ export default function PackageCreationModal({
               const agentPhone = agentData.phone || agentData.attributes?.phone || '';
               const agentId = agentData.id || agentData.attributes?.id || '';
               
+              // Get area and location info with better fallbacks
+              const areaName = agentData.area?.name || agentData.area?.attributes?.name || 'Unknown Area';
+              const locationName = agentData.area?.location?.name || agentData.area?.location?.attributes?.name || group.locationName;
+              
               return (
                 <TouchableOpacity
                   key={agentId}
@@ -861,7 +916,7 @@ export default function PackageCreationModal({
                     <View style={styles.selectionInfo}>
                       <Text style={styles.selectionName}>{agentName}</Text>
                       <Text style={styles.selectionLocation}>
-                        {agentData.area?.name || 'Unknown Area'} • {group.locationName}
+                        {areaName} • {locationName}
                       </Text>
                       <Text style={styles.selectionPhone}>{agentPhone}</Text>
                     </View>
@@ -987,6 +1042,10 @@ export default function PackageCreationModal({
                   const agentPhone = agentData.phone || agentData.attributes?.phone || '';
                   const agentId = agentData.id || agentData.attributes?.id || '';
                   
+                  // Get area and location info with better fallbacks
+                  const areaName = agentData.area?.name || agentData.area?.attributes?.name || 'Unknown Area';
+                  const locationName = agentData.area?.location?.name || agentData.area?.location?.attributes?.name || group.locationName;
+                  
                   return (
                     <TouchableOpacity
                       key={agentId}
@@ -1005,7 +1064,7 @@ export default function PackageCreationModal({
                         <View style={styles.selectionInfo}>
                           <Text style={styles.selectionName}>{agentName}</Text>
                           <Text style={styles.selectionLocation}>
-                            {agentData.area?.name || 'Unknown Area'} • {group.locationName}
+                            {areaName} • {locationName}
                           </Text>
                           <Text style={styles.selectionPhone}>{agentPhone}</Text>
                         </View>
