@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - UPDATED for FastJSON with createPackage
+// lib/helpers/packageHelpers.ts - FIXED to use proper helper functions
 import { getLocations, Location } from './getLocations';
 import { getAreas, Area } from './getAreas';
 import { getAgents, Agent } from './getAgents';
@@ -65,7 +65,7 @@ export const debugApiConnection = async () => {
   }
 };
 
-// Enhanced getPackageFormData with detailed debugging
+// FIXED: Use the actual helper functions instead of manual API calls
 export async function getPackageFormData(): Promise<{
   locations: Location[];
   areas: Area[];
@@ -73,7 +73,7 @@ export async function getPackageFormData(): Promise<{
 }> {
   try {
     console.log('🔄 Starting getPackageFormData...');
-    console.log('🔄 Using FastJSON API with updated parsers...');
+    console.log('🔄 Using proper helper functions with FastJSON parsing...');
     
     // First, test API connectivity
     const apiConnected = await debugApiConnection();
@@ -81,13 +81,13 @@ export async function getPackageFormData(): Promise<{
       throw new Error('API connection failed - check your server and network');
     }
 
-    console.log('🔄 API connection successful, fetching data...');
+    console.log('🔄 API connection successful, fetching data with proper helpers...');
     
-    // Fetch data with individual error handling and better error messages
+    // FIXED: Use the actual helper functions that handle FastJSON properly
     const results = await Promise.allSettled([
-      fetchLocationsWithDebug(),
-      fetchAreasWithDebug(),
-      fetchAgentsWithDebug(),
+      getLocations(),
+      getAreas(), 
+      getAgents(),
     ]);
 
     // Process results with detailed logging
@@ -104,7 +104,7 @@ export async function getPackageFormData(): Promise<{
       } else {
         console.log(`✅ ${names[index]} fetched:`, result.value.length, 'items');
         if (result.value.length > 0) {
-          console.log(`✅ Sample ${names[index]}:`, result.value[0]);
+          console.log(`✅ Sample ${names[index]}:`, JSON.stringify(result.value[0], null, 2));
         }
       }
     });
@@ -131,11 +131,19 @@ export async function getPackageFormData(): Promise<{
       console.warn('⚠️ No agents found - some delivery options may not be available');
     }
 
+    // FIXED: Enhanced validation of data structure
+    const validation = validatePackageFormData({ locations, areas, agents });
+    if (!validation.isValid) {
+      console.warn('⚠️ Data validation issues found:', validation.issues);
+      // Still continue but log the issues
+    }
+
     console.log('✅ Package form data completed:', {
       locations: locations.length,
       areas: areas.length,
       agents: agents.length,
-      totalItems: locations.length + areas.length + agents.length
+      totalItems: locations.length + areas.length + agents.length,
+      validation: validation.isValid ? 'passed' : 'failed'
     });
 
     return { locations, areas, agents };
@@ -153,147 +161,6 @@ export async function getPackageFormData(): Promise<{
     } else {
       throw new Error(`Failed to fetch package form data: ${error.message}`);
     }
-  }
-}
-
-// Debug wrapper for getLocations
-async function fetchLocationsWithDebug(): Promise<Location[]> {
-  try {
-    console.log('📍 Fetching locations with FastJSON parser...');
-    
-    // Ensure JSON headers are sent
-    const response = await api.get('/api/v1/locations', {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    console.log('📍 Raw API response:', response.data);
-    
-    // Parse the response data directly since we're not using the helper functions
-    const locations = response.data.data || response.data.locations || response.data;
-    
-    console.log('📍 FastJSON locations parsed successfully');
-    console.log('📍 Locations count:', locations?.length || 0);
-    
-    if (locations && locations.length > 0) {
-      console.log('📍 Sample location structure:', locations[0]);
-      
-      // Validate location structure
-      const sampleLocation = locations[0];
-      if (!sampleLocation.id || !sampleLocation.name) {
-        console.warn('⚠️ Location structure may be incomplete:', sampleLocation);
-      }
-    } else {
-      console.warn('⚠️ No locations returned from API');
-    }
-    
-    return locations || [];
-  } catch (error: any) {
-    console.error('❌ getLocations error:', error);
-    console.error('❌ This usually indicates:');
-    console.error('   - FastJSON response format issue');
-    console.error('   - Server returned unexpected data structure');
-    console.error('   - Network connectivity problem');
-    throw error;
-  }
-}
-
-// Debug wrapper for getAreas
-async function fetchAreasWithDebug(): Promise<Area[]> {
-  try {
-    console.log('🏢 Fetching areas with FastJSON parser...');
-    
-    // Ensure JSON headers are sent
-    const response = await api.get('/api/v1/areas', {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    console.log('🏢 Raw API response:', response.data);
-    
-    // Parse the response data directly since we're not using the helper functions
-    const areas = response.data.data || response.data.areas || response.data;
-    
-    console.log('🏢 FastJSON areas parsed successfully');
-    console.log('🏢 Areas count:', areas?.length || 0);
-    
-    if (areas && areas.length > 0) {
-      console.log('🏢 Sample area structure:', areas[0]);
-      
-      // Validate area structure and relationships
-      const sampleArea = areas[0];
-      if (!sampleArea.id || !sampleArea.name || !sampleArea.location_id) {
-        console.warn('⚠️ Area structure may be incomplete:', sampleArea);
-      }
-      if (!sampleArea.location || !sampleArea.location.id) {
-        console.warn('⚠️ Area location relationship may be missing:', sampleArea);
-      }
-    } else {
-      console.warn('⚠️ No areas returned from API');
-    }
-    
-    return areas || [];
-  } catch (error: any) {
-    console.error('❌ getAreas error:', error);
-    console.error('❌ This usually indicates:');
-    console.error('   - FastJSON include relationships not working');
-    console.error('   - Areas table is empty');
-    console.error('   - Location relationship missing');
-    throw error;
-  }
-}
-
-// Debug wrapper for getAgents
-async function fetchAgentsWithDebug(): Promise<Agent[]> {
-  try {
-    console.log('👥 Fetching agents with FastJSON parser...');
-    
-    // Ensure JSON headers are sent
-    const response = await api.get('/api/v1/agents', {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      }
-    });
-    
-    console.log('👥 Raw API response:', response.data);
-    
-    // Parse the response data directly since we're not using the helper functions
-    const agents = response.data.data || response.data.agents || response.data;
-    
-    console.log('👥 FastJSON agents parsed successfully');
-    console.log('👥 Agents count:', agents?.length || 0);
-    
-    if (agents && agents.length > 0) {
-      console.log('👥 Sample agent structure:', agents[0]);
-      
-      // Validate agent structure and nested relationships
-      const sampleAgent = agents[0];
-      if (!sampleAgent.id || !sampleAgent.name || !sampleAgent.area_id) {
-        console.warn('⚠️ Agent structure may be incomplete:', sampleAgent);
-      }
-      if (!sampleAgent.area || !sampleAgent.area.id) {
-        console.warn('⚠️ Agent area relationship may be missing:', sampleAgent);
-      }
-      if (sampleAgent.area && (!sampleAgent.area.location || !sampleAgent.area.location.id)) {
-        console.warn('⚠️ Agent area location relationship may be missing:', sampleAgent);
-      }
-    } else {
-      console.warn('⚠️ No agents returned from API');
-    }
-    
-    return agents || [];
-  } catch (error: any) {
-    console.error('❌ getAgents error:', error);
-    console.error('❌ This usually indicates:');
-    console.error('   - FastJSON nested includes not working (area.location)');
-    console.error('   - Agents table is empty');
-    console.error('   - Area or Location relationships missing');
-    throw error;
   }
 }
 
@@ -398,7 +265,7 @@ const calculateFallbackPricing = (data: {
   return baseCost;
 };
 
-// CREATE PACKAGE FUNCTION - This was missing!
+// CREATE PACKAGE FUNCTION
 export async function createPackage(packageData: PackageData): Promise<PackageResponse> {
   try {
     console.log('📦 Creating package...');
@@ -456,13 +323,20 @@ export async function createPackage(packageData: PackageData): Promise<PackageRe
   }
 }
 
-// Utility function to validate package form data
+// ENHANCED: Utility function to validate package form data
 export const validatePackageFormData = (data: {
   locations: Location[];
   areas: Area[];
   agents: Agent[];
 }): { isValid: boolean; issues: string[] } => {
   const issues: string[] = [];
+  
+  console.log('🔍 Validating package form data...');
+  console.log('🔍 Data counts:', {
+    locations: data.locations.length,
+    areas: data.areas.length,
+    agents: data.agents.length
+  });
   
   if (data.locations.length === 0) {
     issues.push('No locations available');
@@ -480,12 +354,32 @@ export const validatePackageFormData = (data: {
   const areasWithoutLocations = data.areas.filter(area => !area.location || !area.location.id);
   if (areasWithoutLocations.length > 0) {
     issues.push(`${areasWithoutLocations.length} areas missing location data`);
+    console.warn('⚠️ Areas without locations:', areasWithoutLocations.map(a => ({ id: a.id, name: a.name })));
   }
   
   const agentsWithoutAreas = data.agents.filter(agent => !agent.area || !agent.area.id);
   if (agentsWithoutAreas.length > 0) {
     issues.push(`${agentsWithoutAreas.length} agents missing area data`);
+    console.warn('⚠️ Agents without areas:', agentsWithoutAreas.map(a => ({ id: a.id, name: a.name })));
   }
+  
+  // Check for agents without nested location data
+  const agentsWithoutLocations = data.agents.filter(agent => 
+    agent.area && agent.area.id && (!agent.area.location || !agent.area.location.id)
+  );
+  if (agentsWithoutLocations.length > 0) {
+    issues.push(`${agentsWithoutLocations.length} agents missing location data in area relationship`);
+    console.warn('⚠️ Agents without location in area:', agentsWithoutLocations.map(a => ({ 
+      id: a.id, 
+      name: a.name, 
+      area: a.area?.name 
+    })));
+  }
+  
+  console.log('🔍 Validation result:', {
+    isValid: issues.length === 0,
+    issues: issues
+  });
   
   return {
     isValid: issues.length === 0,
@@ -504,12 +398,12 @@ export type {
   PackageResponse,
 };
 
-// Export all functions - FIXED: Added createPackage
+// Export all functions
 export {
   getLocations,
   getAreas,
   getAgents,
-  createPackage, // This was missing!
+  createPackage,
   debugApiConnection,
   getPackageFormData,
   getPackagePricing,
