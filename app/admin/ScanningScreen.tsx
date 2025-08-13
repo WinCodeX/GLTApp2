@@ -13,8 +13,8 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import QRScanner from '../components/QRScanner';
-import BulkScanner from '../components/BulkScanner';
+import QRScanner from '../../components/QRScanner';
+import BulkScanner from '../../components/BulkScanner';
 
 const { width } = Dimensions.get('window');
 
