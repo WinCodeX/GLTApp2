@@ -156,7 +156,72 @@ export default function Track() {
     }
   }, [router]);
 
-  // Get state badge color
+  // Get delivery type display
+  const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return 'Doorstep';
+      case 'agent': return 'Agent';
+      case 'mixed': return 'Mixed';
+      default: return 'Agent';
+    }
+  }, []);
+
+  // Get delivery type badge color
+  const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return '#3b82f6'; // Blue
+      case 'agent': return '#8b5cf6';    // Purple
+      case 'mixed': return '#f59e0b';    // Orange
+      default: return '#8b5cf6';
+    }
+  }, []);
+
+  // Group packages by date
+  const groupPackagesByDate = useCallback((packages: Package[]) => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const groups: { [key: string]: Package[] } = {
+      'Today': [],
+      'Yesterday': [],
+    };
+
+    packages.forEach(pkg => {
+      const pkgDate = new Date(pkg.created_at);
+      const pkgDateStr = pkgDate.toDateString();
+      const todayStr = today.toDateString();
+      const yesterdayStr = yesterday.toDateString();
+
+      if (pkgDateStr === todayStr) {
+        groups['Today'].push(pkg);
+      } else if (pkgDateStr === yesterdayStr) {
+        groups['Yesterday'].push(pkg);
+      } else {
+        const dateKey = pkgDate.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+        groups[dateKey].push(pkg);
+      }
+    });
+
+    // Remove empty groups and sort packages within groups by newest first
+    Object.keys(groups).forEach(key => {
+      if (groups[key].length === 0) {
+        delete groups[key];
+      } else {
+        groups[key].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      }
+    });
+
+    return groups;
+  }, []);
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
       case 'pending_unpaid': return '#f59e0b';
@@ -209,17 +274,19 @@ export default function Track() {
   // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
+    
+    // Use simple object navigation
     router.push({
       pathname: '/(drawer)/track/tracking',
       params: { 
         packageCode: packageItem.code,
         packageId: packageItem.id.toString(),
-        from: '/(drawer)/track' // Pass current route for proper back navigation
+        from: '/(drawer)/track'
       }
     });
   }, [router]);
 
-  // Render package item without QR code
+  // Render package item with updated layout
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
@@ -236,64 +303,35 @@ export default function Track() {
               <Text style={styles.packageCode}>{item.code}</Text>
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
-            <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
-              <Text style={styles.stateBadgeText}>{item.state_display}</Text>
+            <View style={styles.badgeContainer}>
+              {/* Delivery Type Badge */}
+              <View style={[styles.deliveryTypeBadge, { backgroundColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                <Text style={styles.badgeText}>{getDeliveryTypeDisplay(item.delivery_type)}</Text>
+              </View>
+              {/* State Badge */}
+              <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
+                <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
+              </View>
             </View>
           </View>
 
-          {/* Package Details */}
-          <View style={styles.packageDetails}>
-            <View style={styles.detailRow}>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>From</Text>
-                <Text style={styles.detailValue}>{item.sender_name}</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>To</Text>
-                <Text style={styles.detailValue}>{item.receiver_name}</Text>
-              </View>
-            </View>
-            
-            <View style={styles.detailRow}>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Cost</Text>
-                <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
-              </View>
-              <View style={styles.detailItem}>
-                <Text style={styles.detailLabel}>Type</Text>
-                <Text style={styles.detailValue}>
-                  {item.delivery_type === 'doorstep' ? 'Doorstep' : 
-                   item.delivery_type === 'mixed' ? 'Mixed' : 'Agent'}
-                </Text>
-              </View>
-            </View>
-            
-            <View style={styles.timestampRow}>
-              <Text style={styles.timestampLabel}>Created:</Text>
-              <Text style={styles.timestampValue}>
-                {new Date(item.created_at).toLocaleDateString('en-US', {
-                  year: 'numeric',
-                  month: 'short',
-                  day: 'numeric',
-                  hour: '2-digit',
-                  minute: '2-digit'
-                })}
-              </Text>
-            </View>
+          {/* Cost Section Only */}
+          <View style={styles.costSection}>
+            <Text style={styles.costLabel}>Cost</Text>
+            <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
           </View>
 
-          {/* Tracking Button */}
-          <TouchableOpacity 
-            style={styles.trackingButton}
-            onPress={() => handleViewTracking(item)}
-          >
-            <Feather name="search" size={16} color={colors.primary} />
-            <Text style={styles.trackingButtonText}>View Tracking Details</Text>
-            <Feather name="chevron-right" size={16} color="#888" />
-          </TouchableOpacity>
-
-          {/* Action Buttons */}
+          {/* Action Buttons - All in one row */}
           <View style={styles.actionButtons}>
+            {/* Track Button */}
+            <TouchableOpacity 
+              style={styles.actionButton}
+              onPress={() => handleViewTracking(item)}
+            >
+              <Feather name="search" size={16} color={colors.primary} />
+              <Text style={styles.actionButtonText}>Track</Text>
+            </TouchableOpacity>
+
             {/* Edit Button */}
             <TouchableOpacity 
               style={[
@@ -334,14 +372,14 @@ export default function Track() {
                 styles.actionButtonText,
                 showPayButton ? styles.payButtonText : styles.actionButtonTextDisabled
               ]}>
-                {showPayButton ? 'Pay Now' : 'Paid'}
+                {showPayButton ? 'Pay' : 'Paid'}
               </Text>
             </TouchableOpacity>
           </View>
         </LinearGradient>
       </View>
     );
-  }, [getStateBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking]);
+  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking]);
 
   // Render empty state
   const renderEmptyState = useCallback(() => (
@@ -454,11 +492,26 @@ export default function Track() {
             />
           }
         >
-          {packages.map((pkg) => (
-            <View key={pkg.id}>
-              {renderPackageItem({ item: pkg })}
-            </View>
-          ))}
+          {/* Render Grouped Packages */}
+          {(() => {
+            const groupedPackages = groupPackagesByDate(packages);
+            return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
+              <View key={dateGroup} style={styles.dateGroup}>
+                {/* Date Group Header */}
+                <View style={styles.dateGroupHeader}>
+                  <Text style={styles.dateGroupTitle}>{dateGroup}</Text>
+                  <Text style={styles.dateGroupCount}>{packages.length} package{packages.length !== 1 ? 's' : ''}</Text>
+                </View>
+                
+                {/* Packages in this date group */}
+                {packages.map((pkg) => (
+                  <View key={pkg.id}>
+                    {renderPackageItem({ item: pkg })}
+                  </View>
+                ))}
+              </View>
+            ));
+          })()}
           
           {/* Load more indicator if needed */}
           <View style={styles.listFooter}>
@@ -656,26 +709,52 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   packagesListContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 16,
   },
   
-  // Package card styles
+  // Date grouping styles
+  dateGroup: {
+    marginBottom: 20,
+  },
+  dateGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  dateGroupTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  dateGroupCount: {
+    fontSize: 12,
+    color: '#888',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  
+  // Package card styles - more compact
   packageCard: {
-    marginBottom: 16,
-    borderRadius: 16,
+    marginBottom: 12,
+    borderRadius: 12,
     overflow: 'hidden',
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: 4,
+      height: 2,
     },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
   },
   packageCardGradient: {
-    padding: 20,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
@@ -685,125 +764,86 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   packageInfo: {
     flex: 1,
   },
   packageCode: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   routeDescription: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#888',
-    lineHeight: 18,
+    lineHeight: 16,
+  },
+  
+  // Badge container and styles
+  badgeContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  deliveryTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
   stateBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginLeft: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
   },
-  stateBadgeText: {
-    fontSize: 12,
+  badgeText: {
+    fontSize: 10,
     fontWeight: '600',
     color: '#fff',
   },
   
-  // Package details
-  packageDetails: {
-    gap: 12,
-    marginBottom: 16,
+  // Cost section
+  costSection: {
+    marginBottom: 12,
   },
-  detailRow: {
-    flexDirection: 'row',
-    gap: 20,
-  },
-  detailItem: {
-    flex: 1,
-  },
-  detailLabel: {
-    fontSize: 12,
+  costLabel: {
+    fontSize: 11,
     color: '#888',
-    marginBottom: 4,
-    fontWeight: '500',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#fff',
+    marginBottom: 2,
     fontWeight: '500',
   },
   costValue: {
-    fontSize: 14,
+    fontSize: 16,
     color: '#10b981',
-    fontWeight: '600',
-  },
-  timestampRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  timestampLabel: {
-    fontSize: 12,
-    color: '#888',
-  },
-  timestampValue: {
-    fontSize: 12,
-    color: '#666',
+    fontWeight: '700',
   },
   
-  // Tracking button
-  trackingButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 10,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    marginBottom: 16,
-  },
-  trackingButtonText: {
-    fontSize: 14,
-    color: colors.primary,
-    fontWeight: '500',
-    flex: 1,
-    marginLeft: 8,
-  },
-  
-  // Action buttons
+  // Action buttons - three in one row
   actionButtons: {
     flexDirection: 'row',
-    gap: 12,
+    gap: 8,
   },
   actionButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    gap: 6,
+    gap: 4,
   },
   actionButtonDisabled: {
     backgroundColor: 'rgba(102, 102, 102, 0.2)',
     borderColor: 'rgba(102, 102, 102, 0.3)',
   },
   actionButtonText: {
-    fontSize: 14,
+    fontSize: 12,
     color: colors.primary,
-    fontWeight: '500',
+    fontWeight: '600',
   },
   actionButtonTextDisabled: {
     color: '#666',
