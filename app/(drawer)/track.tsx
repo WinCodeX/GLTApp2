@@ -152,7 +152,7 @@ export default function Track() {
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.push('/(drawer)/(tabs)/home');
+      router.push('/');
     }
   }, [router]);
 
@@ -360,7 +360,7 @@ export default function Track() {
           }
         </Text>
         
-        <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/(drawer)/(tabs)/home')}>
+        <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/')}>
           <Feather name="plus" size={20} color="#fff" />
           <Text style={styles.emptyStateButtonText}>Create Package</Text>
         </TouchableOpacity>
