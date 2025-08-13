@@ -13,7 +13,7 @@ import {
   Dimensions,
   SafeAreaView,
 } from 'react-native';
-import { CameraView, Camera } from 'expo-camera/next';
+import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 
