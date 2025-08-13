@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Fixed header version
+// components/AdminLayout.tsx - Updated with Scanning route
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -50,7 +50,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     ? { uri: user.avatar_url }
     : require('../assets/images/avatar_placeholder.png');
 
-  // ✅ Properly typed bottom tabs with correct Ionicons names
+  // ✅ Updated bottom tabs with scanning route
   const bottomTabs: BottomTab[] = [
     { 
       id: 'home', 
@@ -64,7 +64,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       icon: 'qr-code-outline' as IoniconsName, 
       activeIcon: 'qr-code' as IoniconsName, 
       label: 'Scan', 
-      route: '/admin/scan' 
+      route: '/admin/scanning' // Updated to point to ScanningScreen
     },
     { 
       id: 'packages', 
@@ -89,11 +89,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     },
   ];
 
-  // ✅ Determine active tab based on current pathname with proper typing
+  // ✅ Enhanced pathname matching for scanning route
   const getActiveTab = (): string => {
     // Special handling for account route
     if (pathname === '/admin/account') {
       return 'profile';
+    }
+    
+    // Special handling for scanning route
+    if (pathname === '/admin/scanning') {
+      return 'scan';
     }
     
     const currentTab = bottomTabs.find(tab => tab.route === pathname);
@@ -105,7 +110,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const toggleSidebar = (): void => setSidebarVisible(!sidebarVisible);
   const closeSidebar = (): void => setSidebarVisible(false);
 
-  // ✅ Enhanced navigation handler with better error handling
+  // ✅ Updated navigation handler with scanning route
   const handleTabPress = (tabId: string): void => {
     try {
       const tab = bottomTabs.find(t => t.id === tabId);
@@ -122,7 +127,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // Updated navigation logic with proper routing
+      // Updated navigation logic with scanning route
       switch (tabId) {
         case 'profile':
           console.log('🚀 Navigating to admin account');
@@ -132,7 +137,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           router.replace('/admin');
           break;
         case 'scan':
-          router.replace('/admin/scan');
+          console.log('🚀 Navigating to scanning screen');
+          router.replace('/admin/scanning');
           break;
         case 'packages':
           router.replace('/admin/packages');
@@ -153,11 +159,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
-  // ✅ Navigation debug logging with proper types
+  // ✅ Navigation debug logging with scanning route
   useEffect(() => {
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
-    console.log('Available tabs:', bottomTabs.map(t => t.id));
+    console.log('Available tabs:', bottomTabs.map(t => `${t.id}: ${t.route}`));
+    
+    // Special logging for scanning route
+    if (pathname === '/admin/scanning') {
+      console.log('📱 Currently on Scanning Screen');
+    }
   }, [pathname, activeTab]);
 
   // ✅ Handle avatar press with proper navigation
@@ -171,21 +182,52 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     // Add your search logic here
   };
 
-  // ✅ Check if current route should show bottom tabs
+  // ✅ Enhanced route checking including scanning
   const shouldShowBottomTabs = (): boolean => {
-    return pathname?.startsWith('/admin') ?? false;
+    const adminRoutes = [
+      '/admin',
+      '/admin/scanning',
+      '/admin/packages', 
+      '/admin/settings',
+      '/admin/account'
+    ];
+    return adminRoutes.includes(pathname || '') || pathname?.startsWith('/admin') || false;
   };
 
-  // ✅ Check if current route should show FAB
+  // ✅ Enhanced FAB visibility logic
   const shouldShowFAB = (): boolean => {
-    return (pathname?.startsWith('/admin') && pathname !== '/admin/account') ?? false;
+    const fabRoutes = ['/admin', '/admin/scanning', '/admin/packages', '/admin/settings'];
+    return fabRoutes.includes(pathname || '') || false;
+  };
+
+  // ✅ Handle FAB press based on current screen
+  const handleFABPress = (): void => {
+    console.log('FAB pressed on route:', pathname);
+    
+    switch (pathname) {
+      case '/admin/scanning':
+        // On scanning screen, FAB could open quick scan or bulk scan
+        console.log('🚀 Opening quick scan from FAB');
+        // You can trigger a callback or navigate to a specific scan mode
+        break;
+      case '/admin/packages':
+        // On packages screen, FAB could create new package
+        console.log('🚀 Creating new package from FAB');
+        router.push('/admin/packages/create');
+        break;
+      case '/admin':
+      default:
+        // Default behavior - could open a quick action menu
+        console.log('🚀 Opening quick actions from FAB');
+        break;
+    }
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Simplified header without company name */}
+        {/* ✅ Header with dynamic title based on current screen */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -206,21 +248,31 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
+              {/* Dynamic title based on current screen */}
+              <Text style={styles.panelTitle}>
+                {pathname === '/admin/scanning' ? 'Package Scanning' :
+                 pathname === '/admin/packages' ? 'Package Management' :
+                 pathname === '/admin/settings' ? 'Settings' :
+                 pathname === '/admin/account' ? 'Account' :
+                 'Dashboard'}
+              </Text>
             </View>
           </View>
 
-          {/* Center - Search */}
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
-            <TextInput
-              placeholder="Search..."
-              placeholderTextColor="rgba(255,255,255,0.8)"
-              style={styles.searchInput}
-              onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
-              returnKeyType="search"
-              accessibilityLabel="Search input"
-            />
-          </View>
+          {/* Center - Search (hide on scanning screen to give more space) */}
+          {pathname !== '/admin/scanning' && (
+            <View style={styles.searchContainer}>
+              <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
+              <TextInput
+                placeholder="Search..."
+                placeholderTextColor="rgba(255,255,255,0.8)"
+                style={styles.searchInput}
+                onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
+                returnKeyType="search"
+                accessibilityLabel="Search input"
+              />
+            </View>
+          )}
 
           {/* Right - Notifications & Avatar */}
           <View style={styles.headerRight}>
@@ -277,7 +329,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         )}
       </View>
 
-      {/* Bottom Tabs - Show on admin routes and admin account */}
+      {/* Bottom Tabs - Show on admin routes including scanning */}
       {shouldShowBottomTabs() && (
         <View style={styles.bottomTabBar}>
           {bottomTabs.map((tab) => {
@@ -307,24 +359,43 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
                 >
                   {tab.label}
                 </Text>
+                {/* Add scanning indicator badge */}
+                {tab.id === 'scan' && isActive && (
+                  <View style={styles.scanningBadge}>
+                    <View style={styles.scanningDot} />
+                  </View>
+                )}
               </TouchableOpacity>
             );
           })}
         </View>
       )}
 
-      {/* Floating Action Button - Show on admin routes but NOT account */}
+      {/* Enhanced Floating Action Button with context-aware actions */}
       {shouldShowFAB() && (
         <TouchableOpacity 
           style={styles.fab}
-          accessibilityLabel="Add new item"
+          onPress={handleFABPress}
+          accessibilityLabel={
+            pathname === '/admin/scanning' ? 'Quick scan' :
+            pathname === '/admin/packages' ? 'Add new package' :
+            'Quick actions'
+          }
           accessibilityRole="button"
         >
           <LinearGradient 
             colors={['#667eea', '#764ba2']} 
             style={styles.fabGradient}
           >
-            <Ionicons name="add" size={28} color="white" />
+            <Ionicons 
+              name={
+                pathname === '/admin/scanning' ? 'qr-code' :
+                pathname === '/admin/packages' ? 'add' :
+                'add'
+              } 
+              size={28} 
+              color="white" 
+            />
           </LinearGradient>
         </TouchableOpacity>
       )}
@@ -465,11 +536,30 @@ const styles = StyleSheet.create({
     paddingVertical: 4, 
     paddingHorizontal: 8,
     minWidth: width / 5 - 16, // Ensure even spacing
+    position: 'relative',
   },
   tabLabel: { 
     fontSize: 10, 
     marginTop: 2,
     textAlign: 'center',
+  },
+  // ✅ New styles for scanning indicator
+  scanningBadge: {
+    position: 'absolute',
+    top: -2,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10B981',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  scanningDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#FFFFFF',
   },
   fab: {
     position: 'absolute',
