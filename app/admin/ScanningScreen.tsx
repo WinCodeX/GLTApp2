@@ -7,12 +7,12 @@ import {
   TouchableOpacity,
   ScrollView,
   SafeAreaView,
-  Alert,
   RefreshControl,
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import Toast from 'react-native-toast-message';
 import QRScanner from '../../components/QRScanner';
 import BulkScanner from '../../components/BulkScanner';
 
@@ -96,12 +96,14 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     // Refresh stats after successful scan
     loadUserStats();
     
-    // Show success feedback
-    Alert.alert(
-      'Scan Successful',
-      `Package ${result.package.code} has been ${selectedAction}ed successfully.`,
-      [{ text: 'OK' }]
-    );
+    // Show success feedback with toast
+    Toast.show({
+      type: 'success',
+      text1: 'Scan Successful',
+      text2: `Package ${result.package.code} has been ${selectedAction}ed successfully`,
+      position: 'top',
+      visibilityTime: 3000,
+    });
   };
 
   const handleBulkComplete = (results: any[]) => {
@@ -109,11 +111,36 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     loadUserStats();
     
     const successCount = results.filter(r => r.success).length;
-    Alert.alert(
-      'Bulk Operation Complete',
-      `Successfully processed ${successCount} of ${results.length} packages.`,
-      [{ text: 'OK' }]
-    );
+    const failureCount = results.length - successCount;
+
+    if (failureCount === 0) {
+      // All successful
+      Toast.show({
+        type: 'success',
+        text1: 'Bulk Operation Complete',
+        text2: `Successfully processed all ${successCount} packages`,
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } else if (successCount === 0) {
+      // All failed
+      Toast.show({
+        type: 'error',
+        text1: 'Bulk Operation Failed',
+        text2: `Failed to process all ${results.length} packages`,
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } else {
+      // Mixed results
+      Toast.show({
+        type: 'warning',
+        text1: 'Bulk Operation Partial Success',
+        text2: `${successCount} successful, ${failureCount} failed out of ${results.length} packages`,
+        position: 'top',
+        visibilityTime: 5000,
+      });
+    }
   };
 
   const getAvailableActions = () => {
