@@ -1,29 +1,29 @@
 // app/(drawer)/track/tracking.tsx - Detailed tracking with timeline and QR code
+import React, { useState, useEffect, useCallback } from 'react';
 import {
+  StyleSheet,
+  Text,
+  View,
+  ScrollView,
+  TouchableOpacity,
+  ActivityIndicator,
+  StatusBar,
+  Image,
+  Share,
+  Linking,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
+import { 
   getPackageDetails,
   getPackageQRCode,
   type Package,
   type QRCodeResponse
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
-import { Feather } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
-import {
-  ActivityIndicator,
-  Image,
-  Linking,
-  ScrollView,
-  Share,
-  StatusBar,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Toast from 'react-native-toast-message';
 
 interface TimelineEvent {
   status: string;
@@ -48,63 +48,23 @@ export default function PackageTracking() {
   const [isLoadingQR, setIsLoadingQR] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Load package details and QR code
-  const loadPackageData = useCallback(async () => {
-    if (!packageCode) {
-      setError('Package code is required');
-      setIsLoading(false);
-      return;
+  // Get status description
+  const getStatusDescription = useCallback((state: string): string => {
+    switch (state) {
+      case 'submitted':
+        return 'Package submitted and ready for pickup';
+      case 'in_transit':
+        return 'Package is being transported to destination';
+      case 'delivered':
+        return 'Package delivered to destination area';
+      case 'collected':
+        return 'Package collected by recipient';
+      case 'rejected':
+        return 'Package delivery was rejected or failed';
+      default:
+        return state.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
     }
-
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      console.log('📦 Loading package details for:', packageCode);
-      
-      // Load package details
-      const packageResponse = await getPackageDetails(packageCode);
-      setPackage(packageResponse.data);
-      
-      // Create timeline from package data
-      const timelineData = createTimelineFromPackage(packageResponse.data);
-      setTimeline(timelineData);
-      
-      // Load QR code
-      setIsLoadingQR(true);
-      try {
-        const qrResponse = await getPackageQRCode(packageCode);
-        setQrData(qrResponse.data);
-        console.log('✅ QR code loaded for package:', packageCode);
-      } catch (qrError) {
-        console.warn('⚠️ Failed to load QR code:', qrError);
-        // Create fallback QR data
-        setQrData({
-          qr_code_base64: null,
-          tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-          package_code: packageCode,
-          package_state: packageResponse.data.state,
-          route_description: packageResponse.data.route_description
-        });
-      } finally {
-        setIsLoadingQR(false);
-      }
-      
-    } catch (error: any) {
-      console.error('❌ Failed to load package data:', error);
-      setError(error.message);
-      
-      Toast.show({
-        type: 'errorToast',
-        text1: 'Failed to Load Package',
-        text2: error.message,
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  }, [packageCode]);
+  }, []);
 
   // Create timeline from package data
   const createTimelineFromPackage = useCallback((pkg: Package): TimelineEvent[] => {
@@ -138,25 +98,65 @@ export default function PackageTracking() {
     }
 
     return events;
-  }, []);
+  }, [getStatusDescription]);
 
-  // Get status description
-  const getStatusDescription = useCallback((state: string): string => {
-    switch (state) {
-      case 'submitted':
-        return 'Package submitted and ready for pickup';
-      case 'in_transit':
-        return 'Package is being transported to destination';
-      case 'delivered':
-        return 'Package delivered to destination area';
-      case 'collected':
-        return 'Package collected by recipient';
-      case 'rejected':
-        return 'Package delivery was rejected or failed';
-      default:
-        return state.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+  // Load package details and QR code
+  const loadPackageData = useCallback(async () => {
+    if (!packageCode) {
+      setError('Package code is required');
+      setIsLoading(false);
+      return;
     }
-  }, []);
+
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      console.log('📦 Loading package details for:', packageCode);
+      
+      // Load package details - getPackageDetails returns Package directly, not wrapped
+      const packageData = await getPackageDetails(packageCode);
+      setPackage(packageData);
+      
+      // Create timeline from package data
+      const timelineData = createTimelineFromPackage(packageData);
+      setTimeline(timelineData);
+      
+      // Load QR code
+      setIsLoadingQR(true);
+      try {
+        const qrResponse = await getPackageQRCode(packageCode);
+        setQrData(qrResponse.data);
+        console.log('✅ QR code loaded for package:', packageCode);
+      } catch (qrError) {
+        console.warn('⚠️ Failed to load QR code:', qrError);
+        // Create fallback QR data
+        setQrData({
+          qr_code_base64: null,
+          tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+          package_code: packageCode,
+          package_state: packageData.state,
+          route_description: packageData.route_description
+        });
+      } finally {
+        setIsLoadingQR(false);
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load package data:', error);
+      setError(error.message);
+      
+      Toast.show({
+        type: 'errorToast',
+        text1: 'Failed to Load Package',
+        text2: error.message,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } finally {
+      setIsLoading(false);
+    }
+  }, [packageCode, createTimelineFromPackage]);
 
   // Get state badge color
   const getStateBadgeColor = useCallback((state: string) => {
@@ -216,8 +216,17 @@ export default function PackageTracking() {
 
   // Load data when component mounts
   useEffect(() => {
-    loadPackageData();
-  }, [loadPackageData]);
+    if (packageCode) {
+      loadPackageData().catch((error) => {
+        console.error('Failed to load package data in useEffect:', error);
+        setError(error.message || 'Failed to load package data');
+        setIsLoading(false);
+      });
+    } else {
+      setError('Package code is required');
+      setIsLoading(false);
+    }
+  }, [loadPackageData, packageCode]);
 
   // Render timeline item
   const renderTimelineItem = useCallback(({ item, index }: { item: TimelineEvent; index: number }) => (
@@ -237,7 +246,7 @@ export default function PackageTracking() {
       
       <View style={styles.timelineContent}>
         <Text style={[
-          styles.timelineTitle,
+          styles.timelineDescription,
           { color: item.active ? '#fff' : '#888' }
         ]}>
           {item.description}
@@ -453,7 +462,8 @@ export default function PackageTracking() {
                 <View style={styles.detailItem}>
                   <Text style={styles.detailItemLabel}>Origin Area</Text>
                   <Text style={styles.detailItemValue}>
-                    {package_.origin_area.name}, {package_.origin_area.location?.name}
+                    {package_.origin_area.name}
+                    {package_.origin_area.location?.name && `, ${package_.origin_area.location.name}`}
                   </Text>
                 </View>
               )}
@@ -462,7 +472,8 @@ export default function PackageTracking() {
                 <View style={styles.detailItem}>
                   <Text style={styles.detailItemLabel}>Destination Area</Text>
                   <Text style={styles.detailItemValue}>
-                    {package_.destination_area.name}, {package_.destination_area.location?.name}
+                    {package_.destination_area.name}
+                    {package_.destination_area.location?.name && `, ${package_.destination_area.location.name}`}
                   </Text>
                 </View>
               )}
@@ -788,7 +799,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingBottom: 16,
   },
-  timelineTitle: {
+  timelineDescription: {
     fontSize: 14,
     fontWeight: '500',
     marginBottom: 4,
