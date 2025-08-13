@@ -207,10 +207,12 @@ export default function PackageTracking() {
 
   // Navigation handlers
   const handleBack = useCallback(() => {
+    // Always try to go back to previous screen first
     if (router.canGoBack()) {
       router.back();
     } else {
-      router.push('/(drawer)/track');
+      // Only if no history exists, go to track listing
+      router.replace('/(drawer)/track');
     }
   }, [router]);
 
