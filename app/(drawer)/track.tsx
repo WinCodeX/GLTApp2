@@ -213,7 +213,8 @@ export default function Track() {
       pathname: '/(drawer)/track/tracking',
       params: { 
         packageCode: packageItem.code,
-        packageId: packageItem.id.toString()
+        packageId: packageItem.id.toString(),
+        from: '/(drawer)/track' // Pass current route for proper back navigation
       }
     });
   }, [router]);
