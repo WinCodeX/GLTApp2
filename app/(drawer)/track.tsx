@@ -25,6 +25,7 @@ import {
   type DrawerState
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
+import PackageCreationModal from '@/components/modals/PackageCreationModal';
 
 export default function Track() {
   const params = useLocalSearchParams();
@@ -45,6 +46,9 @@ export default function Track() {
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAnimation] = useState(new Animated.Value(0));
+  
+  // Modal state
+  const [showCreateModal, setShowCreateModal] = useState(false);
 
   // Memoized state display
   const stateDisplayInfo = useMemo(() => {
@@ -162,6 +166,21 @@ export default function Track() {
   const clearSearch = useCallback(() => {
     setSearchQuery('');
   }, []);
+
+  // Modal handlers
+  const handleOpenCreateModal = useCallback(() => {
+    setShowCreateModal(true);
+  }, []);
+
+  const handleCloseCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+  }, []);
+
+  const handlePackageCreated = useCallback(() => {
+    setShowCreateModal(false);
+    // Refresh packages list after creation
+    loadPackages(true);
+  }, [loadPackages]);
 
   // Load packages based on selected status
   const loadPackages = useCallback(async (isRefresh = false) => {
@@ -486,14 +505,14 @@ export default function Track() {
         </Text>
         
         {!searchQuery && (
-          <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/')}>
+          <TouchableOpacity style={styles.emptyStateButton} onPress={handleOpenCreateModal}>
             <Feather name="plus" size={20} color="#fff" />
             <Text style={styles.emptyStateButtonText}>Create Package</Text>
           </TouchableOpacity>
         )}
       </LinearGradient>
     </View>
-  ), [stateDisplayInfo, selectedStatus, searchQuery, router]);
+  ), [stateDisplayInfo, selectedStatus, searchQuery, handleOpenCreateModal]);
 
   // Render error state
   const renderErrorState = useCallback(() => (
@@ -659,6 +678,13 @@ export default function Track() {
           </View>
         </ScrollView>
       )}
+      
+      {/* Package Creation Modal */}
+      <PackageCreationModal
+        visible={showCreateModal}
+        onClose={handleCloseCreateModal}
+        onPackageCreated={handlePackageCreated}
+      />
     </View>
   );
 }
