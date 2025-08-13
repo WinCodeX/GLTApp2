@@ -1,4 +1,4 @@
-// components/QRScanner.tsx
+// components/QRScanner.tsx - Updated to use expo-camera CameraView
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -13,8 +13,7 @@ import {
   Dimensions,
   SafeAreaView,
 } from 'react-native';
-import { BarCodeScanner } from 'expo-barcode-scanner';
-import { Camera } from 'expo-camera';
+import { CameraView, Camera } from 'expo-camera/next';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -76,7 +75,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const [showActionModal, setShowActionModal] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
-  const scannerRef = useRef<any>(null);
+  const cameraRef = useRef<CameraView>(null);
 
   // Request camera permissions
   useEffect(() => {
@@ -99,7 +98,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setHasPermission(status === 'granted');
   };
 
-  const handleBarCodeScanned = async ({ type, data }: { type: string; data: string }) => {
+  const handleBarcodeScanned = async ({ type, data }: { type: string; data: string }) => {
     if (scanned) return;
     
     setScanned(true);
@@ -314,14 +313,17 @@ const QRScanner: React.FC<QRScannerProps> = ({
           </TouchableOpacity>
         </View>
 
-        {/* Scanner */}
+        {/* Camera Scanner */}
         <View style={styles.scannerContainer}>
-          <BarCodeScanner
-            ref={scannerRef}
-            onBarCodeScanned={scanned ? undefined : handleBarCodeScanned}
-            style={styles.scanner}
-            flashMode={flashEnabled ? 'torch' : 'off'}
-            barCodeTypes={[BarCodeScanner.Constants.BarCodeType.qr]}
+          <CameraView
+            ref={cameraRef}
+            style={styles.camera}
+            facing="back"
+            flash={flashEnabled ? 'on' : 'off'}
+            barcodeScannerSettings={{
+              barcodeTypes: ['qr'],
+            }}
+            onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
           />
           
           {/* Scanner Overlay */}
@@ -331,7 +333,15 @@ const QRScanner: React.FC<QRScannerProps> = ({
               <View style={[styles.corner, styles.topRight]} />
               <View style={[styles.corner, styles.bottomLeft]} />
               <View style={[styles.corner, styles.bottomRight]} />
+              
+              {/* Scanning line animation */}
+              <View style={styles.scanLine} />
             </View>
+            
+            {/* Scan instruction */}
+            <Text style={styles.scanInstruction}>
+              Position QR code within the frame
+            </Text>
           </View>
 
           {/* Loading Indicator */}
@@ -491,7 +501,7 @@ const styles = StyleSheet.create({
     flex: 1,
     position: 'relative',
   },
-  scanner: {
+  camera: {
     flex: 1,
   },
   overlay: {
@@ -504,40 +514,64 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanArea: {
-    width: 250,
-    height: 250,
+    width: 280,
+    height: 280,
     position: 'relative',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   corner: {
     position: 'absolute',
-    width: 20,
-    height: 20,
-    borderColor: '#fff',
-    borderWidth: 3,
+    width: 30,
+    height: 30,
+    borderColor: '#00FF00',
+    borderWidth: 4,
   },
   topLeft: {
     top: 0,
     left: 0,
     borderRightWidth: 0,
     borderBottomWidth: 0,
+    borderTopLeftRadius: 8,
   },
   topRight: {
     top: 0,
     right: 0,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
+    borderTopRightRadius: 8,
   },
   bottomLeft: {
     bottom: 0,
     left: 0,
     borderRightWidth: 0,
     borderTopWidth: 0,
+    borderBottomLeftRadius: 8,
   },
   bottomRight: {
     bottom: 0,
     right: 0,
     borderLeftWidth: 0,
     borderTopWidth: 0,
+    borderBottomRightRadius: 8,
+  },
+  scanLine: {
+    position: 'absolute',
+    left: 30,
+    right: 30,
+    height: 2,
+    backgroundColor: '#00FF00',
+    opacity: 0.8,
+  },
+  scanInstruction: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 40,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    borderRadius: 20,
   },
   loadingOverlay: {
     position: 'absolute',
