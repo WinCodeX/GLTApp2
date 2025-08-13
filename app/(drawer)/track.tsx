@@ -222,6 +222,7 @@ export default function Track() {
 
     return groups;
   }, []);
+  
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
       case 'pending_unpaid': return '#f59e0b';
@@ -286,10 +287,22 @@ export default function Track() {
     });
   }, [router]);
 
+  // Get receiver name display - handle various possible field names
+  const getReceiverName = useCallback((packageItem: Package) => {
+    // Try different possible field names for receiver
+    return packageItem.receiver_name || 
+           packageItem.recipient_name || 
+           packageItem.receiver?.name ||
+           packageItem.recipient?.name ||
+           packageItem.to_name ||
+           'Unknown Recipient';
+  }, []);
+
   // Render package item with updated layout
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
+    const receiverName = getReceiverName(item);
     
     return (
       <View style={styles.packageCard}>
@@ -315,7 +328,16 @@ export default function Track() {
             </View>
           </View>
 
-          {/* Cost Section Only */}
+          {/* Receiver Section */}
+          <View style={styles.receiverSection}>
+            <View style={styles.receiverHeader}>
+              <Feather name="user" size={14} color="#888" />
+              <Text style={styles.receiverLabel}>Receiver</Text>
+            </View>
+            <Text style={styles.receiverName}>{receiverName}</Text>
+          </View>
+
+          {/* Cost Section */}
           <View style={styles.costSection}>
             <Text style={styles.costLabel}>Cost</Text>
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
@@ -379,7 +401,7 @@ export default function Track() {
         </LinearGradient>
       </View>
     );
-  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking]);
+  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking, getReceiverName]);
 
   // Render empty state
   const renderEmptyState = useCallback(() => (
@@ -801,6 +823,31 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     color: '#fff',
+  },
+  
+  // Receiver section - NEW
+  receiverSection: {
+    marginBottom: 12,
+    paddingBottom: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  receiverHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+    gap: 4,
+  },
+  receiverLabel: {
+    fontSize: 11,
+    color: '#888',
+    fontWeight: '500',
+  },
+  receiverName: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+    marginLeft: 18, // Align with icon + gap
   },
   
   // Cost section
