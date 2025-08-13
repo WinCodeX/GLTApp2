@@ -330,11 +330,7 @@ export default function Track() {
 
           {/* Receiver Section */}
           <View style={styles.receiverSection}>
-            <View style={styles.receiverHeader}>
-              <Feather name="user" size={14} color="#888" />
-              <Text style={styles.receiverLabel}>Receiver</Text>
-            </View>
-            <Text style={styles.receiverName}>{receiverName}</Text>
+            <Text style={styles.receiverText}>To: {receiverName}</Text>
           </View>
 
           {/* Cost Section */}
@@ -827,27 +823,12 @@ const styles = StyleSheet.create({
   
   // Receiver section - NEW
   receiverSection: {
-    marginBottom: 12,
-    paddingBottom: 8,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+    marginBottom: 8,
   },
-  receiverHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-    gap: 4,
-  },
-  receiverLabel: {
-    fontSize: 11,
-    color: '#888',
-    fontWeight: '500',
-  },
-  receiverName: {
+  receiverText: {
     fontSize: 14,
     color: '#fff',
     fontWeight: '600',
-    marginLeft: 18, // Align with icon + gap
   },
   
   // Cost section
