@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Updated with Scanning route
+// components/AdminLayout.tsx - Fixed with Dashboard text removed and scanning navigation
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -50,7 +50,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     ? { uri: user.avatar_url }
     : require('../assets/images/avatar_placeholder.png');
 
-  // ✅ Updated bottom tabs with scanning route
+  // ✅ Bottom tabs with correct scanning route
   const bottomTabs: BottomTab[] = [
     { 
       id: 'home', 
@@ -64,7 +64,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       icon: 'qr-code-outline' as IoniconsName, 
       activeIcon: 'qr-code' as IoniconsName, 
       label: 'Scan', 
-      route: '/admin/ScanningScreen' // Updated to point to ScanningScreen
+      route: '/admin/ScanningScreen'
     },
     { 
       id: 'packages', 
@@ -110,7 +110,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const toggleSidebar = (): void => setSidebarVisible(!sidebarVisible);
   const closeSidebar = (): void => setSidebarVisible(false);
 
-  // ✅ Updated navigation handler with scanning route
+  // ✅ Updated navigation handler with proper scanning navigation
   const handleTabPress = (tabId: string): void => {
     try {
       const tab = bottomTabs.find(t => t.id === tabId);
@@ -127,39 +127,39 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // Updated navigation logic with scanning route
+      // Updated navigation logic with proper scanning route
       switch (tabId) {
         case 'profile':
           console.log('🚀 Navigating to admin account');
           router.push('/admin/account');
           break;
         case 'home':
-          router.replace('/admin');
+          router.push('/admin');
           break;
         case 'scan':
           console.log('🚀 Navigating to scanning screen');
-          router.replace('/admin/ScanningScreen');
+          router.push('/admin/ScanningScreen');
           break;
         case 'packages':
-          router.replace('/admin/packages');
+          router.push('/admin/packages');
           break;
         case 'settings':
-          router.replace('/admin/settings');
+          router.push('/admin/settings');
           break;
         default:
           console.warn(`Unknown tab id: ${tabId}`);
-          router.replace('/admin');
+          router.push('/admin');
           break;
       }
       
     } catch (error) {
       console.error('Navigation error:', error);
       // Fallback to admin home
-      router.replace('/admin');
+      router.push('/admin');
     }
   };
 
-  // ✅ Navigation debug logging with scanning route
+  // ✅ Navigation debug logging
   useEffect(() => {
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
@@ -223,11 +223,29 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
+  // ✅ Get screen title without Dashboard fallback
+  const getScreenTitle = (): string => {
+    switch (pathname) {
+      case '/admin/ScanningScreen':
+        return 'Package Scanning';
+      case '/admin/packages':
+        return 'Package Management';
+      case '/admin/settings':
+        return 'Settings';
+      case '/admin/account':
+        return 'Account';
+      case '/admin':
+        return 'Home';
+      default:
+        return 'Admin'; // Removed "Dashboard" - now shows "Admin"
+    }
+  };
+
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Header with dynamic title based on current screen */}
+        {/* ✅ Header with clean title without Dashboard */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -248,13 +266,9 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              {/* Dynamic title based on current screen */}
+              {/* ✅ Clean title without Dashboard text */}
               <Text style={styles.panelTitle}>
-                {pathname === '/admin/ScanningScreen' ? 'Package Scanning' :
-                 pathname === '/admin/packages' ? 'Package Management' :
-                 pathname === '/admin/settings' ? 'Settings' :
-                 pathname === '/admin/account' ? 'Account' :
-                 'Dashboard'}
+                {getScreenTitle()}
               </Text>
             </View>
           </View>
@@ -543,7 +557,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: 'center',
   },
-  // ✅ New styles for scanning indicator
+  // ✅ Scanning indicator styles
   scanningBadge: {
     position: 'absolute',
     top: -2,
