@@ -64,7 +64,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       icon: 'qr-code-outline' as IoniconsName, 
       activeIcon: 'qr-code' as IoniconsName, 
       label: 'Scan', 
-      route: '/admin/scanning' // Updated to point to ScanningScreen
+      route: '/admin/ScanningScreen' // Updated to point to ScanningScreen
     },
     { 
       id: 'packages', 
@@ -97,7 +97,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
     
     // Special handling for scanning route
-    if (pathname === '/admin/scanning') {
+    if (pathname === '/admin/ScanningScreen') {
       return 'scan';
     }
     
@@ -138,7 +138,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           break;
         case 'scan':
           console.log('🚀 Navigating to scanning screen');
-          router.replace('/admin/scanning');
+          router.replace('/admin/ScanningScreen');
           break;
         case 'packages':
           router.replace('/admin/packages');
@@ -166,7 +166,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     console.log('Available tabs:', bottomTabs.map(t => `${t.id}: ${t.route}`));
     
     // Special logging for scanning route
-    if (pathname === '/admin/scanning') {
+    if (pathname === '/admin/ScanningScreen') {
       console.log('📱 Currently on Scanning Screen');
     }
   }, [pathname, activeTab]);
@@ -186,7 +186,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const shouldShowBottomTabs = (): boolean => {
     const adminRoutes = [
       '/admin',
-      '/admin/scanning',
+      '/admin/ScanningScreen',
       '/admin/packages', 
       '/admin/settings',
       '/admin/account'
@@ -196,7 +196,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   // ✅ Enhanced FAB visibility logic
   const shouldShowFAB = (): boolean => {
-    const fabRoutes = ['/admin', '/admin/scanning', '/admin/packages', '/admin/settings'];
+    const fabRoutes = ['/admin', '/admin/ScanningScreen', '/admin/packages', '/admin/settings'];
     return fabRoutes.includes(pathname || '') || false;
   };
 
@@ -205,7 +205,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     console.log('FAB pressed on route:', pathname);
     
     switch (pathname) {
-      case '/admin/scanning':
+      case '/admin/ScanningScreen':
         // On scanning screen, FAB could open quick scan or bulk scan
         console.log('🚀 Opening quick scan from FAB');
         // You can trigger a callback or navigate to a specific scan mode
@@ -250,7 +250,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               </View>
               {/* Dynamic title based on current screen */}
               <Text style={styles.panelTitle}>
-                {pathname === '/admin/scanning' ? 'Package Scanning' :
+                {pathname === '/admin/ScanningScreen' ? 'Package Scanning' :
                  pathname === '/admin/packages' ? 'Package Management' :
                  pathname === '/admin/settings' ? 'Settings' :
                  pathname === '/admin/account' ? 'Account' :
@@ -260,7 +260,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           </View>
 
           {/* Center - Search (hide on scanning screen to give more space) */}
-          {pathname !== '/admin/scanning' && (
+          {pathname !== '/admin/ScanningScreen' && (
             <View style={styles.searchContainer}>
               <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
               <TextInput
@@ -377,7 +377,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           style={styles.fab}
           onPress={handleFABPress}
           accessibilityLabel={
-            pathname === '/admin/scanning' ? 'Quick scan' :
+            pathname === '/admin/ScanningScreen' ? 'Quick scan' :
             pathname === '/admin/packages' ? 'Add new package' :
             'Quick actions'
           }
@@ -389,7 +389,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           >
             <Ionicons 
               name={
-                pathname === '/admin/scanning' ? 'qr-code' :
+                pathname === '/admin/ScanningScreen' ? 'qr-code' :
                 pathname === '/admin/packages' ? 'add' :
                 'add'
               } 
