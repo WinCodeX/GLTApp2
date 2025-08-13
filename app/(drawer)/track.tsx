@@ -10,6 +10,8 @@ import {
   RefreshControl,
   StatusBar,
   Platform,
+  TextInput,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -34,9 +36,15 @@ export default function Track() {
   
   // State management
   const [packages, setPackages] = useState<Package[]>([]);
+  const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Search state
+  const [searchVisible, setSearchVisible] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchAnimation] = useState(new Animated.Value(0));
 
   // Memoized state display
   const stateDisplayInfo = useMemo(() => {
@@ -96,6 +104,64 @@ export default function Track() {
 
     return statusConfig[selectedStatus] || statusConfig['pending'];
   }, [selectedStatus]);
+
+  // Search functionality
+  const filterPackages = useCallback((packages: Package[], query: string) => {
+    if (!query.trim()) {
+      return packages;
+    }
+
+    const lowercaseQuery = query.toLowerCase().trim();
+    
+    return packages.filter(pkg => {
+      // Get receiver name
+      const receiverName = (pkg.receiver_name || 
+                           pkg.recipient_name || 
+                           pkg.receiver?.name ||
+                           pkg.recipient?.name ||
+                           pkg.to_name || '').toLowerCase();
+      
+      // Get route/location info
+      const routeDescription = (pkg.route_description || '').toLowerCase();
+      const fromLocation = (pkg.from_location || '').toLowerCase();
+      const toLocation = (pkg.to_location || '').toLowerCase();
+      const packageCode = (pkg.code || '').toLowerCase();
+      
+      // Search in multiple fields
+      return receiverName.includes(lowercaseQuery) ||
+             routeDescription.includes(lowercaseQuery) ||
+             fromLocation.includes(lowercaseQuery) ||
+             toLocation.includes(lowercaseQuery) ||
+             packageCode.includes(lowercaseQuery);
+    });
+  }, []);
+
+  // Update filtered packages when search query or packages change
+  useEffect(() => {
+    const filtered = filterPackages(packages, searchQuery);
+    setFilteredPackages(filtered);
+  }, [packages, searchQuery, filterPackages]);
+
+  // Toggle search functionality
+  const toggleSearch = useCallback(() => {
+    const newVisible = !searchVisible;
+    setSearchVisible(newVisible);
+    
+    Animated.timing(searchAnimation, {
+      toValue: newVisible ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+
+    if (!newVisible) {
+      setSearchQuery('');
+    }
+  }, [searchVisible, searchAnimation]);
+
+  // Clear search
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
 
   // Load packages based on selected status
   const loadPackages = useCallback(async (isRefresh = false) => {
@@ -408,22 +474,26 @@ export default function Track() {
       >
         <Feather name={stateDisplayInfo.icon} size={64} color="#666" />
         <Text style={styles.emptyStateTitle}>
-          No {stateDisplayInfo.title} Found
+          {searchQuery ? 'No Matching Packages' : `No ${stateDisplayInfo.title} Found`}
         </Text>
         <Text style={styles.emptyStateSubtitle}>
-          {selectedStatus 
-            ? `You don't have any packages in "${stateDisplayInfo.title.toLowerCase()}" state.`
-            : 'You haven\'t created any packages yet.'
+          {searchQuery 
+            ? `No packages found matching "${searchQuery}". Try a different search term.`
+            : selectedStatus 
+              ? `You don't have any packages in "${stateDisplayInfo.title.toLowerCase()}" state.`
+              : 'You haven\'t created any packages yet.'
           }
         </Text>
         
-        <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/')}>
-          <Feather name="plus" size={20} color="#fff" />
-          <Text style={styles.emptyStateButtonText}>Create Package</Text>
-        </TouchableOpacity>
+        {!searchQuery && (
+          <TouchableOpacity style={styles.emptyStateButton} onPress={() => router.push('/')}>
+            <Feather name="plus" size={20} color="#fff" />
+            <Text style={styles.emptyStateButtonText}>Create Package</Text>
+          </TouchableOpacity>
+        )}
       </LinearGradient>
     </View>
-  ), [stateDisplayInfo, selectedStatus, router]);
+  ), [stateDisplayInfo, selectedStatus, searchQuery, router]);
 
   // Render error state
   const renderErrorState = useCallback(() => (
@@ -443,6 +513,9 @@ export default function Track() {
       </LinearGradient>
     </View>
   ), [error, loadPackages]);
+
+  // Use filtered packages for display
+  const displayPackages = filteredPackages;
 
   // Main render
   return (
@@ -476,14 +549,52 @@ export default function Track() {
               </View>
             </View>
             
+            {/* Search Button */}
+            <TouchableOpacity style={styles.searchButton} onPress={toggleSearch}>
+              <Feather name="search" size={20} color="#fff" />
+            </TouchableOpacity>
+            
             {/* Package Count */}
-            {packages.length > 0 && (
+            {displayPackages.length > 0 && (
               <View style={styles.packageCount}>
-                <Text style={styles.packageCountText}>{packages.length}</Text>
+                <Text style={styles.packageCountText}>{displayPackages.length}</Text>
               </View>
             )}
           </View>
         </LinearGradient>
+        
+        {/* Search Input Dropdown */}
+        <Animated.View style={[
+          styles.searchContainer,
+          {
+            maxHeight: searchAnimation.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 60],
+            }),
+            opacity: searchAnimation,
+          }
+        ]}>
+          <LinearGradient
+            colors={['rgba(22, 33, 62, 0.95)', 'rgba(26, 26, 46, 0.95)']}
+            style={styles.searchInputContainer}
+          >
+            <Feather name="search" size={18} color="#888" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by receiver, location, or package code..."
+              placeholderTextColor="#888"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                <Feather name="x" size={18} color="#888" />
+              </TouchableOpacity>
+            )}
+          </LinearGradient>
+        </Animated.View>
       </View>
 
       {/* Content */}
@@ -494,7 +605,7 @@ export default function Track() {
         </View>
       ) : error ? (
         renderErrorState()
-      ) : packages.length === 0 ? (
+      ) : displayPackages.length === 0 ? (
         renderEmptyState()
       ) : (
         <ScrollView
@@ -510,9 +621,18 @@ export default function Track() {
             />
           }
         >
+          {/* Search Results Info */}
+          {searchQuery && (
+            <View style={styles.searchResultsInfo}>
+              <Text style={styles.searchResultsText}>
+                Found {displayPackages.length} package{displayPackages.length !== 1 ? 's' : ''} matching "{searchQuery}"
+              </Text>
+            </View>
+          )}
+          
           {/* Render Grouped Packages */}
           {(() => {
-            const groupedPackages = groupPackagesByDate(packages);
+            const groupedPackages = groupPackagesByDate(displayPackages);
             return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
               <View key={dateGroup} style={styles.dateGroup}>
                 {/* Date Group Header */}
@@ -534,7 +654,7 @@ export default function Track() {
           {/* Load more indicator if needed */}
           <View style={styles.listFooter}>
             <Text style={styles.listFooterText}>
-              Showing {packages.length} packages
+              Showing {displayPackages.length} packages
             </Text>
           </View>
         </ScrollView>
@@ -601,6 +721,15 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#888',
   },
+  searchButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 8,
+  },
   packageCount: {
     backgroundColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 14,
@@ -615,6 +744,42 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: colors.primary,
+  },
+  
+  // Search functionality styles
+  searchContainer: {
+    overflow: 'hidden',
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  searchIcon: {
+    marginRight: 12,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 8,
+  },
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  searchResultsInfo: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  searchResultsText: {
+    fontSize: 14,
+    color: '#888',
+    fontStyle: 'italic',
   },
   
   // Loading states
@@ -821,7 +986,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // Receiver section - NEW
+  // Receiver section
   receiverSection: {
     marginBottom: 8,
   },
