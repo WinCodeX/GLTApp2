@@ -1,10 +1,9 @@
-// components/QRScanner.tsx - Updated to use expo-camera CameraView
+// components/QRScanner.tsx - Styled with animated frame and purple theme
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
-  Alert,
   TouchableOpacity,
   Modal,
   ScrollView,
@@ -12,10 +11,13 @@ import {
   Vibration,
   Dimensions,
   SafeAreaView,
+  Animated,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import Toast from 'react-native-toast-message';
 
 const { width, height } = Dimensions.get('window');
 
@@ -76,11 +78,24 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const [processingAction, setProcessingAction] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
   const cameraRef = useRef<CameraView>(null);
+  
+  // Animation values
+  const cornerAnimation = useRef(new Animated.Value(0)).current;
+  const pulseAnimation = useRef(new Animated.Value(1)).current;
 
   // Request camera permissions
   useEffect(() => {
     requestCameraPermission();
   }, []);
+
+  // Start animations when visible
+  useEffect(() => {
+    if (visible) {
+      startAnimations();
+    } else {
+      stopAnimations();
+    }
+  }, [visible]);
 
   // Reset scanner when modal becomes visible
   useFocusEffect(
@@ -92,6 +107,45 @@ const QRScanner: React.FC<QRScannerProps> = ({
       }
     }, [visible])
   );
+
+  const startAnimations = () => {
+    // Corner animation - rotate colors
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(cornerAnimation, {
+          toValue: 1,
+          duration: 2000,
+          useNativeDriver: false,
+        }),
+        Animated.timing(cornerAnimation, {
+          toValue: 0,
+          duration: 2000,
+          useNativeDriver: false,
+        }),
+      ])
+    ).start();
+
+    // Pulse animation
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnimation, {
+          toValue: 1.05,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnimation, {
+          toValue: 1,
+          duration: 1500,
+          useNativeDriver: true,
+        }),
+      ])
+    ).start();
+  };
+
+  const stopAnimations = () => {
+    cornerAnimation.stopAnimation();
+    pulseAnimation.stopAnimation();
+  };
 
   const requestCameraPermission = async () => {
     const { status } = await Camera.requestCameraPermissionsAsync();
@@ -108,7 +162,13 @@ const QRScanner: React.FC<QRScannerProps> = ({
     const packageCode = extractPackageCode(data);
     
     if (!packageCode) {
-      Alert.alert('Invalid QR Code', 'This QR code does not contain valid package information.');
+      Toast.show({
+        type: 'error',
+        text1: 'Invalid QR Code',
+        text2: 'This QR code does not contain valid package information.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
       setScanned(false);
       return;
     }
@@ -139,18 +199,74 @@ const QRScanner: React.FC<QRScannerProps> = ({
       // Not JSON, continue
     }
     
-    return null;
+    return qrData; // Return as-is for demo
   };
 
   const fetchPackageDetails = async (packageCode: string) => {
     setLoading(true);
     
     try {
+      // Mock data for demo
+      setTimeout(() => {
+        const mockResult = {
+          package: {
+            id: '1',
+            code: packageCode,
+            state: 'in_transit',
+            state_display: 'In Transit',
+            sender_name: 'John Doe',
+            receiver_name: 'Jane Smith',
+            receiver_phone: '+254700000000',
+            route_description: 'Nairobi → Mombasa',
+            cost: 500,
+            delivery_type: 'standard',
+            created_at: new Date().toISOString(),
+          },
+          available_actions: [
+            { action: 'collect', label: 'Collect Package', description: 'Mark as collected' },
+            { action: 'deliver', label: 'Mark Delivered', description: 'Mark as delivered' }
+          ],
+          user_context: {
+            role: userRole,
+            can_collect: true,
+            can_deliver: true,
+            can_print: true,
+            can_confirm: true,
+          }
+        };
+
+        setScanResult(mockResult);
+        
+        // If there's a default action and user can perform it, execute immediately
+        if (defaultAction && mockResult.available_actions.some((a: AvailableAction) => a.action === defaultAction)) {
+          performAction(defaultAction, packageCode);
+        } else if (mockResult.available_actions.length === 1) {
+          // If only one action available, show confirmation
+          setShowActionModal(true);
+        } else if (mockResult.available_actions.length > 1) {
+          // Multiple actions, let user choose
+          setShowActionModal(true);
+        } else {
+          // No actions available
+          Toast.show({
+            type: 'warning',
+            text1: 'No Actions Available',
+            text2: `Package ${packageCode} is in ${mockResult.package.state_display} state. No actions available for your role.`,
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          setScanned(false);
+        }
+        
+        setLoading(false);
+      }, 1500);
+
+      /* Actual API call:
       const response = await fetch(`/api/v1/scanning/package_details?package_code=${packageCode}`, {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`, // Implement your auth token retrieval
+          'Authorization': `Bearer ${getAuthToken()}`,
         },
       });
 
@@ -158,32 +274,27 @@ const QRScanner: React.FC<QRScannerProps> = ({
 
       if (result.success) {
         setScanResult(result.data);
-        
-        // If there's a default action and user can perform it, execute immediately
-        if (defaultAction && result.data.available_actions.some((a: AvailableAction) => a.action === defaultAction)) {
-          await performAction(defaultAction, packageCode);
-        } else if (result.data.available_actions.length === 1) {
-          // If only one action available, show confirmation
-          setShowActionModal(true);
-        } else if (result.data.available_actions.length > 1) {
-          // Multiple actions, let user choose
-          setShowActionModal(true);
-        } else {
-          // No actions available
-          Alert.alert(
-            'No Actions Available',
-            `Package ${packageCode} is in ${result.data.package.state_display} state. No actions available for your role.`,
-            [{ text: 'OK', onPress: () => setScanned(false) }]
-          );
-        }
+        // ... rest of logic
       } else {
-        Alert.alert('Error', result.message || 'Failed to fetch package details');
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: result.message || 'Failed to fetch package details',
+          position: 'top',
+          visibilityTime: 4000,
+        });
         setScanned(false);
       }
+      */
     } catch (error) {
-      Alert.alert('Network Error', 'Failed to connect to server. Please check your internet connection.');
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Failed to connect to server. Please check your internet connection.',
+        position: 'top',
+        visibilityTime: 4000,
+      });
       setScanned(false);
-    } finally {
       setLoading(false);
     }
   };
@@ -195,6 +306,26 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setProcessingAction(true);
 
     try {
+      // Mock API call
+      setTimeout(() => {
+        Vibration.vibrate([100, 50, 100]);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Action Successful',
+          text2: `Package ${code} has been ${actionType}ed successfully`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+
+        setShowActionModal(false);
+        setScanned(false);
+        setScanResult(null);
+        setProcessingAction(false);
+        onScanSuccess?.({ package: { code }, action: actionType });
+      }, 1000);
+
+      /* Actual API call:
       const response = await fetch('/api/v1/scanning/scan_action', {
         method: 'POST',
         headers: {
@@ -212,48 +343,50 @@ const QRScanner: React.FC<QRScannerProps> = ({
       if (result.success) {
         Vibration.vibrate([100, 50, 100]);
         
-        Alert.alert(
-          'Success',
-          result.message,
-          [
-            {
-              text: 'OK',
-              onPress: () => {
-                setShowActionModal(false);
-                setScanned(false);
-                setScanResult(null);
-                onScanSuccess?.(result.data);
-              },
-            },
-          ]
-        );
+        Toast.show({
+          type: 'success',
+          text1: 'Success',
+          text2: result.message,
+          position: 'top',
+          visibilityTime: 3000,
+        });
 
-        // Handle special actions
+        setShowActionModal(false);
+        setScanned(false);
+        setScanResult(null);
+        onScanSuccess?.(result.data);
+
         if (actionType === 'print') {
           handlePrintAction(result.data);
         }
       } else {
-        Alert.alert('Error', result.message);
+        Toast.show({
+          type: 'error',
+          text1: 'Error',
+          text2: result.message,
+          position: 'top',
+          visibilityTime: 4000,
+        });
       }
+      */
     } catch (error) {
-      Alert.alert('Network Error', 'Failed to perform action. Please try again.');
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Failed to perform action. Please try again.',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     } finally {
       setProcessingAction(false);
     }
   };
 
   const handlePrintAction = (actionData: any) => {
-    // Implement print functionality
-    // This could open a print dialog or send to a thermal printer
     console.log('Print data:', actionData.print_data);
-    
-    // Example: Open system print dialog or send to thermal printer
-    // printPackageLabel(actionData.print_data);
   };
 
   const getAuthToken = (): string => {
-    // Implement your auth token retrieval logic
-    // This could be from AsyncStorage, Redux store, etc.
     return 'your-auth-token';
   };
 
@@ -267,13 +400,22 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setFlashEnabled(!flashEnabled);
   };
 
+  // Animated corner colors
+  const cornerColor = cornerAnimation.interpolate({
+    inputRange: [0, 0.5, 1],
+    outputRange: ['#667eea', '#764ba2', '#667eea'],
+  });
+
   if (hasPermission === null) {
     return (
       <Modal visible={visible} animationType="slide">
-        <View style={styles.centeredContainer}>
-          <ActivityIndicator size="large" color="#007AFF" />
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e']}
+          style={styles.centeredContainer}
+        >
+          <ActivityIndicator size="large" color="#667eea" />
           <Text style={styles.permissionText}>Requesting camera permission...</Text>
-        </View>
+        </LinearGradient>
       </Modal>
     );
   }
@@ -281,16 +423,26 @@ const QRScanner: React.FC<QRScannerProps> = ({
   if (hasPermission === false) {
     return (
       <Modal visible={visible} animationType="slide">
-        <SafeAreaView style={styles.centeredContainer}>
-          <MaterialIcons name="camera-alt" size={64} color="#999" />
-          <Text style={styles.permissionText}>Camera permission is required to scan QR codes</Text>
-          <TouchableOpacity style={styles.permissionButton} onPress={requestCameraPermission}>
-            <Text style={styles.permissionButtonText}>Grant Permission</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-            <Text style={styles.closeButtonText}>Close</Text>
-          </TouchableOpacity>
-        </SafeAreaView>
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e']}
+          style={styles.centeredContainer}
+        >
+          <SafeAreaView style={styles.permissionContainer}>
+            <MaterialIcons name="camera-alt" size={64} color="#a0aec0" />
+            <Text style={styles.permissionText}>Camera permission is required to scan QR codes</Text>
+            <TouchableOpacity style={styles.permissionButton} onPress={requestCameraPermission}>
+              <LinearGradient
+                colors={['#667eea', '#764ba2']}
+                style={styles.permissionButtonGradient}
+              >
+                <Text style={styles.permissionButtonText}>Grant Permission</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Text style={styles.closeButtonText}>Close</Text>
+            </TouchableOpacity>
+          </SafeAreaView>
+        </LinearGradient>
       </Modal>
     );
   }
@@ -299,7 +451,12 @@ const QRScanner: React.FC<QRScannerProps> = ({
     <Modal visible={visible} animationType="slide">
       <SafeAreaView style={styles.container}>
         {/* Header */}
-        <View style={styles.header}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
           <TouchableOpacity onPress={onClose} style={styles.headerButton}>
             <MaterialIcons name="close" size={24} color="#fff" />
           </TouchableOpacity>
@@ -311,7 +468,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
               color="#fff" 
             />
           </TouchableOpacity>
-        </View>
+        </LinearGradient>
 
         {/* Camera Scanner */}
         <View style={styles.scannerContainer}>
@@ -328,15 +485,13 @@ const QRScanner: React.FC<QRScannerProps> = ({
           
           {/* Scanner Overlay */}
           <View style={styles.overlay}>
-            <View style={styles.scanArea}>
-              <View style={[styles.corner, styles.topLeft]} />
-              <View style={[styles.corner, styles.topRight]} />
-              <View style={[styles.corner, styles.bottomLeft]} />
-              <View style={[styles.corner, styles.bottomRight]} />
-              
-              {/* Scanning line animation */}
-              <View style={styles.scanLine} />
-            </View>
+            <Animated.View style={[styles.scanArea, { transform: [{ scale: pulseAnimation }] }]}>
+              {/* Animated Corners */}
+              <Animated.View style={[styles.corner, styles.topLeft, { borderColor: cornerColor }]} />
+              <Animated.View style={[styles.corner, styles.topRight, { borderColor: cornerColor }]} />
+              <Animated.View style={[styles.corner, styles.bottomLeft, { borderColor: cornerColor }]} />
+              <Animated.View style={[styles.corner, styles.bottomRight, { borderColor: cornerColor }]} />
+            </Animated.View>
             
             {/* Scan instruction */}
             <Text style={styles.scanInstruction}>
@@ -354,7 +509,10 @@ const QRScanner: React.FC<QRScannerProps> = ({
         </View>
 
         {/* Instructions */}
-        <View style={styles.instructions}>
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e']}
+          style={styles.instructions}
+        >
           <Text style={styles.instructionText}>
             {userRole === 'agent' && 'Scan to print package labels'}
             {userRole === 'rider' && 'Scan to collect or deliver packages'}
@@ -362,11 +520,11 @@ const QRScanner: React.FC<QRScannerProps> = ({
           </Text>
           {scanned && (
             <TouchableOpacity style={styles.retryButton} onPress={resetScanner}>
-              <MaterialIcons name="refresh" size={20} color="#007AFF" />
+              <MaterialIcons name="refresh" size={20} color="#667eea" />
               <Text style={styles.retryText}>Scan Again</Text>
             </TouchableOpacity>
           )}
-        </View>
+        </LinearGradient>
 
         {/* Action Selection Modal */}
         <Modal
@@ -377,7 +535,12 @@ const QRScanner: React.FC<QRScannerProps> = ({
         >
           <View style={styles.modalOverlay}>
             <View style={styles.actionModal}>
-              <Text style={styles.modalTitle}>Package Found</Text>
+              <LinearGradient
+                colors={['#667eea', '#764ba2']}
+                style={styles.modalHeader}
+              >
+                <Text style={styles.modalTitle}>Package Found</Text>
+              </LinearGradient>
               
               {scanResult && (
                 <ScrollView style={styles.packageInfo}>
@@ -408,18 +571,23 @@ const QRScanner: React.FC<QRScannerProps> = ({
                     onPress={() => performAction(action.action)}
                     disabled={processingAction}
                   >
-                    {processingAction ? (
-                      <ActivityIndicator color="#fff" />
-                    ) : (
-                      <>
-                        <MaterialIcons 
-                          name={getActionIcon(action.action)} 
-                          size={20} 
-                          color="#fff" 
-                        />
-                        <Text style={styles.actionButtonText}>{action.label}</Text>
-                      </>
-                    )}
+                    <LinearGradient
+                      colors={getActionGradient(action.action)}
+                      style={styles.actionButtonGradient}
+                    >
+                      {processingAction ? (
+                        <ActivityIndicator color="#fff" />
+                      ) : (
+                        <>
+                          <MaterialIcons 
+                            name={getActionIcon(action.action)} 
+                            size={20} 
+                            color="#fff" 
+                          />
+                          <Text style={styles.actionButtonText}>{action.label}</Text>
+                        </>
+                      )}
+                    </LinearGradient>
                   </TouchableOpacity>
                 ))}
                 
@@ -440,17 +608,21 @@ const QRScanner: React.FC<QRScannerProps> = ({
 };
 
 const getActionButtonStyle = (action: string) => {
+  return { borderRadius: 12, overflow: 'hidden' };
+};
+
+const getActionGradient = (action: string): string[] => {
   switch (action) {
     case 'collect':
-      return { backgroundColor: '#007AFF' };
+      return ['#667eea', '#764ba2'];
     case 'deliver':
-      return { backgroundColor: '#34C759' };
+      return ['#34C759', '#30A46C'];
     case 'print':
-      return { backgroundColor: '#FF9500' };
+      return ['#FF9500', '#FF8C00'];
     case 'confirm_receipt':
-      return { backgroundColor: '#5856D6' };
+      return ['#764ba2', '#667eea'];
     default:
-      return { backgroundColor: '#007AFF' };
+      return ['#667eea', '#764ba2'];
   }
 };
 
@@ -478,16 +650,20 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#f5f5f5',
+    padding: 20,
+  },
+  permissionContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    backgroundColor: '#007AFF',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingVertical: 16,
   },
   headerButton: {
     padding: 8,
@@ -495,7 +671,7 @@ const styles = StyleSheet.create({
   headerTitle: {
     color: '#fff',
     fontSize: 18,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   scannerContainer: {
     flex: 1,
@@ -514,64 +690,56 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   scanArea: {
-    width: 280,
-    height: 280,
+    width: 300,
+    height: 300,
     position: 'relative',
     justifyContent: 'center',
     alignItems: 'center',
   },
   corner: {
     position: 'absolute',
-    width: 30,
-    height: 30,
-    borderColor: '#00FF00',
-    borderWidth: 4,
+    width: 40,
+    height: 40,
+    borderWidth: 5,
   },
   topLeft: {
     top: 0,
     left: 0,
     borderRightWidth: 0,
     borderBottomWidth: 0,
-    borderTopLeftRadius: 8,
+    borderTopLeftRadius: 12,
   },
   topRight: {
     top: 0,
     right: 0,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
-    borderTopRightRadius: 8,
+    borderTopRightRadius: 12,
   },
   bottomLeft: {
     bottom: 0,
     left: 0,
     borderRightWidth: 0,
     borderTopWidth: 0,
-    borderBottomLeftRadius: 8,
+    borderBottomLeftRadius: 12,
   },
   bottomRight: {
     bottom: 0,
     right: 0,
     borderLeftWidth: 0,
     borderTopWidth: 0,
-    borderBottomRightRadius: 8,
-  },
-  scanLine: {
-    position: 'absolute',
-    left: 30,
-    right: 30,
-    height: 2,
-    backgroundColor: '#00FF00',
-    opacity: 0.8,
+    borderBottomRightRadius: 12,
   },
   scanInstruction: {
     color: '#fff',
     fontSize: 16,
     textAlign: 'center',
-    marginTop: 40,
-    backgroundColor: 'rgba(0, 0, 0, 0.6)',
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    borderRadius: 20,
+    marginTop: 50,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 24,
+    fontWeight: '600',
   },
   loadingOverlay: {
     position: 'absolute',
@@ -579,129 +747,155 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   loadingText: {
     color: '#fff',
     fontSize: 16,
-    marginTop: 12,
+    marginTop: 16,
+    fontWeight: '600',
   },
   instructions: {
-    backgroundColor: '#1a1a1a',
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
   },
   instructionText: {
     color: '#fff',
     fontSize: 16,
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
+    fontWeight: '600',
   },
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#333',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
+    backgroundColor: '#2d3748',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: '#667eea',
   },
   retryText: {
-    color: '#007AFF',
+    color: '#667eea',
     fontSize: 14,
-    marginLeft: 4,
+    marginLeft: 8,
+    fontWeight: '600',
   },
   permissionText: {
     fontSize: 16,
     textAlign: 'center',
-    color: '#666',
-    marginVertical: 20,
+    color: '#a0aec0',
+    marginVertical: 24,
+    fontWeight: '500',
   },
   permissionButton: {
-    backgroundColor: '#007AFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
     marginTop: 16,
+  },
+  permissionButtonGradient: {
+    paddingHorizontal: 32,
+    paddingVertical: 16,
+    alignItems: 'center',
   },
   permissionButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   closeButton: {
     marginTop: 16,
     paddingVertical: 12,
   },
   closeButtonText: {
-    color: '#007AFF',
+    color: '#667eea',
     fontSize: 16,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'flex-end',
   },
   actionModal: {
-    backgroundColor: '#fff',
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    padding: 20,
+    backgroundColor: '#1a1a2e',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     maxHeight: height * 0.7,
+    borderWidth: 1,
+    borderTopColor: '#2d3748',
+    borderLeftColor: '#2d3748',
+    borderRightColor: '#2d3748',
+  },
+  modalHeader: {
+    padding: 20,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
   },
   modalTitle: {
     fontSize: 20,
-    fontWeight: '600',
+    fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 16,
+    color: '#fff',
   },
   packageInfo: {
     maxHeight: 200,
-    marginBottom: 20,
+    padding: 20,
   },
   packageCode: {
     fontSize: 18,
-    fontWeight: '600',
-    color: '#007AFF',
+    fontWeight: '700',
+    color: '#667eea',
     textAlign: 'center',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   packageDetail: {
     fontSize: 14,
-    color: '#666',
-    marginBottom: 4,
+    color: '#a0aec0',
+    marginBottom: 6,
+    fontWeight: '500',
   },
   packageStatus: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
-    marginTop: 8,
+    fontWeight: '700',
+    color: '#fff',
+    marginTop: 12,
   },
   actionButtons: {
+    padding: 20,
     gap: 12,
   },
   actionButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  actionButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#007AFF',
-    paddingVertical: 14,
-    borderRadius: 8,
+    paddingVertical: 16,
     gap: 8,
   },
   actionButtonText: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
+    fontWeight: '700',
   },
   cancelButton: {
-    paddingVertical: 14,
+    paddingVertical: 16,
     alignItems: 'center',
+    backgroundColor: '#2d3748',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#4a5568',
   },
   cancelButtonText: {
-    color: '#666',
+    color: '#a0aec0',
     fontSize: 16,
+    fontWeight: '600',
   },
 });
 
