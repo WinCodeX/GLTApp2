@@ -9,11 +9,11 @@ import {
   FlatList,
   SafeAreaView,
   ActivityIndicator,
-  Alert,
   Keyboard,
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
 import QRScanner from '../../components/QRScanner';
 
 const { width } = Dimensions.get('window');
@@ -59,7 +59,13 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 
   const handleSearch = async (query: string = searchQuery) => {
     if (!query.trim()) {
-      Alert.alert('Error', 'Please enter a package code to search');
+      Toast.show({
+        type: 'warning',
+        text1: 'Search Required',
+        text2: 'Please enter a package code to search',
+        position: 'top',
+        visibilityTime: 3000,
+      });
       return;
     }
 
@@ -113,13 +119,36 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         if (query.trim() && !recentSearches.includes(query.trim())) {
           setRecentSearches(prev => [query.trim(), ...prev.slice(0, 4)]);
         }
+
+        // Show success toast if packages found
+        if (detailedResults.length > 0) {
+          Toast.show({
+            type: 'success',
+            text1: 'Search Complete',
+            text2: `Found ${detailedResults.length} package${detailedResults.length > 1 ? 's' : ''}`,
+            position: 'top',
+            visibilityTime: 2000,
+          });
+        }
       } else {
         setSearchResults([]);
-        Alert.alert('Search Failed', result.message || 'No packages found');
+        Toast.show({
+          type: 'error',
+          text1: 'Search Failed',
+          text2: result.message || 'No packages found',
+          position: 'top',
+          visibilityTime: 4000,
+        });
       }
     } catch (error) {
       setSearchResults([]);
-      Alert.alert('Network Error', 'Failed to search packages. Please check your connection.');
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Failed to search packages. Please check your connection.',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     } finally {
       setLoading(false);
     }
@@ -151,15 +180,33 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       const result = await response.json();
 
       if (result.success) {
-        Alert.alert('Success', result.message);
+        Toast.show({
+          type: 'success',
+          text1: 'Action Successful',
+          text2: result.message,
+          position: 'top',
+          visibilityTime: 3000,
+        });
         
         // Refresh the search results to show updated package state
         await handleSearch(searchQuery);
       } else {
-        Alert.alert('Error', result.message);
+        Toast.show({
+          type: 'error',
+          text1: 'Action Failed',
+          text2: result.message,
+          position: 'top',
+          visibilityTime: 4000,
+        });
       }
     } catch (error) {
-      Alert.alert('Network Error', 'Failed to perform action. Please try again.');
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Failed to perform action. Please try again.',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     }
   };
 
