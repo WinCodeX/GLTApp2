@@ -14,7 +14,7 @@ import {
   Dimensions,
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
-import QRScanner from '../components/QRScanner';
+import QRScanner from '../../components/QRScanner';
 
 const { width } = Dimensions.get('window');
 
