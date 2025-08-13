@@ -25,7 +25,7 @@ import {
   type DrawerState
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
-import PackageCreationModal from '@/components/modals/PackageCreationModal';
+import PackageCreationModal from '@/components/PackageCreationModal';
 
 export default function Track() {
   const params = useLocalSearchParams();
