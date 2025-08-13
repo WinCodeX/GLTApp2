@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Enhanced with state filtering and QR codes
+// app/(drawer)/track.tsx - Enhanced with proper header and navigation
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -8,33 +8,26 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   RefreshControl,
-  Image,
-  Dimensions,
+  StatusBar,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { 
   getPackages,
-  getPackageQRCode,
-  searchPackages,
   STATE_MAPPING,
   type Package,
-  type DrawerState,
-  type QRCodeResponse
+  type DrawerState
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-
-interface QRCodeCache {
-  [packageCode: string]: QRCodeResponse['data'];
-}
 
 export default function Track() {
   const params = useLocalSearchParams();
   const router = useRouter();
+  const insets = useSafeAreaInsets();
   
   // Get status from params (from drawer navigation)
   const selectedStatus = params.status as DrawerState | undefined;
@@ -44,8 +37,6 @@ export default function Track() {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [qrCodeCache, setQrCodeCache] = useState<QRCodeCache>({});
-  const [loadingQRCodes, setLoadingQRCodes] = useState<Set<string>>(new Set());
 
   // Memoized state display
   const stateDisplayInfo = useMemo(() => {
@@ -129,11 +120,6 @@ export default function Track() {
       
       setPackages(response.data);
       
-      // Load QR codes for visible packages (first 5)
-      if (response.data.length > 0) {
-        loadQRCodesForPackages(response.data.slice(0, 5));
-      }
-      
     } catch (error: any) {
       console.error('❌ Failed to load packages:', error);
       setError(error.message);
@@ -151,80 +137,6 @@ export default function Track() {
     }
   }, [selectedStatus]);
 
-  // Load QR codes for multiple packages with client-side fallback
-  const loadQRCodesForPackages = useCallback(async (packagesToLoad: Package[]) => {
-    const newLoadingSet = new Set(loadingQRCodes);
-    
-    for (const pkg of packagesToLoad) {
-      if (!qrCodeCache[pkg.code] && !newLoadingSet.has(pkg.code)) {
-        newLoadingSet.add(pkg.code);
-      }
-    }
-    
-    setLoadingQRCodes(newLoadingSet);
-    
-    // Load QR codes concurrently with fallback
-    const qrPromises = packagesToLoad
-      .filter(pkg => !qrCodeCache[pkg.code])
-      .map(async (pkg) => {
-        try {
-          console.log(`🔲 Loading QR for package: ${pkg.code}`);
-          const qrData = await getPackageQRCode(pkg.code);
-          
-          // If backend QR generation failed, create client-side fallback
-          if (!qrData.data.qr_code_base64) {
-            console.log(`🔄 Backend QR failed for ${pkg.code}, using tracking URL fallback`);
-            return { 
-              packageCode: pkg.code, 
-              data: {
-                ...qrData.data,
-                qr_code_base64: null, // Will show tracking URL instead
-              }
-            };
-          }
-          
-          console.log(`✅ QR loaded successfully for ${pkg.code}`);
-          return { packageCode: pkg.code, data: qrData.data };
-        } catch (error) {
-          console.warn(`⚠️ Failed to load QR for ${pkg.code}:`, error);
-          
-          // Create fallback data with tracking URL
-          return { 
-            packageCode: pkg.code, 
-            data: {
-              qr_code_base64: null,
-              tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${pkg.code}`,
-              package_code: pkg.code,
-              package_state: pkg.state,
-              route_description: pkg.route_description
-            }
-          };
-        }
-      });
-
-    const qrResults = await Promise.all(qrPromises);
-    
-    // Update cache
-    setQrCodeCache(prev => {
-      const updated = { ...prev };
-      qrResults.forEach(result => {
-        if (result.data) {
-          updated[result.packageCode] = result.data;
-        }
-      });
-      return updated;
-    });
-    
-    // Clear loading states
-    setLoadingQRCodes(prev => {
-      const updated = new Set(prev);
-      qrResults.forEach(result => {
-        updated.delete(result.packageCode);
-      });
-      return updated;
-    });
-  }, [qrCodeCache, loadingQRCodes]);
-
   // Load data when component mounts or status changes
   useEffect(() => {
     loadPackages();
@@ -234,6 +146,15 @@ export default function Track() {
   const handleRefresh = useCallback(() => {
     loadPackages(true);
   }, [loadPackages]);
+
+  // Navigation handlers
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.push('/(drawer)/(tabs)/home');
+    }
+  }, [router]);
 
   // Get state badge color
   const getStateBadgeColor = useCallback((state: string) => {
@@ -251,20 +172,17 @@ export default function Track() {
 
   // Check if package can be edited
   const canEditPackage = useCallback((state: string) => {
-    // Allow editing for pending payment, pending, and rejected packages
     return ['pending_unpaid', 'pending', 'rejected'].includes(state);
   }, []);
 
   // Check if package needs payment
   const needsPayment = useCallback((state: string) => {
-    // Show pay button for packages that need payment
     return ['pending_unpaid', 'pending'].includes(state);
   }, []);
 
   // Handle edit package
   const handleEditPackage = useCallback((packageItem: Package) => {
     console.log('🔧 Editing package:', packageItem.code);
-    // Navigate to edit screen or show edit modal
     router.push({
       pathname: '/(drawer)/(tabs)/send',
       params: { 
@@ -278,7 +196,6 @@ export default function Track() {
   // Handle pay for package
   const handlePayPackage = useCallback((packageItem: Package) => {
     console.log('💳 Processing payment for package:', packageItem.code);
-    // Navigate to payment screen
     router.push({
       pathname: '/(drawer)/payment',
       params: { 
@@ -289,10 +206,20 @@ export default function Track() {
     });
   }, [router]);
 
-  // Render package item with QR code
+  // Handle view tracking details
+  const handleViewTracking = useCallback((packageItem: Package) => {
+    console.log('🔍 Viewing tracking for package:', packageItem.code);
+    router.push({
+      pathname: '/(drawer)/track/tracking',
+      params: { 
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString()
+      }
+    });
+  }, [router]);
+
+  // Render package item without QR code
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
-    const qrData = qrCodeCache[item.code];
-    const isLoadingQR = loadingQRCodes.has(item.code);
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
     
@@ -334,7 +261,8 @@ export default function Track() {
               <View style={styles.detailItem}>
                 <Text style={styles.detailLabel}>Type</Text>
                 <Text style={styles.detailValue}>
-                  {item.delivery_type === 'doorstep' ? 'Doorstep' : 'Agent'}
+                  {item.delivery_type === 'doorstep' ? 'Doorstep' : 
+                   item.delivery_type === 'mixed' ? 'Mixed' : 'Agent'}
                 </Text>
               </View>
             </View>
@@ -353,48 +281,15 @@ export default function Track() {
             </View>
           </View>
 
-          {/* QR Code Section */}
-          <View style={styles.qrCodeSection}>
-            <View style={styles.qrCodeHeader}>
-              <Feather name="smartphone" size={16} color="#888" />
-              <Text style={styles.qrCodeTitle}>QR Code</Text>
-            </View>
-            
-            {isLoadingQR ? (
-              <View style={styles.qrCodePlaceholder}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={styles.qrCodeLoadingText}>Loading QR code...</Text>
-              </View>
-            ) : qrData?.qr_code_base64 ? (
-              <TouchableOpacity style={styles.qrCodeContainer}>
-                <Image
-                  source={{ uri: qrData.qr_code_base64 }}
-                  style={styles.qrCodeImage}
-                  resizeMode="contain"
-                />
-                <Text style={styles.qrCodeInstructions}>
-                  Tap to view tracking page
-                </Text>
-              </TouchableOpacity>
-            ) : qrData?.tracking_url ? (
-              <View style={styles.qrCodeFallback}>
-                <Feather name="link" size={32} color={colors.primary} />
-                <Text style={styles.qrCodeFallbackTitle}>QR Code Unavailable</Text>
-                <Text style={styles.qrCodeFallbackSubtitle}>
-                  Use tracking code: {item.code}
-                </Text>
-                <TouchableOpacity style={styles.trackingUrlButton}>
-                  <Feather name="external-link" size={16} color="#fff" />
-                  <Text style={styles.trackingUrlButtonText}>Open Tracking Page</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.qrCodePlaceholder}>
-                <Feather name="alert-circle" size={20} color="#666" />
-                <Text style={styles.qrCodeErrorText}>QR code unavailable</Text>
-              </View>
-            )}
-          </View>
+          {/* Tracking Button */}
+          <TouchableOpacity 
+            style={styles.trackingButton}
+            onPress={() => handleViewTracking(item)}
+          >
+            <Feather name="search" size={16} color={colors.primary} />
+            <Text style={styles.trackingButtonText}>View Tracking Details</Text>
+            <Feather name="chevron-right" size={16} color="#888" />
+          </TouchableOpacity>
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
@@ -445,7 +340,7 @@ export default function Track() {
         </LinearGradient>
       </View>
     );
-  }, [qrCodeCache, loadingQRCodes, getStateBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage]);
+  }, [getStateBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking]);
 
   // Render empty state
   const renderEmptyState = useCallback(() => (
@@ -495,33 +390,44 @@ export default function Track() {
   // Main render
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <LinearGradient
-        colors={[colors.background, 'rgba(22, 33, 62, 0.8)']}
-        style={styles.header}
-      >
-        <View style={styles.headerContent}>
-          <View style={styles.headerInfo}>
-            <View style={styles.headerIconContainer}>
-              <Feather 
-                name={stateDisplayInfo.icon} 
-                size={24} 
-                color={stateDisplayInfo.color} 
-              />
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      
+      {/* Fixed Header with Back Button */}
+      <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
+        <LinearGradient
+          colors={[colors.background, 'rgba(22, 33, 62, 0.95)']}
+          style={styles.header}
+        >
+          <View style={styles.headerContent}>
+            {/* Back Button */}
+            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+              <Feather name="arrow-left" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            {/* Header Info */}
+            <View style={styles.headerInfo}>
+              <View style={styles.headerIconContainer}>
+                <Feather 
+                  name={stateDisplayInfo.icon} 
+                  size={20} 
+                  color={stateDisplayInfo.color} 
+                />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>{stateDisplayInfo.title}</Text>
+                <Text style={styles.headerSubtitle}>{stateDisplayInfo.subtitle}</Text>
+              </View>
             </View>
-            <View style={styles.headerText}>
-              <Text style={styles.headerTitle}>{stateDisplayInfo.title}</Text>
-              <Text style={styles.headerSubtitle}>{stateDisplayInfo.subtitle}</Text>
-            </View>
+            
+            {/* Package Count */}
+            {packages.length > 0 && (
+              <View style={styles.packageCount}>
+                <Text style={styles.packageCountText}>{packages.length}</Text>
+              </View>
+            )}
           </View>
-          
-          {packages.length > 0 && (
-            <View style={styles.packageCount}>
-              <Text style={styles.packageCountText}>{packages.length}</Text>
-            </View>
-          )}
-        </View>
-      </LinearGradient>
+        </LinearGradient>
+      </View>
 
       {/* Content */}
       {isLoading ? (
@@ -571,11 +477,14 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   
-  // Header styles
+  // Fixed header styles
+  headerContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
   header: {
-    paddingTop: 20,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingVertical: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
@@ -584,43 +493,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
   },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+  },
   headerInfo: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
   headerIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 12,
   },
   headerText: {
     flex: 1,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: 2,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#888',
   },
   packageCount: {
     backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderWidth: 1,
     borderColor: colors.primary,
+    minWidth: 28,
+    alignItems: 'center',
   },
   packageCountText: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: colors.primary,
   },
@@ -795,7 +715,7 @@ const styles = StyleSheet.create({
   // Package details
   packageDetails: {
     gap: 12,
-    marginBottom: 20,
+    marginBottom: 16,
   },
   detailRow: {
     flexDirection: 'row',
@@ -837,86 +757,25 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // QR Code section
-  qrCodeSection: {
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
-    borderRadius: 12,
-    padding: 16,
+  // Tracking button
+  trackingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 10,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
     marginBottom: 16,
   },
-  qrCodeHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 12,
-  },
-  qrCodeTitle: {
+  trackingButtonText: {
     fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  qrCodeContainer: {
-    alignItems: 'center',
-    gap: 8,
-  },
-  qrCodeImage: {
-    width: 120,
-    height: 120,
-    borderRadius: 8,
-    backgroundColor: '#fff',
-  },
-  qrCodeInstructions: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-  },
-  qrCodePlaceholder: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    height: 120,
-    gap: 8,
-  },
-  qrCodeLoadingText: {
-    fontSize: 12,
-    color: '#888',
-  },
-  qrCodeErrorText: {
-    fontSize: 12,
-    color: '#666',
-  },
-  
-  // QR Code fallback styles
-  qrCodeFallback: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 20,
-    gap: 8,
-  },
-  qrCodeFallbackTitle: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#888',
-    marginTop: 8,
-  },
-  qrCodeFallbackSubtitle: {
-    fontSize: 12,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 12,
-  },
-  trackingUrlButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-    backgroundColor: colors.primary,
-    gap: 6,
-  },
-  trackingUrlButtonText: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: '600',
+    color: colors.primary,
+    fontWeight: '500',
+    flex: 1,
+    marginLeft: 8,
   },
   
   // Action buttons
