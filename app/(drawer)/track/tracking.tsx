@@ -205,48 +205,16 @@ export default function PackageTracking() {
     }
   }, [qrData]);
 
-  // Navigation handlers
+  // Navigation handlers - SIMPLIFIED VERSION
   const handleBack = useCallback(() => {
-    console.log('🔙 Back button pressed');
-    console.log('🔙 Can go back?', router.canGoBack());
-    console.log('🔙 Current params:', params);
+    console.log('🔙 Back button pressed - using explicit navigation');
     
-    // For debugging - let's see the actual navigation state
-    console.log('🔙 Router state:', { 
-      canGoBack: router.canGoBack(), 
-      pathname: router.pathname || 'unknown',
-      params: router.params || {}
-    });
-    
-    try {
-      // Method 1: Try dismiss first (works for modal-like navigation)
-      if (typeof router.dismiss === 'function') {
-        console.log('🔙 Trying router.dismiss()');
-        router.dismiss();
-        return;
-      }
-    } catch (error) {
-      console.log('🔙 Dismiss failed:', error);
-    }
-    
-    try {
-      // Method 2: Try regular back navigation
-      if (router.canGoBack()) {
-        console.log('🔙 Going back in history');
-        router.back();
-        return;
-      }
-    } catch (error) {
-      console.log('🔙 Back failed:', error);
-    }
-    
-    // Method 3: Explicit route navigation
-    console.log('🔙 Using explicit navigation');
+    // Always use explicit navigation to avoid stack issues
     if (params.from) {
       console.log('🔙 Going to from parameter:', params.from);
       router.replace(params.from as string);
     } else {
-      console.log('🔙 Going to track listing');
+      console.log('🔙 Going to track listing (default)');
       router.replace('/(drawer)/track');
     }
   }, [router, params]);
