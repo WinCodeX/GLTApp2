@@ -1,29 +1,29 @@
 // app/(drawer)/track/tracking.tsx - Detailed tracking with timeline and QR code
-import React, { useState, useEffect, useCallback } from 'react';
 import {
-  StyleSheet,
-  Text,
-  View,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  StatusBar,
-  Image,
-  Share,
-  Linking,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Toast from 'react-native-toast-message';
-import { 
   getPackageDetails,
   getPackageQRCode,
   type Package,
   type QRCodeResponse
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  Image,
+  Linking,
+  ScrollView,
+  Share,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 
 interface TimelineEvent {
   status: string;
