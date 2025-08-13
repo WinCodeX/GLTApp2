@@ -249,10 +249,52 @@ export default function Track() {
     }
   }, []);
 
+  // Check if package can be edited
+  const canEditPackage = useCallback((state: string) => {
+    // Allow editing for pending payment, pending, and rejected packages
+    return ['pending_unpaid', 'pending', 'rejected'].includes(state);
+  }, []);
+
+  // Check if package needs payment
+  const needsPayment = useCallback((state: string) => {
+    // Show pay button for packages that need payment
+    return ['pending_unpaid', 'pending'].includes(state);
+  }, []);
+
+  // Handle edit package
+  const handleEditPackage = useCallback((packageItem: Package) => {
+    console.log('🔧 Editing package:', packageItem.code);
+    // Navigate to edit screen or show edit modal
+    router.push({
+      pathname: '/(drawer)/(tabs)/send',
+      params: { 
+        edit: 'true',
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString()
+      }
+    });
+  }, [router]);
+
+  // Handle pay for package
+  const handlePayPackage = useCallback((packageItem: Package) => {
+    console.log('💳 Processing payment for package:', packageItem.code);
+    // Navigate to payment screen
+    router.push({
+      pathname: '/(drawer)/payment',
+      params: { 
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString(),
+        amount: packageItem.cost.toString()
+      }
+    });
+  }, [router]);
+
   // Render package item with QR code
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const qrData = qrCodeCache[item.code];
     const isLoadingQR = loadingQRCodes.has(item.code);
+    const canEdit = canEditPackage(item.state);
+    const showPayButton = needsPayment(item.state);
     
     return (
       <View style={styles.packageCard}>
@@ -356,22 +398,54 @@ export default function Track() {
 
           {/* Action Buttons */}
           <View style={styles.actionButtons}>
-            <TouchableOpacity style={styles.actionButton}>
-              <Feather name="eye" size={16} color={colors.primary} />
-              <Text style={styles.actionButtonText}>View Details</Text>
+            {/* Edit Button */}
+            <TouchableOpacity 
+              style={[
+                styles.actionButton,
+                !canEdit && styles.actionButtonDisabled
+              ]}
+              onPress={() => canEdit && handleEditPackage(item)}
+              disabled={!canEdit}
+            >
+              <Feather 
+                name="edit-3" 
+                size={16} 
+                color={canEdit ? colors.primary : '#666'} 
+              />
+              <Text style={[
+                styles.actionButtonText,
+                !canEdit && styles.actionButtonTextDisabled
+              ]}>
+                Edit
+              </Text>
             </TouchableOpacity>
             
-            {qrData?.tracking_url && (
-              <TouchableOpacity style={styles.actionButton}>
-                <Feather name="external-link" size={16} color={colors.primary} />
-                <Text style={styles.actionButtonText}>Track Online</Text>
-              </TouchableOpacity>
-            )}
+            {/* Pay Button */}
+            <TouchableOpacity 
+              style={[
+                styles.actionButton,
+                showPayButton ? styles.payButton : styles.actionButtonDisabled
+              ]}
+              onPress={() => showPayButton && handlePayPackage(item)}
+              disabled={!showPayButton}
+            >
+              <Feather 
+                name="credit-card" 
+                size={16} 
+                color={showPayButton ? '#fff' : '#666'} 
+              />
+              <Text style={[
+                styles.actionButtonText,
+                showPayButton ? styles.payButtonText : styles.actionButtonTextDisabled
+              ]}>
+                {showPayButton ? 'Pay Now' : 'Paid'}
+              </Text>
+            </TouchableOpacity>
           </View>
         </LinearGradient>
       </View>
     );
-  }, [qrCodeCache, loadingQRCodes, getStateBadgeColor]);
+  }, [qrCodeCache, loadingQRCodes, getStateBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage]);
 
   // Render empty state
   const renderEmptyState = useCallback(() => (
@@ -862,10 +936,27 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
     gap: 6,
   },
+  actionButtonDisabled: {
+    backgroundColor: 'rgba(102, 102, 102, 0.2)',
+    borderColor: 'rgba(102, 102, 102, 0.3)',
+  },
   actionButtonText: {
     fontSize: 14,
     color: colors.primary,
     fontWeight: '500',
+  },
+  actionButtonTextDisabled: {
+    color: '#666',
+  },
+  
+  // Pay button specific styles
+  payButton: {
+    backgroundColor: '#10b981',
+    borderColor: '#059669',
+  },
+  payButtonText: {
+    color: '#fff',
+    fontWeight: '600',
   },
   
   // List footer
