@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Fixed with Dashboard text removed and scanning navigation
+// components/AdminLayout.tsx - Fixed with Home text removed and proper scanning navigation
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -127,13 +127,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // Updated navigation logic with proper scanning route
+      // Enhanced navigation logic with proper scanning route
       switch (tabId) {
         case 'profile':
           console.log('🚀 Navigating to admin account');
           router.push('/admin/account');
           break;
         case 'home':
+          console.log('🚀 Navigating to admin home');
           router.push('/admin');
           break;
         case 'scan':
@@ -141,9 +142,11 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           router.push('/admin/ScanningScreen');
           break;
         case 'packages':
+          console.log('🚀 Navigating to packages');
           router.push('/admin/packages');
           break;
         case 'settings':
+          console.log('🚀 Navigating to settings');
           router.push('/admin/settings');
           break;
         default:
@@ -217,13 +220,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         break;
       case '/admin':
       default:
-        // Default behavior - could open a quick action menu
-        console.log('🚀 Opening quick actions from FAB');
+        // Default behavior - could open a quick action menu or navigate to scan
+        console.log('🚀 Opening quick actions from FAB - navigating to scan');
+        router.push('/admin/ScanningScreen');
         break;
     }
   };
 
-  // ✅ Get screen title without Dashboard fallback
+  // ✅ Get screen title - FIXED: Removed "Home" text, now shows nothing for /admin
   const getScreenTitle = (): string => {
     switch (pathname) {
       case '/admin/ScanningScreen':
@@ -235,17 +239,23 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       case '/admin/account':
         return 'Account';
       case '/admin':
-        return 'Home';
+        return ''; // ✅ FIXED: Empty string instead of 'Home'
       default:
-        return 'Admin'; // Removed "Dashboard" - now shows "Admin"
+        return 'Admin';
     }
+  };
+
+  // ✅ Check if we should show the title (don't show empty titles)
+  const shouldShowTitle = (): boolean => {
+    const title = getScreenTitle();
+    return title.trim().length > 0;
   };
 
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#667eea" />
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Header with clean title without Dashboard */}
+        {/* ✅ Header with conditional title display */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -266,10 +276,12 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              {/* ✅ Clean title without Dashboard text */}
-              <Text style={styles.panelTitle}>
-                {getScreenTitle()}
-              </Text>
+              {/* ✅ FIXED: Only show title if it's not empty */}
+              {shouldShowTitle() && (
+                <Text style={styles.panelTitle}>
+                  {getScreenTitle()}
+                </Text>
+              )}
             </View>
           </View>
 
@@ -373,7 +385,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
                 >
                   {tab.label}
                 </Text>
-                {/* Add scanning indicator badge */}
+                {/* Add scanning indicator badge when scanning tab is active */}
                 {tab.id === 'scan' && isActive && (
                   <View style={styles.scanningBadge}>
                     <View style={styles.scanningDot} />
@@ -393,7 +405,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           accessibilityLabel={
             pathname === '/admin/ScanningScreen' ? 'Quick scan' :
             pathname === '/admin/packages' ? 'Add new package' :
-            'Quick actions'
+            'Quick scan'
           }
           accessibilityRole="button"
         >
@@ -405,7 +417,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               name={
                 pathname === '/admin/ScanningScreen' ? 'qr-code' :
                 pathname === '/admin/packages' ? 'add' :
-                'add'
+                'qr-code'
               } 
               size={28} 
               color="white" 
