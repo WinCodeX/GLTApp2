@@ -74,15 +74,15 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
- // const loadUserStats = async () => {
-   // try {
-    //  setRefreshing(true);
+    const loadUserStats = async () => {
+      try {
+       setRefreshing(true);
       
-      // const response = await api.get('/api/v1/users/scanning_stats');        
+      const response = await api.get('/api/v1/users/scanning_stats');        
       
-   //   if (response.data.success) {
-      //  setUserStats(response.data.data);
-   //   } else {
+       if (response.data.success) {
+         setUserStats(response.data.data);
+            } else {
         // Fallback to demo data
         setUserStats({
           packages_scanned_today: 12,
