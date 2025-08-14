@@ -81,6 +81,12 @@ def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInRelea
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
+// Define app version constants for consistency
+def appName = "GLT"
+def appVersionName = "1.2.0"
+def appVersionCode = 3
+def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
+
 android {
     ndkVersion rootProject.ext.ndkVersion
 
@@ -92,14 +98,22 @@ android {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 2  // Increment for each build/release
-        versionName "1.1.0"  // Semantic version matching app.json
+        versionCode appVersionCode
+        versionName appVersionName
         
-        // App display name and metadata
-        resValue "string", "app_name", "GLT"
-        resValue "string", "app_version", "1.2.0"
-        resValue "string", "build_number", "2"
+        // App display name and metadata - using consistent values
+        resValue "string", "app_name", appName
+        resValue "string", "app_version", appVersionName
+        resValue "string", "build_number", appVersionCode.toString()
+        resValue "string", "build_timestamp", buildTimestamp
+        
+        // Add version info to build config for runtime access
+        buildConfigField "String", "VERSION_NAME", "\"${appVersionName}\""
+        buildConfigField "int", "VERSION_CODE", "${appVersionCode}"
+        buildConfigField "String", "APP_NAME", "\"${appName}\""
+        buildConfigField "String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\""
     }
+    
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -108,11 +122,15 @@ android {
             keyPassword 'android'
         }
     }
+    
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
             applicationIdSuffix ".debug"  // Different ID for debug builds
-            resValue "string", "app_name", "GLT (Debug)"
+            resValue "string", "app_name", "${appName} (Debug)"
+            
+            // Debug-specific build config
+            buildConfigField "boolean", "IS_DEBUG", "true"
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -122,13 +140,39 @@ android {
             minifyEnabled enableProguardInReleaseBuilds
             proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
             crunchPngs (findProperty('android.enablePngCrunchInReleaseBuilds')?.toBoolean() ?: true)
+            
+            // Release-specific build config
+            buildConfigField "boolean", "IS_DEBUG", "false"
         }
     }
+    
+    // Custom APK naming configuration
+    applicationVariants.all { variant ->
+        variant.outputs.all {
+            def buildType = variant.buildType.name
+            def versionName = variant.versionName
+            def versionCode = variant.versionCode
+            
+            // Create custom APK name based on build type
+            if (buildType == "release") {
+                // Release APK: GLT-1.2.0-3.apk
+                outputFileName = "${appName}-${versionName}-${versionCode}.apk"
+            } else if (buildType == "debug") {
+                // Debug APK: GLT-1.2.0-3-debug-20250814-1430.apk
+                outputFileName = "${appName}-${versionName}-${versionCode}-debug-${buildTimestamp}.apk"
+            }
+            
+            // Log the output file name for verification
+            println "Generated APK name: ${outputFileName}"
+        }
+    }
+    
     packagingOptions {
         jniLibs {
             useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
     }
+    
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
