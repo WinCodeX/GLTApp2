@@ -372,7 +372,7 @@ export const searchPackagesForScanning = async (query: string): Promise<{
   try {
     console.log('🔄 Searching packages for scanning:', query);
     
-    const response = await api.get(`/api/v1/packages/search_for_scan?query=${encodeURIComponent(query)}`, {
+    const response = await api.get(`/api/v1/scanning/search_packages?query=${encodeURIComponent(query)}`, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
