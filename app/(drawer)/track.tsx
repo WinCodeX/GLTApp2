@@ -180,7 +180,7 @@ export default function Track() {
     setShowCreateModal(false);
     // Refresh packages list after creation
     loadPackages(true);
-  }, [loadPackages]);
+  }, []);
 
   // Load packages based on selected status
   const loadPackages = useCallback(async (isRefresh = false) => {
@@ -321,14 +321,14 @@ export default function Track() {
     }
   }, []);
 
-  // Check if package can be edited
+  // Check if package can be edited - FIXED: only certain states
   const canEditPackage = useCallback((state: string) => {
     return ['pending_unpaid', 'pending', 'rejected'].includes(state);
   }, []);
 
-  // Check if package needs payment
+  // Check if package needs payment - FIXED: only pending_unpaid
   const needsPayment = useCallback((state: string) => {
-    return ['pending_unpaid', 'pending'].includes(state);
+    return state === 'pending_unpaid';
   }, []);
 
   // Handle edit package
@@ -383,11 +383,51 @@ export default function Track() {
            'Unknown Recipient';
   }, []);
 
-  // Render package item with updated layout
+  // Render package item with conditional button rendering
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
     const receiverName = getReceiverName(item);
+    
+    // Build action buttons array based on state
+    const actionButtons = [];
+    
+    // Track button - always available
+    actionButtons.push({
+      key: 'track',
+      icon: 'search',
+      text: 'Track',
+      onPress: () => handleViewTracking(item),
+      style: styles.actionButton,
+      textStyle: styles.actionButtonText,
+      iconColor: colors.primary
+    });
+    
+    // Edit button - only if editable
+    if (canEdit) {
+      actionButtons.push({
+        key: 'edit',
+        icon: 'edit-3',
+        text: 'Edit',
+        onPress: () => handleEditPackage(item),
+        style: styles.actionButton,
+        textStyle: styles.actionButtonText,
+        iconColor: colors.primary
+      });
+    }
+    
+    // Pay button - only if needs payment
+    if (showPayButton) {
+      actionButtons.push({
+        key: 'pay',
+        icon: 'credit-card',
+        text: 'Pay',
+        onPress: () => handlePayPackage(item),
+        style: [styles.actionButton, styles.payButton],
+        textStyle: [styles.actionButtonText, styles.payButtonText],
+        iconColor: '#fff'
+      });
+    }
     
     return (
       <View style={styles.packageCard}>
@@ -424,60 +464,23 @@ export default function Track() {
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
           </View>
 
-          {/* Action Buttons - All in one row */}
-          <View style={styles.actionButtons}>
-            {/* Track Button */}
-            <TouchableOpacity 
-              style={styles.actionButton}
-              onPress={() => handleViewTracking(item)}
-            >
-              <Feather name="search" size={16} color={colors.primary} />
-              <Text style={styles.actionButtonText}>Track</Text>
-            </TouchableOpacity>
-
-            {/* Edit Button */}
-            <TouchableOpacity 
-              style={[
-                styles.actionButton,
-                !canEdit && styles.actionButtonDisabled
-              ]}
-              onPress={() => canEdit && handleEditPackage(item)}
-              disabled={!canEdit}
-            >
-              <Feather 
-                name="edit-3" 
-                size={16} 
-                color={canEdit ? colors.primary : '#666'} 
-              />
-              <Text style={[
-                styles.actionButtonText,
-                !canEdit && styles.actionButtonTextDisabled
-              ]}>
-                Edit
-              </Text>
-            </TouchableOpacity>
-            
-            {/* Pay Button */}
-            <TouchableOpacity 
-              style={[
-                styles.actionButton,
-                showPayButton ? styles.payButton : styles.actionButtonDisabled
-              ]}
-              onPress={() => showPayButton && handlePayPackage(item)}
-              disabled={!showPayButton}
-            >
-              <Feather 
-                name="credit-card" 
-                size={16} 
-                color={showPayButton ? '#fff' : '#666'} 
-              />
-              <Text style={[
-                styles.actionButtonText,
-                showPayButton ? styles.payButtonText : styles.actionButtonTextDisabled
-              ]}>
-                {showPayButton ? 'Pay' : 'Paid'}
-              </Text>
-            </TouchableOpacity>
+          {/* Dynamic Action Buttons */}
+          <View style={[
+            styles.actionButtons,
+            actionButtons.length === 1 && styles.singleButton,
+            actionButtons.length === 2 && styles.doubleButtons,
+            actionButtons.length === 3 && styles.tripleButtons
+          ]}>
+            {actionButtons.map((button) => (
+              <TouchableOpacity 
+                key={button.key}
+                style={button.style}
+                onPress={button.onPress}
+              >
+                <Feather name={button.icon as any} size={16} color={button.iconColor} />
+                <Text style={button.textStyle}>{button.text}</Text>
+              </TouchableOpacity>
+            ))}
           </View>
         </LinearGradient>
       </View>
@@ -1038,11 +1041,23 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  // Action buttons - three in one row
+  // Dynamic action buttons - adaptive layout
   actionButtons: {
     flexDirection: 'row',
     gap: 8,
   },
+  
+  // Button layout variations
+  singleButton: {
+    justifyContent: 'center',
+  },
+  doubleButtons: {
+    justifyContent: 'space-between',
+  },
+  tripleButtons: {
+    justifyContent: 'space-between',
+  },
+  
   actionButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1055,17 +1070,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
     gap: 4,
   },
-  actionButtonDisabled: {
-    backgroundColor: 'rgba(102, 102, 102, 0.2)',
-    borderColor: 'rgba(102, 102, 102, 0.3)',
-  },
+  
   actionButtonText: {
     fontSize: 12,
     color: colors.primary,
     fontWeight: '600',
-  },
-  actionButtonTextDisabled: {
-    color: '#666',
   },
   
   // Pay button specific styles
