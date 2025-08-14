@@ -139,30 +139,37 @@ const SettingsScreen: React.FC = () => {
   const requestBluetoothPermissions = async () => {
     if (Platform.OS === 'android') {
       try {
-        const apiLevel = Platform.constants.Release;
-        
+        // Base permissions that are always available
         let permissions = [
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH,
+          PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADMIN,
         ];
 
-        // Android 12+ requires new permissions
-        if (apiLevel >= 31) {
-          permissions = [
-            ...permissions,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
-          ];
-        } else {
-          permissions = [
-            ...permissions,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH,
-            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADMIN,
-          ];
+        // Add Android 12+ permissions if they exist
+        const androidApiLevel = Platform.Version;
+        if (androidApiLevel >= 31) {
+          // Only add if the permission constants exist
+          if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN) {
+            permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
+          }
+          if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT) {
+            permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT);
+          }
+          if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE) {
+            permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE);
+          }
         }
 
-        const granted = await PermissionsAndroid.requestMultiple(permissions);
+        // Filter out any undefined permissions
+        const validPermissions = permissions.filter(permission => 
+          permission && typeof permission === 'string'
+        );
+
+        console.log('Requesting permissions:', validPermissions);
+
+        const granted = await PermissionsAndroid.requestMultiple(validPermissions);
 
         const allPermissionsGranted = Object.values(granted).every(
           permission => permission === PermissionsAndroid.RESULTS.GRANTED
