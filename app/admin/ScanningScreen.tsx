@@ -20,7 +20,6 @@ import QRScanner from '../../components/QRScanner';
 import BulkScanner from '../../components/BulkScanner';
 import AdminLayout from '../../components/AdminLayout';
 import api from '../../lib/api';
-import { getPackages, searchPackages } from '../../lib/helpers/packageHelpers';
 
 const { width } = Dimensions.get('window');
 
@@ -74,15 +73,15 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-    const loadUserStats = async () => {
-      try {
-       setRefreshing(true);
+  const loadUserStats = async () => {
+    try {
+      setRefreshing(true);
       
       const response = await api.get('/api/v1/users/scanning_stats');        
       
-       if (response.data.success) {
-         setUserStats(response.data.data);
-            } else {
+      if (response.data.success) {
+        setUserStats(response.data.data);
+      } else {
         // Fallback to demo data
         setUserStats({
           packages_scanned_today: 12,
@@ -103,7 +102,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
       });
       
       Toast.show({
-        type: 'warning',
+        type: 'info', // Changed from 'warning' to 'info'
         text1: 'Offline Mode',
         text2: 'Using cached data. Check your connection.',
         position: 'top',
@@ -165,9 +164,9 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
         visibilityTime: 4000,
       });
     } else {
-      // Mixed results
+      // Mixed results - use 'info' instead of 'warning'
       Toast.show({
-        type: 'warning',
+        type: 'info',
         text1: 'Bulk Operation Partial Success',
         text2: `${successCount} successful, ${failureCount} failed out of ${results.length} packages`,
         position: 'top',
