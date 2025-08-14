@@ -75,7 +75,11 @@ export default function LoginScreen() {
         });
         
         console.log('✅ Google login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
-        router.push(role === 'admin' ? '/admin' : '/');
+        
+        // Delay navigation to ensure toast is visible
+        setTimeout(() => {
+          router.push(role === 'admin' ? '/admin' : '/');
+        }, 1500);
       } else {
         console.error('❌ Google login failed - missing token or user ID');
         Toast.show({
@@ -229,7 +233,11 @@ export default function LoginScreen() {
         });
         
         console.log('✅ Login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
-        router.push(role === 'admin' ? '/admin' : '/');
+        
+        // Delay navigation to ensure toast is visible
+        setTimeout(() => {
+          router.push(role === 'admin' ? '/admin' : '/');
+        }, 1500);
       } else {
         const message = 'Login failed: Server response incomplete';
         setErrorMsg(message);
@@ -403,6 +411,7 @@ export default function LoginScreen() {
     <>
       <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
         <View style={styles.inner}>
+          {/* Welcome Back Text - Always visible at top */}
           <GradientText>Welcome Back!</GradientText>
 
           {/* Server Status Indicator */}
@@ -523,11 +532,11 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
   title: {
-    fontSize: 32,
+    fontSize: 34, // Slightly larger
     fontWeight: 'bold',
-    marginBottom: 20,
+    marginBottom: 32, // More space below title
     textAlign: 'center',
-    textShadowColor: 'rgba(124, 58, 237, 0.3)',
+    textShadowColor: 'rgba(124, 58, 237, 0.4)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 8,
   },
@@ -538,7 +547,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 25,
+    marginBottom: 30, // More space below status
     gap: 8,
   },
   statusDot: {
