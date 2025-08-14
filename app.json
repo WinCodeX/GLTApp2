@@ -10,7 +10,12 @@
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.lvl0-x.gltapp2"
+      "bundleIdentifier": "com.lvl0-x.gltapp2",
+      "infoPlist": {
+        "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
+        "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
+        "NSLocationWhenInUseUsageDescription": "This app uses location services to discover nearby Bluetooth devices."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +23,21 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.lvl0_x.gltapp2"
+      "package": "com.lvl0_x.gltapp2",
+      "permissions": [
+        "android.permission.BLUETOOTH",
+        "android.permission.BLUETOOTH_ADMIN",
+        "android.permission.BLUETOOTH_CONNECT",
+        "android.permission.BLUETOOTH_SCAN",
+        "android.permission.BLUETOOTH_ADVERTISE",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.INTERNET",
+        "android.permission.ACCESS_NETWORK_STATE",
+        "android.permission.VIBRATE",
+        "android.permission.WAKE_LOCK"
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -36,9 +55,24 @@
           "backgroundColor": "#ffffff"
         }
       ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "minSdkVersion": 23,
+            "compileSdkVersion": 34,
+            "targetSdkVersion": 34,
+            "buildToolsVersion": "34.0.0"
+          },
+          "ios": {
+            "deploymentTarget": "13.0"
+          }
+        }
+      ],
       "expo-secure-store",
       "expo-web-browser",
-      "expo-barcode-scanner"
+      "expo-barcode-scanner",
+      "expo-dev-client"
     ],
     "experiments": {
       "typedRoutes": true
