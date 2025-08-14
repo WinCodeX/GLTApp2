@@ -92,8 +92,13 @@ android {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.1.0"
+        versionCode 2  // Increment for each build/release
+        versionName "1.1.0"  // Semantic version matching app.json
+        
+        // App display name and metadata
+        resValue "string", "app_name", "GLT"
+        resValue "string", "app_version", "1.2.0"
+        resValue "string", "build_number", "2"
     }
     signingConfigs {
         debug {
@@ -106,6 +111,8 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
+            applicationIdSuffix ".debug"  // Different ID for debug builds
+            resValue "string", "app_name", "GLT (Debug)"
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
