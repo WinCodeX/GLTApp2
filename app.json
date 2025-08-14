@@ -71,7 +71,6 @@
       ],
       "expo-secure-store",
       "expo-web-browser",
-      "expo-barcode-scanner",
       "expo-dev-client"
     ],
     "experiments": {
