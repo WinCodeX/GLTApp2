@@ -1,5 +1,5 @@
-// app/admin/PackageSearchScreen.tsx - Styled with dark theme and toasts
-import React, { useState, useRef } from 'react';
+// app/admin/PackageSearchScreen.tsx - Updated with proper API integration and role support
+import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,13 +10,16 @@ import {
   ActivityIndicator,
   Keyboard,
   Dimensions,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
+import * as SecureStore from 'expo-secure-store';
 import QRScanner from '../../components/QRScanner';
 import AdminLayout from '../../components/AdminLayout';
+import api from '../../lib/api';
 
 const { width } = Dimensions.get('window');
 
@@ -42,7 +45,7 @@ interface AvailableAction {
 }
 
 interface PackageSearchScreenProps {
-  userRole?: 'agent' | 'rider' | 'customer';
+  userRole?: 'client' | 'agent' | 'rider' | 'warehouse' | 'admin';
 }
 
 const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
@@ -54,9 +57,48 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
   const [loading, setLoading] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
-  const [recentSearches, setRecentSearches] = useState<string[]>(['PKG-DEMO-20240814', 'PKG-TEST-20240813']);
+  const [recentSearches, setRecentSearches] = useState<string[]>([]);
+  const [currentUserRole, setCurrentUserRole] = useState<string>(userRole);
+  const [isOnline, setIsOnline] = useState(true);
   
   const searchInputRef = useRef<TextInput>(null);
+
+  useEffect(() => {
+    loadUserRole();
+    loadRecentSearches();
+  }, []);
+
+  const loadUserRole = async () => {
+    try {
+      const storedRole = await SecureStore.getItemAsync('user_role');
+      if (storedRole) {
+        setCurrentUserRole(storedRole);
+      }
+    } catch (error) {
+      console.error('Failed to load user role:', error);
+    }
+  };
+
+  const loadRecentSearches = async () => {
+    try {
+      const recent = await SecureStore.getItemAsync('recent_package_searches');
+      if (recent) {
+        setRecentSearches(JSON.parse(recent));
+      }
+    } catch (error) {
+      console.error('Failed to load recent searches:', error);
+    }
+  };
+
+  const saveRecentSearch = async (query: string) => {
+    try {
+      const updated = [query, ...recentSearches.filter(s => s !== query)].slice(0, 5);
+      setRecentSearches(updated);
+      await SecureStore.setItemAsync('recent_package_searches', JSON.stringify(updated));
+    } catch (error) {
+      console.error('Failed to save recent search:', error);
+    }
+  };
 
   const handleSearch = async (query: string = searchQuery) => {
     if (!query.trim()) {
@@ -75,85 +117,67 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     Keyboard.dismiss();
 
     try {
-      // Mock data for demo - replace with actual API call
-      setTimeout(() => {
-        const mockResults: Package[] = [
-          {
-            id: '1',
-            code: query.trim(),
-            state: 'in_transit',
-            state_display: 'In Transit',
-            sender_name: 'John Doe',
-            receiver_name: 'Jane Smith',
-            receiver_phone: '+254700000000',
-            route_description: 'Nairobi → Mombasa',
-            cost: 500,
-            delivery_type: 'standard',
-            created_at: new Date().toISOString(),
-            available_actions: [
-              { action: 'collect', label: 'Collect Package', description: 'Mark as collected' },
-              { action: 'deliver', label: 'Mark Delivered', description: 'Mark as delivered' }
-            ]
-          }
-        ];
+      console.log('🔍 Searching for packages with query:', query);
+      
+      // Check connectivity
+      const response = await api.get('/api/v1/ping');
+      setIsOnline(true);
+      
+      // Search packages using the API
+      const searchResponse = await api.get(`/api/v1/packages/search?query=${encodeURIComponent(query.trim())}`);
 
-        setSearchResults(mockResults);
+      if (searchResponse.data.success) {
+        const packages = searchResponse.data.data || [];
+        setSearchResults(packages);
         
-        // Add to recent searches
-        if (query.trim() && !recentSearches.includes(query.trim())) {
-          setRecentSearches(prev => [query.trim(), ...prev.slice(0, 4)]);
-        }
-
+        // Save to recent searches
+        await saveRecentSearch(query.trim());
+        
         Toast.show({
           type: 'success',
           text1: 'Search Complete',
-          text2: `Found ${mockResults.length} package${mockResults.length > 1 ? 's' : ''}`,
+          text2: `Found ${packages.length} package${packages.length !== 1 ? 's' : ''}`,
           position: 'top',
           visibilityTime: 2000,
         });
-        
-        setLoading(false);
-      }, 1500);
-
-      /* Actual API call:
-      const response = await fetch(`/api/v1/packages/search?query=${encodeURIComponent(query.trim())}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Process results...
       } else {
         setSearchResults([]);
         Toast.show({
-          type: 'error',
-          text1: 'Search Failed',
-          text2: result.message || 'No packages found',
+          type: 'warning',
+          text1: 'No Results',
+          text2: searchResponse.data.message || 'No packages found matching your search',
           position: 'top',
           visibilityTime: 4000,
         });
       }
-      */
-    } catch (error) {
+    } catch (error: any) {
+      console.error('❌ Search error:', error);
+      setIsOnline(false);
       setSearchResults([]);
+      
+      let errorMessage = 'Search failed. Please try again.';
+      if (error.message?.includes('Network Error') || error.message?.includes('timeout')) {
+        errorMessage = 'Network error. Check your connection and try again.';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Authentication failed. Please login again.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      }
+      
       Toast.show({
         type: 'error',
-        text1: 'Network Error',
-        text2: 'Failed to search packages. Please check your connection.',
+        text1: 'Search Failed',
+        text2: errorMessage,
         position: 'top',
         visibilityTime: 4000,
       });
+    } finally {
       setLoading(false);
     }
   };
 
   const handleScanSuccess = async (result: any) => {
-    const packageCode = result.package?.code || 'PKG-SCANNED-20240814';
+    const packageCode = result.package?.code || result.code || 'PKG-SCANNED-20240814';
     setSearchQuery(packageCode);
     setShowScanner(false);
     
@@ -171,67 +195,54 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         visibilityTime: 2000,
       });
 
-      // Mock API call
-      setTimeout(() => {
+      const response = await api.post('/api/v1/scanning/scan_action', {
+        package_code: packageObj.code,
+        action_type: action,
+        metadata: {
+          source: 'package_search',
+          timestamp: new Date().toISOString()
+        }
+      });
+
+      if (response.data.success) {
         Toast.show({
           type: 'success',
           text1: 'Action Successful',
-          text2: `Package ${packageObj.code} has been ${action}ed`,
+          text2: response.data.message,
           position: 'top',
           visibilityTime: 3000,
         });
         
         // Refresh the search results
-        handleSearch(searchQuery);
-      }, 1000);
-
-      /* Actual API call:
-      const response = await fetch('/api/v1/scanning/scan_action', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-        body: JSON.stringify({
-          package_code: packageObj.code,
-          action_type: action,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        Toast.show({
-          type: 'success',
-          text1: 'Action Successful',
-          text2: result.message,
-          position: 'top',
-          visibilityTime: 3000,
-        });
         await handleSearch(searchQuery);
       } else {
         Toast.show({
           type: 'error',
           text1: 'Action Failed',
-          text2: result.message,
+          text2: response.data.message,
           position: 'top',
           visibilityTime: 4000,
         });
       }
-      */
-    } catch (error) {
+    } catch (error: any) {
+      console.error('Action error:', error);
+      
+      const errorMessage = error.response?.data?.message || 
+                          error.message || 
+                          'Failed to perform action. Please try again.';
+      
       Toast.show({
         type: 'error',
         text1: 'Network Error',
-        text2: 'Failed to perform action. Please try again.',
+        text2: errorMessage,
         position: 'top',
         visibilityTime: 4000,
       });
     }
   };
 
-  const getAuthToken = (): string => {
-    return 'your-auth-token';
+  const navigateToPackageDetails = (packageCode: string) => {
+    router.push(`/admin/PackageDetailsScreen?code=${packageCode}`);
   };
 
   const getStateColor = (state: string): string => {
@@ -263,6 +274,8 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         return '#FF9500';
       case 'confirm_receipt':
         return '#764ba2';
+      case 'process':
+        return '#9C27B0';
       default:
         return '#667eea';
     }
@@ -278,16 +291,22 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         return 'print';
       case 'confirm_receipt':
         return 'done-all';
+      case 'process':
+        return 'inventory';
       default:
         return 'check';
     }
+  };
+
+  const canPerformActions = (): boolean => {
+    return ['agent', 'rider', 'warehouse', 'admin'].includes(currentUserRole);
   };
 
   const renderPackageItem = ({ item }: { item: Package }) => (
     <View style={styles.packageItem}>
       <TouchableOpacity
         style={styles.packageHeader}
-        onPress={() => router.push(`/admin/PackageDetailsScreen?code=${item.code}`)}
+        onPress={() => navigateToPackageDetails(item.code)}
       >
         <View style={styles.packageInfo}>
           <Text style={styles.packageCode}>{item.code}</Text>
@@ -311,7 +330,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         </Text>
       </View>
 
-      {item.available_actions && item.available_actions.length > 0 && (
+      {canPerformActions() && item.available_actions && item.available_actions.length > 0 && (
         <View style={styles.actionsContainer}>
           <Text style={styles.actionsTitle}>Available Actions:</Text>
           <View style={styles.actionButtons}>
@@ -349,7 +368,11 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       <MaterialIcons name="history" size={16} color="#a0aec0" />
       <Text style={styles.recentSearchText}>{item}</Text>
       <TouchableOpacity
-        onPress={() => setRecentSearches(prev => prev.filter(s => s !== item))}
+        onPress={() => {
+          const updated = recentSearches.filter(s => s !== item);
+          setRecentSearches(updated);
+          SecureStore.setItemAsync('recent_package_searches', JSON.stringify(updated));
+        }}
         style={styles.removeRecentButton}
       >
         <MaterialIcons name="close" size={14} color="#718096" />
@@ -387,12 +410,25 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         <Text style={styles.emptySubtitle}>
           No packages match your search query "{searchQuery}"
         </Text>
+        {!isOnline && (
+          <Text style={styles.offlineNote}>
+            You are offline. Some packages may not appear in search results.
+          </Text>
+        )}
       </View>
     );
   };
 
   const renderContent = () => (
     <View style={styles.container}>
+      {/* Connection Status */}
+      {!isOnline && (
+        <View style={styles.offlineBar}>
+          <MaterialIcons name="cloud-off" size={16} color="#FFB000" />
+          <Text style={styles.offlineText}>Offline - Limited functionality</Text>
+        </View>
+      )}
+
       {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
@@ -411,7 +447,11 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           />
           {searchQuery.length > 0 && (
             <TouchableOpacity
-              onPress={() => setSearchQuery('')}
+              onPress={() => {
+                setSearchQuery('');
+                setSearchResults([]);
+                setHasSearched(false);
+              }}
               style={styles.clearButton}
             >
               <MaterialIcons name="close" size={20} color="#a0aec0" />
@@ -484,7 +524,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       <QRScanner
         visible={showScanner}
         onClose={() => setShowScanner(false)}
-        userRole={userRole}
+        userRole={currentUserRole as any}
         onScanSuccess={handleScanSuccess}
       />
     </View>
@@ -500,6 +540,21 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  offlineBar: {
+    backgroundColor: '#2A1F3D',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: '#FFB000',
+  },
+  offlineText: {
+    color: '#FFB000',
+    fontSize: 14,
+    fontWeight: '600',
   },
   searchContainer: {
     backgroundColor: '#1a1a2e',
@@ -725,6 +780,13 @@ const styles = StyleSheet.create({
     color: '#a0aec0',
     textAlign: 'center',
     lineHeight: 24,
+    fontWeight: '500',
+  },
+  offlineNote: {
+    fontSize: 14,
+    color: '#FFB000',
+    textAlign: 'center',
+    marginTop: 12,
     fontWeight: '500',
   },
 });
