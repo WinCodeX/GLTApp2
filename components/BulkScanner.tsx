@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - Styled with dark theme and toasts
+// components/BulkScanner.tsx - Updated with all roles and proper API integration
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -10,11 +10,15 @@ import {
   Modal,
   SafeAreaView,
   TextInput,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
+import * as SecureStore from 'expo-secure-store';
 import QRScanner from './QRScanner';
+import api from '../lib/api';
+import OfflineScanningService from '../services/OfflineScanningService';
 
 interface ScannedPackage {
   code: string;
@@ -25,6 +29,7 @@ interface ScannedPackage {
   scanned_at: Date;
   processed: boolean;
   error?: string;
+  offline?: boolean;
 }
 
 interface BulkScanResult {
@@ -37,8 +42,8 @@ interface BulkScanResult {
 interface BulkScannerProps {
   visible: boolean;
   onClose: () => void;
-  actionType: 'print' | 'collect' | 'deliver';
-  userRole: 'agent' | 'rider';
+  actionType: 'print' | 'collect' | 'deliver' | 'process';
+  userRole: 'client' | 'agent' | 'rider' | 'warehouse' | 'admin';
   onBulkComplete?: (results: BulkScanResult[]) => void;
 }
 
@@ -54,13 +59,44 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   const [processing, setProcessing] = useState(false);
   const [manualCode, setManualCode] = useState('');
   const [showManualEntry, setShowManualEntry] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+
+  const offlineService = OfflineScanningService.getInstance();
 
   useEffect(() => {
     if (visible) {
       setScannedPackages([]);
       setManualCode('');
+      loadCurrentUser();
+      checkConnectivity();
     }
   }, [visible]);
+
+  const loadCurrentUser = async () => {
+    try {
+      const userId = await SecureStore.getItemAsync('user_id');
+      const userName = await SecureStore.getItemAsync('user_name') || 'Unknown User';
+      const userRole = await SecureStore.getItemAsync('user_role') || 'client';
+      
+      setCurrentUser({
+        id: userId || 'unknown',
+        name: userName,
+        role: userRole
+      });
+    } catch (error) {
+      console.error('Failed to load current user:', error);
+    }
+  };
+
+  const checkConnectivity = async () => {
+    try {
+      const online = await offlineService.isOnline();
+      setIsOnline(online);
+    } catch (error) {
+      setIsOnline(false);
+    }
+  };
 
   const handleScanSuccess = async (result: any) => {
     const packageData = result.package || result;
@@ -78,30 +114,130 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       return;
     }
 
-    // Mock package validation
-    const canPerformAction = Math.random() > 0.2; // 80% success rate for demo
+    try {
+      const online = await offlineService.isOnline();
+      let packageInfo = packageData;
 
-    const newPackage: ScannedPackage = {
-      code: packageCode,
-      sender_name: packageData.sender_name || 'John Doe',
-      receiver_name: packageData.receiver_name || 'Jane Smith',
-      route_description: packageData.route_description || 'Nairobi → Mombasa',
-      state: packageData.state || 'in_transit',
-      scanned_at: new Date(),
-      processed: false,
-      error: canPerformAction ? undefined : `Cannot ${actionType} package in current state`,
-    };
+      if (!online) {
+        // Try to get from cache
+        const cached = await offlineService.getCachedPackage(packageCode);
+        if (cached) {
+          packageInfo = cached.package;
+        }
+      } else {
+        // Fetch fresh package details
+        try {
+          const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
+          if (response.data.success) {
+            packageInfo = response.data.data.package;
+            // Cache for offline use
+            await offlineService.cachePackage(
+              packageCode,
+              packageInfo,
+              response.data.data.available_actions
+            );
+          }
+        } catch (error) {
+          console.warn('Failed to fetch package details, using provided data:', error);
+        }
+      }
 
-    setScannedPackages(prev => [newPackage, ...prev]);
-    setShowScanner(false);
+      // Validate if action can be performed
+      const canPerformAction = await validatePackageAction(packageInfo, actionType);
+
+      const newPackage: ScannedPackage = {
+        code: packageCode,
+        sender_name: packageInfo.sender_name || 'Unknown Sender',
+        receiver_name: packageInfo.receiver_name || 'Unknown Receiver',
+        route_description: packageInfo.route_description || 'Unknown Route',
+        state: packageInfo.state || 'unknown',
+        scanned_at: new Date(),
+        processed: false,
+        error: canPerformAction.canPerform ? undefined : canPerformAction.reason,
+        offline: !online
+      };
+
+      setScannedPackages(prev => [newPackage, ...prev]);
+      setShowScanner(false);
+      
+      Toast.show({
+        type: canPerformAction.canPerform ? 'success' : 'warning',
+        text1: 'Package Scanned',
+        text2: canPerformAction.canPerform 
+          ? `${packageCode} added to batch${!online ? ' (offline)' : ''}` 
+          : `${packageCode} has validation errors`,
+        position: 'top',
+        visibilityTime: 2000,
+      });
+    } catch (error) {
+      console.error('Error processing scanned package:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Scan Error',
+        text2: 'Failed to process scanned package',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
+  };
+
+  const validatePackageAction = async (packageInfo: any, action: string): Promise<{canPerform: boolean, reason?: string}> => {
+    try {
+      const online = await offlineService.isOnline();
+      
+      if (online) {
+        // Use API validation
+        const response = await api.post(`/api/v1/scanning/package/${packageInfo.code}/validate`, {
+          action_type: action
+        });
+        
+        if (response.data.success) {
+          return {
+            canPerform: response.data.data.can_execute,
+            reason: response.data.data.can_execute ? undefined : 'Action not allowed in current state'
+          };
+        }
+      }
+      
+      // Fallback validation
+      return validatePackageActionLocally(packageInfo, action);
+    } catch (error) {
+      // Fallback to local validation
+      return validatePackageActionLocally(packageInfo, action);
+    }
+  };
+
+  const validatePackageActionLocally = (packageInfo: any, action: string): {canPerform: boolean, reason?: string} => {
+    const state = packageInfo.state;
     
-    Toast.show({
-      type: canPerformAction ? 'success' : 'warning',
-      text1: 'Package Scanned',
-      text2: canPerformAction ? `${packageCode} added to batch` : `${packageCode} has validation errors`,
-      position: 'top',
-      visibilityTime: 2000,
-    });
+    switch (action) {
+      case 'print':
+        return {
+          canPerform: ['pending', 'submitted', 'in_transit', 'delivered'].includes(state),
+          reason: !['pending', 'submitted', 'in_transit', 'delivered'].includes(state) 
+            ? `Cannot print package in ${state} state` 
+            : undefined
+        };
+      case 'collect':
+        return {
+          canPerform: state === 'submitted',
+          reason: state !== 'submitted' ? `Cannot collect package in ${state} state` : undefined
+        };
+      case 'deliver':
+        return {
+          canPerform: state === 'in_transit',
+          reason: state !== 'in_transit' ? `Cannot deliver package in ${state} state` : undefined
+        };
+      case 'process':
+        return {
+          canPerform: ['submitted', 'in_transit'].includes(state),
+          reason: !['submitted', 'in_transit'].includes(state) 
+            ? `Cannot process package in ${state} state` 
+            : undefined
+        };
+      default:
+        return { canPerform: false, reason: 'Unknown action type' };
+    }
   };
 
   const handleManualEntry = async () => {
@@ -117,47 +253,44 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
 
     try {
-      // Mock API call
-      const mockResult = {
-        package: {
-          code: manualCode.trim(),
-          sender_name: 'Manual Entry',
-          receiver_name: 'Test Receiver',
-          route_description: 'Test Route',
-          state: 'in_transit',
+      const online = await offlineService.isOnline();
+      
+      if (online) {
+        // Try API call
+        const response = await api.get(`/api/v1/scanning/package_details?package_code=${manualCode.trim()}`);
+        
+        if (response.data.success) {
+          await handleScanSuccess({ package: response.data.data.package });
+          setManualCode('');
+          setShowManualEntry(false);
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: 'Package Not Found',
+            text2: response.data.message || 'Package not found',
+            position: 'top',
+            visibilityTime: 4000,
+          });
         }
-      };
-
-      await handleScanSuccess(mockResult);
-      setManualCode('');
-      setShowManualEntry(false);
-
-      /* Actual API call:
-      const response = await fetch(`/api/v1/scanning/package_details?package_code=${manualCode.trim()}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        await handleScanSuccess(result.data);
-        setManualCode('');
-        setShowManualEntry(false);
       } else {
-        Toast.show({
-          type: 'error',
-          text1: 'Package Not Found',
-          text2: result.message || 'Package not found',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        // Try cached data
+        const cached = await offlineService.getCachedPackage(manualCode.trim());
+        if (cached) {
+          await handleScanSuccess({ package: cached.package });
+          setManualCode('');
+          setShowManualEntry(false);
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: 'Offline Error',
+            text2: 'Package not found in cache',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+        }
       }
-      */
     } catch (error) {
+      console.error('Manual entry error:', error);
       Toast.show({
         type: 'error',
         text1: 'Network Error',
@@ -193,18 +326,14 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       return;
     }
 
-    Toast.show({
-      type: 'info',
-      text1: 'Confirm Bulk Action',
-      text2: `${getActionLabel(actionType)} ${validPackages.length} packages?`,
-      position: 'top',
-      visibilityTime: 4000,
-    });
-
-    // Auto-proceed after a delay for demo
-    setTimeout(() => {
-      performBulkAction();
-    }, 2000);
+    Alert.alert(
+      'Confirm Bulk Action',
+      `${getActionLabel(actionType)} ${validPackages.length} packages?${!isOnline ? '\n\nNote: You are offline. Actions will be queued for sync.' : ''}`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Proceed', onPress: performBulkAction, style: 'default' }
+      ]
+    );
   };
 
   const performBulkAction = async () => {
@@ -214,18 +343,100 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     const packageCodes = validPackages.map(pkg => pkg.code);
 
     try {
-      // Mock bulk processing
-      setTimeout(() => {
-        const mockResults: BulkScanResult[] = packageCodes.map(code => ({
-          package_code: code,
-          success: Math.random() > 0.1, // 90% success rate
-          message: `Package ${code} ${actionType}ed successfully`,
-          new_state: getNewState(actionType),
-        }));
+      const online = await offlineService.isOnline();
+      
+      if (!online) {
+        // Process offline
+        await processBulkOffline(packageCodes);
+      } else {
+        // Process online
+        await processBulkOnline(packageCodes);
+      }
+    } catch (error) {
+      console.error('Bulk processing error:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Processing Failed',
+        text2: 'Failed to process packages',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } finally {
+      setProcessing(false);
+    }
+  };
 
+  const processBulkOffline = async (packageCodes: string[]) => {
+    const results: BulkScanResult[] = [];
+
+    for (const code of packageCodes) {
+      try {
+        const result = await offlineService.storeScanAction(
+          code,
+          actionType,
+          currentUser,
+          {
+            bulk_operation: true,
+            location: await getCurrentLocation(),
+            device_info: getDeviceInfo()
+          }
+        );
+
+        results.push({
+          package_code: code,
+          success: result.success,
+          message: result.success ? 'Queued for sync' : result.message
+        });
+
+        // Update package status locally
+        if (result.success) {
+          setScannedPackages(prev => prev.map(pkg => 
+            pkg.code === code ? { ...pkg, processed: true, offline: true } : pkg
+          ));
+        }
+      } catch (error) {
+        results.push({
+          package_code: code,
+          success: false,
+          message: 'Failed to queue offline'
+        });
+      }
+    }
+
+    const successful = results.filter(r => r.success).length;
+    
+    Toast.show({
+      type: 'success',
+      text1: 'Queued for Sync',
+      text2: `${successful} of ${results.length} packages queued for sync when online`,
+      position: 'top',
+      visibilityTime: 5000,
+    });
+
+    onBulkComplete?.(results);
+    
+    // Close after a delay to show results
+    setTimeout(() => onClose(), 2000);
+  };
+
+  const processBulkOnline = async (packageCodes: string[]) => {
+    try {
+      const response = await api.post('/api/v1/scanning/bulk_scan', {
+        package_codes: packageCodes,
+        action_type: actionType,
+        metadata: {
+          bulk_operation: true,
+          location: await getCurrentLocation(),
+          device_info: getDeviceInfo()
+        }
+      });
+
+      if (response.data.success) {
+        const results = response.data.data.results;
+        
         // Update package statuses based on results
         const updatedPackages = scannedPackages.map(pkg => {
-          const processResult = mockResults.find(r => r.package_code === pkg.code);
+          const processResult = results.find((r: any) => r.package_code === pkg.code);
           if (processResult) {
             return {
               ...pkg,
@@ -239,8 +450,8 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
         setScannedPackages(updatedPackages);
 
-        const successful = mockResults.filter(r => r.success).length;
-        const total = mockResults.length;
+        const successful = response.data.data.summary.successful;
+        const total = response.data.data.summary.total;
 
         if (successful === total) {
           Toast.show({
@@ -260,60 +471,29 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
           });
         }
 
-        onBulkComplete?.(mockResults);
-        setProcessing(false);
+        onBulkComplete?.(results);
 
         if (successful === total) {
           setTimeout(() => onClose(), 2000);
         }
-      }, 2000);
-
-      /* Actual API call:
-      const response = await fetch('/api/v1/scanning/bulk_scan', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-        body: JSON.stringify({
-          package_codes: packageCodes,
-          action_type: actionType,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        // Process results...
       } else {
-        Toast.show({
-          type: 'error',
-          text1: 'Bulk Action Failed',
-          text2: result.message || 'Bulk action failed',
-          position: 'top',
-          visibilityTime: 4000,
-        });
+        throw new Error(response.data.message || 'Bulk action failed');
       }
-      */
-    } catch (error) {
-      Toast.show({
-        type: 'error',
-        text1: 'Network Error',
-        text2: 'Failed to process bulk action',
-        position: 'top',
-        visibilityTime: 4000,
-      });
-      setProcessing(false);
+    } catch (error: any) {
+      throw error;
     }
   };
 
-  const getNewState = (action: string): string => {
-    switch (action) {
-      case 'collect': return 'collected';
-      case 'deliver': return 'delivered';
-      case 'print': return 'printed';
-      default: return 'processed';
-    }
+  const getCurrentLocation = async () => {
+    // Implement location services if needed
+    return null;
+  };
+
+  const getDeviceInfo = () => {
+    return {
+      platform: 'react-native',
+      timestamp: new Date().toISOString()
+    };
   };
 
   const getActionLabel = (action: string): string => {
@@ -321,6 +501,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       case 'print': return 'Print';
       case 'collect': return 'Collect';
       case 'deliver': return 'Mark as Delivered';
+      case 'process': return 'Process';
       default: return action;
     }
   };
@@ -330,18 +511,24 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       case 'print': return ['#FF9500', '#FF8C00'];
       case 'collect': return ['#667eea', '#764ba2'];
       case 'deliver': return ['#34C759', '#30A46C'];
+      case 'process': return ['#9C27B0', '#673AB7'];
       default: return ['#667eea', '#764ba2'];
     }
   };
 
-  const getAuthToken = (): string => {
-    return 'your-auth-token';
-  };
-
   const renderPackageItem = ({ item }: { item: ScannedPackage }) => (
-    <View style={[styles.packageItem, item.error && styles.packageItemError]}>
+    <View style={[
+      styles.packageItem, 
+      item.error && styles.packageItemError,
+      item.offline && styles.packageItemOffline
+    ]}>
       <View style={styles.packageHeader}>
-        <Text style={styles.packageCode}>{item.code}</Text>
+        <View style={styles.packageCodeContainer}>
+          <Text style={styles.packageCode}>{item.code}</Text>
+          {item.offline && (
+            <MaterialIcons name="cloud-off" size={16} color="#FFB000" />
+          )}
+        </View>
         <TouchableOpacity onPress={() => removePackage(item.code)} style={styles.removeButton}>
           <MaterialIcons name="close" size={20} color="#FF6B6B" />
         </TouchableOpacity>
@@ -354,11 +541,25 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       
       <View style={styles.packageFooter}>
         <LinearGradient
-          colors={item.processed ? ['#34C759', '#30A46C'] : item.error ? ['#FF6B6B', '#FF5252'] : ['#FF9500', '#FF8C00']}
+          colors={item.processed 
+            ? ['#34C759', '#30A46C'] 
+            : item.error 
+              ? ['#FF6B6B', '#FF5252'] 
+              : item.offline
+                ? ['#FFB000', '#FF8C00']
+                : ['#FF9500', '#FF8C00']
+          }
           style={styles.statusBadge}
         >
           <Text style={styles.statusText}>
-            {item.processed ? 'Processed' : item.error ? 'Error' : 'Ready'}
+            {item.processed 
+              ? 'Processed' 
+              : item.error 
+                ? 'Error' 
+                : item.offline
+                  ? 'Offline'
+                  : 'Ready'
+            }
           </Text>
         </LinearGradient>
         {item.error && <Text style={styles.errorText}>{item.error}</Text>}
@@ -386,9 +587,14 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             <TouchableOpacity onPress={onClose} style={styles.headerButton}>
               <MaterialIcons name="close" size={24} color="#fff" />
             </TouchableOpacity>
-            <Text style={styles.headerTitle}>
-              Bulk {getActionLabel(actionType)}
-            </Text>
+            <View style={styles.headerTitleContainer}>
+              <Text style={styles.headerTitle}>
+                Bulk {getActionLabel(actionType)}
+              </Text>
+              {!isOnline && (
+                <Text style={styles.offlineHeaderIndicator}>OFFLINE MODE</Text>
+              )}
+            </View>
             <View style={styles.headerButton} />
           </LinearGradient>
 
@@ -422,6 +628,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             <View style={styles.countRow}>
               <Text style={styles.countText}>
                 {scannedPackages.length} packages scanned
+                {!isOnline && ' (offline mode)'}
               </Text>
               {scannedPackages.length > 0 && (
                 <TouchableOpacity
@@ -460,6 +667,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                   <Text style={styles.emptyText}>No packages scanned yet</Text>
                   <Text style={styles.emptySubtext}>
                     Scan QR codes to add packages for bulk {actionType}
+                    {!isOnline && ' (offline mode active)'}
                   </Text>
                 </View>
               }
@@ -481,9 +689,16 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                       <ActivityIndicator color="#fff" />
                     ) : (
                       <>
-                        <MaterialIcons name="check-circle" size={20} color="#fff" />
+                        <MaterialIcons 
+                          name={!isOnline ? "cloud-queue" : "check-circle"} 
+                          size={20} 
+                          color="#fff" 
+                        />
                         <Text style={styles.processButtonText}>
-                          {getActionLabel(actionType)} All Packages
+                          {!isOnline 
+                            ? `Queue All for Sync` 
+                            : `${getActionLabel(actionType)} All Packages`
+                          }
                         </Text>
                       </>
                     )}
@@ -571,10 +786,20 @@ const styles = StyleSheet.create({
     width: 40,
     alignItems: 'center',
   },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  offlineHeaderIndicator: {
+    color: '#FFB000',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   content: {
     flex: 1,
@@ -656,11 +881,20 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FF6B6B',
   },
+  packageItemOffline: {
+    borderLeftWidth: 4,
+    borderLeftColor: '#FFB000',
+  },
   packageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     marginBottom: 8,
+  },
+  packageCodeContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   packageCode: {
     fontSize: 16,
