@@ -92,8 +92,9 @@ export const toastConfig = {
 
 const styles = StyleSheet.create({
   toastContainer: {
-    paddingHorizontal: 20,
-    marginTop: 50, // Account for status bar and notch
+    paddingHorizontal: 16, // Reduced padding for more width
+    marginTop: 60, // Account for status bar and notch
+    marginHorizontal: 0, // Full width
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
@@ -107,33 +108,35 @@ const styles = StyleSheet.create({
   toast: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    borderRadius: 20,
-    borderWidth: 1,
-    backgroundColor: 'rgba(26, 26, 46, 0.95)',
+    paddingHorizontal: 20, // Increased padding for better text spacing
+    paddingVertical: 18, // Increased vertical padding
+    borderRadius: 16, // Slightly smaller radius for more rectangular shape
+    borderWidth: 1.5, // Slightly thicker border
+    backgroundColor: 'rgba(26, 26, 46, 0.98)', // More opaque background
     backdropFilter: 'blur(15px)',
     overflow: 'hidden',
+    minHeight: 64, // Minimum height for consistent sizing
+    width: '100%', // Full width of container
   },
   
   successToast: {
-    borderColor: 'rgba(16, 185, 129, 0.4)',
-    backgroundColor: 'rgba(26, 46, 37, 0.95)',
+    borderColor: 'rgba(16, 185, 129, 0.6)', // More visible border
+    backgroundColor: 'rgba(26, 46, 37, 0.98)', // More opaque background
   },
   
   errorToast: {
-    borderColor: 'rgba(239, 68, 68, 0.4)',
-    backgroundColor: 'rgba(46, 26, 26, 0.95)',
+    borderColor: 'rgba(239, 68, 68, 0.6)', // More visible border
+    backgroundColor: 'rgba(46, 26, 26, 0.98)', // More opaque background
   },
   
   warningToast: {
-    borderColor: 'rgba(245, 158, 11, 0.4)',
-    backgroundColor: 'rgba(46, 39, 26, 0.95)',
+    borderColor: 'rgba(245, 158, 11, 0.6)', // More visible border
+    backgroundColor: 'rgba(46, 39, 26, 0.98)', // More opaque background
   },
   
   infoToast: {
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    backgroundColor: 'rgba(35, 26, 46, 0.95)',
+    borderColor: 'rgba(124, 58, 237, 0.6)', // More visible border
+    backgroundColor: 'rgba(35, 26, 46, 0.98)', // More opaque background
   },
   
   iconContainer: {
@@ -164,70 +167,77 @@ const styles = StyleSheet.create({
   textContainer: {
     flex: 1,
     alignItems: 'flex-start',
+    justifyContent: 'center', // Center text vertically
   },
   
   toastText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 17, // Slightly larger font
     fontWeight: '700',
-    lineHeight: 22,
+    lineHeight: 24, // Better line spacing
     letterSpacing: 0.3,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)', // Text shadow for better visibility
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
   },
   
   toastSubText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)', // More opaque subtitle
+    fontSize: 15, // Slightly larger subtitle
     fontWeight: '500',
-    marginTop: 3,
-    lineHeight: 18,
+    marginTop: 2,
+    lineHeight: 20, // Better line spacing
     letterSpacing: 0.2,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)', // Subtle shadow for subtitle
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 1,
   },
   
   // Success text styles
   successText: {
-    color: '#10b981',
-    textShadowColor: 'rgba(16, 185, 129, 0.3)',
+    color: '#22c55e', // Brighter green
+    textShadowColor: 'rgba(34, 197, 94, 0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   
   successSubText: {
-    color: 'rgba(16, 185, 129, 0.9)',
+    color: 'rgba(34, 197, 94, 0.95)', // More opaque
   },
   
   // Error text styles
   errorText: {
-    color: '#ef4444',
-    textShadowColor: 'rgba(239, 68, 68, 0.3)',
+    color: '#f87171', // Brighter red
+    textShadowColor: 'rgba(248, 113, 113, 0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   
   errorSubText: {
-    color: 'rgba(239, 68, 68, 0.9)',
+    color: 'rgba(248, 113, 113, 0.95)', // More opaque
   },
   
   // Warning text styles
   warningText: {
-    color: '#f59e0b',
-    textShadowColor: 'rgba(245, 158, 11, 0.3)',
+    color: '#fbbf24', // Brighter yellow
+    textShadowColor: 'rgba(251, 191, 36, 0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   
   warningSubText: {
-    color: 'rgba(245, 158, 11, 0.9)',
+    color: 'rgba(251, 191, 36, 0.95)', // More opaque
   },
   
   // Info text styles
   infoText: {
-    color: '#7c3aed',
-    textShadowColor: 'rgba(124, 58, 237, 0.3)',
+    color: '#a78bfa', // Brighter purple
+    textShadowColor: 'rgba(167, 139, 250, 0.4)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
   
   infoSubText: {
-    color: 'rgba(124, 58, 237, 0.9)',
+    color: 'rgba(167, 139, 250, 0.95)', // More opaque
   },
 });
