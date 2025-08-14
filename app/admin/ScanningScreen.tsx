@@ -380,7 +380,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
         end={{ x: 1, y: 1 }}
         style={styles.actionHeader}
       >
-        <MaterialIcons name={action.icon} size={24} color="#fff" />
+        <MaterialIcons name={action.icon} size={20} color="#fff" />
         <Text style={styles.actionTitle}>{action.title}</Text>
       </LinearGradient>
       
@@ -627,23 +627,23 @@ const styles = StyleSheet.create({
   actionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    gap: 12,
+    padding: 14, // Reduced from 20
+    gap: 8, // Reduced from 12
   },
   actionTitle: {
-    fontSize: 18,
-    fontWeight: '700',
+    fontSize: 15, // Reduced from 18
+    fontWeight: '600', // Reduced from '700'
     color: '#fff',
   },
   actionContent: {
-    padding: 20,
-    paddingTop: 0,
+    padding: 16, // Reduced from 20
+    paddingTop: 12, // Increased from 0 to create space
   },
   actionDescription: {
-    fontSize: 15,
+    fontSize: 14, // Reduced from 15
     color: '#a0aec0',
-    marginBottom: 20,
-    lineHeight: 22,
+    marginBottom: 16, // Reduced from 20
+    lineHeight: 20, // Reduced from 22
     fontWeight: '500',
   },
   actionButtons: {
