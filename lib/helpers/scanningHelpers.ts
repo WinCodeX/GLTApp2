@@ -146,7 +146,7 @@ export const performScanAction = async (request: ScanActionRequest): Promise<Sca
   try {
     console.log('🔄 Performing scan action:', request);
     
-    const response = await api.post('/api/v1/scanning/scan_action', request, {
+    const response = await api.post('/api/v1/user/scan_stats', request, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json',
