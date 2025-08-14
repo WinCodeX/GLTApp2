@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Admin Settings Screen
+// app/admin/settings.tsx - Admin Settings Screen with Real Bluetooth Integration
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -11,18 +11,29 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  PermissionsAndroid,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import AdminLayout from '../../components/AdminLayout';
+
+// Real Bluetooth libraries
+import RNBluetoothClassic, { BluetoothDevice as RNBluetoothDevice } from 'react-native-bluetooth-classic';
+import { BleManager, Device as BleDevice } from 'react-native-ble-plx';
 
 interface BluetoothDevice {
   id: string;
   name: string;
+  address: string;
   connected: boolean;
   type: 'printer' | 'scanner' | 'other';
+  rssi?: number;
+  bondState?: 'bonded' | 'bonding' | 'none';
+  isClassic?: boolean;
 }
 
 interface AppInfo {
@@ -33,15 +44,18 @@ interface AppInfo {
 
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
-  const [bluetoothEnabled, setBluetoothEnabled] = useState(true);
+  const [bleManager] = useState(() => new BleManager());
+  const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
   const [printerConnected, setPrinterConnected] = useState(false);
-  const [connectedPrinter, setConnectedPrinter] = useState<string | null>('HP LaserJet Pro');
+  const [connectedPrinter, setConnectedPrinter] = useState<string | null>(null);
+  const [connectedPrinterAddress, setConnectedPrinterAddress] = useState<string | null>(null);
   const [bluetoothDevices, setBluetoothDevices] = useState<BluetoothDevice[]>([]);
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [scanningDevices, setScanningDevices] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
+  const [bluetoothPermissions, setBluetoothPermissions] = useState(false);
 
   const appInfo: AppInfo = {
     version: '2.1.0',
@@ -50,38 +64,262 @@ const SettingsScreen: React.FC = () => {
   };
 
   useEffect(() => {
-    // Mock Bluetooth devices
-    setBluetoothDevices([
-      { id: '1', name: 'HP LaserJet Pro', connected: true, type: 'printer' },
-      { id: '2', name: 'Zebra ZD220', connected: false, type: 'printer' },
-      { id: '3', name: 'Honeywell Scanner', connected: false, type: 'scanner' },
-    ]);
+    initializeBluetooth();
+    loadStoredSettings();
+
+    // Setup BLE manager
+    const subscription = bleManager.onStateChange((state) => {
+      console.log('BLE State changed:', state);
+      setBluetoothEnabled(state === 'PoweredOn');
+    }, true);
+
+    return () => {
+      subscription.remove();
+      bleManager.destroy();
+    };
   }, []);
 
-  const handleBluetoothToggle = (value: boolean) => {
-    setBluetoothEnabled(value);
-    if (!value) {
-      setPrinterConnected(false);
-      setConnectedPrinter(null);
+  const loadStoredSettings = async () => {
+    try {
+      const storedSettings = await AsyncStorage.getItem('app_settings');
+      if (storedSettings) {
+        const settings = JSON.parse(storedSettings);
+        setNotifications(settings.notifications ?? true);
+        setAutoSync(settings.autoSync ?? true);
+        setDarkMode(settings.darkMode ?? true);
+      }
+
+      const storedPrinter = await AsyncStorage.getItem('connected_printer');
+      if (storedPrinter) {
+        const printer = JSON.parse(storedPrinter);
+        setConnectedPrinter(printer.name);
+        setConnectedPrinterAddress(printer.address);
+        setPrinterConnected(true);
+      }
+    } catch (error) {
+      console.error('Failed to load settings:', error);
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      const settings = {
+        notifications,
+        autoSync,
+        darkMode,
+      };
+      await AsyncStorage.setItem('app_settings', JSON.stringify(settings));
+    } catch (error) {
+      console.error('Failed to save settings:', error);
+    }
+  };
+
+  const initializeBluetooth = async () => {
+    try {
+      // Request Bluetooth permissions
+      await requestBluetoothPermissions();
+      
+      // Check if Bluetooth is enabled
+      await checkBluetoothState();
+      
+      // Load paired devices
+      await loadPairedDevices();
+    } catch (error) {
+      console.error('Failed to initialize Bluetooth:', error);
       Toast.show({
-        type: 'info',
-        text1: 'Bluetooth Disabled',
-        text2: 'All Bluetooth connections have been disconnected',
+        type: 'error',
+        text1: 'Bluetooth Initialization Failed',
+        text2: 'Please check your device Bluetooth settings',
         position: 'top',
-        visibilityTime: 3000,
+        visibilityTime: 4000,
       });
+    }
+  };
+
+  const requestBluetoothPermissions = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const apiLevel = Platform.constants.Release;
+        
+        let permissions = [
+          PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+          PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
+        ];
+
+        // Android 12+ requires new permissions
+        if (apiLevel >= 31) {
+          permissions = [
+            ...permissions,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADVERTISE,
+          ];
+        } else {
+          permissions = [
+            ...permissions,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH,
+            PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADMIN,
+          ];
+        }
+
+        const granted = await PermissionsAndroid.requestMultiple(permissions);
+
+        const allPermissionsGranted = Object.values(granted).every(
+          permission => permission === PermissionsAndroid.RESULTS.GRANTED
+        );
+
+        setBluetoothPermissions(allPermissionsGranted);
+
+        if (!allPermissionsGranted) {
+          Toast.show({
+            type: 'warning',
+            text1: 'Bluetooth Permissions Required',
+            text2: 'Please grant all Bluetooth permissions to use this feature',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+        }
+
+        return allPermissionsGranted;
+      } catch (error) {
+        console.error('Permission request failed:', error);
+        setBluetoothPermissions(false);
+        return false;
+      }
     } else {
+      // iOS permissions are handled automatically
+      setBluetoothPermissions(true);
+      return true;
+    }
+  };
+
+  const checkBluetoothState = async () => {
+    try {
+      const isEnabled = await RNBluetoothClassic.isBluetoothEnabled();
+      setBluetoothEnabled(isEnabled);
+      
+      if (!isEnabled) {
+        Toast.show({
+          type: 'info',
+          text1: 'Bluetooth Disabled',
+          text2: 'Please enable Bluetooth in your device settings',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      }
+      
+      return isEnabled;
+    } catch (error) {
+      console.error('Failed to check Bluetooth state:', error);
+      setBluetoothEnabled(false);
+      return false;
+    }
+  };
+
+  const loadPairedDevices = async () => {
+    try {
+      const pairedDevices = await RNBluetoothClassic.getBondedDevices();
+      const formattedDevices: BluetoothDevice[] = pairedDevices.map((device: RNBluetoothDevice) => ({
+        id: device.address,
+        name: device.name || 'Unknown Device',
+        address: device.address,
+        connected: false,
+        type: detectDeviceType(device.name || ''),
+        bondState: device.bonded ? 'bonded' : 'none',
+        isClassic: true,
+      }));
+      
+      setBluetoothDevices(formattedDevices);
+      console.log('Loaded paired devices:', formattedDevices.length);
+    } catch (error) {
+      console.error('Failed to load paired devices:', error);
+    }
+  };
+
+  const detectDeviceType = (deviceName: string): 'printer' | 'scanner' | 'other' => {
+    const name = deviceName?.toLowerCase() || '';
+    if (name.includes('print') || name.includes('hp') || name.includes('zebra') || 
+        name.includes('epson') || name.includes('brother') || name.includes('canon')) {
+      return 'printer';
+    }
+    if (name.includes('scan') || name.includes('honeywell') || name.includes('symbol') || 
+        name.includes('datalogic') || name.includes('intermec')) {
+      return 'scanner';
+    }
+    return 'other';
+  };
+
+  const handleBluetoothToggle = async (value: boolean) => {
+    if (!bluetoothPermissions) {
+      const granted = await requestBluetoothPermissions();
+      if (!granted) return;
+    }
+
+    try {
+      if (value) {
+        const result = await RNBluetoothClassic.requestBluetoothEnabled();
+        if (result) {
+          setBluetoothEnabled(true);
+          await loadPairedDevices();
+          
+          Toast.show({
+            type: 'success',
+            text1: 'Bluetooth Enabled',
+            text2: 'Bluetooth is now available for connections',
+            position: 'top',
+            visibilityTime: 3000,
+          });
+        }
+      } else {
+        // Disconnect all devices first
+        await disconnectAllDevices();
+        setBluetoothEnabled(false);
+        
+        Toast.show({
+          type: 'info',
+          text1: 'Bluetooth Disabled',
+          text2: 'All Bluetooth connections have been disconnected',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to toggle Bluetooth:', error);
       Toast.show({
-        type: 'success',
-        text1: 'Bluetooth Enabled',
-        text2: 'Bluetooth is now available for connections',
+        type: 'error',
+        text1: 'Bluetooth Error',
+        text2: 'Failed to change Bluetooth state',
         position: 'top',
         visibilityTime: 3000,
       });
     }
   };
 
-  const handlePrinterConnect = () => {
+  const disconnectAllDevices = async () => {
+    try {
+      // Disconnect Classic Bluetooth devices
+      const connectedDevices = await RNBluetoothClassic.getConnectedDevices();
+      for (const device of connectedDevices) {
+        try {
+          await RNBluetoothClassic.disconnectFromDevice(device.address);
+          console.log('Disconnected from:', device.name);
+        } catch (error) {
+          console.error('Failed to disconnect from device:', device.name, error);
+        }
+      }
+
+      // Update UI state
+      setBluetoothDevices(prev => prev.map(d => ({ ...d, connected: false })));
+      setPrinterConnected(false);
+      setConnectedPrinter(null);
+      setConnectedPrinterAddress(null);
+      await AsyncStorage.removeItem('connected_printer');
+    } catch (error) {
+      console.error('Failed to disconnect all devices:', error);
+    }
+  };
+
+  const handlePrinterConnect = async () => {
     if (!bluetoothEnabled) {
       Toast.show({
         type: 'warning',
@@ -92,70 +330,240 @@ const SettingsScreen: React.FC = () => {
       });
       return;
     }
+
+    if (!bluetoothPermissions) {
+      const granted = await requestBluetoothPermissions();
+      if (!granted) return;
+    }
+
     setShowDeviceModal(true);
-    scanForDevices();
+    await scanForDevices();
   };
 
-  const scanForDevices = () => {
+  const scanForDevices = async () => {
+    if (!bluetoothPermissions) {
+      await requestBluetoothPermissions();
+      return;
+    }
+
     setScanningDevices(true);
-    // Mock scanning process
-    setTimeout(() => {
-      setScanningDevices(false);
+    
+    try {
+      // Get bonded devices first
+      await loadPairedDevices();
+
+      // Start Classic Bluetooth discovery
+      const isDiscovering = await RNBluetoothClassic.isDiscovering();
+      if (isDiscovering) {
+        await RNBluetoothClassic.cancelDiscovery();
+      }
+
+      const discoveredDevices = await RNBluetoothClassic.startDiscovery();
+      
+      const newDevices: BluetoothDevice[] = discoveredDevices.map((device: RNBluetoothDevice) => ({
+        id: device.address,
+        name: device.name || 'Unknown Device',
+        address: device.address,
+        connected: false,
+        type: detectDeviceType(device.name || ''),
+        rssi: device.rssi || undefined,
+        bondState: device.bonded ? 'bonded' : 'none',
+        isClassic: true,
+      }));
+
+      // Combine with existing devices, avoiding duplicates
+      setBluetoothDevices(prev => {
+        const combined = [...prev];
+        newDevices.forEach(newDevice => {
+          const existingIndex = combined.findIndex(d => d.address === newDevice.address);
+          if (existingIndex >= 0) {
+            combined[existingIndex] = { ...combined[existingIndex], ...newDevice };
+          } else {
+            combined.push(newDevice);
+          }
+        });
+        return combined;
+      });
+
       Toast.show({
         type: 'info',
         text1: 'Device Scan Complete',
-        text2: `Found ${bluetoothDevices.length} available devices`,
+        text2: `Found ${discoveredDevices.length} new devices`,
         position: 'top',
         visibilityTime: 2000,
       });
-    }, 3000);
+    } catch (error) {
+      console.error('Failed to scan for devices:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Scan Failed',
+        text2: 'Failed to scan for Bluetooth devices',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } finally {
+      setScanningDevices(false);
+    }
   };
 
-  const connectToDevice = (device: BluetoothDevice) => {
-    // Update device connection status
-    setBluetoothDevices(prev =>
-      prev.map(d => ({
-        ...d,
-        connected: d.id === device.id ? true : d.type === 'printer' ? false : d.connected,
-      }))
-    );
+  const connectToDevice = async (device: BluetoothDevice) => {
+    try {
+      Toast.show({
+        type: 'info',
+        text1: 'Connecting...',
+        text2: `Connecting to ${device.name}`,
+        position: 'top',
+        visibilityTime: 2000,
+      });
 
-    if (device.type === 'printer') {
-      setPrinterConnected(true);
-      setConnectedPrinter(device.name);
+      // If device is not bonded, try to pair first
+      if (device.bondState !== 'bonded') {
+        try {
+          const paired = await RNBluetoothClassic.pairDevice(device.address);
+          if (!paired) {
+            throw new Error('Failed to pair device');
+          }
+        } catch (pairError) {
+          console.error('Failed to pair device:', pairError);
+          Toast.show({
+            type: 'warning',
+            text1: 'Pairing Required',
+            text2: 'Please pair the device manually in system settings',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          return;
+        }
+      }
+
+      // Connect to the device
+      const connection = await RNBluetoothClassic.connectToDevice(device.address);
+      
+      if (connection) {
+        // Update device connection status
+        setBluetoothDevices(prev =>
+          prev.map(d => ({
+            ...d,
+            connected: d.address === device.address ? true : d.type === 'printer' ? false : d.connected,
+          }))
+        );
+
+        if (device.type === 'printer') {
+          setPrinterConnected(true);
+          setConnectedPrinter(device.name);
+          setConnectedPrinterAddress(device.address);
+          
+          // Store connected printer
+          await AsyncStorage.setItem('connected_printer', JSON.stringify({
+            name: device.name,
+            address: device.address,
+          }));
+        }
+
+        setShowDeviceModal(false);
+
+        Toast.show({
+          type: 'success',
+          text1: 'Device Connected',
+          text2: `Successfully connected to ${device.name}`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } else {
+        throw new Error('Connection failed');
+      }
+    } catch (error) {
+      console.error('Failed to connect to device:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Connection Failed',
+        text2: `Failed to connect to ${device.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
-
-    setShowDeviceModal(false);
-
-    Toast.show({
-      type: 'success',
-      text1: 'Device Connected',
-      text2: `Successfully connected to ${device.name}`,
-      position: 'top',
-      visibilityTime: 3000,
-    });
   };
 
-  const disconnectDevice = (device: BluetoothDevice) => {
-    setBluetoothDevices(prev =>
-      prev.map(d => ({
-        ...d,
-        connected: d.id === device.id ? false : d.connected,
-      }))
-    );
+  const disconnectDevice = async (device: BluetoothDevice) => {
+    try {
+      await RNBluetoothClassic.disconnectFromDevice(device.address);
 
-    if (device.type === 'printer') {
-      setPrinterConnected(false);
-      setConnectedPrinter(null);
+      setBluetoothDevices(prev =>
+        prev.map(d => ({
+          ...d,
+          connected: d.address === device.address ? false : d.connected,
+        }))
+      );
+
+      if (device.type === 'printer') {
+        setPrinterConnected(false);
+        setConnectedPrinter(null);
+        setConnectedPrinterAddress(null);
+        await AsyncStorage.removeItem('connected_printer');
+      }
+
+      Toast.show({
+        type: 'info',
+        text1: 'Device Disconnected',
+        text2: `Disconnected from ${device.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } catch (error) {
+      console.error('Failed to disconnect device:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Disconnection Failed',
+        text2: `Failed to disconnect from ${device.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
+  };
+
+  const testPrinterConnection = async () => {
+    if (!printerConnected || !connectedPrinterAddress) {
+      Toast.show({
+        type: 'warning',
+        text1: 'No Printer Connected',
+        text2: 'Please connect a printer first',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      return;
     }
 
-    Toast.show({
-      type: 'info',
-      text1: 'Device Disconnected',
-      text2: `Disconnected from ${device.name}`,
-      position: 'top',
-      visibilityTime: 3000,
-    });
+    try {
+      const testData = "\n--- TEST PRINT ---\n\nThis is a test print from the admin app.\n\nTimestamp: " + new Date().toLocaleString() + "\n\n--- END TEST ---\n\n\n";
+      
+      const isConnected = await RNBluetoothClassic.isDeviceConnected(connectedPrinterAddress);
+      if (!isConnected) {
+        throw new Error('Printer is not connected');
+      }
+
+      await RNBluetoothClassic.writeToDevice(connectedPrinterAddress, testData);
+
+      Toast.show({
+        type: 'success',
+        text1: 'Test Print Sent',
+        text2: `Test print sent to ${connectedPrinter}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } catch (error) {
+      console.error('Failed to test printer:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Test Print Failed',
+        text2: 'Failed to send test print. Check connection.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
   };
 
   const handleLogout = () => {
@@ -167,7 +575,9 @@ const SettingsScreen: React.FC = () => {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: () => {
+          onPress: async () => {
+            await disconnectAllDevices();
+            
             Toast.show({
               type: 'success',
               text1: 'Logged Out',
@@ -175,7 +585,6 @@ const SettingsScreen: React.FC = () => {
               position: 'top',
               visibilityTime: 3000,
             });
-            // Navigate to login screen
             router.replace('/login');
           },
         },
@@ -183,7 +592,7 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  const handleTroubleshoot = () => {
+  const handleTroubleshoot = async () => {
     Toast.show({
       type: 'info',
       text1: 'Running Diagnostics',
@@ -192,17 +601,42 @@ const SettingsScreen: React.FC = () => {
       visibilityTime: 4000,
     });
 
-    // Mock troubleshoot process
-    setTimeout(() => {
+    try {
+      // Clear cache and reset connections
+      await AsyncStorage.multiRemove(['connected_printer', 'bluetooth_cache']);
+      
+      // Disconnect all devices
+      await disconnectAllDevices();
+      
+      // Reinitialize Bluetooth
+      setTimeout(async () => {
+        await initializeBluetooth();
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Diagnostics Complete',
+          text2: 'Cache cleared and connections reset',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }, 3000);
+    } catch (error) {
+      console.error('Troubleshoot failed:', error);
+      
       Toast.show({
-        type: 'success',
-        text1: 'Diagnostics Complete',
-        text2: 'All systems are functioning normally',
+        type: 'error',
+        text1: 'Diagnostics Failed',
+        text2: 'Failed to complete diagnostic checks',
         position: 'top',
         visibilityTime: 4000,
       });
-    }, 3000);
+    }
   };
+
+  // Save settings when they change
+  useEffect(() => {
+    saveSettings();
+  }, [notifications, autoSync, darkMode]);
 
   const renderSettingItem = (
     icon: keyof typeof MaterialIcons.glyphMap,
@@ -243,7 +677,13 @@ const SettingsScreen: React.FC = () => {
         <View style={styles.deviceText}>
           <Text style={styles.deviceName}>{item.name}</Text>
           <Text style={styles.deviceStatus}>
-            {item.connected ? 'Connected' : 'Available'}
+            {item.connected ? 'Connected' : item.bondState === 'bonded' ? 'Paired' : 'Available'} • {item.address}
+          </Text>
+          {item.rssi && (
+            <Text style={styles.deviceRssi}>Signal: {item.rssi} dBm</Text>
+          )}
+          <Text style={styles.deviceType}>
+            {item.type.charAt(0).toUpperCase() + item.type.slice(1)} • {item.isClassic ? 'Classic' : 'BLE'}
           </Text>
         </View>
       </View>
@@ -278,19 +718,34 @@ const SettingsScreen: React.FC = () => {
           'print',
           'Printer Connection',
           printerConnected ? `Connected to ${connectedPrinter}` : 'Printer not connected',
-          <TouchableOpacity
-            style={styles.connectButton}
-            onPress={handlePrinterConnect}
-          >
-            <LinearGradient
-              colors={printerConnected ? ['#34C759', '#30A46C'] : ['#FF9500', '#FF8C00']}
-              style={styles.connectButtonGradient}
+          <View style={styles.printerActions}>
+            {printerConnected && (
+              <TouchableOpacity
+                style={styles.testButton}
+                onPress={testPrinterConnection}
+              >
+                <LinearGradient
+                  colors={['#34C759', '#30A46C']}
+                  style={styles.testButtonGradient}
+                >
+                  <Text style={styles.testButtonText}>Test</Text>
+                </LinearGradient>
+              </TouchableOpacity>
+            )}
+            <TouchableOpacity
+              style={styles.connectButton}
+              onPress={handlePrinterConnect}
             >
-              <Text style={styles.connectButtonText}>
-                {printerConnected ? 'Change' : 'Connect'}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
+              <LinearGradient
+                colors={printerConnected ? ['#34C759', '#30A46C'] : ['#FF9500', '#FF8C00']}
+                style={styles.connectButtonGradient}
+              >
+                <Text style={styles.connectButtonText}>
+                  {printerConnected ? 'Change' : 'Connect'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </View>
         )}
       </View>
 
@@ -456,6 +911,21 @@ const SettingsScreen: React.FC = () => {
             </LinearGradient>
 
             <View style={styles.modalContent}>
+              {!bluetoothPermissions && (
+                <View style={styles.permissionWarning}>
+                  <MaterialIcons name="warning" size={24} color="#FF9500" />
+                  <Text style={styles.permissionWarningText}>
+                    Bluetooth permissions required to scan for devices
+                  </Text>
+                  <TouchableOpacity
+                    style={styles.permissionButton}
+                    onPress={requestBluetoothPermissions}
+                  >
+                    <Text style={styles.permissionButtonText}>Grant Permissions</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
               {scanningDevices ? (
                 <View style={styles.scanningContainer}>
                   <ActivityIndicator size="large" color="#667eea" />
@@ -468,13 +938,22 @@ const SettingsScreen: React.FC = () => {
                   renderItem={renderDeviceItem}
                   style={styles.deviceList}
                   showsVerticalScrollIndicator={false}
+                  ListEmptyComponent={
+                    <View style={styles.emptyDeviceList}>
+                      <MaterialIcons name="bluetooth-disabled" size={48} color="#a0aec0" />
+                      <Text style={styles.emptyDeviceText}>No devices found</Text>
+                      <Text style={styles.emptyDeviceSubtext}>
+                        Make sure your devices are discoverable and try scanning again
+                      </Text>
+                    </View>
+                  }
                 />
               )}
 
               <TouchableOpacity
                 style={styles.rescanButton}
                 onPress={scanForDevices}
-                disabled={scanningDevices}
+                disabled={scanningDevices || !bluetoothPermissions}
               >
                 <LinearGradient
                   colors={['#667eea', '#764ba2']}
@@ -562,6 +1041,24 @@ const styles = StyleSheet.create({
     color: '#a0aec0',
     fontWeight: '500',
   },
+  printerActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  testButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  testButtonGradient: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  testButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   connectButton: {
     borderRadius: 12,
     overflow: 'hidden',
@@ -643,6 +1140,33 @@ const styles = StyleSheet.create({
   modalContent: {
     padding: 20,
   },
+  permissionWarning: {
+    backgroundColor: '#2d1810',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 16,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FF9500',
+  },
+  permissionWarningText: {
+    fontSize: 14,
+    color: '#FF9500',
+    textAlign: 'center',
+    marginVertical: 12,
+    fontWeight: '500',
+  },
+  permissionButton: {
+    backgroundColor: '#FF9500',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  permissionButtonText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
   scanningContainer: {
     alignItems: 'center',
     paddingVertical: 40,
@@ -683,9 +1207,21 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   deviceStatus: {
-    fontSize: 14,
+    fontSize: 12,
     color: '#a0aec0',
     fontWeight: '500',
+  },
+  deviceRssi: {
+    fontSize: 11,
+    color: '#718096',
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  deviceType: {
+    fontSize: 11,
+    color: '#667eea',
+    fontWeight: '500',
+    marginTop: 2,
   },
   deviceStatusBadge: {
     paddingHorizontal: 12,
@@ -696,6 +1232,23 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     color: '#fff',
+  },
+  emptyDeviceList: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyDeviceText: {
+    fontSize: 16,
+    color: '#a0aec0',
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  emptyDeviceSubtext: {
+    fontSize: 14,
+    color: '#718096',
+    textAlign: 'center',
+    marginTop: 8,
+    lineHeight: 20,
   },
   rescanButton: {
     borderRadius: 12,
