@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { ActivityIndicator, Dimensions, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
-import { useRouter, usePathname } from 'expo-router';
+import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
 
 import {
@@ -47,52 +47,100 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
-  const [isReady, setIsReady] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [shouldRedirect, setShouldRedirect] = useState<string | null>(null);
   const router = useRouter();
-  const pathname = usePathname(); // 👈 Track current path
 
   useEffect(() => {
-    SplashScreen.preventAutoHideAsync();
+    let isMounted = true;
 
     async function init() {
-      console.log('🔍 DrawerLayout: Starting authentication check...');
       try {
+        console.log('🔍 DrawerLayout: Starting authentication check...');
+        
+        // Prevent splash screen from hiding
+        await SplashScreen.preventAutoHideAsync();
+        
+        // Bootstrap app
+        await bootstrapApp();
+        
+        // Check authentication
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
         const role = await SecureStore.getItemAsync('user_role');
 
         const isAuthenticated = !!(authToken && userId);
-        await bootstrapApp();
+
+        if (!isMounted) return;
 
         if (!isAuthenticated) {
           console.log('❌ No authentication found, redirecting to /login');
-          router.replace('/login');
-          return;
-        }
-
-        // ✅ Only redirect to /admin from root pages
-        if (role === 'admin' && (pathname === '/' || pathname === '/index' || pathname === '/drawer')) {
+          setShouldRedirect('/login');
+        } else if (role === 'admin') {
           console.log('👑 Admin detected. Redirecting to /admin');
-          router.replace('/admin');
-          return;
+          setShouldRedirect('/admin');
+        } else {
+          console.log('✅ Client user. Staying in drawer layout.');
+          setShouldRedirect(null);
         }
-
-        console.log('✅ Client user. Staying in drawer layout.');
-        setIsReady(true);
-        await SplashScreen.hideAsync();
-
+        
+        setIsLoading(false);
+        
       } catch (error) {
         console.error('❌ Initialization error:', error);
-        router.replace('/login');
-        await SplashScreen.hideAsync();
+        if (isMounted) {
+          setShouldRedirect('/login');
+          setIsLoading(false);
+        }
       }
     }
 
     init();
-  }, [pathname]); // 👈 Watch current path
 
-  if (!isReady) return null;
+    return () => {
+      isMounted = false;
+    };
+  }, []); // Remove pathname dependency
 
+  // Handle redirects after component is ready
+  useEffect(() => {
+    if (!isLoading && shouldRedirect) {
+      const redirect = async () => {
+        try {
+          await SplashScreen.hideAsync();
+          router.replace(shouldRedirect);
+        } catch (error) {
+          console.error('Navigation error:', error);
+        }
+      };
+      
+      // Small delay to ensure navigation is ready
+      setTimeout(redirect, 100);
+    } else if (!isLoading && !shouldRedirect) {
+      // No redirect needed, just hide splash
+      SplashScreen.hideAsync();
+    }
+  }, [isLoading, shouldRedirect]);
+
+  // Show loading while checking auth
+  if (isLoading) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // If we should redirect, show loading until redirect happens
+  if (shouldRedirect) {
+    return (
+      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+        <ActivityIndicator size="large" color={colors.primary} />
+      </View>
+    );
+  }
+
+  // Only render drawer if we're staying here
   return (
     <PaperProvider>
       <ThemeProvider value={CustomDarkTheme}>
