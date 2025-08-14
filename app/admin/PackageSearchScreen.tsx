@@ -103,7 +103,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
   const handleSearch = async (query: string = searchQuery) => {
     if (!query.trim()) {
       Toast.show({
-        type: 'warning',
+        type: 'info', // Changed from 'warning' to 'info'
         text1: 'Search Required',
         text2: 'Please enter a package code to search',
         position: 'top',
@@ -143,7 +143,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       } else {
         setSearchResults([]);
         Toast.show({
-          type: 'warning',
+          type: 'info', // Changed from 'warning' to 'info'
           text1: 'No Results',
           text2: searchResponse.data.message || 'No packages found matching your search',
           position: 'top',
