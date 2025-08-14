@@ -23,7 +23,7 @@ import AdminLayout from '../../components/AdminLayout';
 
 // Real Bluetooth libraries
 import RNBluetoothClassic, { BluetoothDevice as RNBluetoothDevice } from 'react-native-bluetooth-classic';
-import { BleManager, Device as BleDevice } from 'react-native-ble-plx';
+// import { BleManager, Device as BleDevice } from 'react-native-ble-plx';
 
 interface BluetoothDevice {
   id: string;
@@ -44,7 +44,7 @@ interface AppInfo {
 
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
-  const [bleManager] = useState(() => new BleManager());
+  // const [bleManager] = useState(() => new BleManager());
   const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [connectedPrinter, setConnectedPrinter] = useState<string | null>(null);
@@ -67,16 +67,16 @@ const SettingsScreen: React.FC = () => {
     initializeBluetooth();
     loadStoredSettings();
 
-    // Setup BLE manager
-    const subscription = bleManager.onStateChange((state) => {
-      console.log('BLE State changed:', state);
-      setBluetoothEnabled(state === 'PoweredOn');
-    }, true);
+    // BLE manager setup commented out until proper development build
+    // const subscription = bleManager.onStateChange((state) => {
+    //   console.log('BLE State changed:', state);
+    //   setBluetoothEnabled(state === 'PoweredOn');
+    // }, true);
 
-    return () => {
-      subscription.remove();
-      bleManager.destroy();
-    };
+    // return () => {
+    //   subscription.remove();
+    //   bleManager.destroy();
+    // };
   }, []);
 
   const loadStoredSettings = async () => {
