@@ -1,6 +1,6 @@
 // services/OfflineScanningService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-netinfo/netinfo';
+import NetInfo from '@react-native-community/netinfo';
 import { Alert } from 'react-native';
 
 interface OfflineScanAction {
