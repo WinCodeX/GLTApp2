@@ -78,7 +78,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     try {
       setRefreshing(true);
       
-      const response = await api.get('/api/v1/scanning/scan_statistics');
+      const response = await api.get('/api/v1/user/scan_stats');
       
       if (response.data.success) {
         setUserStats(response.data.data);
