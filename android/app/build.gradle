@@ -98,8 +98,13 @@ android {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
+<<<<<<< HEAD
         versionCode appVersionCode
         versionName appVersionName
+=======
+        versionCode 1
+        versionName "1.1.0"  // Semantic version matching app.json
+>>>>>>> 8bca379 (fix)
         
         // App display name and metadata - using consistent values
         resValue "string", "app_name", appName
