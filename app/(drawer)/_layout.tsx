@@ -21,6 +21,7 @@ import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import { UserProvider } from '@/context/UserContext';
 import { bootstrapApp } from '@/lib/bootstrap';
+import api from '@/lib/api';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -56,41 +57,101 @@ export default function DrawerLayout() {
 
     async function init() {
       try {
-        console.log('🔍 DrawerLayout: Starting authentication check...');
+        console.log('🔍 DrawerLayout: Starting offline-first authentication check...');
         
         // Prevent splash screen from hiding
         await SplashScreen.preventAutoHideAsync();
         
-        // Bootstrap app
-        await bootstrapApp();
+        // Bootstrap app (non-blocking)
+        try {
+          await bootstrapApp();
+        } catch (bootstrapError) {
+          console.warn('⚠️ Bootstrap warning (non-critical):', bootstrapError);
+        }
         
-        // Check authentication
+        // OFFLINE-FIRST AUTH: Check stored tokens immediately
         const authToken = await SecureStore.getItemAsync('auth_token');
         const userId = await SecureStore.getItemAsync('user_id');
         const role = await SecureStore.getItemAsync('user_role');
 
-        const isAuthenticated = !!(authToken && userId);
+        console.log('🔑 Stored auth check:', { 
+          hasToken: !!authToken, 
+          hasUserId: !!userId, 
+          role 
+        });
 
         if (!isMounted) return;
 
-        if (!isAuthenticated) {
-          console.log('❌ No authentication found, redirecting to /login');
-          setShouldRedirect('/login');
-        } else if (role === 'admin') {
-          console.log('👑 Admin detected. Redirecting to /admin');
-          setShouldRedirect('/admin');
+        // If we have stored credentials, trust them and redirect immediately
+        if (authToken && userId) {
+          console.log('✅ Found stored credentials - redirecting immediately');
+          
+          if (role === 'admin') {
+            console.log('👑 Admin role detected, redirecting to /admin');
+            setShouldRedirect('/admin');
+          } else {
+            console.log('👤 Client role, staying in drawer layout');
+            setShouldRedirect(null);
+          }
+          
+          // Background server verification (non-blocking)
+          verifyTokenInBackground(authToken);
         } else {
-          console.log('✅ Client user. Staying in drawer layout.');
-          setShouldRedirect(null);
+          console.log('❌ No stored credentials found, redirecting to /login');
+          setShouldRedirect('/login');
         }
         
         setIsLoading(false);
         
       } catch (error) {
-        console.error('❌ Initialization error:', error);
+        console.error('❌ Critical initialization error:', error);
         if (isMounted) {
-          setShouldRedirect('/login');
+          // Even on error, don't assume we need to login - check tokens
+          try {
+            const authToken = await SecureStore.getItemAsync('auth_token');
+            const userId = await SecureStore.getItemAsync('user_id');
+            
+            if (authToken && userId) {
+              console.log('🔑 Error during init but found tokens - staying authenticated');
+              setShouldRedirect(null);
+            } else {
+              console.log('❌ Error during init and no tokens - redirecting to login');
+              setShouldRedirect('/login');
+            }
+          } catch (tokenError) {
+            console.error('❌ Failed to check tokens after error:', tokenError);
+            setShouldRedirect('/login');
+          }
+          
           setIsLoading(false);
+        }
+      }
+    }
+
+    // Background server verification (doesn't affect UI)
+    async function verifyTokenInBackground(token: string) {
+      try {
+        console.log('🔍 Background: Verifying token with server...');
+        await api.get('/api/v1/me');
+        console.log('✅ Background: Token verified successfully');
+      } catch (verifyError) {
+        console.warn('⚠️ Background: Token verification failed (non-critical):', verifyError);
+        // NOTE: We do NOT clear tokens here - user stays logged in
+        // Only clear tokens if we get a specific 401 unauthorized response
+        if (verifyError?.response?.status === 401) {
+          console.log('🔑 Background: Token is invalid (401), clearing...');
+          try {
+            await SecureStore.deleteItemAsync('auth_token');
+            await SecureStore.deleteItemAsync('user_id');
+            await SecureStore.deleteItemAsync('user_role');
+            
+            // Only redirect if we're still mounted and showing the drawer
+            if (isMounted && !shouldRedirect) {
+              setShouldRedirect('/login');
+            }
+          } catch (clearError) {
+            console.error('❌ Failed to clear invalid tokens:', clearError);
+          }
         }
       }
     }
@@ -100,7 +161,7 @@ export default function DrawerLayout() {
     return () => {
       isMounted = false;
     };
-  }, []); // Remove pathname dependency
+  }, []); // Remove any dependencies to prevent loops
 
   // Handle redirects after component is ready
   useEffect(() => {
@@ -110,22 +171,34 @@ export default function DrawerLayout() {
           await SplashScreen.hideAsync();
           router.replace(shouldRedirect);
         } catch (error) {
-          console.error('Navigation error:', error);
+          console.error('❌ Navigation error:', error);
+          // Fallback: hide splash screen anyway
+          try {
+            await SplashScreen.hideAsync();
+          } catch (splashError) {
+            console.error('❌ Failed to hide splash screen:', splashError);
+          }
         }
       };
       
       // Small delay to ensure navigation is ready
-      setTimeout(redirect, 100);
+      const timeoutId = setTimeout(redirect, 100);
+      return () => clearTimeout(timeoutId);
     } else if (!isLoading && !shouldRedirect) {
       // No redirect needed, just hide splash
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(console.error);
     }
-  }, [isLoading, shouldRedirect]);
+  }, [isLoading, shouldRedirect, router]);
 
   // Show loading while checking auth
   if (isLoading) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ 
+        flex: 1, 
+        backgroundColor: colors.background, 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+      }}>
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
@@ -134,13 +207,18 @@ export default function DrawerLayout() {
   // If we should redirect, show loading until redirect happens
   if (shouldRedirect) {
     return (
-      <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
+      <View style={{ 
+        flex: 1, 
+        backgroundColor: colors.background, 
+        justifyContent: 'center', 
+        alignItems: 'center' 
+      }}>
         <ActivityIndicator size="large" color={colors.primary} />
       </View>
     );
   }
 
-  // Only render drawer if we're staying here
+  // Only render drawer if we're staying here (authenticated client)
   return (
     <PaperProvider>
       <ThemeProvider value={CustomDarkTheme}>
