@@ -1,4 +1,4 @@
-// components/QRScanner.tsx - Styled with animated frame and purple theme
+// components/QRScanner.tsx - Updated with proper API integration and all roles
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -18,6 +18,9 @@ import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import Toast from 'react-native-toast-message';
+import * as SecureStore from 'expo-secure-store';
+import api from '../lib/api';
+import OfflineScanningService from '../services/OfflineScanningService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -47,6 +50,7 @@ interface UserContext {
   can_deliver: boolean;
   can_print: boolean;
   can_confirm: boolean;
+  can_process: boolean;
 }
 
 interface ScanResult {
@@ -58,9 +62,9 @@ interface ScanResult {
 interface QRScannerProps {
   visible: boolean;
   onClose: () => void;
-  userRole: 'agent' | 'rider' | 'customer';
+  userRole: 'client' | 'agent' | 'rider' | 'warehouse' | 'admin';
   onScanSuccess?: (result: any) => void;
-  defaultAction?: string; // 'collect', 'deliver', 'print', 'confirm_receipt'
+  defaultAction?: string; // 'collect', 'deliver', 'print', 'confirm_receipt', 'process'
 }
 
 const QRScanner: React.FC<QRScannerProps> = ({
@@ -77,15 +81,20 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const [showActionModal, setShowActionModal] = useState(false);
   const [processingAction, setProcessingAction] = useState(false);
   const [flashEnabled, setFlashEnabled] = useState(false);
+  const [isOnline, setIsOnline] = useState(true);
   const cameraRef = useRef<CameraView>(null);
   
   // Animation values
   const cornerAnimation = useRef(new Animated.Value(0)).current;
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
+  // Initialize offline scanning service
+  const offlineService = OfflineScanningService.getInstance();
+
   // Request camera permissions
   useEffect(() => {
     requestCameraPermission();
+    initializeOfflineService();
   }, []);
 
   // Start animations when visible
@@ -104,9 +113,27 @@ const QRScanner: React.FC<QRScannerProps> = ({
         setScanned(false);
         setScanResult(null);
         setShowActionModal(false);
+        checkConnectivity();
       }
     }, [visible])
   );
+
+  const initializeOfflineService = async () => {
+    try {
+      await offlineService.initialize();
+    } catch (error) {
+      console.error('Failed to initialize offline service:', error);
+    }
+  };
+
+  const checkConnectivity = async () => {
+    try {
+      const online = await offlineService.isOnline();
+      setIsOnline(online);
+    } catch (error) {
+      setIsOnline(false);
+    }
+  };
 
   const startAnimations = () => {
     // Corner animation - rotate colors
@@ -206,44 +233,43 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setLoading(true);
     
     try {
-      // Mock data for demo
-      setTimeout(() => {
-        const mockResult = {
-          package: {
-            id: '1',
-            code: packageCode,
-            state: 'in_transit',
-            state_display: 'In Transit',
-            sender_name: 'John Doe',
-            receiver_name: 'Jane Smith',
-            receiver_phone: '+254700000000',
-            route_description: 'Nairobi → Mombasa',
-            cost: 500,
-            delivery_type: 'standard',
-            created_at: new Date().toISOString(),
-          },
-          available_actions: [
-            { action: 'collect', label: 'Collect Package', description: 'Mark as collected' },
-            { action: 'deliver', label: 'Mark Delivered', description: 'Mark as delivered' }
-          ],
-          user_context: {
-            role: userRole,
-            can_collect: true,
-            can_deliver: true,
-            can_print: true,
-            can_confirm: true,
-          }
-        };
+      // Check if online first
+      const online = await offlineService.isOnline();
+      setIsOnline(online);
 
-        setScanResult(mockResult);
+      if (!online) {
+        // Try to get from cache
+        const cached = await offlineService.getCachedPackage(packageCode);
+        if (cached) {
+          processCachedPackage(cached, packageCode);
+        } else {
+          showOfflineError();
+        }
+        return;
+      }
+
+      // Make API call to get package details
+      const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
+
+      if (response.data.success) {
+        const packageData = response.data.data;
+        
+        // Cache the package for offline use
+        await offlineService.cachePackage(
+          packageCode,
+          packageData.package,
+          packageData.available_actions
+        );
+
+        setScanResult(packageData);
         
         // If there's a default action and user can perform it, execute immediately
-        if (defaultAction && mockResult.available_actions.some((a: AvailableAction) => a.action === defaultAction)) {
+        if (defaultAction && packageData.available_actions.some((a: AvailableAction) => a.action === defaultAction)) {
           performAction(defaultAction, packageCode);
-        } else if (mockResult.available_actions.length === 1) {
+        } else if (packageData.available_actions.length === 1) {
           // If only one action available, show confirmation
           setShowActionModal(true);
-        } else if (mockResult.available_actions.length > 1) {
+        } else if (packageData.available_actions.length > 1) {
           // Multiple actions, let user choose
           setShowActionModal(true);
         } else {
@@ -251,52 +277,76 @@ const QRScanner: React.FC<QRScannerProps> = ({
           Toast.show({
             type: 'warning',
             text1: 'No Actions Available',
-            text2: `Package ${packageCode} is in ${mockResult.package.state_display} state. No actions available for your role.`,
+            text2: `Package ${packageCode} is in ${packageData.package.state_display} state. No actions available for your role.`,
             position: 'top',
             visibilityTime: 4000,
           });
           setScanned(false);
         }
-        
-        setLoading(false);
-      }, 1500);
-
-      /* Actual API call:
-      const response = await fetch(`/api/v1/scanning/package_details?package_code=${packageCode}`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        setScanResult(result.data);
-        // ... rest of logic
       } else {
         Toast.show({
           type: 'error',
-          text1: 'Error',
-          text2: result.message || 'Failed to fetch package details',
+          text1: 'Package Not Found',
+          text2: response.data.message || 'Package not found in system',
           position: 'top',
           visibilityTime: 4000,
         });
         setScanned(false);
       }
-      */
-    } catch (error) {
-      Toast.show({
-        type: 'error',
-        text1: 'Network Error',
-        text2: 'Failed to connect to server. Please check your internet connection.',
-        position: 'top',
-        visibilityTime: 4000,
-      });
-      setScanned(false);
+      
+      setLoading(false);
+      
+    } catch (error: any) {
+      console.error('Failed to fetch package details:', error);
+      
+      // Check if it's a network error and try offline mode
+      if (error.message.includes('Network Error') || error.message.includes('timeout')) {
+        const cached = await offlineService.getCachedPackage(packageCode);
+        if (cached) {
+          processCachedPackage(cached, packageCode);
+        } else {
+          showOfflineError();
+        }
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Network Error',
+          text2: 'Failed to connect to server. Check your internet connection.',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+        setScanned(false);
+      }
+      
       setLoading(false);
     }
+  };
+
+  const processCachedPackage = (cached: any, packageCode: string) => {
+    setScanResult(cached);
+    setShowActionModal(true);
+    
+    Toast.show({
+      type: 'info',
+      text1: 'Offline Mode',
+      text2: 'Using cached data. Action will sync when online.',
+      position: 'top',
+      visibilityTime: 3000,
+    });
+    
+    setLoading(false);
+  };
+
+  const showOfflineError = () => {
+    Toast.show({
+      type: 'error',
+      text1: 'Offline Error',
+      text2: 'No cached data available. Connect to internet.',
+      position: 'top',
+      visibilityTime: 4000,
+    });
+    setScanned(false);
+    setLoading(false);
   };
 
   const performAction = async (actionType: string, packageCode?: string) => {
@@ -306,14 +356,65 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setProcessingAction(true);
 
     try {
-      // Mock API call
-      setTimeout(() => {
+      const online = await offlineService.isOnline();
+      
+      if (!online) {
+        // Store action for offline sync
+        const user = await getCurrentUser();
+        const result = await offlineService.storeScanAction(
+          code,
+          actionType,
+          user,
+          {
+            location: await getCurrentLocation(),
+            device_info: getDeviceInfo()
+          }
+        );
+        
+        if (result.success) {
+          Toast.show({
+            type: 'success',
+            text1: 'Action Queued',
+            text2: 'Action saved for sync when online',
+            position: 'top',
+            visibilityTime: 3000,
+          });
+          
+          setShowActionModal(false);
+          setScanned(false);
+          setScanResult(null);
+          onScanSuccess?.({ package: { code }, action: actionType, offline: true });
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: 'Storage Failed',
+            text2: result.message,
+            position: 'top',
+            visibilityTime: 4000,
+          });
+        }
+        
+        setProcessingAction(false);
+        return;
+      }
+
+      // Online - make API call
+      const response = await api.post('/api/v1/scanning/scan_action', {
+        package_code: code,
+        action_type: actionType,
+        metadata: {
+          location: await getCurrentLocation(),
+          device_info: getDeviceInfo()
+        }
+      });
+
+      if (response.data.success) {
         Vibration.vibrate([100, 50, 100]);
         
         Toast.show({
           type: 'success',
           text1: 'Action Successful',
-          text2: `Package ${code} has been ${actionType}ed successfully`,
+          text2: response.data.message,
           position: 'top',
           visibilityTime: 3000,
         });
@@ -321,73 +422,104 @@ const QRScanner: React.FC<QRScannerProps> = ({
         setShowActionModal(false);
         setScanned(false);
         setScanResult(null);
-        setProcessingAction(false);
-        onScanSuccess?.({ package: { code }, action: actionType });
-      }, 1000);
+        onScanSuccess?.(response.data.data);
 
-      /* Actual API call:
-      const response = await fetch('/api/v1/scanning/scan_action', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${getAuthToken()}`,
-        },
-        body: JSON.stringify({
-          package_code: code,
-          action_type: actionType,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (result.success) {
-        Vibration.vibrate([100, 50, 100]);
-        
-        Toast.show({
-          type: 'success',
-          text1: 'Success',
-          text2: result.message,
-          position: 'top',
-          visibilityTime: 3000,
-        });
-
-        setShowActionModal(false);
-        setScanned(false);
-        setScanResult(null);
-        onScanSuccess?.(result.data);
-
-        if (actionType === 'print') {
-          handlePrintAction(result.data);
+        if (actionType === 'print' && response.data.data.print_data) {
+          handlePrintAction(response.data.data.print_data);
         }
       } else {
         Toast.show({
           type: 'error',
-          text1: 'Error',
-          text2: result.message,
+          text1: 'Action Failed',
+          text2: response.data.message,
           position: 'top',
           visibilityTime: 4000,
         });
       }
-      */
-    } catch (error) {
-      Toast.show({
-        type: 'error',
-        text1: 'Network Error',
-        text2: 'Failed to perform action. Please try again.',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      
+    } catch (error: any) {
+      console.error('Action failed:', error);
+      
+      // If it's a network error, try to save offline
+      if (error.message.includes('Network Error')) {
+        const user = await getCurrentUser();
+        const result = await offlineService.storeScanAction(
+          code,
+          actionType,
+          user,
+          {
+            location: await getCurrentLocation(),
+            device_info: getDeviceInfo()
+          }
+        );
+        
+        if (result.success) {
+          Toast.show({
+            type: 'warning',
+            text1: 'Saved Offline',
+            text2: 'Action will sync when connection is restored',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+        } else {
+          Toast.show({
+            type: 'error',
+            text1: 'Network Error',
+            text2: 'Failed to save action offline',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+        }
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Action Failed',
+          text2: error.response?.data?.message || 'Failed to perform action',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }
     } finally {
       setProcessingAction(false);
     }
   };
 
-  const handlePrintAction = (actionData: any) => {
-    console.log('Print data:', actionData.print_data);
+  const getCurrentUser = async () => {
+    try {
+      const userId = await SecureStore.getItemAsync('user_id');
+      const userName = await SecureStore.getItemAsync('user_name') || 'Unknown User';
+      const userRole = await SecureStore.getItemAsync('user_role') || 'client';
+      
+      return {
+        id: userId || 'unknown',
+        name: userName,
+        role: userRole
+      };
+    } catch (error) {
+      return {
+        id: 'unknown',
+        name: 'Unknown User',
+        role: userRole
+      };
+    }
   };
 
-  const getAuthToken = (): string => {
-    return 'your-auth-token';
+  const getCurrentLocation = async () => {
+    // Implement location services if needed
+    return null;
+  };
+
+  const getDeviceInfo = () => {
+    // Return basic device info
+    return {
+      platform: 'react-native',
+      timestamp: new Date().toISOString()
+    };
+  };
+
+  const handlePrintAction = (printData: any) => {
+    console.log('Print data:', printData);
+    // Implement print handling logic
   };
 
   const resetScanner = () => {
@@ -460,7 +592,12 @@ const QRScanner: React.FC<QRScannerProps> = ({
           <TouchableOpacity onPress={onClose} style={styles.headerButton}>
             <MaterialIcons name="close" size={24} color="#fff" />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Scan Package QR Code</Text>
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Scan Package QR Code</Text>
+            {!isOnline && (
+              <Text style={styles.offlineIndicator}>OFFLINE MODE</Text>
+            )}
+          </View>
           <TouchableOpacity onPress={toggleFlash} style={styles.headerButton}>
             <MaterialIcons 
               name={flashEnabled ? "flash-on" : "flash-off"} 
@@ -514,9 +651,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
           style={styles.instructions}
         >
           <Text style={styles.instructionText}>
-            {userRole === 'agent' && 'Scan to print package labels'}
-            {userRole === 'rider' && 'Scan to collect or deliver packages'}
-            {userRole === 'customer' && 'Scan to confirm package receipt'}
+            {getRoleInstructions(userRole)}
           </Text>
           {scanned && (
             <TouchableOpacity style={styles.retryButton} onPress={resetScanner}>
@@ -540,6 +675,9 @@ const QRScanner: React.FC<QRScannerProps> = ({
                 style={styles.modalHeader}
               >
                 <Text style={styles.modalTitle}>Package Found</Text>
+                {!isOnline && (
+                  <Text style={styles.offlineModalIndicator}>OFFLINE MODE</Text>
+                )}
               </LinearGradient>
               
               {scanResult && (
@@ -607,6 +745,17 @@ const QRScanner: React.FC<QRScannerProps> = ({
   );
 };
 
+const getRoleInstructions = (role: string): string => {
+  switch (role) {
+    case 'agent': return 'Scan to print package labels';
+    case 'rider': return 'Scan to collect or deliver packages';
+    case 'warehouse': return 'Scan to process packages in warehouse';
+    case 'client': return 'Scan to confirm package receipt';
+    case 'admin': return 'Scan to perform any package action';
+    default: return 'Scan QR codes to manage packages';
+  }
+};
+
 const getActionButtonStyle = (action: string) => {
   return { borderRadius: 12, overflow: 'hidden' };
 };
@@ -621,6 +770,8 @@ const getActionGradient = (action: string): string[] => {
       return ['#FF9500', '#FF8C00'];
     case 'confirm_receipt':
       return ['#764ba2', '#667eea'];
+    case 'process':
+      return ['#9C27B0', '#673AB7'];
     default:
       return ['#667eea', '#764ba2'];
   }
@@ -636,6 +787,8 @@ const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
       return 'print';
     case 'confirm_receipt':
       return 'done-all';
+    case 'process':
+      return 'inventory';
     default:
       return 'check';
   }
@@ -668,10 +821,20 @@ const styles = StyleSheet.create({
   headerButton: {
     padding: 8,
   },
+  headerTitleContainer: {
+    flex: 1,
+    alignItems: 'center',
+  },
   headerTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+  offlineIndicator: {
+    color: '#FFB000',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   scannerContainer: {
     flex: 1,
@@ -834,12 +997,19 @@ const styles = StyleSheet.create({
     padding: 20,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    alignItems: 'center',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
     color: '#fff',
+  },
+  offlineModalIndicator: {
+    color: '#FFB000',
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
   },
   packageInfo: {
     maxHeight: 200,
