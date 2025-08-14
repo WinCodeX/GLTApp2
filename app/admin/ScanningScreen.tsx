@@ -20,6 +20,7 @@ import QRScanner from '../../components/QRScanner';
 import BulkScanner from '../../components/BulkScanner';
 import AdminLayout from '../../components/AdminLayout';
 import api from '../../lib/api';
+import { getPackages, searchPackages } from '../../lib/helpers/packageHelpers';
 
 const { width } = Dimensions.get('window');
 
