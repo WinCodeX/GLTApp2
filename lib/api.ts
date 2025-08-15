@@ -7,7 +7,7 @@ import Toast from 'react-native-toast-message';
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
 const LOCAL_BASE_2 = 'http://192.168.162.106:3000'; // Fixed to match your first working version
 const PROD_BASE = 'https://stockx-3vvh.onrender.com'; // Using your production URL
-const FALLBACK_BASE = PROD_BASE; // Use production as fallback, not local
+const FALLBACK_BASE = PROD_BASE; // Use production as fallback when no servers are reachable
 
 let resolvedBaseUrl: string | null = null;
 let isResolvingBaseUrl = false;
@@ -54,14 +54,15 @@ const getBaseUrl = async (): Promise<string> => {
   isResolvingBaseUrl = true;
   console.log('🚀 Starting base URL resolution...');
 
-  // Try in order of preference: production first, then local servers
-  const bases = [PROD_BASE, LOCAL_BASE_1, LOCAL_BASE_2];
+  // Try in order of preference: local servers first (for development), then production
+  const bases = [LOCAL_BASE_1, LOCAL_BASE_2, PROD_BASE];
 
   try {
-    // Test connections sequentially (not parallel) to avoid overwhelming
+    // Test connections sequentially to prioritize local development servers
     for (const base of bases) {
       if (await testConnection(base, 2000)) {
         resolvedBaseUrl = base;
+        console.log(`🎯 Selected base URL: ${resolvedBaseUrl} ${base.includes('localhost') || base.includes('192.168') || base.includes('10.') ? '(local dev server)' : '(production)'}`);
         break;
       }
     }
