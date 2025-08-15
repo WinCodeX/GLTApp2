@@ -12,9 +12,10 @@ import {
 } from 'react-native';
 import { Button, TextInput } from 'react-native-paper';
 import Toast from 'react-native-toast-message';
-import api, { getCurrentBaseUrl, refreshBaseUrl } from '../../lib/api';
+import api, { getCurrentBaseUrl, refreshBaseUrl, initializeApi } from '../../lib/api';
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
 import { toastConfig } from '../../lib/toastConfig';
+import { checkServerStatus } from '../../lib/netStatus';
 import MaskedView from '@react-native-masked-view/masked-view';
 
 export default function LoginScreen() {
@@ -76,7 +77,6 @@ export default function LoginScreen() {
         
         console.log('✅ Google login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
         
-        // Delay navigation to ensure toast is visible
         setTimeout(() => {
           router.push(role === 'admin' ? '/admin' : '/');
         }, 1500);
@@ -98,7 +98,6 @@ export default function LoginScreen() {
       });
     } finally {
       setIsGoogleLoading(false);
-      // Reset the flag after a delay to prevent rapid re-attempts
       setTimeout(() => {
         googleLoginInProgress.current = false;
       }, 3000);
@@ -128,14 +127,16 @@ export default function LoginScreen() {
           return; // Exit early - don't need to check server
         }
 
-        console.log('❌ No existing tokens found, proceeding with server check');
+        console.log('❌ No existing tokens found, initializing API...');
 
-        // Test server connectivity (non-blocking for UI)
+        // Initialize API properly
+        await initializeApi();
+        
+        // Test server connectivity
         await testServerConnectivity();
         
       } catch (error) {
         console.error('❌ App initialization error:', error);
-        // Don't fail completely - allow user to try login anyway
         setServerStatus('unreachable');
         Toast.show({
           type: 'warning',
@@ -153,40 +154,33 @@ export default function LoginScreen() {
         const baseUrl = getCurrentBaseUrl();
         console.log('📍 Current base URL:', baseUrl);
         
-        // Simple ping with timeout
-        const timeoutPromise = new Promise((_, reject) =>
-          setTimeout(() => reject(new Error('Timeout')), 8000)
-        );
+        const status = await checkServerStatus();
         
-        const pingPromise = api.get('/api/v1/ping');
-        
-        await Promise.race([pingPromise, timeoutPromise]);
-        console.log('✅ Server is reachable');
-        setServerStatus('connected');
-        
-      } catch (pingError) {
-        console.log('❌ Server ping failed, trying to refresh base URL...');
-        
-        try {
+        if (status === 'online') {
+          console.log('✅ Server is reachable');
+          setServerStatus('connected');
+        } else {
+          console.log('❌ Server unreachable, trying to refresh...');
+          
           // Try to refresh and find a working server
           const newBaseUrl = await refreshBaseUrl();
           console.log('🔄 New base URL resolved:', newBaseUrl);
           
-          // Test again with new URL (with timeout)
-          const timeoutPromise = new Promise((_, reject) =>
-            setTimeout(() => reject(new Error('Timeout')), 5000)
-          );
+          // Test again
+          const retryStatus = await checkServerStatus();
           
-          const retryPromise = api.get('/api/v1/ping');
-          await Promise.race([retryPromise, timeoutPromise]);
-          
-          console.log('✅ Server is reachable after refresh');
-          setServerStatus('connected');
-          
-        } catch (refreshError) {
-          console.log('❌ Server unreachable after refresh');
-          setServerStatus('unreachable');
+          if (retryStatus === 'online') {
+            console.log('✅ Server is reachable after refresh');
+            setServerStatus('connected');
+          } else {
+            console.log('❌ Server still unreachable after refresh');
+            setServerStatus('unreachable');
+          }
         }
+        
+      } catch (error) {
+        console.log('❌ Server connectivity test failed:', error);
+        setServerStatus('unreachable');
       }
     };
 
@@ -202,19 +196,11 @@ export default function LoginScreen() {
     try {
       console.log('🔐 Attempting login for:', email);
       
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Login timeout')), 15000)
-      );
-      
-      const loginPromise = api.post('/api/v1/login', {
+      const response = await api.post('/api/v1/login', {
         user: { email, password },
       });
-      
-      const response = await Promise.race([loginPromise, timeoutPromise]);
 
-      const token =
-        response?.data?.token || response.headers?.authorization?.split(' ')[1];
+      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
       const user = response?.data?.user;
       const userId = user?.id;
 
@@ -234,7 +220,6 @@ export default function LoginScreen() {
         
         console.log('✅ Login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
         
-        // Delay navigation to ensure toast is visible
         setTimeout(() => {
           router.push(role === 'admin' ? '/admin' : '/');
         }, 1500);
@@ -254,10 +239,7 @@ export default function LoginScreen() {
       let errorMessage = 'Please try again';
       let toastMessage = 'Unexpected error';
 
-      if (err?.message === 'Login timeout') {
-        errorMessage = 'Request timed out - check your connection';
-        toastMessage = 'Connection timeout';
-      } else if (err?.response?.status === 401) {
+      if (err?.response?.status === 401) {
         errorMessage = 'Invalid email or password';
         toastMessage = 'Invalid credentials';
       } else if (err?.response?.status === 422) {
@@ -266,6 +248,9 @@ export default function LoginScreen() {
       } else if (err?.code === 'NETWORK_ERROR' || err?.message === 'Network Error') {
         errorMessage = 'Network error - check your connection';
         toastMessage = 'Connection failed';
+      } else if (err?.code === 'ECONNABORTED') {
+        errorMessage = 'Request timed out - check your connection';
+        toastMessage = 'Connection timeout';
       } else if (err?.response?.data?.message) {
         errorMessage = err.response.data.message;
         toastMessage = 'Server error';
@@ -297,7 +282,6 @@ export default function LoginScreen() {
       console.log('📋 Google login result:', result?.type);
 
       if (result?.type === 'success') {
-        // Success is handled by the useEffect in useGoogleAuth
         console.log('✅ Google OAuth successful');
         return;
       }
@@ -342,25 +326,28 @@ export default function LoginScreen() {
       console.log('🔄 Retrying server connection...');
       const newBaseUrl = await refreshBaseUrl();
       
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('Timeout')), 8000)
-      );
+      const status = await checkServerStatus();
       
-      const pingPromise = api.get('/api/v1/ping');
-      await Promise.race([pingPromise, timeoutPromise]);
-      
-      setServerStatus('connected');
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Connected!',
-        text2: `Server: ${newBaseUrl}`,
-      });
+      if (status === 'online') {
+        setServerStatus('connected');
+        Toast.show({
+          type: 'success',
+          text1: 'Connected!',
+          text2: `Server: ${newBaseUrl}`,
+        });
+      } else {
+        setServerStatus('unreachable');
+        Toast.show({
+          type: 'error',
+          text1: 'Still unreachable',
+          text2: 'Please check your network',
+        });
+      }
     } catch (error) {
       setServerStatus('unreachable');
       Toast.show({
         type: 'error',
-        text1: 'Still unreachable',
+        text1: 'Connection failed',
         text2: 'Please check your network',
       });
     } finally {
@@ -411,8 +398,10 @@ export default function LoginScreen() {
     <>
       <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
         <View style={styles.inner}>
-          {/* Welcome Back Text - Always visible at top */}
-          <GradientText>Welcome Back!</GradientText>
+          {/* Welcome Back Title - Always visible at top */}
+          <View style={styles.titleContainer}>
+            <GradientText>Welcome Back!</GradientText>
+          </View>
 
           {/* Server Status Indicator */}
           <View style={styles.statusContainer}>
@@ -522,7 +511,6 @@ export default function LoginScreen() {
         </View>
       </LinearGradient>
       
-      {/* Toast with custom config */}
       <Toast config={toastConfig} />
     </>
   );
@@ -531,10 +519,14 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   inner: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
+  titleContainer: {
+    alignItems: 'center',
+    marginBottom: 20, // Space between title and server status
+  },
   title: {
-    fontSize: 34, // Slightly larger
+    fontSize: 34,
     fontWeight: 'bold',
-    marginBottom: 32, // More space below title
+    marginBottom: 0, // Remove bottom margin since we handle spacing with titleContainer
     textAlign: 'center',
     textShadowColor: 'rgba(124, 58, 237, 0.4)',
     textShadowOffset: { width: 0, height: 2 },
