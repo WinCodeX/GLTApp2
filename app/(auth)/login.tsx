@@ -2,6 +2,7 @@ import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   ActivityIndicator,
@@ -60,13 +61,41 @@ export default function LoginScreen() {
       const user = response?.data?.user;
       const userId = user?.id;
 
-      if (token && userId) {
+      if (token && userId && user) {
+        // Save authentication data
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
 
+        // Determine and save user role
         const roles = user?.roles || [];
         const role = roles.includes('admin') ? 'admin' : 'client';
         await SecureStore.setItemAsync('user_role', role);
+
+        // ✅ Save complete user data for account screen
+        const userData = {
+          id: user.id,
+          email: user.email,
+          username: user.username || null,
+          first_name: user.first_name || null,
+          last_name: user.last_name || null,
+          display_name: user.display_name || user.first_name || null,
+          phone: user.phone || null,
+          avatar_url: user.avatar_url || null,
+          role: role,
+          roles: roles,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+          provider: 'google', // Track that this was a Google login
+        };
+
+        // Save user data to AsyncStorage for UserContext
+        try {
+          await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+          console.log('✅ Google user data saved:', userData);
+        } catch (storageError) {
+          console.warn('⚠️ Failed to save Google user data to storage:', storageError);
+          // Non-critical error, continue with login
+        }
 
         Toast.show({ 
           type: 'success', 
@@ -80,7 +109,7 @@ export default function LoginScreen() {
           router.push(role === 'admin' ? '/admin' : '/');
         }, 1500);
       } else {
-        console.error('❌ Google login failed - missing token or user ID');
+        console.error('❌ Google login failed - missing token or user ID', { hasToken: !!token, hasUserId: !!userId, hasUser: !!user });
         Toast.show({
           type: 'error',
           text1: 'Google login failed',
@@ -203,13 +232,40 @@ export default function LoginScreen() {
       const user = response?.data?.user;
       const userId = user?.id;
 
-      if (token && userId) {
+      if (token && userId && user) {
+        // Save authentication data
         await SecureStore.setItemAsync('auth_token', token);
         await SecureStore.setItemAsync('user_id', String(userId));
 
+        // Determine and save user role
         const roles = user?.roles || [];
         const role = roles.includes('admin') ? 'admin' : 'client';
         await SecureStore.setItemAsync('user_role', role);
+
+        // ✅ Save complete user data for account screen
+        const userData = {
+          id: user.id,
+          email: user.email,
+          username: user.username || null,
+          first_name: user.first_name || null,
+          last_name: user.last_name || null,
+          display_name: user.display_name || user.first_name || null,
+          phone: user.phone || null,
+          avatar_url: user.avatar_url || null,
+          role: role,
+          roles: roles,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+        };
+
+        // Save user data to AsyncStorage for UserContext
+        try {
+          await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+          console.log('✅ User data saved:', userData);
+        } catch (storageError) {
+          console.warn('⚠️ Failed to save user data to storage:', storageError);
+          // Non-critical error, continue with login
+        }
 
         Toast.show({ 
           type: 'success', 
@@ -225,7 +281,7 @@ export default function LoginScreen() {
       } else {
         const message = 'Login failed: Server response incomplete';
         setErrorMsg(message);
-        console.error('❌', message);
+        console.error('❌', message, { hasToken: !!token, hasUserId: !!userId, hasUser: !!user });
         Toast.show({
           type: 'error',
           text1: 'Login failed',
