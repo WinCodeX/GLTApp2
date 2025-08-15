@@ -8,7 +8,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type ConnectionStatus = 'connected' | 'disconnected' | 'reconnected' | null;
 
-export default function NetworkBanner() {
+interface NetworkBannerProps {
+  headerHeight?: number; // Allow custom header height
+}
+
+export default function NetworkBanner({ headerHeight = 60 }: NetworkBannerProps) {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(null);
   const [slideAnim] = useState(new Animated.Value(-100)); // Start off-screen
   const insets = useSafeAreaInsets();
@@ -90,7 +94,7 @@ export default function NetworkBanner() {
       style={[
         styles.container,
         {
-          top: insets.top, // Position below status bar/notch
+          top: insets.top + headerHeight, // Position below header (status bar + header height)
           transform: [{ translateY: slideAnim }],
         }
       ]}
@@ -149,8 +153,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    zIndex: 1000, // High z-index to appear above other content
-    elevation: 10, // Android elevation
+    zIndex: 999, // Lower z-index to appear below header but above content
+    elevation: 9, // Android elevation
     // Allow touches to pass through the container
     pointerEvents: 'box-none',
   },
