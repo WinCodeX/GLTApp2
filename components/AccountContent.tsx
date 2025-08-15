@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Fixed version with proper data handling
+// components/AccountContent.tsx - Fixed version with user data validation
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -46,6 +46,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   // ✅ Initialize component state
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
+  const [isRedirecting, setIsRedirecting] = useState(false);
   
   const { user, refreshUser, loading: userLoading, error: userError } = useUser();
   const router = useRouter();
@@ -104,6 +105,100 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       isMounted = false;
     };
   }, [source]);
+
+  // ✅ Check for user data and redirect if missing
+  useEffect(() => {
+    let isMounted = true;
+    
+    async function validateUserData() {
+      if (!isScreenReady || isRedirecting) return;
+
+      try {
+        // Wait a bit for UserContext to load
+        await new Promise(resolve => setTimeout(resolve, 200));
+        
+        if (!isMounted) return;
+
+        // Check if we have auth tokens first
+        const authToken = await SecureStore.getItemAsync('auth_token');
+        const userId = await SecureStore.getItemAsync('user_id');
+        
+        if (!authToken || !userId) {
+          console.log('❌ No auth tokens found, redirecting to login');
+          setIsRedirecting(true);
+          Toast.show({ 
+            type: 'warning', 
+            text1: 'Session expired', 
+            text2: 'Please log in again' 
+          });
+          router.replace('/login');
+          return;
+        }
+
+        // Check if UserContext has user data
+        if (!userLoading && !user) {
+          console.log('❌ No user data in context, checking storage...');
+          
+          // Try to get user data from AsyncStorage
+          const storedUserData = await AsyncStorage.getItem('user_data');
+          
+          if (!storedUserData) {
+            console.log('❌ No user data in storage either, redirecting to login');
+            setIsRedirecting(true);
+            Toast.show({ 
+              type: 'error', 
+              text1: 'User data missing', 
+              text2: 'Please log in again to reload your profile' 
+            });
+            
+            // Clear any stale auth tokens
+            await SecureStore.deleteItemAsync('auth_token');
+            await SecureStore.deleteItemAsync('user_id');
+            await SecureStore.deleteItemAsync('user_role');
+            
+            router.replace('/login');
+            return;
+          } else {
+            console.log('✅ Found user data in storage, refreshing user context...');
+            // Try to refresh user data from server
+            try {
+              await refreshUser();
+            } catch (refreshError) {
+              console.log('⚠️ Failed to refresh user from server, using stored data');
+            }
+          }
+        }
+
+        // If we have user data, proceed normally
+        if (user) {
+          console.log(`✅ User data validated for ${source} screen:`, {
+            id: user.id,
+            email: user.email,
+            hasDisplayName: !!user.display_name,
+            hasFirstName: !!user.first_name,
+          });
+        }
+
+      } catch (error) {
+        console.error('❌ Error validating user data:', error);
+        if (isMounted && !user) {
+          setIsRedirecting(true);
+          Toast.show({ 
+            type: 'error', 
+            text1: 'Authentication error', 
+            text2: 'Please log in again' 
+          });
+          router.replace('/login');
+        }
+      }
+    }
+
+    validateUserData();
+    
+    return () => {
+      isMounted = false;
+    };
+  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting]);
 
   // ✅ Clear all cached data helper
   const clearAllCachedData = useCallback(async () => {
@@ -173,21 +268,26 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [user]);
 
-  // ✅ Load data only after screen is ready and user is available
+  // ✅ Load data only after screen is ready and user is validated
   useEffect(() => {
-    if (isScreenReady && !screenError && !userError && user) {
+    if (isScreenReady && !screenError && !userError && user && !isRedirecting) {
       console.log(`🔄 AccountContent (${source}) ready with user, loading data...`);
       loadBusinesses();
-    } else if (isScreenReady && !user) {
-      // Clear data if no user
+    } else if (isScreenReady && !user && !userLoading && !isRedirecting) {
+      // User data is missing and not loading - validation effect will handle redirect
       console.log('🧹 No user found, clearing business data');
       setOwnedBusinesses([]);
       setJoinedBusinesses([]);
     }
-  }, [isScreenReady, screenError, userError, loadBusinesses, source, user]);
+  }, [isScreenReady, screenError, userError, loadBusinesses, source, user, userLoading, isRedirecting]);
 
   // ✅ Refresh handler with better error handling
   const onRefresh = useCallback(async () => {
+    if (!user) {
+      Toast.show({ type: 'warning', text1: 'Please log in first' });
+      return;
+    }
+
     setRefreshing(true);
     try {
       // First refresh user data, then businesses
@@ -201,7 +301,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, loadBusinesses]);
+  }, [refreshUser, loadBusinesses, user]);
 
   // ✅ Avatar picker
   const pickAndPreviewAvatar = useCallback(async () => {
@@ -285,8 +385,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return 'User';
   }, [user]);
 
-  // ✅ Loading screen while initializing
-  if (!isScreenReady) {
+  // ✅ Loading screen while initializing or redirecting
+  if (!isScreenReady || isRedirecting) {
     return (
       <View style={styles.loadingContainer}>
         <LinearGradient
@@ -296,7 +396,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           style={styles.loadingGradient}
         >
           <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Loading {title}...</Text>
+          <Text style={styles.loadingText}>
+            {isRedirecting ? 'Redirecting to login...' : `Loading ${title}...`}
+          </Text>
           <Text style={styles.sourceText}>Context: {source}</Text>
         </LinearGradient>
       </View>
@@ -322,7 +424,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         
         <View style={styles.errorContainer}>
           <Text style={styles.error}>
-            {screenError || 'Failed to load account data'}
+            {screenError || userError || 'Failed to load account data'}
           </Text>
           <Button mode="outlined" onPress={() => {
             setScreenError(null);
@@ -330,7 +432,32 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           }}>
             Retry
           </Button>
+          <Button 
+            mode="contained" 
+            onPress={() => router.replace('/login')}
+            style={{ marginTop: 10, backgroundColor: '#764ba2' }}
+          >
+            Go to Login
+          </Button>
         </View>
+      </View>
+    );
+  }
+
+  // ✅ Show loading if user data is still loading
+  if (userLoading || !user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.loadingGradient}
+        >
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading user data...</Text>
+          <Text style={styles.sourceText}>Context: {source}</Text>
+        </LinearGradient>
       </View>
     );
   }
@@ -459,9 +586,12 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             <Text style={styles.debugText}>Title: {title}</Text>
             <Text style={styles.debugText}>User Loading: {userLoading.toString()}</Text>
             <Text style={styles.debugText}>Component Ready: {isScreenReady.toString()}</Text>
+            <Text style={styles.debugText}>Is Redirecting: {isRedirecting.toString()}</Text>
+            <Text style={styles.debugText}>User ID: {user?.id || 'N/A'}</Text>
             <Text style={styles.debugText}>User Role: {user?.role || 'Unknown'}</Text>
             <Text style={styles.debugText}>Display Name: {getDisplayName()}</Text>
             <Text style={styles.debugText}>First Name: {user?.first_name || 'N/A'}</Text>
+            <Text style={styles.debugText}>Email: {user?.email || 'N/A'}</Text>
             <Text style={styles.debugText}>Owned Businesses: {ownedBusinesses.length}</Text>
             <Text style={styles.debugText}>Joined Businesses: {joinedBusinesses.length}</Text>
           </View>
