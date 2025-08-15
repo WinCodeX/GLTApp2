@@ -388,24 +388,6 @@ export default function LoginScreen() {
     <>
       <LinearGradient colors={['#0a0a0f', '#1a1a2e']} style={styles.container}>
         <View style={styles.inner}>
-          {/* Welcome Back Title - Always visible at top */}
-          <View style={styles.titleContainer}>
-            <GradientText>Welcome Back!</GradientText>
-          </View>
-
-          {/* Server Status Indicator */}
-          <View style={styles.statusContainer}>
-            <View style={[styles.statusDot, { backgroundColor: getServerStatusColor() }]} />
-            <Text style={[styles.statusText, { color: getServerStatusColor() }]}>
-              {getServerStatusText()}
-            </Text>
-            {serverStatus === 'unreachable' && (
-              <TouchableOpacity onPress={handleRetryConnection} style={styles.retryButton}>
-                <Text style={styles.retryText}>Retry</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
           {!ready ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#bd93f9" />
@@ -413,6 +395,24 @@ export default function LoginScreen() {
             </View>
           ) : (
             <View style={styles.formContainer}>
+              {/* Welcome Back Title - Moved closer to form */}
+              <View style={styles.titleContainer}>
+                <GradientText>Welcome Back!</GradientText>
+              </View>
+
+              {/* Server Status Indicator - Moved closer to form */}
+              <View style={styles.statusContainer}>
+                <View style={[styles.statusDot, { backgroundColor: getServerStatusColor() }]} />
+                <Text style={[styles.statusText, { color: getServerStatusColor() }]}>
+                  {getServerStatusText()}
+                </Text>
+                {serverStatus === 'unreachable' && (
+                  <TouchableOpacity onPress={handleRetryConnection} style={styles.retryButton}>
+                    <Text style={styles.retryText}>Retry</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+
               <TextInput
                 label="Email"
                 value={email}
@@ -512,11 +512,10 @@ const styles = StyleSheet.create({
     flex: 1, 
     paddingHorizontal: 24, 
     justifyContent: 'center',
-    paddingTop: 60, // Add top padding to prevent content from being too high
   },
   titleContainer: {
     alignItems: 'center',
-    marginBottom: 20, // Space between title and server status
+    marginBottom: 16, // Reduced spacing between title and server status
   },
   titleGradientContainer: {
     paddingHorizontal: 20,
@@ -541,7 +540,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 30, // More space below status
+    marginBottom: 32, // More space between status and first input
     gap: 8,
   },
   statusDot: {
@@ -569,12 +568,11 @@ const styles = StyleSheet.create({
   loadingContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    flex: 0.6, // Take up more space for loading
+    flex: 1, // Take full height for loading
   },
   formContainer: {
-    flex: 1,
     justifyContent: 'center',
-    maxHeight: 500, // Limit form height
+    alignItems: 'stretch', // Stretch to full width
   },
   input: {
     marginBottom: 16,
