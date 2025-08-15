@@ -151,6 +151,8 @@ const styles = StyleSheet.create({
     right: 0,
     zIndex: 1000, // High z-index to appear above other content
     elevation: 10, // Android elevation
+    // Allow touches to pass through the container
+    pointerEvents: 'box-none',
   },
 
   banner: {
@@ -167,6 +169,8 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 8,
+    // Allow the banner itself to receive touches (for future functionality)
+    pointerEvents: 'auto',
   },
 
   disconnectedBanner: {
