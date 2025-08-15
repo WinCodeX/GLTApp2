@@ -7,11 +7,13 @@ import {
   DarkTheme as NavigationDarkTheme,
 } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 // ✅ Add Toast imports
 import Toast from 'react-native-toast-message';
 import { toastConfig } from '@/lib/toastConfig';
 
 import { UserProvider } from '@/context/UserContext';
+import NetworkBanner from '@/components/NetworkBanner';
 import colors from '@/theme/colors';
 
 const CustomDarkTheme = {
@@ -30,15 +32,22 @@ const CustomDarkTheme = {
 export default function Layout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
-      <PaperProvider>
-        <ThemeProvider value={CustomDarkTheme}>
-          <UserProvider>
-            <Slot />
-          </UserProvider>
-        </ThemeProvider>
-      </PaperProvider>
-      {/* ✅ Add Toast component at the very end */}
-      <Toast config={toastConfig} />
+      <SafeAreaProvider>
+        <PaperProvider>
+          <ThemeProvider value={CustomDarkTheme}>
+            <UserProvider>
+              {/* Main app content */}
+              <Slot />
+              
+              {/* Network status banner - positioned absolutely above everything */}
+              <NetworkBanner />
+            </UserProvider>
+          </ThemeProvider>
+        </PaperProvider>
+        
+        {/* ✅ Toast component at the very end */}
+        <Toast config={toastConfig} />
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }
