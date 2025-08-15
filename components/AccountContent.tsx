@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Enhanced version with advanced netStatus integration
+// components/AccountContent.tsx - Enhanced version with proper toast integration
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -53,6 +53,49 @@ interface AccountContentProps {
   onBack: () => void;
   title?: string;
 }
+
+// ✅ Centralized toast helper with consistent styling
+const showToast = {
+  success: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'success',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 2500,
+    });
+  },
+  
+  error: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'error',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+  },
+  
+  warning: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'warning',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3500,
+    });
+  },
+  
+  info: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'info',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3000,
+    });
+  },
+};
 
 export default function AccountContent({ source, onBack, title = 'Account' }: AccountContentProps) {
   // ✅ Initialize component state
@@ -124,37 +167,19 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           switch (status) {
             case 'offline':
               if (previousStatus === 'online') {
-                Toast.show({
-                  type: 'warning',
-                  text1: 'Connection Lost',
-                  text2: 'Working offline with cached data',
-                  position: 'bottom',
-                  visibilityTime: 3000,
-                });
+                showToast.warning('Connection Lost', 'Working offline with cached data');
               }
               break;
             
             case 'server_error':
               if (previousStatus === 'online') {
-                Toast.show({
-                  type: 'error',
-                  text1: 'Server Unavailable',
-                  text2: 'Using cached data while server reconnects',
-                  position: 'bottom',
-                  visibilityTime: 4000,
-                });
+                showToast.error('Server Unavailable', 'Using cached data while server reconnects');
               }
               break;
             
             case 'online':
               if (previousStatus !== 'online') {
-                Toast.show({
-                  type: 'success',
-                  text1: 'Connection Restored',
-                  text2: 'Syncing latest data...',
-                  position: 'bottom',
-                  visibilityTime: 2000,
-                });
+                showToast.success('Connection Restored', 'Syncing latest data...');
                 // Automatically refresh data when connection is restored
                 if (user && isScreenReady) {
                   setTimeout(() => {
@@ -333,11 +358,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         if (!authToken || !userId) {
           console.log('❌ No auth tokens found, redirecting to login');
           setIsRedirecting(true);
-          Toast.show({ 
-            type: 'warning', 
-            text1: 'Session expired', 
-            text2: 'Please log in again' 
-          });
+          showToast.warning('Session expired', 'Please log in again');
           router.replace('/login');
           return;
         }
@@ -352,11 +373,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           if (!storedUserData) {
             console.log('❌ No user data in storage either, redirecting to login');
             setIsRedirecting(true);
-            Toast.show({ 
-              type: 'error', 
-              text1: 'User data missing', 
-              text2: 'Please log in again to reload your profile' 
-            });
+            showToast.error('User data missing', 'Please log in again to reload your profile');
             
             // Clear any stale auth tokens
             await SecureStore.deleteItemAsync('auth_token');
@@ -393,11 +410,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         console.error('❌ Error validating user data:', error);
         if (isMounted && !user) {
           setIsRedirecting(true);
-          Toast.show({ 
-            type: 'error', 
-            text1: 'Authentication error', 
-            text2: 'Please log in again' 
-          });
+          showToast.error('Authentication error', 'Please log in again');
           router.replace('/login');
         }
       }
@@ -518,19 +531,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                 setJoinedBusinesses(cachedData.joined || []);
                 setUsingCachedData(true);
                 
-                Toast.show({
-                  type: 'warning',
-                  text1: 'Connection Failed',
-                  text2: 'Showing cached business data',
-                  position: 'bottom',
-                });
+                showToast.warning('Connection Failed', 'Showing cached business data');
               } else {
                 // No cached data and fetch failed
-                Toast.show({ 
-                  type: 'error', 
-                  text1: 'Failed to load businesses',
-                  text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your internet connection',
-                });
+                const errorMessage = networkStatus === 'server_error' 
+                  ? 'Server temporarily unavailable' 
+                  : 'Check your internet connection';
+                showToast.error('Failed to load businesses', errorMessage);
                 setOwnedBusinesses([]);
                 setJoinedBusinesses([]);
               }
@@ -538,7 +545,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               console.error('❌ Error loading fallback cached data:', fallbackError);
               setOwnedBusinesses([]);
               setJoinedBusinesses([]);
-              Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+              showToast.error('Failed to load businesses');
             }
           }
         }
@@ -555,22 +562,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           setJoinedBusinesses(cachedData.joined || []);
           setUsingCachedData(true);
           
-          Toast.show({
-            type: 'warning',
-            text1: 'Error Loading Data',
-            text2: 'Showing cached business data',
-            position: 'bottom',
-          });
+          showToast.warning('Error Loading Data', 'Showing cached business data');
         } else {
           setOwnedBusinesses([]);
           setJoinedBusinesses([]);
-          Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+          showToast.error('Failed to load businesses');
         }
       } catch (cacheError) {
         console.error('❌ Failed to load cached data as fallback:', cacheError);
         setOwnedBusinesses([]);
         setJoinedBusinesses([]);
-        Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+        showToast.error('Failed to load businesses');
       }
     }
   }, [user, networkStatus, canMakeRequests, shouldUseCachedData, loadCachedBusinessData, cacheBusinessData, usingCachedData]);
@@ -597,16 +599,16 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
-        Toast.show({ type: 'warning', text1: 'Please log in first' });
+        showToast.warning('Please log in first');
         return;
       }
 
       if (!canMakeRequests()) {
-        Toast.show({ 
-          type: 'info', 
-          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-          text2: networkStatus === 'offline' ? 'Cannot refresh while offline' : 'Server is temporarily unavailable'
-        });
+        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+        const message = networkStatus === 'offline' 
+          ? 'Cannot refresh while offline' 
+          : 'Server is temporarily unavailable';
+        showToast.info(title, message);
         return;
       }
 
@@ -619,11 +621,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       await loadBusinesses(true); // Force refresh
     } catch (error) {
       console.error('❌ Refresh error:', error);
-      Toast.show({ 
-        type: 'error', 
-        text1: 'Failed to refresh data',
-        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your connection'
-      });
+      const errorMessage = networkStatus === 'server_error' 
+        ? 'Server temporarily unavailable' 
+        : 'Check your connection';
+      showToast.error('Failed to refresh data', errorMessage);
     } finally {
       setRefreshing(false);
     }
@@ -633,17 +634,15 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const pickAndPreviewAvatar = useCallback(async () => {
     try {
       if (!isConnected()) {
-        Toast.show({ 
-          type: 'info', 
-          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-          text2: 'Avatar upload requires server connection' 
-        });
+        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+        showToast.info(title, 'Avatar upload requires server connection');
         return;
       }
 
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        return Toast.show({ type: 'error', text1: 'Photo access denied.' });
+        showToast.error('Photo access denied');
+        return;
       }
 
       const result = await ImagePicker.launchImageLibraryAsync({
@@ -656,7 +655,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setPreviewUri(result.assets[0].uri);
     } catch (error) {
       console.error('❌ Error picking avatar:', error);
-      Toast.show({ type: 'error', text1: 'Failed to select image' });
+      showToast.error('Failed to select image');
     }
   }, [networkStatus, isConnected]);
 
@@ -666,26 +665,22 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       if (!previewUri) return;
 
       if (!isConnected()) {
-        Toast.show({ 
-          type: 'error', 
-          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-          text2: 'Cannot upload while server is unavailable' 
-        });
+        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+        showToast.error(title, 'Cannot upload while server is unavailable');
         return;
       }
 
       setLoading(true);
       
       await uploadAvatar(previewUri);
-      Toast.show({ type: 'success', text1: 'Avatar updated!' });
+      showToast.success('Avatar updated!');
       await refreshUser();
     } catch (error) {
       console.error('❌ Error uploading avatar:', error);
-      Toast.show({ 
-        type: 'error', 
-        text1: 'Upload failed',
-        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your connection'
-      });
+      const errorMessage = networkStatus === 'server_error' 
+        ? 'Server temporarily unavailable' 
+        : 'Check your connection';
+      showToast.error('Upload failed', errorMessage);
     } finally {
       setPreviewUri(null);
       setLoading(false);
@@ -713,7 +708,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         console.log('Note: Some storage items may not exist:', storageError);
       }
       
-      Toast.show({ type: 'info', text1: 'Logged out successfully' });
+      showToast.info('Logged out successfully');
       setShowLogoutConfirm(false);
       
       // Navigate to login
@@ -721,7 +716,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
     } catch (error) {
       console.error('❌ Logout error:', error);
-      Toast.show({ type: 'error', text1: 'Logout failed' });
+      showToast.error('Logout failed');
     }
   }, [router, clearAllCachedData]);
 
@@ -789,11 +784,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       }
     } catch (error) {
       console.error('❌ Error checking server status:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Status check failed',
-        text2: 'Please try again later'
-      });
+      showToast.error('Status check failed', 'Please try again later');
     }
   }, [loadBusinesses]);
 
@@ -943,11 +934,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                   onPress={async () => {
                     try {
                       if (!isConnected()) {
-                        Toast.show({
-                          type: 'error',
-                          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                          text2: 'Cannot generate invite while server is unavailable',
-                        });
+                        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+                        showToast.error(title, 'Cannot generate invite while server is unavailable');
                         return;
                       }
 
@@ -955,11 +943,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                       setInviteLink(res?.code || 'No code');
                     } catch (error) {
                       console.error('❌ Error creating invite:', error);
-                      Toast.show({
-                        type: 'error',
-                        text1: 'Failed to create invite',
-                        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Please try again',
-                      });
+                      const errorMessage = networkStatus === 'server_error' 
+                        ? 'Server temporarily unavailable' 
+                        : 'Please try again';
+                      showToast.error('Failed to create invite', errorMessage);
                     }
                   }}
                   disabled={!isConnected()}
@@ -972,10 +959,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                   <Button onPress={() => {
                     try {
                       Clipboard.setStringAsync(inviteLink);
-                      Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
+                      showToast.success('Copied to clipboard!');
                     } catch (error) {
                       console.error('❌ Error copying to clipboard:', error);
-                      Toast.show({ type: 'error', text1: 'Failed to copy' });
+                      showToast.error('Failed to copy');
                     }
                   }}>
                     Copy
@@ -1113,11 +1100,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               onPress={() => {
                 try {
                   if (!isConnected()) {
-                    Toast.show({
-                      type: 'info',
-                      text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                      text2: 'Cannot create business while server is unavailable',
-                    });
+                    const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+                    showToast.info(title, 'Cannot create business while server is unavailable');
                     return;
                   }
                   setShowBusinessModal(true);
@@ -1136,11 +1120,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               onPress={() => {
                 try {
                   if (!isConnected()) {
-                    Toast.show({
-                      type: 'info',
-                      text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                      text2: 'Cannot join business while server is unavailable',
-                    });
+                    const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+                    showToast.info(title, 'Cannot join business while server is unavailable');
                     return;
                   }
                   setShowJoinModal(true);
@@ -1169,11 +1150,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                 onPress={() => {
                   try {
                     if (!isConnected()) {
-                      Toast.show({
-                        type: 'info',
-                        text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                        text2: 'Cannot generate invite while server is unavailable',
-                      });
+                      const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
+                      showToast.info(title, 'Cannot generate invite while server is unavailable');
                       return;
                     }
                     setSelectedBusiness(biz);
