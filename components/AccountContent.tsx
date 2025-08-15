@@ -1,6 +1,7 @@
-// components/AccountContent.tsx - Fixed version with user data validation
+// components/AccountContent.tsx - Enhanced version with offline support and caching
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import NetInfo from '@react-native-netinfo/netinfo';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -35,6 +36,15 @@ import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 // ✅ Constants
 const CHANGELOG_KEY = 'changelog_seen';
 const CHANGELOG_VERSION = '1.0.0';
+const BUSINESS_CACHE_KEY = 'cached_business_data';
+const CACHE_EXPIRY_KEY = 'business_cache_expiry';
+const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+interface BusinessData {
+  owned: any[];
+  joined: any[];
+  timestamp: number;
+}
 
 interface AccountContentProps {
   source: 'admin' | 'drawer';
@@ -47,6 +57,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
+  const [isOffline, setIsOffline] = useState(false);
+  const [usingCachedData, setUsingCachedData] = useState(false);
   
   const { user, refreshUser, loading: userLoading, error: userError } = useUser();
   const router = useRouter();
@@ -62,6 +74,76 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [showChangelog, setShowChangelog] = useState(false);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+
+  // ✅ Network state monitoring
+  useEffect(() => {
+    const unsubscribe = NetInfo.addEventListener(state => {
+      const offline = !state.isConnected || !state.isInternetReachable;
+      setIsOffline(offline);
+      
+      if (offline) {
+        console.log('📴 Device is offline - using cached data');
+      } else {
+        console.log('📶 Device is online');
+      }
+    });
+
+    return unsubscribe;
+  }, []);
+
+  // ✅ Cache business data
+  const cacheBusinessData = useCallback(async (data: { owned: any[]; joined: any[] }) => {
+    try {
+      const cacheData: BusinessData = {
+        owned: data.owned || [],
+        joined: data.joined || [],
+        timestamp: Date.now(),
+      };
+      
+      await AsyncStorage.setItem(BUSINESS_CACHE_KEY, JSON.stringify(cacheData));
+      await AsyncStorage.setItem(CACHE_EXPIRY_KEY, (Date.now() + CACHE_DURATION).toString());
+      
+      console.log('💾 Business data cached successfully');
+    } catch (error) {
+      console.error('❌ Failed to cache business data:', error);
+    }
+  }, []);
+
+  // ✅ Load cached business data
+  const loadCachedBusinessData = useCallback(async (): Promise<BusinessData | null> => {
+    try {
+      const [cachedData, expiryTime] = await Promise.all([
+        AsyncStorage.getItem(BUSINESS_CACHE_KEY),
+        AsyncStorage.getItem(CACHE_EXPIRY_KEY),
+      ]);
+
+      if (!cachedData) {
+        console.log('💾 No cached business data found');
+        return null;
+      }
+
+      const parsed: BusinessData = JSON.parse(cachedData);
+      const expiry = expiryTime ? parseInt(expiryTime) : 0;
+      const isExpired = Date.now() > expiry;
+
+      if (isExpired && !isOffline) {
+        console.log('💾 Cached data expired, will fetch fresh data');
+        return null;
+      }
+
+      console.log('💾 Using cached business data', {
+        owned: parsed.owned?.length || 0,
+        joined: parsed.joined?.length || 0,
+        age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60) + ' minutes',
+        expired: isExpired,
+      });
+
+      return parsed;
+    } catch (error) {
+      console.error('❌ Failed to load cached business data:', error);
+      return null;
+    }
+  }, [isOffline]);
 
   // ✅ Component initialization
   useEffect(() => {
@@ -162,7 +244,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             console.log('✅ Found user data in storage, refreshing user context...');
             // Try to refresh user data from server
             try {
-              await refreshUser();
+              if (!isOffline) {
+                await refreshUser();
+              }
             } catch (refreshError) {
               console.log('⚠️ Failed to refresh user from server, using stored data');
             }
@@ -198,7 +282,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return () => {
       isMounted = false;
     };
-  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting]);
+  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting, isOffline]);
 
   // ✅ Clear all cached data helper
   const clearAllCachedData = useCallback(async () => {
@@ -210,6 +294,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setJoinedBusinesses([]);
       setSelectedBusiness(null);
       setInviteLink(null);
+      setUsingCachedData(false);
       
       // Clear AsyncStorage (but keep essential items like changelog)
       const keys = await AsyncStorage.getAllKeys();
@@ -229,44 +314,118 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, []);
 
-  // ✅ Load businesses data with better error handling
-  const loadBusinesses = useCallback(async () => {
+  // ✅ Load businesses data with offline support and caching
+  const loadBusinesses = useCallback(async (forceRefresh = false) => {
     try {
-      console.log('📊 Loading businesses...');
+      console.log('📊 Loading businesses...', { isOffline, forceRefresh });
       
       // Check changelog first
       const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
       if (!seen) setShowChangelog(true);
       
-      // Clear previous data first
-      setOwnedBusinesses([]);
-      setJoinedBusinesses([]);
-      
-      // Fetch fresh business data
-      const data = await getBusinesses();
-      
-      // Only set data if user is still logged in and request succeeded
-      if (data && user) {
-        setOwnedBusinesses(data?.owned || []);
-        setJoinedBusinesses(data?.joined || []);
-        console.log('✅ Businesses loaded:', {
-          owned: data?.owned?.length || 0,
-          joined: data?.joined?.length || 0
-        });
-      } else {
-        console.log('⚠️ No business data or user not logged in');
-        setOwnedBusinesses([]);
-        setJoinedBusinesses([]);
+      // If offline or not forcing refresh, try cached data first
+      if (isOffline || !forceRefresh) {
+        const cachedData = await loadCachedBusinessData();
+        if (cachedData) {
+          setOwnedBusinesses(cachedData.owned || []);
+          setJoinedBusinesses(cachedData.joined || []);
+          setUsingCachedData(true);
+          
+          if (isOffline) {
+            Toast.show({
+              type: 'info',
+              text1: 'Offline Mode',
+              text2: 'Showing cached business data',
+              position: 'bottom',
+            });
+            return; // Don't try to fetch if offline
+          } else if (!forceRefresh) {
+            // Show cached data immediately, but continue to fetch fresh data
+            console.log('📊 Showing cached data while fetching fresh data...');
+          }
+        }
+      }
+
+      // Try to fetch fresh data if online
+      if (!isOffline) {
+        try {
+          console.log('🌐 Fetching fresh business data...');
+          const data = await getBusinesses();
+          
+          if (data && user) {
+            setOwnedBusinesses(data?.owned || []);
+            setJoinedBusinesses(data?.joined || []);
+            setUsingCachedData(false);
+            
+            // Cache the fresh data
+            await cacheBusinessData(data);
+            
+            console.log('✅ Fresh businesses loaded:', {
+              owned: data?.owned?.length || 0,
+              joined: data?.joined?.length || 0
+            });
+          }
+        } catch (fetchError) {
+          console.error('❌ Error fetching fresh business data:', fetchError);
+          
+          // If we don't have cached data and fetch failed, try one more time with cached data
+          if (!usingCachedData) {
+            const cachedData = await loadCachedBusinessData();
+            if (cachedData) {
+              setOwnedBusinesses(cachedData.owned || []);
+              setJoinedBusinesses(cachedData.joined || []);
+              setUsingCachedData(true);
+              
+              Toast.show({
+                type: 'warning',
+                text1: 'Connection Failed',
+                text2: 'Showing cached business data',
+                position: 'bottom',
+              });
+            } else {
+              // No cached data and fetch failed
+              Toast.show({ 
+                type: 'error', 
+                text1: 'Failed to load businesses',
+                text2: 'Check your internet connection',
+              });
+              setOwnedBusinesses([]);
+              setJoinedBusinesses([]);
+            }
+          }
+        }
       }
       
     } catch (error) {
-      console.log('❌ Error loading businesses:', error);
-      Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
-      // Clear stale data on error
-      setOwnedBusinesses([]);
-      setJoinedBusinesses([]);
+      console.error('❌ Error in loadBusinesses:', error);
+      
+      // Try to fallback to cached data on any error
+      try {
+        const cachedData = await loadCachedBusinessData();
+        if (cachedData) {
+          setOwnedBusinesses(cachedData.owned || []);
+          setJoinedBusinesses(cachedData.joined || []);
+          setUsingCachedData(true);
+          
+          Toast.show({
+            type: 'warning',
+            text1: 'Error Loading Data',
+            text2: 'Showing cached business data',
+            position: 'bottom',
+          });
+        } else {
+          setOwnedBusinesses([]);
+          setJoinedBusinesses([]);
+          Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+        }
+      } catch (cacheError) {
+        console.error('❌ Failed to load cached data as fallback:', cacheError);
+        setOwnedBusinesses([]);
+        setJoinedBusinesses([]);
+        Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
+      }
     }
-  }, [user]);
+  }, [user, isOffline, loadCachedBusinessData, cacheBusinessData, usingCachedData]);
 
   // ✅ Load data only after screen is ready and user is validated
   useEffect(() => {
@@ -278,13 +437,23 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       console.log('🧹 No user found, clearing business data');
       setOwnedBusinesses([]);
       setJoinedBusinesses([]);
+      setUsingCachedData(false);
     }
   }, [isScreenReady, screenError, userError, loadBusinesses, source, user, userLoading, isRedirecting]);
 
-  // ✅ Refresh handler with better error handling
+  // ✅ Refresh handler with offline support
   const onRefresh = useCallback(async () => {
     if (!user) {
       Toast.show({ type: 'warning', text1: 'Please log in first' });
+      return;
+    }
+
+    if (isOffline) {
+      Toast.show({ 
+        type: 'info', 
+        text1: 'Offline Mode', 
+        text2: 'Cannot refresh while offline' 
+      });
       return;
     }
 
@@ -294,17 +463,26 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       await refreshUser();
       // Small delay to ensure user context is updated
       await new Promise(resolve => setTimeout(resolve, 100));
-      await loadBusinesses();
+      await loadBusinesses(true); // Force refresh
     } catch (error) {
       console.error('❌ Refresh error:', error);
       Toast.show({ type: 'error', text1: 'Failed to refresh data' });
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, loadBusinesses, user]);
+  }, [refreshUser, loadBusinesses, user, isOffline]);
 
   // ✅ Avatar picker
   const pickAndPreviewAvatar = useCallback(async () => {
+    if (isOffline) {
+      Toast.show({ 
+        type: 'info', 
+        text1: 'Offline Mode', 
+        text2: 'Avatar upload requires internet connection' 
+      });
+      return;
+    }
+
     const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
     if (!permission.granted) {
       return Toast.show({ type: 'error', text1: 'Photo access denied.' });
@@ -318,11 +496,20 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
     if (result.canceled || !result.assets?.length) return;
     setPreviewUri(result.assets[0].uri);
-  }, []);
+  }, [isOffline]);
 
   // ✅ Avatar upload
   const confirmUploadAvatar = useCallback(async () => {
     if (!previewUri) return;
+
+    if (isOffline) {
+      Toast.show({ 
+        type: 'error', 
+        text1: 'Offline Mode', 
+        text2: 'Cannot upload while offline' 
+      });
+      return;
+    }
 
     setLoading(true);
     try {
@@ -335,7 +522,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setPreviewUri(null);
       setLoading(false);
     }
-  }, [previewUri, refreshUser]);
+  }, [previewUri, refreshUser, isOffline]);
 
   // ✅ Enhanced logout handler with proper cleanup
   const confirmLogout = useCallback(async () => {
@@ -515,14 +702,32 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               </Text>
 
               {!inviteLink ? (
-                <Button mode="contained" onPress={async () => {
-                  try {
-                    const res = await createInvite(selectedBusiness.id);
-                    setInviteLink(res?.code || 'No code');
-                  } catch (error) {
-                    console.log('Error creating invite:', error);
-                  }
-                }}>
+                <Button 
+                  mode="contained" 
+                  onPress={async () => {
+                    if (isOffline) {
+                      Toast.show({
+                        type: 'error',
+                        text1: 'Offline Mode',
+                        text2: 'Cannot generate invite while offline',
+                      });
+                      return;
+                    }
+
+                    try {
+                      const res = await createInvite(selectedBusiness.id);
+                      setInviteLink(res?.code || 'No code');
+                    } catch (error) {
+                      console.log('Error creating invite:', error);
+                      Toast.show({
+                        type: 'error',
+                        text1: 'Failed to create invite',
+                        text2: 'Please try again',
+                      });
+                    }
+                  }}
+                  disabled={isOffline}
+                >
                   Generate Link
                 </Button>
               ) : (
@@ -578,22 +783,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           />
         }
       >
-        {/* Debug info (dev only) */}
-        {__DEV__ && (
-          <View style={styles.debugCard}>
-            <Text style={styles.debugTitle}>Debug Info:</Text>
-            <Text style={styles.debugText}>Source: {source}</Text>
-            <Text style={styles.debugText}>Title: {title}</Text>
-            <Text style={styles.debugText}>User Loading: {userLoading.toString()}</Text>
-            <Text style={styles.debugText}>Component Ready: {isScreenReady.toString()}</Text>
-            <Text style={styles.debugText}>Is Redirecting: {isRedirecting.toString()}</Text>
-            <Text style={styles.debugText}>User ID: {user?.id || 'N/A'}</Text>
-            <Text style={styles.debugText}>User Role: {user?.role || 'Unknown'}</Text>
-            <Text style={styles.debugText}>Display Name: {getDisplayName()}</Text>
-            <Text style={styles.debugText}>First Name: {user?.first_name || 'N/A'}</Text>
-            <Text style={styles.debugText}>Email: {user?.email || 'N/A'}</Text>
-            <Text style={styles.debugText}>Owned Businesses: {ownedBusinesses.length}</Text>
-            <Text style={styles.debugText}>Joined Businesses: {joinedBusinesses.length}</Text>
+        {/* Offline/Cached Data Indicator */}
+        {(isOffline || usingCachedData) && (
+          <View style={[styles.statusCard, isOffline ? styles.offlineCard : styles.cachedCard]}>
+            <MaterialCommunityIcons 
+              name={isOffline ? "wifi-off" : "cached"} 
+              size={20} 
+              color={isOffline ? "#ff6b6b" : "#ffa726"} 
+            />
+            <Text style={[styles.statusText, { color: isOffline ? "#ff6b6b" : "#ffa726" }]}>
+              {isOffline ? 'Offline Mode - Showing cached data' : 'Showing cached data'}
+            </Text>
           </View>
         )}
 
@@ -661,17 +861,39 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
             <Button 
               mode="outlined" 
-              onPress={() => setShowBusinessModal(true)}
+              onPress={() => {
+                if (isOffline) {
+                  Toast.show({
+                    type: 'info',
+                    text1: 'Offline Mode',
+                    text2: 'Cannot create business while offline',
+                  });
+                  return;
+                }
+                setShowBusinessModal(true);
+              }}
               buttonColor="rgba(118, 75, 162, 0.1)"
               textColor="#764ba2"
+              disabled={isOffline}
             >
               Create
             </Button>
             <Button 
               mode="outlined" 
-              onPress={() => setShowJoinModal(true)}
+              onPress={() => {
+                if (isOffline) {
+                  Toast.show({
+                    type: 'info',
+                    text1: 'Offline Mode',
+                    text2: 'Cannot join business while offline',
+                  });
+                  return;
+                }
+                setShowJoinModal(true);
+              }}
               buttonColor="rgba(118, 75, 162, 0.1)"
               textColor="#764ba2"
+              disabled={isOffline}
             >
               Join
             </Button>
@@ -799,26 +1021,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
-  debugCard: {
+  statusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1a1a2e',
     marginHorizontal: 16,
     marginTop: 16,
     marginBottom: 8,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: 12,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 0, 0.3)',
   },
-  debugTitle: {
-    color: '#ffff00',
+  offlineCard: {
+    borderColor: 'rgba(255, 107, 107, 0.5)',
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+  },
+  cachedCard: {
+    borderColor: 'rgba(255, 167, 38, 0.5)',
+    backgroundColor: 'rgba(255, 167, 38, 0.1)',
+  },
+  statusText: {
     fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 8,
-  },
-  debugText: {
-    color: '#ccc',
-    fontSize: 12,
-    marginBottom: 4,
+    fontWeight: '500',
+    marginLeft: 8,
   },
   infoCard: {
     backgroundColor: '#1a1a2e',
