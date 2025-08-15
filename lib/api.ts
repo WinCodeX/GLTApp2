@@ -5,28 +5,22 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
-const LOCAL_BASE_2 = 'http://10.22.223.106:3000';
-const PROD_BASE = 'https://your-production-server.com'; // Add your production URL
-const FALLBACK_BASE = LOCAL_BASE_1; // Fallback to first local server
+const LOCAL_BASE_2 = 'http://192.168.162.106:3000'; // Fixed to match your first working version
+const PROD_BASE = 'https://stockx-3vvh.onrender.com'; // Using your production URL
+const FALLBACK_BASE = PROD_BASE; // Use production as fallback, not local
 
 let resolvedBaseUrl: string | null = null;
 let isResolvingBaseUrl = false;
 
-const testConnection = async (baseUrl: string, timeout = 2000): Promise<boolean> => {
+const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean> => {
   try {
     console.log(`🔍 Testing connection to: ${baseUrl}`);
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), timeout);
     
     const response = await axios.get(`${baseUrl}/api/v1/ping`, {
       timeout,
-      signal: controller.signal,
-      // Don't use interceptors for this test
-      transformRequest: [(data) => data],
-      transformResponse: [(data) => data],
+      // Don't use the main api instance to avoid interceptor loops
+      headers: { 'Content-Type': 'application/json' }
     });
-    
-    clearTimeout(timeoutId);
     
     if (response.status === 200) {
       console.log(`✅ Connection successful to: ${baseUrl}`);
@@ -48,9 +42,11 @@ const getBaseUrl = async (): Promise<string> => {
   // Prevent multiple concurrent resolutions
   if (isResolvingBaseUrl) {
     console.log('⏳ Base URL resolution already in progress...');
-    // Wait for the current resolution to complete
-    while (isResolvingBaseUrl && !resolvedBaseUrl) {
-      await new Promise(resolve => setTimeout(resolve, 100));
+    // Wait for the current resolution to complete (max 10 seconds)
+    let waitTime = 0;
+    while (isResolvingBaseUrl && !resolvedBaseUrl && waitTime < 10000) {
+      await new Promise(resolve => setTimeout(resolve, 200));
+      waitTime += 200;
     }
     return resolvedBaseUrl || FALLBACK_BASE;
   }
@@ -58,37 +54,23 @@ const getBaseUrl = async (): Promise<string> => {
   isResolvingBaseUrl = true;
   console.log('🚀 Starting base URL resolution...');
 
-  const bases = [LOCAL_BASE_1, LOCAL_BASE_2];
-  
-  // Add production base only if it's not empty
-  if (PROD_BASE && PROD_BASE.trim() !== '') {
-    bases.push(PROD_BASE);
-  }
+  // Try in order of preference: production first, then local servers
+  const bases = [PROD_BASE, LOCAL_BASE_1, LOCAL_BASE_2];
 
   try {
-    // Test connections in parallel for faster resolution
-    const connectionTests = bases.map(async (base) => ({
-      url: base,
-      connected: await testConnection(base, 3000)
-    }));
+    // Test connections sequentially (not parallel) to avoid overwhelming
+    for (const base of bases) {
+      if (await testConnection(base, 2000)) {
+        resolvedBaseUrl = base;
+        break;
+      }
+    }
 
-    const results = await Promise.all(connectionTests);
-    const workingServer = results.find(result => result.connected);
-
-    if (workingServer) {
-      resolvedBaseUrl = workingServer.url;
-      console.log(`🎯 Selected base URL: ${resolvedBaseUrl}`);
-    } else {
+    if (!resolvedBaseUrl) {
       resolvedBaseUrl = FALLBACK_BASE;
       console.log(`⚠️ No servers reachable, using fallback: ${resolvedBaseUrl}`);
-      
-      // Show user-friendly message
-      Toast.show({
-        type: 'error',
-        text1: 'Server Connection Issue',
-        text2: 'Using fallback server. Some features may not work.',
-        visibilityTime: 4000,
-      });
+    } else {
+      console.log(`🎯 Selected base URL: ${resolvedBaseUrl}`);
     }
   } catch (error) {
     console.error('❌ Error during base URL resolution:', error);
@@ -100,21 +82,10 @@ const getBaseUrl = async (): Promise<string> => {
   return resolvedBaseUrl;
 };
 
-// Initialize base URL resolution early
-const initializeApi = async () => {
-  try {
-    await getBaseUrl();
-    console.log('🏁 API initialization complete');
-  } catch (error) {
-    console.error('❌ API initialization failed:', error);
-  }
-};
-
-// Call this when your app starts
-initializeApi();
-
+// Create the main API instance
 const api = axios.create({
-  timeout: 15000, // Increased timeout
+  baseURL: PROD_BASE, // Start with production URL
+  timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -127,20 +98,26 @@ api.interceptors.request.use(
       // Get authentication token
       const token = await SecureStore.getItemAsync('auth_token');
 
-      // Ensure base URL is resolved
-      const baseUrl = await getBaseUrl();
-      config.baseURL = baseUrl;
+      // Only resolve base URL if we haven't already or if explicitly requested
+      if (!resolvedBaseUrl) {
+        const baseUrl = await getBaseUrl();
+        config.baseURL = baseUrl;
+      } else {
+        config.baseURL = resolvedBaseUrl;
+      }
 
       // Add auth header if token exists
       if (token && config.headers) {
         config.headers.Authorization = `Bearer ${token}`;
       }
 
-      console.log(`📡 Making request to: ${baseUrl}${config.url}`);
+      console.log(`📡 Making request to: ${config.baseURL}${config.url}`);
       return config;
     } catch (error) {
       console.error('❌ Request interceptor error:', error);
-      return Promise.reject(error);
+      // Don't fail the request completely, use fallback
+      config.baseURL = FALLBACK_BASE;
+      return config;
     }
   },
   (error) => {
@@ -188,7 +165,7 @@ api.interceptors.response.use(
                           !error.response;
 
     if (isNetworkError) {
-      console.log('🌐 Checking network connectivity...');
+      console.log('🌐 Network error detected, checking connectivity...');
       
       try {
         const netInfo = await NetInfo.fetch();
@@ -203,22 +180,14 @@ api.interceptors.response.use(
           });
         } else {
           // Connected to internet but server unreachable
-          console.log('📡 Internet connected but server unreachable - trying to resolve new base URL');
-          
-          // Reset resolved URL to force re-detection
-          resolvedBaseUrl = null;
+          console.log('📡 Internet connected but server unreachable');
           
           Toast.show({
             type: 'error',
             text1: 'Server Unreachable',
-            text2: 'Trying to reconnect...',
+            text2: 'Trying alternative servers...',
             visibilityTime: 3000,
           });
-          
-          // Try to resolve base URL again
-          setTimeout(() => {
-            getBaseUrl();
-          }, 1000);
         }
       } catch (netError) {
         console.error('❌ Network check failed:', netError);
@@ -233,12 +202,24 @@ api.interceptors.response.use(
 export const refreshBaseUrl = async (): Promise<string> => {
   console.log('🔄 Manually refreshing base URL...');
   resolvedBaseUrl = null;
+  isResolvingBaseUrl = false; // Reset the flag
   return await getBaseUrl();
 };
 
 // Export a function to get current base URL without making requests
 export const getCurrentBaseUrl = (): string | null => {
   return resolvedBaseUrl;
+};
+
+// Function to initialize API (call this when app starts, not during module load)
+export const initializeApi = async (): Promise<void> => {
+  try {
+    console.log('🏁 Initializing API...');
+    await getBaseUrl();
+    console.log('✅ API initialization complete');
+  } catch (error) {
+    console.error('❌ API initialization failed:', error);
+  }
 };
 
 export default api;
