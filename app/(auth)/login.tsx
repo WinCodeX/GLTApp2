@@ -16,7 +16,6 @@ import api, { getCurrentBaseUrl, refreshBaseUrl, initializeApi } from '../../lib
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
 import { toastConfig } from '../../lib/toastConfig';
 import { checkServerStatus } from '../../lib/netStatus';
-import MaskedView from '@react-native-masked-view/masked-view';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -373,30 +372,21 @@ export default function LoginScreen() {
     }
   };
 
-  // Gradient Welcome Back Text Component
+  // Gradient Welcome Back Text Component (Fixed - removed MaskedView)
   const GradientText = ({ children, style }: { children: string; style?: any }) => (
-    <MaskedView
-      style={style}
-      maskElement={
-        <Text style={[styles.title, { backgroundColor: 'transparent' }]}>
-          {children}
-        </Text>
-      }
+    <LinearGradient
+      colors={['#7c3aed', '#a855f7', '#c084fc', '#ddd6fe']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={[styles.titleGradientContainer, style]}
     >
-      <LinearGradient
-        colors={['#7c3aed', '#a855f7', '#c084fc', '#ddd6fe']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.titleGradient}
-      >
-        <Text style={[styles.title, { opacity: 0 }]}>{children}</Text>
-      </LinearGradient>
-    </MaskedView>
+      <Text style={styles.title}>{children}</Text>
+    </LinearGradient>
   );
 
   return (
     <>
-      <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
+      <LinearGradient colors={['#0a0a0f', '#1a1a2e']} style={styles.container}>
         <View style={styles.inner}>
           {/* Welcome Back Title - Always visible at top */}
           <View style={styles.titleContainer}>
@@ -417,12 +407,12 @@ export default function LoginScreen() {
           </View>
 
           {!ready ? (
-            <>
+            <View style={styles.loadingContainer}>
               <ActivityIndicator size="large" color="#bd93f9" />
               <Text style={styles.loadingText}>Initializing...</Text>
-            </>
+            </View>
           ) : (
-            <>
+            <View style={styles.formContainer}>
               <TextInput
                 label="Email"
                 value={email}
@@ -506,7 +496,7 @@ export default function LoginScreen() {
               >
                 Don't have an account? Sign up
               </Button>
-            </>
+            </View>
           )}
         </View>
       </LinearGradient>
@@ -518,19 +508,31 @@ export default function LoginScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1 },
-  inner: { flex: 1, paddingHorizontal: 24, justifyContent: 'center' },
+  inner: { 
+    flex: 1, 
+    paddingHorizontal: 24, 
+    justifyContent: 'center',
+    paddingTop: 60, // Add top padding to prevent content from being too high
+  },
   titleContainer: {
     alignItems: 'center',
     marginBottom: 20, // Space between title and server status
   },
+  titleGradientContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   title: {
     fontSize: 34,
     fontWeight: 'bold',
-    marginBottom: 0, // Remove bottom margin since we handle spacing with titleContainer
     textAlign: 'center',
-    textShadowColor: 'rgba(124, 58, 237, 0.4)',
+    color: '#ffffff', // White text on gradient background
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    textShadowRadius: 4,
   },
   titleGradient: {
     flex: 1,
@@ -563,6 +565,16 @@ const styles = StyleSheet.create({
     color: '#bd93f9',
     fontSize: 11,
     fontWeight: '600',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 0.6, // Take up more space for loading
+  },
+  formContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    maxHeight: 500, // Limit form height
   },
   input: {
     marginBottom: 16,
