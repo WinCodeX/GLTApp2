@@ -36,10 +36,11 @@ export default function Layout() {
         <PaperProvider>
           <ThemeProvider value={CustomDarkTheme}>
             <UserProvider>
-              {/* Main app content */}
+              {/* Main app content - includes DrawerLayout and other routes */}
               <Slot />
               
               {/* Network status banner - positioned absolutely above everything */}
+              {/* Uses pointerEvents: 'box-none' so touches pass through to content below */}
               <NetworkBanner />
             </UserProvider>
           </ThemeProvider>
