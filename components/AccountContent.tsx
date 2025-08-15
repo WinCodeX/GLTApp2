@@ -1,7 +1,6 @@
-// components/AccountContent.tsx - Enhanced version with offline support and caching
+// components/AccountContent.tsx - Enhanced version with advanced netStatus integration
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-netinfo/netinfo';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
@@ -32,6 +31,7 @@ const LoaderOverlay = React.lazy(() => import('./LoaderOverlay'));
 import { useUser } from '../context/UserContext';
 import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
+import { registerStatusUpdater, checkServerStatus } from '../lib/netStatus';
 
 // ✅ Constants
 const CHANGELOG_KEY = 'changelog_seen';
@@ -39,6 +39,8 @@ const CHANGELOG_VERSION = '1.0.0';
 const BUSINESS_CACHE_KEY = 'cached_business_data';
 const CACHE_EXPIRY_KEY = 'business_cache_expiry';
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+type NetworkStatus = 'online' | 'offline' | 'server_error';
 
 interface BusinessData {
   owned: any[];
@@ -57,8 +59,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [isOffline, setIsOffline] = useState(false);
+  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>('online');
   const [usingCachedData, setUsingCachedData] = useState(false);
+  const [lastServerCheck, setLastServerCheck] = useState<number>(0);
   
   const { user, refreshUser, loading: userLoading, error: userError } = useUser();
   const router = useRouter();
@@ -75,23 +78,137 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
-  // ✅ Network state monitoring
+  // ✅ Network connectivity helpers with defensive programming
+  const isConnected = useCallback(() => {
+    try {
+      return networkStatus === 'online';
+    } catch (error) {
+      console.error('❌ Error checking connection status:', error);
+      return false; // Fail safely
+    }
+  }, [networkStatus]);
+
+  const canMakeRequests = useCallback(() => {
+    try {
+      return networkStatus !== 'offline';
+    } catch (error) {
+      console.error('❌ Error checking request capability:', error);
+      return false; // Fail safely
+    }
+  }, [networkStatus]);
+
+  const shouldUseCachedData = useCallback(() => {
+    try {
+      return networkStatus !== 'online';
+    } catch (error) {
+      console.error('❌ Error checking cache preference:', error);
+      return true; // Fail safely to cached data
+    }
+  }, [networkStatus]);
+
+  // ✅ Advanced network status monitoring with crash protection
   useEffect(() => {
-    const unsubscribe = NetInfo.addEventListener(state => {
-      const offline = !state.isConnected || !state.isInternetReachable;
-      setIsOffline(offline);
-      
-      if (offline) {
-        console.log('📴 Device is offline - using cached data');
-      } else {
-        console.log('📶 Device is online');
+    let isMonitoring = true;
+
+    const handleStatusUpdate = (status: NetworkStatus) => {
+      try {
+        if (!isMonitoring) return;
+
+        console.log(`🌐 Network status changed: ${networkStatus} → ${status}`);
+        const previousStatus = networkStatus;
+        setNetworkStatus(status);
+        setLastServerCheck(Date.now());
+
+        // Provide intelligent user feedback based on status transitions
+        if (previousStatus !== status) {
+          switch (status) {
+            case 'offline':
+              if (previousStatus === 'online') {
+                Toast.show({
+                  type: 'warning',
+                  text1: 'Connection Lost',
+                  text2: 'Working offline with cached data',
+                  position: 'bottom',
+                  visibilityTime: 3000,
+                });
+              }
+              break;
+            
+            case 'server_error':
+              if (previousStatus === 'online') {
+                Toast.show({
+                  type: 'error',
+                  text1: 'Server Unavailable',
+                  text2: 'Using cached data while server reconnects',
+                  position: 'bottom',
+                  visibilityTime: 4000,
+                });
+              }
+              break;
+            
+            case 'online':
+              if (previousStatus !== 'online') {
+                Toast.show({
+                  type: 'success',
+                  text1: 'Connection Restored',
+                  text2: 'Syncing latest data...',
+                  position: 'bottom',
+                  visibilityTime: 2000,
+                });
+                // Automatically refresh data when connection is restored
+                if (user && isScreenReady) {
+                  setTimeout(() => {
+                    try {
+                      loadBusinesses(true);
+                    } catch (refreshError) {
+                      console.error('❌ Error refreshing data on reconnect:', refreshError);
+                    }
+                  }, 500); // Small delay to avoid overwhelming the server
+                }
+              }
+              break;
+          }
+        }
+      } catch (error) {
+        console.error('❌ Error in network status handler:', error);
+        // Don't let network status errors crash the app
       }
-    });
+    };
 
-    return unsubscribe;
-  }, []);
+    try {
+      // Register status updater with error handling
+      registerStatusUpdater(handleStatusUpdate);
 
-  // ✅ Cache business data
+      // Perform initial status check with timeout
+      const initialCheck = async () => {
+        try {
+          const status = await Promise.race([
+            checkServerStatus(),
+            new Promise<NetworkStatus>((_, reject) => 
+              setTimeout(() => reject(new Error('Initial status check timeout')), 10000)
+            )
+          ]);
+          handleStatusUpdate(status);
+        } catch (error) {
+          console.error('❌ Initial network status check failed:', error);
+          // Default to offline to be safe
+          handleStatusUpdate('offline');
+        }
+      };
+
+      initialCheck();
+    } catch (error) {
+      console.error('❌ Error setting up network monitoring:', error);
+      // Default to offline mode if monitoring setup fails
+      setNetworkStatus('offline');
+    }
+
+    return () => {
+      isMonitoring = false;
+    };
+  }, []); // Only run once on mount
+
+  // ✅ Cache business data with enhanced error handling
   const cacheBusinessData = useCallback(async (data: { owned: any[]; joined: any[] }) => {
     try {
       const cacheData: BusinessData = {
@@ -103,13 +220,18 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       await AsyncStorage.setItem(BUSINESS_CACHE_KEY, JSON.stringify(cacheData));
       await AsyncStorage.setItem(CACHE_EXPIRY_KEY, (Date.now() + CACHE_DURATION).toString());
       
-      console.log('💾 Business data cached successfully');
+      console.log('💾 Business data cached successfully', {
+        owned: cacheData.owned.length,
+        joined: cacheData.joined.length,
+        networkStatus
+      });
     } catch (error) {
       console.error('❌ Failed to cache business data:', error);
+      // Don't throw - caching failures shouldn't crash the app
     }
-  }, []);
+  }, [networkStatus]);
 
-  // ✅ Load cached business data
+  // ✅ Load cached business data with intelligent expiry handling
   const loadCachedBusinessData = useCallback(async (): Promise<BusinessData | null> => {
     try {
       const [cachedData, expiryTime] = await Promise.all([
@@ -126,26 +248,29 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       const expiry = expiryTime ? parseInt(expiryTime) : 0;
       const isExpired = Date.now() > expiry;
 
-      if (isExpired && !isOffline) {
-        console.log('💾 Cached data expired, will fetch fresh data');
-        return null;
+      // Use cached data if offline/server error OR if cache is still valid
+      if (shouldUseCachedData() || !isExpired) {
+        console.log('💾 Using cached business data', {
+          owned: parsed.owned?.length || 0,
+          joined: parsed.joined?.length || 0,
+          age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60) + ' minutes',
+          expired: isExpired,
+          reason: shouldUseCachedData() ? 'network_issue' : 'cache_valid',
+          networkStatus
+        });
+
+        return parsed;
       }
 
-      console.log('💾 Using cached business data', {
-        owned: parsed.owned?.length || 0,
-        joined: parsed.joined?.length || 0,
-        age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60) + ' minutes',
-        expired: isExpired,
-      });
-
-      return parsed;
+      console.log('💾 Cached data expired and network available, will fetch fresh data');
+      return null;
     } catch (error) {
       console.error('❌ Failed to load cached business data:', error);
       return null;
     }
-  }, [isOffline]);
+  }, [shouldUseCachedData, networkStatus]);
 
-  // ✅ Component initialization
+  // ✅ Component initialization with crash protection
   useEffect(() => {
     let isMounted = true;
     
@@ -166,7 +291,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               try {
                 await SplashScreen.hideAsync();
               } catch (e) {
-                console.log('Splash screen already hidden');
+                console.log('Splash screen already hidden or unavailable');
               }
             }, 100);
           }
@@ -175,7 +300,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       } catch (error) {
         console.error(`❌ AccountContent (${source}) initialization error:`, error);
         if (isMounted) {
-          setScreenError(error.message);
+          setScreenError(error.message || 'Initialization failed');
           setIsScreenReady(true);
         }
       }
@@ -188,7 +313,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // ✅ Check for user data and redirect if missing
+  // ✅ Check for user data and redirect if missing - with crash protection
   useEffect(() => {
     let isMounted = true;
     
@@ -242,9 +367,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             return;
           } else {
             console.log('✅ Found user data in storage, refreshing user context...');
-            // Try to refresh user data from server
+            // Try to refresh user data from server only if connected
             try {
-              if (!isOffline) {
+              if (isConnected()) {
                 await refreshUser();
               }
             } catch (refreshError) {
@@ -260,6 +385,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             email: user.email,
             hasDisplayName: !!user.display_name,
             hasFirstName: !!user.first_name,
+            networkStatus
           });
         }
 
@@ -282,9 +408,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return () => {
       isMounted = false;
     };
-  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting, isOffline]);
+  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting, isConnected]);
 
-  // ✅ Clear all cached data helper
+  // ✅ Clear all cached data helper with error handling
   const clearAllCachedData = useCallback(async () => {
     try {
       console.log('🧹 Clearing all cached data...');
@@ -311,43 +437,57 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
     } catch (error) {
       console.error('❌ Error clearing cached data:', error);
+      // Don't throw - clearing cache failures shouldn't crash logout
     }
   }, []);
 
-  // ✅ Load businesses data with offline support and caching
+  // ✅ Enhanced business loading with intelligent network handling and crash protection
   const loadBusinesses = useCallback(async (forceRefresh = false) => {
     try {
-      console.log('📊 Loading businesses...', { isOffline, forceRefresh });
+      console.log('📊 Loading businesses...', { 
+        networkStatus, 
+        forceRefresh,
+        canMakeRequests: canMakeRequests(),
+        shouldUseCached: shouldUseCachedData()
+      });
       
       // Check changelog first
-      const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
-      if (!seen) setShowChangelog(true);
+      try {
+        const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
+        if (!seen) setShowChangelog(true);
+      } catch (error) {
+        console.error('❌ Error checking changelog:', error);
+        // Don't fail business loading for changelog issues
+      }
       
-      // If offline or not forcing refresh, try cached data first
-      if (isOffline || !forceRefresh) {
-        const cachedData = await loadCachedBusinessData();
-        if (cachedData) {
-          setOwnedBusinesses(cachedData.owned || []);
-          setJoinedBusinesses(cachedData.joined || []);
-          setUsingCachedData(true);
-          
-          if (isOffline) {
-            Toast.show({
-              type: 'info',
-              text1: 'Offline Mode',
-              text2: 'Showing cached business data',
-              position: 'bottom',
-            });
-            return; // Don't try to fetch if offline
-          } else if (!forceRefresh) {
-            // Show cached data immediately, but continue to fetch fresh data
-            console.log('📊 Showing cached data while fetching fresh data...');
+      // Load cached data first for immediate UI feedback
+      if (!forceRefresh || shouldUseCachedData()) {
+        try {
+          const cachedData = await loadCachedBusinessData();
+          if (cachedData) {
+            setOwnedBusinesses(cachedData.owned || []);
+            setJoinedBusinesses(cachedData.joined || []);
+            setUsingCachedData(true);
+            
+            // If we can't make requests, stop here
+            if (!canMakeRequests()) {
+              return;
+            }
+            
+            // If not forcing refresh and cache is fresh, stop here
+            if (!forceRefresh) {
+              console.log('📊 Using fresh cached data, skipping network request');
+              return;
+            }
           }
+        } catch (cacheError) {
+          console.error('❌ Error loading cached data:', cacheError);
+          // Continue to try network request
         }
       }
 
-      // Try to fetch fresh data if online
-      if (!isOffline) {
+      // Attempt to fetch fresh data if we can make requests
+      if (canMakeRequests()) {
         try {
           console.log('🌐 Fetching fresh business data...');
           const data = await getBusinesses();
@@ -362,35 +502,43 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             
             console.log('✅ Fresh businesses loaded:', {
               owned: data?.owned?.length || 0,
-              joined: data?.joined?.length || 0
+              joined: data?.joined?.length || 0,
+              networkStatus
             });
           }
         } catch (fetchError) {
           console.error('❌ Error fetching fresh business data:', fetchError);
           
-          // If we don't have cached data and fetch failed, try one more time with cached data
+          // Fallback to cached data if network request fails
           if (!usingCachedData) {
-            const cachedData = await loadCachedBusinessData();
-            if (cachedData) {
-              setOwnedBusinesses(cachedData.owned || []);
-              setJoinedBusinesses(cachedData.joined || []);
-              setUsingCachedData(true);
-              
-              Toast.show({
-                type: 'warning',
-                text1: 'Connection Failed',
-                text2: 'Showing cached business data',
-                position: 'bottom',
-              });
-            } else {
-              // No cached data and fetch failed
-              Toast.show({ 
-                type: 'error', 
-                text1: 'Failed to load businesses',
-                text2: 'Check your internet connection',
-              });
+            try {
+              const cachedData = await loadCachedBusinessData();
+              if (cachedData) {
+                setOwnedBusinesses(cachedData.owned || []);
+                setJoinedBusinesses(cachedData.joined || []);
+                setUsingCachedData(true);
+                
+                Toast.show({
+                  type: 'warning',
+                  text1: 'Connection Failed',
+                  text2: 'Showing cached business data',
+                  position: 'bottom',
+                });
+              } else {
+                // No cached data and fetch failed
+                Toast.show({ 
+                  type: 'error', 
+                  text1: 'Failed to load businesses',
+                  text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your internet connection',
+                });
+                setOwnedBusinesses([]);
+                setJoinedBusinesses([]);
+              }
+            } catch (fallbackError) {
+              console.error('❌ Error loading fallback cached data:', fallbackError);
               setOwnedBusinesses([]);
               setJoinedBusinesses([]);
+              Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
             }
           }
         }
@@ -425,13 +573,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         Toast.show({ type: 'error', text1: 'Failed to load businesses.' });
       }
     }
-  }, [user, isOffline, loadCachedBusinessData, cacheBusinessData, usingCachedData]);
+  }, [user, networkStatus, canMakeRequests, shouldUseCachedData, loadCachedBusinessData, cacheBusinessData, usingCachedData]);
 
   // ✅ Load data only after screen is ready and user is validated
   useEffect(() => {
     if (isScreenReady && !screenError && !userError && user && !isRedirecting) {
       console.log(`🔄 AccountContent (${source}) ready with user, loading data...`);
-      loadBusinesses();
+      try {
+        loadBusinesses();
+      } catch (error) {
+        console.error('❌ Error initiating business load:', error);
+      }
     } else if (isScreenReady && !user && !userLoading && !isRedirecting) {
       // User data is missing and not loading - validation effect will handle redirect
       console.log('🧹 No user found, clearing business data');
@@ -441,24 +593,25 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [isScreenReady, screenError, userError, loadBusinesses, source, user, userLoading, isRedirecting]);
 
-  // ✅ Refresh handler with offline support
+  // ✅ Enhanced refresh handler with intelligent network awareness
   const onRefresh = useCallback(async () => {
-    if (!user) {
-      Toast.show({ type: 'warning', text1: 'Please log in first' });
-      return;
-    }
-
-    if (isOffline) {
-      Toast.show({ 
-        type: 'info', 
-        text1: 'Offline Mode', 
-        text2: 'Cannot refresh while offline' 
-      });
-      return;
-    }
-
-    setRefreshing(true);
     try {
+      if (!user) {
+        Toast.show({ type: 'warning', text1: 'Please log in first' });
+        return;
+      }
+
+      if (!canMakeRequests()) {
+        Toast.show({ 
+          type: 'info', 
+          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+          text2: networkStatus === 'offline' ? 'Cannot refresh while offline' : 'Server is temporarily unavailable'
+        });
+        return;
+      }
+
+      setRefreshing(true);
+      
       // First refresh user data, then businesses
       await refreshUser();
       // Small delay to ensure user context is updated
@@ -466,65 +619,80 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       await loadBusinesses(true); // Force refresh
     } catch (error) {
       console.error('❌ Refresh error:', error);
-      Toast.show({ type: 'error', text1: 'Failed to refresh data' });
+      Toast.show({ 
+        type: 'error', 
+        text1: 'Failed to refresh data',
+        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your connection'
+      });
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, loadBusinesses, user, isOffline]);
+  }, [refreshUser, loadBusinesses, user, networkStatus, canMakeRequests]);
 
-  // ✅ Avatar picker
+  // ✅ Avatar picker with network awareness and crash protection
   const pickAndPreviewAvatar = useCallback(async () => {
-    if (isOffline) {
-      Toast.show({ 
-        type: 'info', 
-        text1: 'Offline Mode', 
-        text2: 'Avatar upload requires internet connection' 
-      });
-      return;
-    }
-
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      return Toast.show({ type: 'error', text1: 'Photo access denied.' });
-    }
-
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      quality: 0.7,
-    });
-
-    if (result.canceled || !result.assets?.length) return;
-    setPreviewUri(result.assets[0].uri);
-  }, [isOffline]);
-
-  // ✅ Avatar upload
-  const confirmUploadAvatar = useCallback(async () => {
-    if (!previewUri) return;
-
-    if (isOffline) {
-      Toast.show({ 
-        type: 'error', 
-        text1: 'Offline Mode', 
-        text2: 'Cannot upload while offline' 
-      });
-      return;
-    }
-
-    setLoading(true);
     try {
+      if (!isConnected()) {
+        Toast.show({ 
+          type: 'info', 
+          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+          text2: 'Avatar upload requires server connection' 
+        });
+        return;
+      }
+
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        return Toast.show({ type: 'error', text1: 'Photo access denied.' });
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+      setPreviewUri(result.assets[0].uri);
+    } catch (error) {
+      console.error('❌ Error picking avatar:', error);
+      Toast.show({ type: 'error', text1: 'Failed to select image' });
+    }
+  }, [networkStatus, isConnected]);
+
+  // ✅ Avatar upload with network status handling and crash protection
+  const confirmUploadAvatar = useCallback(async () => {
+    try {
+      if (!previewUri) return;
+
+      if (!isConnected()) {
+        Toast.show({ 
+          type: 'error', 
+          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+          text2: 'Cannot upload while server is unavailable' 
+        });
+        return;
+      }
+
+      setLoading(true);
+      
       await uploadAvatar(previewUri);
       Toast.show({ type: 'success', text1: 'Avatar updated!' });
       await refreshUser();
-    } catch {
-      Toast.show({ type: 'error', text1: 'Upload failed.' });
+    } catch (error) {
+      console.error('❌ Error uploading avatar:', error);
+      Toast.show({ 
+        type: 'error', 
+        text1: 'Upload failed',
+        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Check your connection'
+      });
     } finally {
       setPreviewUri(null);
       setLoading(false);
     }
-  }, [previewUri, refreshUser, isOffline]);
+  }, [previewUri, refreshUser, networkStatus, isConnected]);
 
-  // ✅ Enhanced logout handler with proper cleanup
+  // ✅ Enhanced logout handler with proper cleanup and crash protection
   const confirmLogout = useCallback(async () => {
     try {
       console.log('🚪 Logging out...');
@@ -557,20 +725,77 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [router, clearAllCachedData]);
 
-  // ✅ Get display name with fallback
+  // ✅ Get display name with fallback and crash protection
   const getDisplayName = useCallback(() => {
-    // Priority: display_name -> first_name -> username -> fallback
-    if (user?.display_name && user.display_name.trim()) {
-      return user.display_name;
+    try {
+      // Priority: display_name -> first_name -> username -> fallback
+      if (user?.display_name && user.display_name.trim()) {
+        return user.display_name;
+      }
+      if (user?.first_name && user.first_name.trim()) {
+        return user.first_name;
+      }
+      if (user?.username && user.username.trim()) {
+        return user.username;
+      }
+      return 'User';
+    } catch (error) {
+      console.error('❌ Error getting display name:', error);
+      return 'User';
     }
-    if (user?.first_name && user.first_name.trim()) {
-      return user.first_name;
-    }
-    if (user?.username && user.username.trim()) {
-      return user.username;
-    }
-    return 'User';
   }, [user]);
+
+  // ✅ Get network status display info with crash protection
+  const getNetworkStatusInfo = useCallback(() => {
+    try {
+      switch (networkStatus) {
+        case 'offline':
+          return {
+            icon: 'wifi-off',
+            color: '#ff6b6b',
+            text: 'Offline Mode - Showing cached data',
+            bgColor: 'rgba(255, 107, 107, 0.1)',
+            borderColor: 'rgba(255, 107, 107, 0.5)'
+          };
+        case 'server_error':
+          return {
+            icon: 'server-network-off',
+            color: '#ffa726',
+            text: 'Server Unavailable - Using cached data',
+            bgColor: 'rgba(255, 167, 38, 0.1)',
+            borderColor: 'rgba(255, 167, 38, 0.5)'
+          };
+        default:
+          return usingCachedData ? {
+            icon: 'cached',
+            color: '#4caf50',
+            text: 'Showing cached data',
+            bgColor: 'rgba(76, 175, 80, 0.1)',
+            borderColor: 'rgba(76, 175, 80, 0.5)'
+          } : null;
+      }
+    } catch (error) {
+      console.error('❌ Error getting network status info:', error);
+      return null;
+    }
+  }, [networkStatus, usingCachedData]);
+
+  // ✅ Manual server status check with crash protection
+  const handleRetryServerCheck = useCallback(async () => {
+    try {
+      const newStatus = await checkServerStatus();
+      if (newStatus === 'online') {
+        loadBusinesses(true);
+      }
+    } catch (error) {
+      console.error('❌ Error checking server status:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Status check failed',
+        text2: 'Please try again later'
+      });
+    }
+  }, [loadBusinesses]);
 
   // ✅ Loading screen while initializing or redirecting
   if (!isScreenReady || isRedirecting) {
@@ -614,8 +839,12 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             {screenError || userError || 'Failed to load account data'}
           </Text>
           <Button mode="outlined" onPress={() => {
-            setScreenError(null);
-            loadBusinesses();
+            try {
+              setScreenError(null);
+              loadBusinesses();
+            } catch (error) {
+              console.error('❌ Error retrying:', error);
+            }
           }}>
             Retry
           </Button>
@@ -662,8 +891,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <ChangelogModal 
             visible 
             onClose={() => {
-              AsyncStorage.setItem(CHANGELOG_KEY, 'true').catch(console.error);
-              setShowChangelog(false);
+              try {
+                AsyncStorage.setItem(CHANGELOG_KEY, 'true');
+                setShowChangelog(false);
+              } catch (error) {
+                console.error('❌ Error closing changelog:', error);
+                setShowChangelog(false);
+              }
             }} 
           />
         )}
@@ -720,7 +954,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                       const res = await createInvite(selectedBusiness.id);
                       setInviteLink(res?.code || 'No code');
                     } catch (error) {
-                      console.error('Error creating invite:', error);
+                      console.error('❌ Error creating invite:', error);
                       Toast.show({
                         type: 'error',
                         text1: 'Failed to create invite',
@@ -740,7 +974,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                       Clipboard.setStringAsync(inviteLink);
                       Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
                     } catch (error) {
-                      console.error('Error copying to clipboard:', error);
+                      console.error('❌ Error copying to clipboard:', error);
                       Toast.show({ type: 'error', text1: 'Failed to copy' });
                     }
                   }}>
@@ -804,16 +1038,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             {networkStatus === 'server_error' && (
               <TouchableOpacity 
                 style={styles.retryButton}
-                onPress={async () => {
-                  try {
-                    const newStatus = await checkServerStatus();
-                    if (newStatus === 'online') {
-                      loadBusinesses(true);
-                    }
-                  } catch (error) {
-                    console.error('Error checking server status:', error);
-                  }
-                }}
+                onPress={handleRetryServerCheck}
               >
                 <MaterialCommunityIcons name="refresh" size={16} color={statusInfo.color} />
               </TouchableOpacity>
@@ -886,684 +1111,19 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             <Button 
               mode="outlined" 
               onPress={() => {
-                if (!isConnected()) {
-                  Toast.show({
-                    type: 'info',
-                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                    text2: 'Cannot create business while server is unavailable',
-                  });
-                  return;
-                }
-                setShowBusinessModal(true);
-              }}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor={isConnected() ? "#764ba2" : "#999"}
-              disabled={!isConnected()}
-            >
-              Create
-            </Button>
-            <Button 
-              mode="outlined" 
-              onPress={() => {
-                if (!isConnected()) {
-                  Toast.show({
-                    type: 'info',
-                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                    text2: 'Cannot join business while server is unavailable',
-                  });
-                  return;
-                }
-                setShowJoinModal(true);
-              }}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor={isConnected() ? "#764ba2" : "#999"}
-              disabled={!isConnected()}
-            >
-              Join
-            </Button>
-          </View>
-        </View>
-
-        {/* User Businesses Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Your Businesses</Text>
-          
-          <Text style={styles.teamLabel}>Owned:</Text>
-          {Array.isArray(ownedBusinesses) && ownedBusinesses.length > 0 ? (
-            ownedBusinesses.map((biz) => (
-              <TouchableOpacity 
-                key={biz?.id || Math.random()} 
-                onPress={() => {
+                try {
                   if (!isConnected()) {
                     Toast.show({
                       type: 'info',
                       text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                      text2: 'Cannot generate invite while server is unavailable',
+                      text2: 'Cannot create business while server is unavailable',
                     });
                     return;
                   }
-                  setSelectedBusiness(biz);
-                }}
-                disabled={!isConnected()}
-              >
-                <Text style={[styles.businessItem, !isConnected() && { opacity: 0.6 }]}>
-                  • {biz?.name || 'Unknown Business'}
-                </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
-
-          <Text style={styles.teamLabel}>Joined:</Text>
-          {Array.isArray(joinedBusinesses) && joinedBusinesses.length > 0 ? (
-            joinedBusinesses.map((biz) => (
-              <Text key={biz?.id || Math.random()} style={styles.businessItem}>
-                • {biz?.name || 'Unknown Business'}
-              </Text>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
-        </View>
-
-        {/* Logout Card */}
-        <View style={styles.logoutCard}>
-          <TouchableOpacity style={styles.logoutButton} onPress={() => setShowLogoutConfirm(true)}>
-            <MaterialCommunityIcons name="logout" size={22} color="#ff6b6b" />
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* Logout Confirmation Dialog */}
-      <Portal>
-        <Dialog
-          visible={showLogoutConfirm}
-          onDismiss={() => setShowLogoutConfirm(false)}
-          style={styles.dialog}
-        >
-          <Dialog.Title style={styles.dialogTitle}>Confirm Logout</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogText}>Are you sure you want to log out?</Text>
-          </Dialog.Content>
-          <Dialog.Actions style={styles.dialogActions}>
-            <Button onPress={() => setShowLogoutConfirm(false)} style={styles.dialogCancel}>
-              No
-            </Button>
-            <Button mode="outlined" onPress={confirmLogout} style={styles.dialogConfirm}>
-              Yes
-            </Button>
-          </Dialog.Actions>
-          </Dialog>
-        </Portal>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#0a0a0f'
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0f',
-  },
-  loadingGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-  },
-  sourceText: {
-    color: '#a0aec0',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 16,
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  backButton: {
-    padding: 8,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    fontStyle: 'italic',
-    textShadowColor: 'rgba(118, 75, 162, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  placeholder: {
-    width: 44,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
-    flex: 1,
-  },
-  retryButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  infoCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    borderWidth: 2,
-    borderColor: 'rgba(118, 75, 162, 0.6)',
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 8,
-    opacity: 0.9,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomColor: 'rgba(118, 75, 162, 0.2)',
-    borderBottomWidth: 1,
-  },
-  infoLabel: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  infoRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  infoValue: {
-    color: '#ccc',
-    fontSize: 15,
-  },
-  identityCard: { 
-    backgroundColor: '#1a1a2e',
-    margin: 16, 
-    borderRadius: 16, 
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(118, 75, 162, 0.6)',
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  identityRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
-  },
-  userName: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: 'bold' 
-  },
-  accountType: { 
-    color: '#888', 
-    fontSize: 14, 
-    marginTop: 4 
-  },
-  version: { 
-    color: '#999', 
-    marginTop: 4 
-  },
-  teamLabel: { 
-    color: '#ccc', 
-    marginTop: 8, 
-    fontWeight: '600' 
-  },
-  businessItem: { 
-    color: '#fff', 
-    marginTop: 4, 
-    fontSize: 15 
-  },
-  logoutCard: { 
-    backgroundColor: '#1a1a2e', 
-    margin: 16, 
-    borderRadius: 16, 
-    padding: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 107, 107, 0.6)',
-    shadowColor: '#ff6b6b',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  logoutButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 12 
-  },
-  logoutText: { 
-    color: '#ff6b6b', 
-    fontSize: 16, 
-    fontWeight: '600' 
-  },
-  dialog: { 
-    backgroundColor: '#1a1a2e', 
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(118, 75, 162, 0.4)',
-  },
-  dialogTitle: { 
-    color: '#fff', 
-    fontWeight: 'bold' 
-  },
-  dialogText: { 
-    color: '#ccc', 
-    fontSize: 15 
-  },
-  dialogActions: { 
-    justifyContent: 'space-between', 
-    paddingHorizontal: 12 
-  },
-  dialogCancel: { 
-    backgroundColor: '#764ba2', 
-    borderRadius: 6, 
-    marginRight: 8 
-  },
-  dialogConfirm: { 
-    borderColor: '#ff5555', 
-    borderWidth: 1, 
-    borderRadius: 6 
-  },
-  error: { 
-    color: '#ff5555', 
-    padding: 20, 
-    textAlign: 'center',
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  inviteModal: { 
-    backgroundColor: '#1a1a2e', 
-    margin: 32, 
-    padding: 20, 
-    borderRadius: 12, 
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(118, 75, 162, 0.4)',
-  },
-  modalText: { 
-    color: '#fff', 
-    fontSize: 16, 
-    marginBottom: 12, 
-    textAlign: 'center' 
-  },
-  code: { 
-    color: '#764ba2', 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    marginTop: 12, 
-    marginBottom: 12 
-  },
-});764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.loadingGradient}
-        >
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>
-            {isRedirecting ? 'Redirecting to login...' : `Loading ${title}...`}
-          </Text>
-          <Text style={styles.sourceText}>Context: {source}</Text>
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  // ✅ Error screen
-  if (screenError || userError) {
-    return (
-      <View style={styles.container}>
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <TouchableOpacity onPress={onBack} style={styles.backButton}>
-            <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
-          </TouchableOpacity>
-          <Text style={styles.title}>{title}</Text>
-          <View style={styles.placeholder} />
-        </LinearGradient>
-        
-        <View style={styles.errorContainer}>
-          <Text style={styles.error}>
-            {screenError || userError || 'Failed to load account data'}
-          </Text>
-          <Button mode="outlined" onPress={() => {
-            setScreenError(null);
-            loadBusinesses();
-          }}>
-            Retry
-          </Button>
-          <Button 
-            mode="contained" 
-            onPress={() => router.replace('/login')}
-            style={{ marginTop: 10, backgroundColor: '#764ba2' }}
-          >
-            Go to Login
-          </Button>
-        </View>
-      </View>
-    );
-  }
-
-  // ✅ Show loading if user data is still loading
-  if (userLoading || !user) {
-    return (
-      <View style={styles.loadingContainer}>
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.loadingGradient}
-        >
-          <ActivityIndicator size="large" color="#fff" />
-          <Text style={styles.loadingText}>Loading user data...</Text>
-          <Text style={styles.sourceText}>Context: {source}</Text>
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  // ✅ Main content
-  return (
-    <View style={styles.container}>
-      {/* ✅ Suspense wrapper for lazy-loaded components */}
-      <Suspense fallback={<View />}>
-        {loading && <LoaderOverlay visible={true} />}
-
-        {showChangelog && (
-          <ChangelogModal 
-            visible 
-            onClose={() => {
-              AsyncStorage.setItem(CHANGELOG_KEY, 'true');
-              setShowChangelog(false);
-            }} 
-          />
-        )}
-
-        {previewUri && (
-          <AvatarPreviewModal
-            visible
-            uri={previewUri}
-            onCancel={() => setPreviewUri(null)}
-            onConfirm={confirmUploadAvatar}
-          />
-        )}
-
-        {showBusinessModal && (
-          <BusinessModal
-            visible
-            onClose={() => setShowBusinessModal(false)}
-            onCreate={loadBusinesses}
-          />
-        )}
-
-        {showJoinModal && (
-          <JoinBusinessModal
-            visible
-            onClose={() => setShowJoinModal(false)}
-            onJoin={loadBusinesses}
-          />
-        )}
-      </Suspense>
-
-      {/* Business invite modal */}
-      {selectedBusiness && (
-        <Modal visible transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.inviteModal}>
-              <Text style={styles.modalText}>
-                Generate invite link for "{selectedBusiness.name}"?
-              </Text>
-
-              {!inviteLink ? (
-                <Button 
-                  mode="contained" 
-                  onPress={async () => {
-                    if (isOffline) {
-                      Toast.show({
-                        type: 'error',
-                        text1: 'Offline Mode',
-                        text2: 'Cannot generate invite while offline',
-                      });
-                      return;
-                    }
-
-                    try {
-                      const res = await createInvite(selectedBusiness.id);
-                      setInviteLink(res?.code || 'No code');
-                    } catch (error) {
-                      console.log('Error creating invite:', error);
-                      Toast.show({
-                        type: 'error',
-                        text1: 'Failed to create invite',
-                        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Please try again',
-                      });
-                    }
-                  }}
-                  disabled={!isConnected()}
-                >
-                  Generate Link
-                </Button>
-              ) : (
-                <>
-                  <Text selectable style={styles.code}>{inviteLink}</Text>
-                  <Button onPress={() => {
-                    Clipboard.setStringAsync(inviteLink);
-                    Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
-                  }}>
-                    Copy
-                  </Button>
-                </>
-              )}
-
-              <Button onPress={() => {
-                setSelectedBusiness(null);
-                setInviteLink(null);
-              }}>
-                Close
-              </Button>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* Header with matching gradient */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <TouchableOpacity 
-          onPress={onBack}
-          style={styles.backButton}
-        >
-          <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
-        <View style={styles.placeholder} />
-      </LinearGradient>
-
-      {/* Content */}
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 32 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#764ba2']}
-            tintColor="#764ba2"
-          />
-        }
-      >
-        {/* Enhanced Network Status Indicator */}
-        {statusInfo && (
-          <View style={[styles.statusCard, { backgroundColor: statusInfo.bgColor, borderColor: statusInfo.borderColor }]}>
-            <MaterialCommunityIcons 
-              name={statusInfo.icon} 
-              size={20} 
-              color={statusInfo.color} 
-            />
-            <Text style={[styles.statusText, { color: statusInfo.color }]}>
-              {statusInfo.text}
-            </Text>
-            {networkStatus === 'server_error' && (
-              <TouchableOpacity 
-                style={styles.retryButton}
-                onPress={async () => {
-                  const newStatus = await checkServerStatus();
-                  if (newStatus === 'online') {
-                    loadBusinesses(true);
-                  }
-                }}
-              >
-                <MaterialCommunityIcons name="refresh" size={16} color={statusInfo.color} />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
-        {/* User Profile Card */}
-        <View style={styles.identityCard}>
-          <View style={styles.identityRow}>
-            <View>
-              <Text style={styles.userName}>{getDisplayName()}</Text>
-              <Text style={styles.accountType}>Glt Account</Text>
-              <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
-            </View>
-            <TouchableOpacity onPress={pickAndPreviewAvatar}>
-              <Avatar.Image
-                size={60}
-                source={
-                  user?.avatar_url
-                    ? { uri: user.avatar_url }
-                    : require('../assets/images/avatar_placeholder.png')
+                  setShowBusinessModal(true);
+                } catch (error) {
+                  console.error('❌ Error opening business modal:', error);
                 }
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Account Information Card */}
-        <View style={styles.infoCard}>
-          <Text style={styles.sectionTitle}>Account Information</Text>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
-            <Text style={styles.infoLabel}>Username</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.username || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
-            <Text style={styles.infoLabel}>Display Name</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.display_name || user?.first_name || 'LVL0'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
-            <Text style={styles.infoLabel}>Email</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
-            <Text style={styles.infoLabel}>Phone</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Business Actions Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Business</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <Button 
-              mode="outlined" 
-              onPress={() => {
-                if (!isConnected()) {
-                  Toast.show({
-                    type: 'info',
-                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                    text2: 'Cannot create business while server is unavailable',
-                  });
-                  return;
-                }
-                setShowBusinessModal(true);
               }}
               buttonColor="rgba(118, 75, 162, 0.1)"
               textColor={isConnected() ? "#764ba2" : "#999"}
@@ -1574,15 +1134,19 @@ const styles = StyleSheet.create({
             <Button 
               mode="outlined" 
               onPress={() => {
-                if (!isConnected()) {
-                  Toast.show({
-                    type: 'info',
-                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                    text2: 'Cannot join business while server is unavailable',
-                  });
-                  return;
+                try {
+                  if (!isConnected()) {
+                    Toast.show({
+                      type: 'info',
+                      text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                      text2: 'Cannot join business while server is unavailable',
+                    });
+                    return;
+                  }
+                  setShowJoinModal(true);
+                } catch (error) {
+                  console.error('❌ Error opening join modal:', error);
                 }
-                setShowJoinModal(true);
               }}
               buttonColor="rgba(118, 75, 162, 0.1)"
               textColor={isConnected() ? "#764ba2" : "#999"}
@@ -1603,15 +1167,19 @@ const styles = StyleSheet.create({
               <TouchableOpacity 
                 key={biz.id} 
                 onPress={() => {
-                  if (!isConnected()) {
-                    Toast.show({
-                      type: 'info',
-                      text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
-                      text2: 'Cannot generate invite while server is unavailable',
-                    });
-                    return;
+                  try {
+                    if (!isConnected()) {
+                      Toast.show({
+                        type: 'info',
+                        text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                        text2: 'Cannot generate invite while server is unavailable',
+                      });
+                      return;
+                    }
+                    setSelectedBusiness(biz);
+                  } catch (error) {
+                    console.error('❌ Error selecting business:', error);
                   }
-                  setSelectedBusiness(biz);
                 }}
                 disabled={!isConnected()}
               >
@@ -1749,509 +1317,6 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     padding: 4,
-    marginLeft: 8,
-  },
-  infoCard: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginBottom: 16,
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 8,
-    borderWidth: 2,
-    borderColor: 'rgba(118, 75, 162, 0.6)',
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  sectionTitle: {
-    color: '#fff',
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 8,
-    opacity: 0.9,
-  },
-  infoRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 14,
-    borderBottomColor: 'rgba(118, 75, 162, 0.2)',
-    borderBottomWidth: 1,
-  },
-  infoLabel: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  infoRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  infoValue: {
-    color: '#ccc',
-    fontSize: 15,
-  },
-  identityCard: { 
-    backgroundColor: '#1a1a2e',
-    margin: 16, 
-    borderRadius: 16, 
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(118, 75, 162, 0.6)',
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  identityRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
-  },
-  userName: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: 'bold' 
-  },
-  accountType: { 
-    color: '#888', 
-    fontSize: 14, 
-    marginTop: 4 
-  },
-  version: { 
-    color: '#999', 
-    marginTop: 4 
-  },
-  teamLabel: { 
-    color: '#ccc', 
-    marginTop: 8, 
-    fontWeight: '600' 
-  },
-  businessItem: { 
-    color: '#fff', 
-    marginTop: 4, 
-    fontSize: 15 
-  },
-  logoutCard: { 
-    backgroundColor: '#1a1a2e', 
-    margin: 16, 
-    borderRadius: 16, 
-    padding: 12,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 107, 107, 0.6)',
-    shadowColor: '#ff6b6b',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    elevation: 6,
-  },
-  logoutButton: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    gap: 12 
-  },
-  logoutText: { 
-    color: '#ff6b6b', 
-    fontSize: 16, 
-    fontWeight: '600' 
-  },
-  dialog: { 
-    backgroundColor: '#1a1a2e', 
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(118, 75, 162, 0.4)',
-  },
-  dialogTitle: { 
-    color: '#fff', 
-    fontWeight: 'bold' 
-  },
-  dialogText: { 
-    color: '#ccc', 
-    fontSize: 15 
-  },
-  dialogActions: { 
-    justifyContent: 'space-between', 
-    paddingHorizontal: 12 
-  },
-  dialogCancel: { 
-    backgroundColor: '#764ba2', 
-    borderRadius: 6, 
-    marginRight: 8 
-  },
-  dialogConfirm: { 
-    borderColor: '#ff5555', 
-    borderWidth: 1, 
-    borderRadius: 6 
-  },
-  error: { 
-    color: '#ff5555', 
-    padding: 20, 
-    textAlign: 'center',
-    fontSize: 16,
-    marginBottom: 20,
-  },
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  inviteModal: { 
-    backgroundColor: '#1a1a2e', 
-    margin: 32, 
-    padding: 20, 
-    borderRadius: 12, 
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(118, 75, 162, 0.4)',
-  },
-  modalText: { 
-    color: '#fff', 
-    fontSize: 16, 
-    marginBottom: 12, 
-    textAlign: 'center' 
-  },
-  code: { 
-    color: '#764ba2', 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    marginTop: 12, 
-    marginBottom: 12 
-  },
-});Invite(selectedBusiness.id);
-                      setInviteLink(res?.code || 'No code');
-                    } catch (error) {
-                      console.log('Error creating invite:', error);
-                      Toast.show({
-                        type: 'error',
-                        text1: 'Failed to create invite',
-                        text2: 'Please try again',
-                      });
-                    }
-                  }}
-                  disabled={isOffline}
-                >
-                  Generate Link
-                </Button>
-              ) : (
-                <>
-                  <Text selectable style={styles.code}>{inviteLink}</Text>
-                  <Button onPress={() => {
-                    Clipboard.setStringAsync(inviteLink);
-                    Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
-                  }}>
-                    Copy
-                  </Button>
-                </>
-              )}
-
-              <Button onPress={() => {
-                setSelectedBusiness(null);
-                setInviteLink(null);
-              }}>
-                Close
-              </Button>
-            </View>
-          </View>
-        </Modal>
-      )}
-
-      {/* Header with matching gradient */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <TouchableOpacity 
-          onPress={onBack}
-          style={styles.backButton}
-        >
-          <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
-        </TouchableOpacity>
-        <Text style={styles.title}>{title}</Text>
-        <View style={styles.placeholder} />
-      </LinearGradient>
-
-      {/* Content */}
-      <ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={{ paddingBottom: 32 }}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={onRefresh}
-            colors={['#764ba2']}
-            tintColor="#764ba2"
-          />
-        }
-      >
-        {/* Offline/Cached Data Indicator */}
-        {(isOffline || usingCachedData) && (
-          <View style={[styles.statusCard, isOffline ? styles.offlineCard : styles.cachedCard]}>
-            <MaterialCommunityIcons 
-              name={isOffline ? "wifi-off" : "cached"} 
-              size={20} 
-              color={isOffline ? "#ff6b6b" : "#ffa726"} 
-            />
-            <Text style={[styles.statusText, { color: isOffline ? "#ff6b6b" : "#ffa726" }]}>
-              {isOffline ? 'Offline Mode - Showing cached data' : 'Showing cached data'}
-            </Text>
-          </View>
-        )}
-
-        {/* User Profile Card */}
-        <View style={styles.identityCard}>
-          <View style={styles.identityRow}>
-            <View>
-              <Text style={styles.userName}>{getDisplayName()}</Text>
-              <Text style={styles.accountType}>Glt Account</Text>
-              <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
-            </View>
-            <TouchableOpacity onPress={pickAndPreviewAvatar}>
-              <Avatar.Image
-                size={60}
-                source={
-                  user?.avatar_url
-                    ? { uri: user.avatar_url }
-                    : require('../assets/images/avatar_placeholder.png')
-                }
-              />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        {/* Account Information Card */}
-        <View style={styles.infoCard}>
-          <Text style={styles.sectionTitle}>Account Information</Text>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
-            <Text style={styles.infoLabel}>Username</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.username || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
-            <Text style={styles.infoLabel}>Display Name</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.display_name || user?.first_name || 'LVL0'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
-            <Text style={styles.infoLabel}>Email</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
-            <Text style={styles.infoLabel}>Phone</Text>
-            <View style={styles.infoRight}>
-              <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
-              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
-            </View>
-          </TouchableOpacity>
-        </View>
-
-        {/* Business Actions Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Business</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <Button 
-              mode="outlined" 
-              onPress={() => {
-                if (isOffline) {
-                  Toast.show({
-                    type: 'info',
-                    text1: 'Offline Mode',
-                    text2: 'Cannot create business while offline',
-                  });
-                  return;
-                }
-                setShowBusinessModal(true);
-              }}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor="#764ba2"
-              disabled={isOffline}
-            >
-              Create
-            </Button>
-            <Button 
-              mode="outlined" 
-              onPress={() => {
-                if (isOffline) {
-                  Toast.show({
-                    type: 'info',
-                    text1: 'Offline Mode',
-                    text2: 'Cannot join business while offline',
-                  });
-                  return;
-                }
-                setShowJoinModal(true);
-              }}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor="#764ba2"
-              disabled={isOffline}
-            >
-              Join
-            </Button>
-          </View>
-        </View>
-
-        {/* User Businesses Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Your Businesses</Text>
-          
-          <Text style={styles.teamLabel}>Owned:</Text>
-          {ownedBusinesses.length > 0 ? (
-            ownedBusinesses.map((biz) => (
-              <TouchableOpacity key={biz.id} onPress={() => setSelectedBusiness(biz)}>
-                <Text style={styles.businessItem}>• {biz.name}</Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
-
-          <Text style={styles.teamLabel}>Joined:</Text>
-          {joinedBusinesses.length > 0 ? (
-            joinedBusinesses.map((biz) => (
-              <Text key={biz.id} style={styles.businessItem}>• {biz.name}</Text>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
-        </View>
-
-        {/* Logout Card */}
-        <View style={styles.logoutCard}>
-          <TouchableOpacity style={styles.logoutButton} onPress={() => setShowLogoutConfirm(true)}>
-            <MaterialCommunityIcons name="logout" size={22} color="#ff6b6b" />
-            <Text style={styles.logoutText}>Log Out</Text>
-          </TouchableOpacity>
-        </View>
-      </ScrollView>
-
-      {/* Logout Confirmation Dialog */}
-      <Portal>
-        <Dialog
-          visible={showLogoutConfirm}
-          onDismiss={() => setShowLogoutConfirm(false)}
-          style={styles.dialog}
-        >
-          <Dialog.Title style={styles.dialogTitle}>Confirm Logout</Dialog.Title>
-          <Dialog.Content>
-            <Text style={styles.dialogText}>Are you sure you want to log out?</Text>
-          </Dialog.Content>
-          <Dialog.Actions style={styles.dialogActions}>
-            <Button onPress={() => setShowLogoutConfirm(false)} style={styles.dialogCancel}>
-              No
-            </Button>
-            <Button mode="outlined" onPress={confirmLogout} style={styles.dialogConfirm}>
-              Yes
-            </Button>
-          </Dialog.Actions>
-          </Dialog>
-        </Portal>
-    </View>
-  );
-}
-
-const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#0a0a0f'
-  },
-  loadingContainer: {
-    flex: 1,
-    backgroundColor: '#0a0a0f',
-  },
-  loadingGradient: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  loadingText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-  },
-  sourceText: {
-    color: '#a0aec0',
-    fontSize: 14,
-    marginTop: 8,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 50,
-    paddingBottom: 20,
-    paddingHorizontal: 16,
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  backButton: {
-    padding: 8,
-  },
-  title: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
-    fontStyle: 'italic',
-    textShadowColor: 'rgba(118, 75, 162, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
-  },
-  placeholder: {
-    width: 44,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-  },
-  offlineCard: {
-    borderColor: 'rgba(255, 107, 107, 0.5)',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
-  },
-  cachedCard: {
-    borderColor: 'rgba(255, 167, 38, 0.5)',
-    backgroundColor: 'rgba(255, 167, 38, 0.1)',
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '500',
     marginLeft: 8,
   },
   infoCard: {
