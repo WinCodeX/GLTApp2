@@ -39,9 +39,9 @@ export default function Layout() {
               {/* Main app content - includes DrawerLayout and other routes */}
               <Slot />
               
-              {/* Network status banner - positioned absolutely above everything */}
+              {/* Network status banner - positioned below header */}
               {/* Uses pointerEvents: 'box-none' so touches pass through to content below */}
-              <NetworkBanner />
+              <NetworkBanner headerHeight={60} />
             </UserProvider>
           </ThemeProvider>
         </PaperProvider>
