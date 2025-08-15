@@ -649,6 +649,686 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
+  const statusInfo = getNetworkStatusInfo();
+
+  // ✅ Main content
+  return (
+    <View style={styles.container}>
+      {/* ✅ Suspense wrapper for lazy-loaded components */}
+      <Suspense fallback={<View />}>
+        {loading && <LoaderOverlay visible={true} />}
+
+        {showChangelog && (
+          <ChangelogModal 
+            visible 
+            onClose={() => {
+              AsyncStorage.setItem(CHANGELOG_KEY, 'true').catch(console.error);
+              setShowChangelog(false);
+            }} 
+          />
+        )}
+
+        {previewUri && (
+          <AvatarPreviewModal
+            visible
+            uri={previewUri}
+            onCancel={() => setPreviewUri(null)}
+            onConfirm={confirmUploadAvatar}
+          />
+        )}
+
+        {showBusinessModal && (
+          <BusinessModal
+            visible
+            onClose={() => setShowBusinessModal(false)}
+            onCreate={loadBusinesses}
+          />
+        )}
+
+        {showJoinModal && (
+          <JoinBusinessModal
+            visible
+            onClose={() => setShowJoinModal(false)}
+            onJoin={loadBusinesses}
+          />
+        )}
+      </Suspense>
+
+      {/* Business invite modal */}
+      {selectedBusiness && (
+        <Modal visible transparent animationType="fade">
+          <View style={styles.modalOverlay}>
+            <View style={styles.inviteModal}>
+              <Text style={styles.modalText}>
+                Generate invite link for "{selectedBusiness.name}"?
+              </Text>
+
+              {!inviteLink ? (
+                <Button 
+                  mode="contained" 
+                  onPress={async () => {
+                    try {
+                      if (!isConnected()) {
+                        Toast.show({
+                          type: 'error',
+                          text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                          text2: 'Cannot generate invite while server is unavailable',
+                        });
+                        return;
+                      }
+
+                      const res = await createInvite(selectedBusiness.id);
+                      setInviteLink(res?.code || 'No code');
+                    } catch (error) {
+                      console.error('Error creating invite:', error);
+                      Toast.show({
+                        type: 'error',
+                        text1: 'Failed to create invite',
+                        text2: networkStatus === 'server_error' ? 'Server temporarily unavailable' : 'Please try again',
+                      });
+                    }
+                  }}
+                  disabled={!isConnected()}
+                >
+                  Generate Link
+                </Button>
+              ) : (
+                <>
+                  <Text selectable style={styles.code}>{inviteLink}</Text>
+                  <Button onPress={() => {
+                    try {
+                      Clipboard.setStringAsync(inviteLink);
+                      Toast.show({ type: 'success', text1: 'Copied to clipboard!' });
+                    } catch (error) {
+                      console.error('Error copying to clipboard:', error);
+                      Toast.show({ type: 'error', text1: 'Failed to copy' });
+                    }
+                  }}>
+                    Copy
+                  </Button>
+                </>
+              )}
+
+              <Button onPress={() => {
+                setSelectedBusiness(null);
+                setInviteLink(null);
+              }}>
+                Close
+              </Button>
+            </View>
+          </View>
+        </Modal>
+      )}
+
+      {/* Header with matching gradient */}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <TouchableOpacity 
+          onPress={onBack}
+          style={styles.backButton}
+        >
+          <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.title}>{title}</Text>
+        <View style={styles.placeholder} />
+      </LinearGradient>
+
+      {/* Content */}
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={{ paddingBottom: 32 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#764ba2']}
+            tintColor="#764ba2"
+          />
+        }
+      >
+        {/* Enhanced Network Status Indicator */}
+        {statusInfo && (
+          <View style={[styles.statusCard, { backgroundColor: statusInfo.bgColor, borderColor: statusInfo.borderColor }]}>
+            <MaterialCommunityIcons 
+              name={statusInfo.icon} 
+              size={20} 
+              color={statusInfo.color} 
+            />
+            <Text style={[styles.statusText, { color: statusInfo.color }]}>
+              {statusInfo.text}
+            </Text>
+            {networkStatus === 'server_error' && (
+              <TouchableOpacity 
+                style={styles.retryButton}
+                onPress={async () => {
+                  try {
+                    const newStatus = await checkServerStatus();
+                    if (newStatus === 'online') {
+                      loadBusinesses(true);
+                    }
+                  } catch (error) {
+                    console.error('Error checking server status:', error);
+                  }
+                }}
+              >
+                <MaterialCommunityIcons name="refresh" size={16} color={statusInfo.color} />
+              </TouchableOpacity>
+            )}
+          </View>
+        )}
+
+        {/* User Profile Card */}
+        <View style={styles.identityCard}>
+          <View style={styles.identityRow}>
+            <View>
+              <Text style={styles.userName}>{getDisplayName()}</Text>
+              <Text style={styles.accountType}>Glt Account</Text>
+              <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
+            </View>
+            <TouchableOpacity onPress={pickAndPreviewAvatar}>
+              <Avatar.Image
+                size={60}
+                source={
+                  user?.avatar_url
+                    ? { uri: user.avatar_url }
+                    : require('../assets/images/avatar_placeholder.png')
+                }
+              />
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* Account Information Card */}
+        <View style={styles.infoCard}>
+          <Text style={styles.sectionTitle}>Account Information</Text>
+
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
+            <Text style={styles.infoLabel}>Username</Text>
+            <View style={styles.infoRight}>
+              <Text style={styles.infoValue}>{user?.username || '—'}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
+            <Text style={styles.infoLabel}>Display Name</Text>
+            <View style={styles.infoRight}>
+              <Text style={styles.infoValue}>{user?.display_name || user?.first_name || 'LVL0'}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
+            <Text style={styles.infoLabel}>Email</Text>
+            <View style={styles.infoRight}>
+              <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
+            </View>
+          </TouchableOpacity>
+
+          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
+            <Text style={styles.infoLabel}>Phone</Text>
+            <View style={styles.infoRight}>
+              <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
+              <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
+            </View>
+          </TouchableOpacity>
+        </View>
+
+        {/* Business Actions Card */}
+        <View style={styles.identityCard}>
+          <Text style={styles.userName}>Business</Text>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
+            <Button 
+              mode="outlined" 
+              onPress={() => {
+                if (!isConnected()) {
+                  Toast.show({
+                    type: 'info',
+                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                    text2: 'Cannot create business while server is unavailable',
+                  });
+                  return;
+                }
+                setShowBusinessModal(true);
+              }}
+              buttonColor="rgba(118, 75, 162, 0.1)"
+              textColor={isConnected() ? "#764ba2" : "#999"}
+              disabled={!isConnected()}
+            >
+              Create
+            </Button>
+            <Button 
+              mode="outlined" 
+              onPress={() => {
+                if (!isConnected()) {
+                  Toast.show({
+                    type: 'info',
+                    text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                    text2: 'Cannot join business while server is unavailable',
+                  });
+                  return;
+                }
+                setShowJoinModal(true);
+              }}
+              buttonColor="rgba(118, 75, 162, 0.1)"
+              textColor={isConnected() ? "#764ba2" : "#999"}
+              disabled={!isConnected()}
+            >
+              Join
+            </Button>
+          </View>
+        </View>
+
+        {/* User Businesses Card */}
+        <View style={styles.identityCard}>
+          <Text style={styles.userName}>Your Businesses</Text>
+          
+          <Text style={styles.teamLabel}>Owned:</Text>
+          {Array.isArray(ownedBusinesses) && ownedBusinesses.length > 0 ? (
+            ownedBusinesses.map((biz) => (
+              <TouchableOpacity 
+                key={biz?.id || Math.random()} 
+                onPress={() => {
+                  if (!isConnected()) {
+                    Toast.show({
+                      type: 'info',
+                      text1: networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable',
+                      text2: 'Cannot generate invite while server is unavailable',
+                    });
+                    return;
+                  }
+                  setSelectedBusiness(biz);
+                }}
+                disabled={!isConnected()}
+              >
+                <Text style={[styles.businessItem, !isConnected() && { opacity: 0.6 }]}>
+                  • {biz?.name || 'Unknown Business'}
+                </Text>
+              </TouchableOpacity>
+            ))
+          ) : (
+            <Text style={styles.businessItem}>None</Text>
+          )}
+
+          <Text style={styles.teamLabel}>Joined:</Text>
+          {Array.isArray(joinedBusinesses) && joinedBusinesses.length > 0 ? (
+            joinedBusinesses.map((biz) => (
+              <Text key={biz?.id || Math.random()} style={styles.businessItem}>
+                • {biz?.name || 'Unknown Business'}
+              </Text>
+            ))
+          ) : (
+            <Text style={styles.businessItem}>None</Text>
+          )}
+        </View>
+
+        {/* Logout Card */}
+        <View style={styles.logoutCard}>
+          <TouchableOpacity style={styles.logoutButton} onPress={() => setShowLogoutConfirm(true)}>
+            <MaterialCommunityIcons name="logout" size={22} color="#ff6b6b" />
+            <Text style={styles.logoutText}>Log Out</Text>
+          </TouchableOpacity>
+        </View>
+      </ScrollView>
+
+      {/* Logout Confirmation Dialog */}
+      <Portal>
+        <Dialog
+          visible={showLogoutConfirm}
+          onDismiss={() => setShowLogoutConfirm(false)}
+          style={styles.dialog}
+        >
+          <Dialog.Title style={styles.dialogTitle}>Confirm Logout</Dialog.Title>
+          <Dialog.Content>
+            <Text style={styles.dialogText}>Are you sure you want to log out?</Text>
+          </Dialog.Content>
+          <Dialog.Actions style={styles.dialogActions}>
+            <Button onPress={() => setShowLogoutConfirm(false)} style={styles.dialogCancel}>
+              No
+            </Button>
+            <Button mode="outlined" onPress={confirmLogout} style={styles.dialogConfirm}>
+              Yes
+            </Button>
+          </Dialog.Actions>
+          </Dialog>
+        </Portal>
+    </View>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: { 
+    flex: 1, 
+    backgroundColor: '#0a0a0f'
+  },
+  loadingContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0f',
+  },
+  loadingGradient: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  sourceText: {
+    color: '#a0aec0',
+    fontSize: 14,
+    marginTop: 8,
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    shadowColor: '#764ba2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  backButton: {
+    padding: 8,
+  },
+  title: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+    fontStyle: 'italic',
+    textShadowColor: 'rgba(118, 75, 162, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  placeholder: {
+    width: 44,
+  },
+  scrollView: {
+    flex: 1,
+  },
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  statusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    marginTop: 16,
+    marginBottom: 8,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+  },
+  statusText: {
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 8,
+    flex: 1,
+  },
+  retryButton: {
+    padding: 4,
+    marginLeft: 8,
+  },
+  infoCard: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+    paddingBottom: 8,
+    borderWidth: 2,
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 8,
+    opacity: 0.9,
+  },
+  infoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 14,
+    borderBottomColor: 'rgba(118, 75, 162, 0.2)',
+    borderBottomWidth: 1,
+  },
+  infoLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  infoRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  infoValue: {
+    color: '#ccc',
+    fontSize: 15,
+  },
+  identityCard: { 
+    backgroundColor: '#1a1a2e',
+    margin: 16, 
+    borderRadius: 16, 
+    padding: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  identityRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  userName: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  accountType: { 
+    color: '#888', 
+    fontSize: 14, 
+    marginTop: 4 
+  },
+  version: { 
+    color: '#999', 
+    marginTop: 4 
+  },
+  teamLabel: { 
+    color: '#ccc', 
+    marginTop: 8, 
+    fontWeight: '600' 
+  },
+  businessItem: { 
+    color: '#fff', 
+    marginTop: 4, 
+    fontSize: 15 
+  },
+  logoutCard: { 
+    backgroundColor: '#1a1a2e', 
+    margin: 16, 
+    borderRadius: 16, 
+    padding: 12,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 107, 107, 0.6)',
+    shadowColor: '#ff6b6b',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
+    elevation: 6,
+  },
+  logoutButton: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    gap: 12 
+  },
+  logoutText: { 
+    color: '#ff6b6b', 
+    fontSize: 16, 
+    fontWeight: '600' 
+  },
+  dialog: { 
+    backgroundColor: '#1a1a2e', 
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(118, 75, 162, 0.4)',
+  },
+  dialogTitle: { 
+    color: '#fff', 
+    fontWeight: 'bold' 
+  },
+  dialogText: { 
+    color: '#ccc', 
+    fontSize: 15 
+  },
+  dialogActions: { 
+    justifyContent: 'space-between', 
+    paddingHorizontal: 12 
+  },
+  dialogCancel: { 
+    backgroundColor: '#764ba2', 
+    borderRadius: 6, 
+    marginRight: 8 
+  },
+  dialogConfirm: { 
+    borderColor: '#ff5555', 
+    borderWidth: 1, 
+    borderRadius: 6 
+  },
+  error: { 
+    color: '#ff5555', 
+    padding: 20, 
+    textAlign: 'center',
+    fontSize: 16,
+    marginBottom: 20,
+  },
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
+    justifyContent: 'center', 
+    alignItems: 'center' 
+  },
+  inviteModal: { 
+    backgroundColor: '#1a1a2e', 
+    margin: 32, 
+    padding: 20, 
+    borderRadius: 12, 
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(118, 75, 162, 0.4)',
+  },
+  modalText: { 
+    color: '#fff', 
+    fontSize: 16, 
+    marginBottom: 12, 
+    textAlign: 'center' 
+  },
+  code: { 
+    color: '#764ba2', 
+    fontSize: 18, 
+    fontWeight: 'bold', 
+    marginTop: 12, 
+    marginBottom: 12 
+  },
+});764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.loadingGradient}
+        >
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>
+            {isRedirecting ? 'Redirecting to login...' : `Loading ${title}...`}
+          </Text>
+          <Text style={styles.sourceText}>Context: {source}</Text>
+        </LinearGradient>
+      </View>
+    );
+  }
+
+  // ✅ Error screen
+  if (screenError || userError) {
+    return (
+      <View style={styles.container}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <TouchableOpacity onPress={onBack} style={styles.backButton}>
+            <MaterialCommunityIcons name="arrow-left" size={28} color="#fff" />
+          </TouchableOpacity>
+          <Text style={styles.title}>{title}</Text>
+          <View style={styles.placeholder} />
+        </LinearGradient>
+        
+        <View style={styles.errorContainer}>
+          <Text style={styles.error}>
+            {screenError || userError || 'Failed to load account data'}
+          </Text>
+          <Button mode="outlined" onPress={() => {
+            setScreenError(null);
+            loadBusinesses();
+          }}>
+            Retry
+          </Button>
+          <Button 
+            mode="contained" 
+            onPress={() => router.replace('/login')}
+            style={{ marginTop: 10, backgroundColor: '#764ba2' }}
+          >
+            Go to Login
+          </Button>
+        </View>
+      </View>
+    );
+  }
+
+  // ✅ Show loading if user data is still loading
+  if (userLoading || !user) {
+    return (
+      <View style={styles.loadingContainer}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.loadingGradient}
+        >
+          <ActivityIndicator size="large" color="#fff" />
+          <Text style={styles.loadingText}>Loading user data...</Text>
+          <Text style={styles.sourceText}>Context: {source}</Text>
+        </LinearGradient>
+      </View>
+    );
+  }
+
   // ✅ Main content
   return (
     <View style={styles.container}>
