@@ -1,4 +1,4 @@
-// components/PackageEditModal.tsx - Edit modal for packages
+// components/PackageEditModal.tsx - FIXED with proper helper functions
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -22,6 +22,9 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import api from '../lib/api';
 
+// FIXED: Import proper helper functions
+import { getAreas, getAgents, Area, Agent } from '../lib/helpers/packageHelpers';
+
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 interface Package {
@@ -41,24 +44,12 @@ interface Package {
   origin_agent?: Agent;
   destination_agent?: Agent;
   delivery_location?: string;
-}
-
-interface Area {
-  id: string;
-  name: string;
-  location?: Location;
+  sender_phone?: string;
 }
 
 interface Location {
   id: string;
   name: string;
-}
-
-interface Agent {
-  id: string;
-  name: string;
-  phone: string;
-  area?: Area;
 }
 
 interface PackageEditModalProps {
@@ -90,10 +81,14 @@ export default function PackageEditModal({
 }: PackageEditModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isLoadingData, setIsLoadingData] = useState(false);
+  const [loadingError, setLoadingError] = useState<string | null>(null);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   // Form data
+  const [senderName, setSenderName] = useState('');
+  const [senderPhone, setSenderPhone] = useState('');
+  const [receiverName, setReceiverName] = useState('');
   const [receiverPhone, setReceiverPhone] = useState('');
   const [selectedState, setSelectedState] = useState<PackageState>('pending');
   const [selectedDestinationArea, setSelectedDestinationArea] = useState<string>('');
@@ -121,13 +116,36 @@ export default function PackageEditModal({
     );
   }, [areas, searchQuery]);
 
-  // Filtered agents for the selected area
+  // Filtered agents for the selected area or search
   const availableAgents = useMemo(() => {
-    if (!selectedDestinationArea) return [];
-    return agents.filter(agent => agent.area?.id === selectedDestinationArea);
-  }, [agents, selectedDestinationArea]);
+    let filteredAgents = agents;
+    
+    // Filter by search query if present
+    if (searchQuery.trim()) {
+      const query = searchQuery.toLowerCase();
+      filteredAgents = filteredAgents.filter(agent => 
+        agent.name.toLowerCase().includes(query) ||
+        agent.area?.name.toLowerCase().includes(query) ||
+        agent.area?.location?.name.toLowerCase().includes(query) ||
+        agent.phone.toLowerCase().includes(query)
+      );
+    }
+    
+    // For agent delivery, if area is selected, filter by area
+    if (isAgentDelivery && selectedDestinationArea) {
+      filteredAgents = filteredAgents.filter(agent => agent.area?.id === selectedDestinationArea);
+    }
+    
+    return filteredAgents;
+  }, [agents, searchQuery, isAgentDelivery, selectedDestinationArea]);
 
-  // User permissions
+  // User permissions based on role and package state
+  const canEditPersonalInfo = useMemo(() => {
+    return ['admin', 'client'].includes(userRole) && 
+           packageData && 
+           ['pending_unpaid', 'pending'].includes(packageData.state);
+  }, [userRole, packageData]);
+
   const canEditDestination = useMemo(() => {
     return ['admin', 'client'].includes(userRole) && 
            packageData && 
@@ -138,14 +156,15 @@ export default function PackageEditModal({
     return ['admin', 'agent', 'rider', 'warehouse'].includes(userRole);
   }, [userRole]);
 
-  const canEditPhone = useMemo(() => {
-    return ['admin', 'client'].includes(userRole) && 
+  const canEditDeliveryLocation = useMemo(() => {
+    return ['admin', 'client', 'agent'].includes(userRole) && 
            packageData && 
-           !['delivered', 'collected', 'rejected'].includes(packageData.state);
+           !['delivered', 'collected'].includes(packageData.state);
   }, [userRole, packageData]);
 
   useEffect(() => {
     if (visible && packageData) {
+      console.log('🔄 Modal opened, loading form data...');
       loadFormData();
       loadAreasAndAgents();
       
@@ -160,43 +179,92 @@ export default function PackageEditModal({
   const loadFormData = useCallback(() => {
     if (!packageData) return;
     
+    console.log('📋 Loading form data from package:', packageData);
+    
+    setSenderName(packageData.sender_name || '');
+    setSenderPhone(packageData.sender_phone || '');
+    setReceiverName(packageData.receiver_name || '');
     setReceiverPhone(packageData.receiver_phone || '');
     setSelectedState(packageData.state as PackageState);
     setSelectedDestinationArea(packageData.destination_area?.id || '');
     setSelectedDestinationAgent(packageData.destination_agent?.id || '');
     setDeliveryLocation(packageData.delivery_location || '');
+    
+    console.log('📋 Form data loaded:', {
+      state: packageData.state,
+      destinationArea: packageData.destination_area?.id,
+      destinationAgent: packageData.destination_agent?.id,
+      deliveryType: packageData.delivery_type
+    });
   }, [packageData]);
 
+  // FIXED: Use proper helper functions instead of direct API calls
   const loadAreasAndAgents = useCallback(async () => {
     try {
       setIsLoadingData(true);
+      setLoadingError(null);
       
-      // Load areas and agents data
-      const [areasResponse, agentsResponse] = await Promise.all([
-        api.get('/api/v1/form_data/areas'),
-        api.get('/api/v1/form_data/agents')
+      console.log('🔄 Loading areas and agents using helper functions...');
+      
+      // FIXED: Use the proper helper functions that handle FastJSON
+      const [areasData, agentsData] = await Promise.allSettled([
+        getAreas(),
+        getAgents()
       ]);
       
-      if (areasResponse.data.success) {
-        setAreas(areasResponse.data.data || []);
+      // Process areas result
+      if (areasData.status === 'fulfilled') {
+        console.log('✅ Areas loaded successfully:', areasData.value.length);
+        setAreas(areasData.value);
+        
+        if (areasData.value.length > 0) {
+          console.log('📋 Sample area:', areasData.value[0]);
+        }
+      } else {
+        console.error('❌ Failed to load areas:', areasData.reason);
+        setLoadingError('Failed to load areas');
       }
       
-      if (agentsResponse.data.success) {
-        setAgents(agentsResponse.data.data || []);
+      // Process agents result
+      if (agentsData.status === 'fulfilled') {
+        console.log('✅ Agents loaded successfully:', agentsData.value.length);
+        setAgents(agentsData.value);
+        
+        if (agentsData.value.length > 0) {
+          console.log('📋 Sample agent:', agentsData.value[0]);
+        }
+      } else {
+        console.error('❌ Failed to load agents:', agentsData.reason);
+        setLoadingError('Failed to load agents');
       }
-    } catch (error) {
-      console.error('Failed to load form data:', error);
+      
+      // Check if we have minimum required data
+      const hasAreas = areasData.status === 'fulfilled' && areasData.value.length > 0;
+      const hasAgents = agentsData.status === 'fulfilled' && agentsData.value.length > 0;
+      
+      if (!hasAreas && !hasAgents) {
+        setLoadingError('No areas or agents available. Please check your data setup.');
+      } else if (!hasAreas) {
+        setLoadingError('No areas available. Package editing may be limited.');
+      } else if (!hasAgents && isAgentDelivery) {
+        setLoadingError('No agents available. Agent delivery editing may be limited.');
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load form data:', error);
+      setLoadingError(`Failed to load form data: ${error.message}`);
+      
       Toast.show({
         type: 'error',
         text1: 'Failed to Load Data',
-        text2: 'Could not load areas and agents',
+        text2: error.message || 'Could not load areas and agents',
         position: 'top',
-        visibilityTime: 3000,
+        visibilityTime: 4000,
       });
     } finally {
       setIsLoadingData(false);
     }
-  }, []);
+  }, [isAgentDelivery]);
 
   const closeModal = useCallback(() => {
     Animated.timing(slideAnim, {
@@ -204,6 +272,9 @@ export default function PackageEditModal({
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
+      // Reset state when modal closes
+      setSearchQuery('');
+      setLoadingError(null);
       onClose();
     });
   }, [slideAnim, onClose]);
@@ -211,24 +282,51 @@ export default function PackageEditModal({
   const validateForm = useCallback(() => {
     const errors: string[] = [];
     
-    if (canEditPhone && !receiverPhone.trim()) {
-      errors.push('Receiver phone is required');
+    console.log('🔍 Validating form...');
+    
+    if (canEditPersonalInfo) {
+      if (!senderName.trim()) {
+        errors.push('Sender name is required');
+      }
+      
+      if (!senderPhone.trim()) {
+        errors.push('Sender phone is required');
+      } else if (!senderPhone.match(/^\+254\d{9}$/)) {
+        errors.push('Sender phone must be in format +254XXXXXXXXX');
+      }
+      
+      if (!receiverName.trim()) {
+        errors.push('Receiver name is required');
+      }
+      
+      if (!receiverPhone.trim()) {
+        errors.push('Receiver phone is required');
+      } else if (!receiverPhone.match(/^\+254\d{9}$/)) {
+        errors.push('Receiver phone must be in format +254XXXXXXXXX');
+      }
     }
     
-    if (canEditPhone && receiverPhone && !receiverPhone.match(/^\+254\d{9}$/)) {
-      errors.push('Phone number must be in format +254XXXXXXXXX');
+    if (canEditDestination) {
+      if (isAgentDelivery) {
+        if (!selectedDestinationAgent) {
+          errors.push('Destination agent is required for agent delivery');
+        }
+      } else {
+        if (!selectedDestinationArea) {
+          errors.push('Destination area is required');
+        }
+      }
+      
+      // Validate delivery location for doorstep deliveries
+      if (['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && !deliveryLocation.trim()) {
+        errors.push('Delivery location is required for doorstep/fragile delivery');
+      }
     }
     
-    if (canEditDestination && !isAgentDelivery && !selectedDestinationArea) {
-      errors.push('Destination area is required');
-    }
-    
-    if (canEditDestination && isAgentDelivery && !selectedDestinationAgent) {
-      errors.push('Destination agent is required');
-    }
+    console.log('🔍 Validation result:', { errors: errors.length, details: errors });
     
     return errors;
-  }, [canEditPhone, canEditDestination, receiverPhone, selectedDestinationArea, selectedDestinationAgent, isAgentDelivery]);
+  }, [canEditPersonalInfo, canEditDestination, senderName, senderPhone, receiverName, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
 
   const handleSubmit = useCallback(async () => {
     if (!packageData) return;
@@ -242,10 +340,15 @@ export default function PackageEditModal({
     setIsSubmitting(true);
     
     try {
+      console.log('💾 Submitting package update...');
+      
       const updateData: any = {};
       
       // Add editable fields based on permissions
-      if (canEditPhone) {
+      if (canEditPersonalInfo) {
+        updateData.sender_name = senderName.trim();
+        updateData.sender_phone = senderPhone.trim();
+        updateData.receiver_name = receiverName.trim();
         updateData.receiver_phone = receiverPhone.trim();
       }
       
@@ -265,18 +368,24 @@ export default function PackageEditModal({
           updateData.destination_area_id = selectedDestinationArea;
           updateData.destination_agent_id = null; // Clear agent for non-agent delivery
         }
-        
-        // Add delivery location for doorstep/fragile deliveries
-        if (['doorstep', 'fragile'].includes(packageData.delivery_type)) {
-          updateData.delivery_location = deliveryLocation.trim();
-        }
       }
       
-      console.log('🔄 Updating package with data:', updateData);
+      if (canEditDeliveryLocation && ['doorstep', 'fragile'].includes(packageData.delivery_type)) {
+        updateData.delivery_location = deliveryLocation.trim();
+      }
+      
+      console.log('💾 Update payload:', updateData);
       
       const response = await api.put(`/api/v1/packages/${packageData.code}`, {
         package: updateData
+      }, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
+      
+      console.log('💾 Update response:', response.data);
       
       if (response.data.success) {
         Toast.show({
@@ -299,7 +408,9 @@ export default function PackageEditModal({
       if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
       } else if (error.response?.data?.errors) {
-        errorMessage = error.response.data.errors.join(', ');
+        errorMessage = Array.isArray(error.response.data.errors) 
+          ? error.response.data.errors.join(', ')
+          : String(error.response.data.errors);
       } else if (error.message) {
         errorMessage = error.message;
       }
@@ -314,7 +425,7 @@ export default function PackageEditModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [packageData, validateForm, canEditPhone, canEditState, canEditDestination, receiverPhone, selectedState, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, agents, closeModal, onSuccess]);
+  }, [packageData, validateForm, canEditPersonalInfo, canEditState, canEditDestination, canEditDeliveryLocation, senderName, senderPhone, receiverName, receiverPhone, selectedState, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, agents, closeModal, onSuccess]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.header}>
@@ -342,27 +453,71 @@ export default function PackageEditModal({
         {packageData?.delivery_type === 'agent' ? 'Agent Delivery' : 
          packageData?.delivery_type === 'fragile' ? 'Fragile Delivery' : 'Doorstep Delivery'}
       </Text>
+      {packageData?.cost && (
+        <Text style={styles.packageCost}>Cost: KES {packageData.cost}</Text>
+      )}
     </View>
   ), [packageData]);
 
-  const renderPhoneEdit = useCallback(() => {
-    if (!canEditPhone) return null;
+  const renderPersonalInfoEdit = useCallback(() => {
+    if (!canEditPersonalInfo) return null;
     
     return (
       <View style={styles.editSection}>
-        <Text style={styles.sectionTitle}>Receiver Phone</Text>
-        <TextInput
-          style={styles.input}
-          placeholder="Receiver's Phone (+254...)"
-          placeholderTextColor="#888"
-          value={receiverPhone}
-          onChangeText={setReceiverPhone}
-          keyboardType="phone-pad"
-          autoCapitalize="none"
-        />
+        <Text style={styles.sectionTitle}>Personal Information</Text>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Sender Name</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Sender's full name"
+            placeholderTextColor="#888"
+            value={senderName}
+            onChangeText={setSenderName}
+            autoCapitalize="words"
+          />
+        </View>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Sender Phone</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Sender's phone (+254...)"
+            placeholderTextColor="#888"
+            value={senderPhone}
+            onChangeText={setSenderPhone}
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+          />
+        </View>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Receiver Name</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Receiver's full name"
+            placeholderTextColor="#888"
+            value={receiverName}
+            onChangeText={setReceiverName}
+            autoCapitalize="words"
+          />
+        </View>
+        
+        <View style={styles.inputGroup}>
+          <Text style={styles.inputLabel}>Receiver Phone</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Receiver's phone (+254...)"
+            placeholderTextColor="#888"
+            value={receiverPhone}
+            onChangeText={setReceiverPhone}
+            keyboardType="phone-pad"
+            autoCapitalize="none"
+          />
+        </View>
       </View>
     );
-  }, [canEditPhone, receiverPhone]);
+  }, [canEditPersonalInfo, senderName, senderPhone, receiverName, receiverPhone]);
 
   const renderStateEdit = useCallback(() => {
     if (!canEditState) return null;
@@ -409,88 +564,92 @@ export default function PackageEditModal({
           {isAgentDelivery ? 'Destination Agent' : 'Destination Area'}
         </Text>
         
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Feather name="search" size={20} color="#888" />
+          <TextInput
+            style={styles.searchInput}
+            placeholder={isAgentDelivery ? "Search agents..." : "Search areas..."}
+            placeholderTextColor="#888"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Feather name="x" size={20} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
+        
         {!isAgentDelivery ? (
           // Area selection for doorstep/fragile delivery
-          <>
-            <View style={styles.searchContainer}>
-              <Feather name="search" size={20} color="#888" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search areas..."
-                placeholderTextColor="#888"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </View>
-            
-            <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
-              {filteredAreas.map((area) => (
-                <TouchableOpacity
-                  key={area.id}
-                  style={[
-                    styles.destinationOption,
-                    selectedDestinationArea === area.id && styles.selectedDestinationOption
-                  ]}
-                  onPress={() => setSelectedDestinationArea(area.id)}
-                >
-                  <View style={styles.destinationInfo}>
-                    <Text style={styles.destinationName}>{area.name}</Text>
-                    <Text style={styles.destinationLocation}>{area.location?.name}</Text>
-                  </View>
-                  {selectedDestinationArea === area.id && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </>
+          <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
+            {filteredAreas.length > 0 ? filteredAreas.map((area) => (
+              <TouchableOpacity
+                key={area.id}
+                style={[
+                  styles.destinationOption,
+                  selectedDestinationArea === area.id && styles.selectedDestinationOption
+                ]}
+                onPress={() => {
+                  setSelectedDestinationArea(area.id);
+                  setSearchQuery(''); // Clear search after selection
+                }}
+              >
+                <View style={styles.destinationInfo}>
+                  <Text style={styles.destinationName}>{area.name}</Text>
+                  <Text style={styles.destinationLocation}>{area.location?.name}</Text>
+                </View>
+                {selectedDestinationArea === area.id && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            )) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  {searchQuery ? 'No areas match your search' : 'No areas available'}
+                </Text>
+              </View>
+            )}
+          </ScrollView>
         ) : (
           // Agent selection for agent delivery
-          <>
-            <View style={styles.searchContainer}>
-              <Feather name="search" size={20} color="#888" />
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search agents..."
-                placeholderTextColor="#888"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </View>
-            
-            <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
-              {agents.filter(agent => 
-                !searchQuery || 
-                agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                agent.area?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                agent.area?.location?.name.toLowerCase().includes(searchQuery.toLowerCase())
-              ).map((agent) => (
-                <TouchableOpacity
-                  key={agent.id}
-                  style={[
-                    styles.destinationOption,
-                    selectedDestinationAgent === agent.id && styles.selectedDestinationOption
-                  ]}
-                  onPress={() => setSelectedDestinationAgent(agent.id)}
-                >
-                  <View style={styles.destinationInfo}>
-                    <Text style={styles.destinationName}>{agent.name}</Text>
-                    <Text style={styles.destinationLocation}>
-                      {agent.area?.name} • {agent.area?.location?.name}
-                    </Text>
-                    <Text style={styles.agentPhone}>{agent.phone}</Text>
-                  </View>
-                  {selectedDestinationAgent === agent.id && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </>
+          <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
+            {availableAgents.length > 0 ? availableAgents.map((agent) => (
+              <TouchableOpacity
+                key={agent.id}
+                style={[
+                  styles.destinationOption,
+                  selectedDestinationAgent === agent.id && styles.selectedDestinationOption
+                ]}
+                onPress={() => {
+                  setSelectedDestinationAgent(agent.id);
+                  setSearchQuery(''); // Clear search after selection
+                }}
+              >
+                <View style={styles.destinationInfo}>
+                  <Text style={styles.destinationName}>{agent.name}</Text>
+                  <Text style={styles.destinationLocation}>
+                    {agent.area?.name} • {agent.area?.location?.name}
+                  </Text>
+                  <Text style={styles.agentPhone}>{agent.phone}</Text>
+                </View>
+                {selectedDestinationAgent === agent.id && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            )) : (
+              <View style={styles.emptyState}>
+                <Text style={styles.emptyStateText}>
+                  {searchQuery ? 'No agents match your search' : 'No agents available'}
+                </Text>
+              </View>
+            )}
+          </ScrollView>
         )}
         
         {/* Delivery location for doorstep/fragile */}
-        {canEditDestination && ['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && (
+        {canEditDeliveryLocation && ['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && (
           <View style={styles.deliveryLocationContainer}>
             <Text style={styles.deliveryLocationLabel}>Delivery Address</Text>
             <TextInput
@@ -507,7 +666,24 @@ export default function PackageEditModal({
         )}
       </View>
     );
-  }, [canEditDestination, isAgentDelivery, searchQuery, filteredAreas, selectedDestinationArea, agents, selectedDestinationAgent, packageData?.delivery_type, deliveryLocation]);
+  }, [canEditDestination, canEditDeliveryLocation, isAgentDelivery, searchQuery, filteredAreas, selectedDestinationArea, availableAgents, selectedDestinationAgent, packageData?.delivery_type, deliveryLocation]);
+
+  const renderLoadingError = useCallback(() => {
+    if (!loadingError) return null;
+    
+    return (
+      <View style={styles.errorContainer}>
+        <Feather name="alert-circle" size={24} color="#FF3B30" />
+        <Text style={styles.errorText}>{loadingError}</Text>
+        <TouchableOpacity
+          style={styles.retryButton}
+          onPress={loadAreasAndAgents}
+        >
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  }, [loadingError, loadAreasAndAgents]);
 
   const renderActionButtons = useCallback(() => (
     <View style={styles.actionButtons}>
@@ -518,7 +694,7 @@ export default function PackageEditModal({
       <TouchableOpacity 
         onPress={handleSubmit} 
         style={[styles.saveButton, isSubmitting && styles.disabledButton]}
-        disabled={isSubmitting}
+        disabled={isSubmitting || isLoadingData}
       >
         <LinearGradient
           colors={isSubmitting ? ['#666', '#666'] : ['#10b981', '#059669']}
@@ -535,7 +711,7 @@ export default function PackageEditModal({
         </LinearGradient>
       </TouchableOpacity>
     </View>
-  ), [closeModal, handleSubmit, isSubmitting]);
+  ), [closeModal, handleSubmit, isSubmitting, isLoadingData]);
 
   const getStateColor = (state: string): string => {
     switch (state) {
@@ -587,16 +763,18 @@ export default function PackageEditModal({
                       <ActivityIndicator size="large" color="#667eea" />
                       <Text style={styles.loadingText}>Loading form data...</Text>
                     </View>
+                  ) : loadingError ? (
+                    renderLoadingError()
                   ) : (
                     <>
-                      {renderPhoneEdit()}
+                      {renderPersonalInfoEdit()}
                       {renderStateEdit()}
                       {renderDestinationEdit()}
                     </>
                   )}
                 </ScrollView>
                 
-                {!isLoadingData && renderActionButtons()}
+                {!isLoadingData && !loadingError && renderActionButtons()}
               </LinearGradient>
             </Animated.View>
           </View>
@@ -697,6 +875,12 @@ const styles = StyleSheet.create({
   deliveryType: {
     fontSize: 12,
     color: '#888',
+    marginBottom: 4,
+  },
+  packageCost: {
+    fontSize: 14,
+    color: '#10b981',
+    fontWeight: '600',
   },
   
   // Content styles
@@ -721,6 +905,35 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
+  // Error styles
+  errorContainer: {
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+    margin: 20,
+    padding: 20,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 59, 48, 0.3)',
+    alignItems: 'center',
+  },
+  errorText: {
+    fontSize: 16,
+    color: '#FF3B30',
+    textAlign: 'center',
+    marginVertical: 12,
+    fontWeight: '500',
+  },
+  retryButton: {
+    backgroundColor: '#FF3B30',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
   // Edit section styles
   editSection: {
     marginHorizontal: 20,
@@ -730,10 +943,19 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   
   // Input styles
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#a0aec0',
+    marginBottom: 8,
+  },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
@@ -841,6 +1063,17 @@ const styles = StyleSheet.create({
   agentPhone: {
     fontSize: 12,
     color: '#666',
+  },
+  
+  // Empty state styles
+  emptyState: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  emptyStateText: {
+    fontSize: 16,
+    color: '#888',
+    textAlign: 'center',
   },
   
   // Delivery location styles
