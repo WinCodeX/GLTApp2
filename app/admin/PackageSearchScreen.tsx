@@ -1,4 +1,4 @@
-// app/admin/PackageSearchScreen.tsx - FIXED with enhanced package display and better edit support
+// app/admin/PackageSearchScreen.tsx - FIXED: Removed admin title, better header
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -12,6 +12,8 @@ import {
   Dimensions,
   Alert,
   RefreshControl,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,7 +21,6 @@ import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import QRScanner from '../../components/QRScanner';
-import AdminLayout from '../../components/AdminLayout';
 import PackageEditModal from '../../components/PackageEditModal';
 import api from '../../lib/api';
 
@@ -725,8 +726,40 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     );
   };
 
+  const renderHeader = () => (
+    <View style={styles.headerContainer}>
+      <LinearGradient
+        colors={['#1a1a2e', '#16213e']}
+        style={styles.headerGradient}
+      >
+        <SafeAreaView>
+          <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+          <View style={styles.headerContent}>
+            <TouchableOpacity
+              onPress={() => router.back()}
+              style={styles.backButton}
+            >
+              <MaterialIcons name="arrow-back" size={24} color="#fff" />
+            </TouchableOpacity>
+            <Text style={styles.headerTitle}>Package Search</Text>
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => setShowScanner(true)}
+                style={styles.headerActionButton}
+              >
+                <MaterialIcons name="qr-code-scanner" size={24} color="#667eea" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </SafeAreaView>
+      </LinearGradient>
+    </View>
+  );
+
   const renderContent = () => (
     <View style={styles.container}>
+      {renderHeader()}
+      
       {/* Connection Status */}
       {!isOnline && (
         <View style={styles.offlineBar}>
@@ -857,17 +890,62 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     </View>
   );
 
-  return (
-    <AdminLayout activePanel="packages">
-      {renderContent()}
-    </AdminLayout>
-  );
+  return renderContent();
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    backgroundColor: '#0f1419',
   },
+  
+  // FIXED: Custom header styles
+  headerContainer: {
+    zIndex: 10,
+  },
+  headerGradient: {
+    paddingBottom: 8,
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingTop: 8,
+    paddingBottom: 12,
+    height: 60,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+    textAlign: 'center',
+    marginHorizontal: 16,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerActionButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(102, 126, 234, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(102, 126, 234, 0.3)',
+  },
+  
   offlineBar: {
     backgroundColor: '#2A1F3D',
     flexDirection: 'row',
