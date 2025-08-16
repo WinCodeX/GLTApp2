@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - Helper functions for package operations
+// lib/helpers/packageHelpers.ts - FIXED: Handle FastJSON format correctly
 import api from '../api';
 
 export interface Location {
@@ -49,7 +49,7 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get all areas with location information
+ * Get all areas with location information - FIXED: Handle FastJSON format
  */
 export const getAreas = async (): Promise<Area[]> => {
   try {
@@ -72,10 +72,44 @@ export const getAreas = async (): Promise<Area[]> => {
 
     console.log('📋 Areas API response:', response.data);
 
-    if (response.data.success) {
-      const areas = response.data.data || [];
+    // FIXED: Handle FastJSON format directly
+    if (response.data.data) {
+      const areasData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+      const included = response.data.included || [];
       
-      // Transform the data to ensure consistent structure
+      const transformedAreas: Area[] = areasData.map((item: any) => {
+        // Find the related location from included data
+        let location = null;
+        if (item.relationships?.location?.data) {
+          const locationRef = item.relationships.location.data;
+          const includedLocation = included.find((inc: any) => 
+            inc.type === 'location' && inc.id === locationRef.id
+          );
+          
+          if (includedLocation) {
+            location = {
+              id: includedLocation.id,
+              name: includedLocation.attributes.name || 'Unknown Location'
+            };
+          }
+        }
+        
+        return {
+          id: String(item.id),
+          name: item.attributes.name || 'Unknown Area',
+          location: location || undefined
+        };
+      });
+
+      // Update cache
+      areasCache = transformedAreas;
+      cacheTimestamp = now;
+
+      console.log('✅ Areas loaded and cached:', transformedAreas.length);
+      return transformedAreas;
+    } else {
+      // Fallback: try to handle as simple array
+      const areas = Array.isArray(response.data) ? response.data : [];
       const transformedAreas: Area[] = areas.map((area: any) => ({
         id: String(area.id),
         name: area.name || 'Unknown Area',
@@ -85,14 +119,11 @@ export const getAreas = async (): Promise<Area[]> => {
         } : undefined
       }));
 
-      // Update cache
       areasCache = transformedAreas;
       cacheTimestamp = now;
-
-      console.log('✅ Areas loaded and cached:', transformedAreas.length);
+      
+      console.log('✅ Areas loaded (fallback format):', transformedAreas.length);
       return transformedAreas;
-    } else {
-      throw new Error(response.data.message || 'Failed to load areas');
     }
   } catch (error: any) {
     console.error('❌ Failed to fetch areas:', error);
@@ -108,7 +139,7 @@ export const getAreas = async (): Promise<Area[]> => {
 };
 
 /**
- * Get all agents with area information
+ * Get all agents with area information - FIXED: Handle FastJSON format
  */
 export const getAgents = async (): Promise<Agent[]> => {
   try {
@@ -131,10 +162,62 @@ export const getAgents = async (): Promise<Agent[]> => {
 
     console.log('📋 Agents API response:', response.data);
 
-    if (response.data.success) {
-      const agents = response.data.data || [];
+    // FIXED: Handle FastJSON format directly
+    if (response.data.data) {
+      const agentsData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+      const included = response.data.included || [];
       
-      // Transform the data to ensure consistent structure
+      const transformedAgents: Agent[] = agentsData.map((item: any) => {
+        // Find the related area from included data
+        let area = null;
+        if (item.relationships?.area?.data) {
+          const areaRef = item.relationships.area.data;
+          const includedArea = included.find((inc: any) => 
+            inc.type === 'area' && inc.id === areaRef.id
+          );
+          
+          if (includedArea) {
+            // Find the location for this area
+            let location = null;
+            if (includedArea.relationships?.location?.data) {
+              const locationRef = includedArea.relationships.location.data;
+              const includedLocation = included.find((inc: any) => 
+                inc.type === 'location' && inc.id === locationRef.id
+              );
+              
+              if (includedLocation) {
+                location = {
+                  id: includedLocation.id,
+                  name: includedLocation.attributes.name || 'Unknown Location'
+                };
+              }
+            }
+            
+            area = {
+              id: includedArea.id,
+              name: includedArea.attributes.name || 'Unknown Area',
+              location: location || undefined
+            };
+          }
+        }
+        
+        return {
+          id: String(item.id),
+          name: item.attributes.name || 'Unknown Agent',
+          phone: item.attributes.phone || 'No phone',
+          area: area || undefined
+        };
+      });
+
+      // Update cache
+      agentsCache = transformedAgents;
+      cacheTimestamp = now;
+
+      console.log('✅ Agents loaded and cached:', transformedAgents.length);
+      return transformedAgents;
+    } else {
+      // Fallback: try to handle as simple array
+      const agents = Array.isArray(response.data) ? response.data : [];
       const transformedAgents: Agent[] = agents.map((agent: any) => ({
         id: String(agent.id),
         name: agent.name || 'Unknown Agent',
@@ -149,14 +232,11 @@ export const getAgents = async (): Promise<Agent[]> => {
         } : undefined
       }));
 
-      // Update cache
       agentsCache = transformedAgents;
       cacheTimestamp = now;
-
-      console.log('✅ Agents loaded and cached:', transformedAgents.length);
+      
+      console.log('✅ Agents loaded (fallback format):', transformedAgents.length);
       return transformedAgents;
-    } else {
-      throw new Error(response.data.message || 'Failed to load agents');
     }
   } catch (error: any) {
     console.error('❌ Failed to fetch agents:', error);
