@@ -1,4 +1,4 @@
-// app/admin/PackageSearchScreen.tsx - FIXED with enhanced edit package support
+// app/admin/PackageSearchScreen.tsx - FIXED with enhanced package display and better edit support
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Keyboard,
   Dimensions,
   Alert,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -37,8 +38,11 @@ interface Package {
   delivery_type: string;
   created_at: string;
   available_actions?: AvailableAction[];
-  // Extended fields for edit modal
+  // Extended fields
   sender_phone?: string;
+  sender_email?: string;
+  receiver_email?: string;
+  business_name?: string;
   origin_area?: Area;
   destination_area?: Area;
   origin_agent?: Agent;
@@ -81,6 +85,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState<Package[]>([]);
   const [loading, setLoading] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [hasSearched, setHasSearched] = useState(false);
   const [recentSearches, setRecentSearches] = useState<string[]>([]);
@@ -215,6 +220,14 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     }
   };
 
+  const handleRefresh = async () => {
+    if (hasSearched && searchQuery.trim()) {
+      setRefreshing(true);
+      await handleSearch(searchQuery);
+      setRefreshing(false);
+    }
+  };
+
   const handleScanSuccess = async (result: any) => {
     const packageCode = result.package?.code || result.code || 'PKG-SCANNED-20240814';
     setSearchQuery(packageCode);
@@ -291,13 +304,14 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       console.log('✏️ Starting edit package process for:', packageObj.code);
       setLoadingPackageDetails(packageObj.code);
       
-      // Fetch full package details for editing with all relationships
+      // First try to fetch comprehensive package details
       console.log('📡 Fetching comprehensive package details...');
       const response = await api.get(`/api/v1/packages/${packageObj.code}`, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 10000 // 10 second timeout
       });
       
       console.log('📡 Package details response:', response.data);
@@ -309,26 +323,51 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         console.log('🔍 Validating package data:', {
           hasPackage: !!fullPackageData,
           packageCode: fullPackageData?.code,
-          hasDestinationArea: !!fullPackageData?.destination_area,
-          hasDestinationAgent: !!fullPackageData?.destination_agent,
-          deliveryType: fullPackageData?.delivery_type,
+          hasBasicInfo: !!(fullPackageData?.sender_name && fullPackageData?.receiver_name),
+          hasAreas: !!(fullPackageData?.origin_area && fullPackageData?.destination_area),
           state: fullPackageData?.state
         });
         
         if (!fullPackageData) {
-          throw new Error('Package data is missing');
+          throw new Error('Package data is missing from server response');
         }
         
-        // Ensure package has required basic fields
-        if (!fullPackageData.code || !fullPackageData.state) {
-          throw new Error('Package data is incomplete');
-        }
+        // Ensure package has required basic fields - use fallback data if needed
+        const packageForEdit = {
+          ...fullPackageData,
+          id: fullPackageData.id || packageObj.id,
+          code: fullPackageData.code || packageObj.code,
+          state: fullPackageData.state || packageObj.state,
+          state_display: fullPackageData.state_display || packageObj.state_display,
+          sender_name: fullPackageData.sender_name || packageObj.sender_name || 'Unknown Sender',
+          receiver_name: fullPackageData.receiver_name || packageObj.receiver_name || 'Unknown Receiver',
+          receiver_phone: fullPackageData.receiver_phone || packageObj.receiver_phone || '',
+          route_description: fullPackageData.route_description || packageObj.route_description || 'Unknown Route',
+          cost: fullPackageData.cost || packageObj.cost || 0,
+          delivery_type: fullPackageData.delivery_type || packageObj.delivery_type || 'agent',
+          created_at: fullPackageData.created_at || packageObj.created_at,
+          // Extended fields with fallbacks
+          sender_phone: fullPackageData.sender_phone || packageObj.sender_phone || '',
+          sender_email: fullPackageData.sender_email || packageObj.sender_email || '',
+          receiver_email: fullPackageData.receiver_email || packageObj.receiver_email || '',
+          business_name: fullPackageData.business_name || packageObj.business_name || '',
+          origin_area: fullPackageData.origin_area || packageObj.origin_area,
+          destination_area: fullPackageData.destination_area || packageObj.destination_area,
+          origin_agent: fullPackageData.origin_agent || packageObj.origin_agent,
+          destination_agent: fullPackageData.destination_agent || packageObj.destination_agent,
+          delivery_location: fullPackageData.delivery_location || packageObj.delivery_location || ''
+        };
         
-        console.log('✅ Package data validated, opening edit modal');
-        setEditingPackage(fullPackageData);
+        console.log('✅ Package data prepared for editing:', {
+          code: packageForEdit.code,
+          hasRequiredFields: !!(packageForEdit.sender_name && packageForEdit.receiver_name),
+          hasAreas: !!(packageForEdit.origin_area && packageForEdit.destination_area)
+        });
+        
+        setEditingPackage(packageForEdit);
         setShowEditModal(true);
       } else {
-        throw new Error(response.data.message || 'Failed to load package details');
+        throw new Error(response.data.message || 'Failed to load package details from server');
       }
     } catch (error: any) {
       console.error('❌ Failed to load package details:', error);
@@ -340,11 +379,46 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         url: error.config?.url
       });
       
+      // If API call fails, try to use the package data we already have for basic editing
+      if (error.response?.status !== 404) {
+        console.log('🔄 API call failed, attempting to edit with available data...');
+        
+        // Check if we have enough data from the search result to edit
+        if (packageObj.code && packageObj.state) {
+          const basicPackageForEdit = {
+            ...packageObj,
+            sender_name: packageObj.sender_name || 'Unknown Sender',
+            receiver_name: packageObj.receiver_name || 'Unknown Receiver',
+            receiver_phone: packageObj.receiver_phone || '',
+            sender_phone: packageObj.sender_phone || '',
+            delivery_location: packageObj.delivery_location || ''
+          };
+          
+          console.log('⚠️ Using basic package data for editing');
+          setEditingPackage(basicPackageForEdit);
+          setShowEditModal(true);
+          
+          Toast.show({
+            type: 'info',
+            text1: 'Limited Edit Mode',
+            text2: 'Some advanced features may not be available',
+            position: 'top',
+            visibilityTime: 4000,
+          });
+          
+          return; // Don't show error if we can still edit with basic data
+        }
+      }
+      
       let errorMessage = 'Could not load package details for editing';
       if (error.response?.status === 404) {
-        errorMessage = 'Package not found';
+        errorMessage = 'Package not found on server';
       } else if (error.response?.status === 401) {
         errorMessage = 'Authentication failed. Please login again.';
+      } else if (error.response?.status === 403) {
+        errorMessage = 'You do not have permission to edit this package';
+      } else if (error.message?.includes('timeout')) {
+        errorMessage = 'Request timed out. Please check your connection and try again.';
       } else if (error.response?.data?.message) {
         errorMessage = error.response.data.message;
       } else if (error.message) {
@@ -474,6 +548,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     return ['agent', 'rider', 'warehouse', 'admin'].includes(currentUserRole);
   };
 
+  // ENHANCED: Better package display with more details
   const renderPackageItem = ({ item }: { item: Package }) => (
     <View style={styles.packageItem}>
       <TouchableOpacity
@@ -494,14 +569,45 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 
       <View style={styles.packageDetails}>
         <Text style={styles.routeText}>{item.route_description}</Text>
-        <Text style={styles.detailText}>From: {item.sender_name}</Text>
-        <Text style={styles.detailText}>To: {item.receiver_name}</Text>
-        <Text style={styles.detailText}>Phone: {item.receiver_phone}</Text>
-        <Text style={styles.detailText}>Cost: KES {item.cost}</Text>
-        <Text style={styles.detailText}>Type: {item.delivery_type}</Text>
-        <Text style={styles.detailText}>
-          Created: {new Date(item.created_at).toLocaleDateString()}
-        </Text>
+        
+        {/* ENHANCED: Sender Information */}
+        <View style={styles.contactSection}>
+          <Text style={styles.sectionLabel}>Sender:</Text>
+          <Text style={styles.detailText}>{item.sender_name || 'Unknown Sender'}</Text>
+          {item.sender_phone && (
+            <Text style={styles.phoneText}>📞 {item.sender_phone}</Text>
+          )}
+          {item.sender_email && (
+            <Text style={styles.emailText}>✉️ {item.sender_email}</Text>
+          )}
+          {item.business_name && (
+            <Text style={styles.businessText}>🏢 {item.business_name}</Text>
+          )}
+        </View>
+
+        {/* ENHANCED: Receiver Information */}
+        <View style={styles.contactSection}>
+          <Text style={styles.sectionLabel}>Receiver:</Text>
+          <Text style={styles.detailText}>{item.receiver_name || 'Unknown Receiver'}</Text>
+          {item.receiver_phone && (
+            <Text style={styles.phoneText}>📞 {item.receiver_phone}</Text>
+          )}
+          {item.receiver_email && (
+            <Text style={styles.emailText}>✉️ {item.receiver_email}</Text>
+          )}
+        </View>
+
+        {/* Package Information */}
+        <View style={styles.packageInfoSection}>
+          <Text style={styles.detailText}>💰 Cost: KES {item.cost || 'Unknown'}</Text>
+          <Text style={styles.detailText}>📦 Type: {item.delivery_type || 'Unknown'}</Text>
+          {item.delivery_location && (
+            <Text style={styles.deliveryLocationText}>📍 {item.delivery_location}</Text>
+          )}
+          <Text style={styles.detailText}>
+            📅 Created: {new Date(item.created_at).toLocaleDateString()}
+          </Text>
+        </View>
       </View>
 
       {/* ENHANCED: Edit button with better loading state */}
@@ -524,7 +630,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
               styles.editButtonText,
               loadingPackageDetails === item.code && styles.editButtonTextLoading
             ]}>
-              {loadingPackageDetails === item.code ? 'Loading...' : 'Edit'}
+              {loadingPackageDetails === item.code ? 'Loading...' : 'Edit Package'}
             </Text>
           </TouchableOpacity>
         </View>
@@ -716,6 +822,14 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
             showsVerticalScrollIndicator={false}
             ListEmptyComponent={renderEmptyState}
             contentContainerStyle={searchResults.length === 0 ? styles.emptyContainer : styles.listContainer}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                tintColor="#667eea"
+                colors={['#667eea']}
+              />
+            }
           />
         )}
       </View>
@@ -923,16 +1037,65 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#667eea',
+    marginBottom: 16,
+  },
+  
+  // ENHANCED: Better contact and info sections
+  contactSection: {
+    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+    borderRadius: 12,
+    padding: 12,
     marginBottom: 12,
+    borderLeftWidth: 3,
+    borderLeftColor: '#667eea',
+  },
+  sectionLabel: {
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#667eea',
+    marginBottom: 6,
+    textTransform: 'uppercase',
   },
   detailText: {
     fontSize: 14,
-    color: '#a0aec0',
-    marginBottom: 6,
+    color: '#fff',
+    marginBottom: 4,
+    fontWeight: '600',
+  },
+  phoneText: {
+    fontSize: 13,
+    color: '#34C759',
+    marginBottom: 2,
+    fontWeight: '500',
+  },
+  emailText: {
+    fontSize: 13,
+    color: '#007AFF',
+    marginBottom: 2,
+    fontWeight: '500',
+  },
+  businessText: {
+    fontSize: 13,
+    color: '#FF9500',
+    marginBottom: 2,
+    fontWeight: '500',
+    fontStyle: 'italic',
+  },
+  packageInfoSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.08)',
+  },
+  deliveryLocationText: {
+    fontSize: 13,
+    color: '#FFB000',
+    marginBottom: 4,
     fontWeight: '500',
   },
   
-  // ENHANCED: Edit button styles with loading states
+  // Edit button styles with loading states
   editButtonContainer: {
     borderTopWidth: 1,
     borderTopColor: '#2d3748',
@@ -947,9 +1110,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#667eea',
     borderRadius: 8,
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 16,
-    gap: 6,
+    gap: 8,
   },
   editButtonLoading: {
     backgroundColor: 'rgba(102, 126, 234, 0.05)',
