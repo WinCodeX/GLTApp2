@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Updated with Fixed Printer Connection
+// app/admin/settings.tsx - Fixed Printer Connection State Management
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -54,6 +54,7 @@ const SettingsScreen: React.FC = () => {
   const [autoSync, setAutoSync] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [bluetoothPermissions, setBluetoothPermissions] = useState(false);
+  const [checkingConnection, setCheckingConnection] = useState(false);
 
   const appInfo: AppInfo = {
     version: '2.1.0',
@@ -66,6 +67,13 @@ const SettingsScreen: React.FC = () => {
     loadStoredSettings();
   }, []);
 
+  // ENHANCED: Better connection state verification
+  useEffect(() => {
+    if (bluetoothEnabled && connectedPrinterAddress) {
+      verifyPrinterConnection();
+    }
+  }, [bluetoothEnabled, connectedPrinterAddress]);
+
   const loadStoredSettings = async () => {
     try {
       const storedSettings = await AsyncStorage.getItem('app_settings');
@@ -76,16 +84,102 @@ const SettingsScreen: React.FC = () => {
         setDarkMode(settings.darkMode ?? true);
       }
 
+      // ENHANCED: Load and verify stored printer connection
       const storedPrinter = await AsyncStorage.getItem('connected_printer');
       if (storedPrinter) {
         const printer = JSON.parse(storedPrinter);
+        console.log('Found stored printer:', printer);
+        
+        // Set the state immediately for UI responsiveness
         setConnectedPrinter(printer.name);
         setConnectedPrinterAddress(printer.address);
         setPrinterConnected(true);
+        
+        // Then verify the actual connection if Bluetooth is available
+        if (bluetoothEnabled) {
+          await verifyStoredPrinterConnection(printer);
+        }
       }
     } catch (error) {
       console.error('Failed to load settings:', error);
     }
+  };
+
+  // NEW: Verify stored printer connection against actual device state
+  const verifyStoredPrinterConnection = async (storedPrinter: any) => {
+    try {
+      console.log('Verifying stored printer connection for:', storedPrinter.name);
+      
+      const isConnected = await RNBluetoothClassic.isDeviceConnected(storedPrinter.address);
+      console.log('Device connection status:', isConnected);
+      
+      if (!isConnected) {
+        console.log('Stored printer is not actually connected, clearing state');
+        // Clear the stored connection since it's not valid
+        await clearPrinterConnection();
+        
+        Toast.show({
+          type: 'warning',
+          text1: 'Printer Disconnected',
+          text2: `${storedPrinter.name} is no longer connected`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } else {
+        console.log('Printer connection verified successfully');
+        // Update device list to reflect connection
+        setBluetoothDevices(prev =>
+          prev.map(d => ({
+            ...d,
+            connected: d.address === storedPrinter.address ? true : d.connected,
+          }))
+        );
+      }
+    } catch (error) {
+      console.error('Failed to verify stored printer connection:', error);
+      // If verification fails, clear the stored connection
+      await clearPrinterConnection();
+    }
+  };
+
+  // NEW: Verify current printer connection
+  const verifyPrinterConnection = async () => {
+    if (!connectedPrinterAddress || checkingConnection) return;
+    
+    setCheckingConnection(true);
+    try {
+      const isConnected = await RNBluetoothClassic.isDeviceConnected(connectedPrinterAddress);
+      
+      if (!isConnected && printerConnected) {
+        console.log('Printer connection lost, updating state');
+        await clearPrinterConnection();
+        
+        Toast.show({
+          type: 'warning',
+          text1: 'Connection Lost',
+          text2: `${connectedPrinter} has been disconnected`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to verify printer connection:', error);
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  // NEW: Clear printer connection state
+  const clearPrinterConnection = async () => {
+    setPrinterConnected(false);
+    setConnectedPrinter(null);
+    setConnectedPrinterAddress(null);
+    await AsyncStorage.removeItem('connected_printer');
+    
+    // Update device list
+    setBluetoothDevices(prev =>
+      prev.map(d => ({ ...d, connected: d.type === 'printer' ? false : d.connected }))
+    );
   };
 
   const saveSettings = async () => {
@@ -212,8 +306,46 @@ const SettingsScreen: React.FC = () => {
       
       setBluetoothDevices(formattedDevices);
       console.log('Loaded paired devices:', formattedDevices.length);
+      
+      // ENHANCED: Check for connected devices and update state
+      await updateConnectedDevicesState(formattedDevices);
     } catch (error) {
       console.error('Failed to load paired devices:', error);
+    }
+  };
+
+  // NEW: Update device connection states based on actual connections
+  const updateConnectedDevicesState = async (devices: BluetoothDevice[]) => {
+    try {
+      const connectedDevices = await RNBluetoothClassic.getConnectedDevices();
+      console.log('Currently connected devices:', connectedDevices.length);
+      
+      const updatedDevices = devices.map(device => {
+        const isConnected = connectedDevices.some(connectedDevice => 
+          connectedDevice.address === device.address
+        );
+        return { ...device, connected: isConnected };
+      });
+      
+      setBluetoothDevices(updatedDevices);
+      
+      // Check if our stored printer is among connected devices
+      const connectedPrinters = updatedDevices.filter(d => d.connected && d.type === 'printer');
+      if (connectedPrinters.length > 0 && !printerConnected) {
+        const printer = connectedPrinters[0];
+        console.log('Found connected printer, updating state:', printer.name);
+        
+        setConnectedPrinter(printer.name);
+        setConnectedPrinterAddress(printer.address);
+        setPrinterConnected(true);
+        
+        await AsyncStorage.setItem('connected_printer', JSON.stringify({
+          name: printer.name,
+          address: printer.address,
+        }));
+      }
+    } catch (error) {
+      console.error('Failed to update connected devices state:', error);
     }
   };
 
@@ -288,10 +420,7 @@ const SettingsScreen: React.FC = () => {
       }
 
       setBluetoothDevices(prev => prev.map(d => ({ ...d, connected: false })));
-      setPrinterConnected(false);
-      setConnectedPrinter(null);
-      setConnectedPrinterAddress(null);
-      await AsyncStorage.removeItem('connected_printer');
+      await clearPrinterConnection();
     } catch (error) {
       console.error('Failed to disconnect all devices:', error);
     }
@@ -318,7 +447,7 @@ const SettingsScreen: React.FC = () => {
     await scanForDevices();
   };
 
-  // NEW FUNCTION: Handle printer disconnect
+  // ENHANCED: Better printer disconnect handling
   const handlePrinterDisconnect = async () => {
     if (!connectedPrinterAddress) {
       Toast.show({
@@ -332,8 +461,18 @@ const SettingsScreen: React.FC = () => {
     }
 
     try {
-      // Disconnect from the printer
-      await RNBluetoothClassic.disconnectFromDevice(connectedPrinterAddress);
+      console.log('Disconnecting from printer:', connectedPrinter);
+      
+      // First check if device is actually connected
+      const isConnected = await RNBluetoothClassic.isDeviceConnected(connectedPrinterAddress);
+      
+      if (isConnected) {
+        // Disconnect from the printer
+        await RNBluetoothClassic.disconnectFromDevice(connectedPrinterAddress);
+        console.log('Successfully disconnected from printer');
+      } else {
+        console.log('Device was not connected, clearing state only');
+      }
 
       // Update UI state
       setBluetoothDevices(prev =>
@@ -344,12 +483,7 @@ const SettingsScreen: React.FC = () => {
       );
 
       // Clear printer connection state
-      setPrinterConnected(false);
-      setConnectedPrinter(null);
-      setConnectedPrinterAddress(null);
-      
-      // Remove from storage
-      await AsyncStorage.removeItem('connected_printer');
+      await clearPrinterConnection();
 
       Toast.show({
         type: 'success',
@@ -361,10 +495,13 @@ const SettingsScreen: React.FC = () => {
     } catch (error) {
       console.error('Failed to disconnect printer:', error);
       
+      // Even if disconnect fails, clear the state
+      await clearPrinterConnection();
+      
       Toast.show({
-        type: 'error',
-        text1: 'Disconnect Failed',
-        text2: 'Failed to disconnect from printer',
+        type: 'warning',
+        text1: 'Disconnect Complete',
+        text2: 'Printer connection has been cleared',
         position: 'top',
         visibilityTime: 3000,
       });
@@ -435,8 +572,11 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
+  // ENHANCED: Better connection handling with state verification
   const connectToDevice = async (device: BluetoothDevice) => {
     try {
+      console.log('Attempting to connect to device:', device.name);
+      
       Toast.show({
         type: 'info',
         text1: 'Connecting...',
@@ -467,6 +607,9 @@ const SettingsScreen: React.FC = () => {
       const connection = await RNBluetoothClassic.connectToDevice(device.address);
       
       if (connection) {
+        console.log('Successfully connected to device:', device.name);
+        
+        // Update device list
         setBluetoothDevices(prev =>
           prev.map(d => ({
             ...d,
@@ -475,6 +618,18 @@ const SettingsScreen: React.FC = () => {
         );
 
         if (device.type === 'printer') {
+          console.log('Connected device is a printer, updating printer state');
+          
+          // Clear any existing printer connection first
+          if (printerConnected && connectedPrinterAddress && connectedPrinterAddress !== device.address) {
+            try {
+              await RNBluetoothClassic.disconnectFromDevice(connectedPrinterAddress);
+            } catch (error) {
+              console.log('Failed to disconnect previous printer, continuing');
+            }
+          }
+          
+          // Set new printer connection
           setPrinterConnected(true);
           setConnectedPrinter(device.name);
           setConnectedPrinterAddress(device.address);
@@ -483,6 +638,8 @@ const SettingsScreen: React.FC = () => {
             name: device.name,
             address: device.address,
           }));
+          
+          console.log('Printer connection state updated');
         }
 
         setShowDeviceModal(false);
@@ -522,10 +679,7 @@ const SettingsScreen: React.FC = () => {
       );
 
       if (device.type === 'printer') {
-        setPrinterConnected(false);
-        setConnectedPrinter(null);
-        setConnectedPrinterAddress(null);
-        await AsyncStorage.removeItem('connected_printer');
+        await clearPrinterConnection();
       }
 
       Toast.show({
@@ -561,13 +715,17 @@ const SettingsScreen: React.FC = () => {
     }
 
     try {
-      const testData = "\n--- TEST PRINT ---\n\nThis is a test print from the admin app.\n\nTimestamp: " + new Date().toLocaleString() + "\n\n--- END TEST ---\n\n\n";
+      console.log('Testing printer connection to:', connectedPrinter);
       
       const isConnected = await RNBluetoothClassic.isDeviceConnected(connectedPrinterAddress);
       if (!isConnected) {
+        console.log('Printer is not actually connected, clearing state');
+        await clearPrinterConnection();
         throw new Error('Printer is not connected');
       }
 
+      const testData = "\n--- TEST PRINT ---\n\nThis is a test print from the admin app.\n\nTimestamp: " + new Date().toLocaleString() + "\n\n--- END TEST ---\n\n\n";
+      
       await RNBluetoothClassic.writeToDevice(connectedPrinterAddress, testData);
 
       Toast.show({
@@ -682,21 +840,26 @@ const SettingsScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // NEW FUNCTION: Render printer connection setting with proper connect/disconnect logic
+  // ENHANCED: Better printer connection display with connection verification
   const renderPrinterConnectionSetting = () => {
+    const isActuallyConnected = printerConnected && connectedPrinter && connectedPrinterAddress;
+    
+    console.log('Rendering printer setting - connected:', printerConnected, 'printer:', connectedPrinter);
+    
     return renderSettingItem(
       'print',
       'Printer Connection',
-      printerConnected 
+      isActuallyConnected 
         ? `Connected to ${connectedPrinter}` 
         : 'No printer connected',
       <View style={styles.printerActions}>
-        {printerConnected ? (
+        {isActuallyConnected ? (
           // When printer is connected, show Test and Disconnect buttons
           <>
             <TouchableOpacity
               style={styles.testButton}
               onPress={testPrinterConnection}
+              disabled={checkingConnection}
             >
               <LinearGradient
                 colors={['#34C759', '#30A46C']}
@@ -709,12 +872,15 @@ const SettingsScreen: React.FC = () => {
             <TouchableOpacity
               style={styles.disconnectButton}
               onPress={handlePrinterDisconnect}
+              disabled={checkingConnection}
             >
               <LinearGradient
                 colors={['#FF6B6B', '#FF5252']}
                 style={styles.disconnectButtonGradient}
               >
-                <Text style={styles.disconnectButtonText}>Disconnect</Text>
+                <Text style={styles.disconnectButtonText}>
+                  {checkingConnection ? 'Checking...' : 'Disconnect'}
+                </Text>
               </LinearGradient>
             </TouchableOpacity>
           </>
@@ -723,17 +889,38 @@ const SettingsScreen: React.FC = () => {
           <TouchableOpacity
             style={styles.connectButton}
             onPress={handlePrinterConnect}
+            disabled={!bluetoothEnabled || checkingConnection}
           >
             <LinearGradient
-              colors={['#667eea', '#764ba2']}
+              colors={!bluetoothEnabled ? ['#718096', '#a0aec0'] : ['#667eea', '#764ba2']}
               style={styles.connectButtonGradient}
             >
-              <Text style={styles.connectButtonText}>Connect</Text>
+              <Text style={styles.connectButtonText}>
+                {checkingConnection ? 'Checking...' : 'Connect'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
       </View>
     );
+  };
+
+  // NEW: Add refresh connection status function
+  const refreshConnectionStatus = async () => {
+    if (!bluetoothEnabled) return;
+    
+    setCheckingConnection(true);
+    try {
+      await updateConnectedDevicesState(bluetoothDevices);
+      
+      if (connectedPrinterAddress) {
+        await verifyPrinterConnection();
+      }
+    } catch (error) {
+      console.error('Failed to refresh connection status:', error);
+    } finally {
+      setCheckingConnection(false);
+    }
   };
 
   const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => (
@@ -772,7 +959,22 @@ const SettingsScreen: React.FC = () => {
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Bluetooth Section */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>Bluetooth</Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Bluetooth</Text>
+          {bluetoothEnabled && (
+            <TouchableOpacity
+              style={styles.refreshButton}
+              onPress={refreshConnectionStatus}
+              disabled={checkingConnection}
+            >
+              <MaterialIcons 
+                name="refresh" 
+                size={20} 
+                color={checkingConnection ? '#718096' : '#667eea'} 
+              />
+            </TouchableOpacity>
+          )}
+        </View>
 
         {renderSettingItem(
           'bluetooth',
@@ -787,7 +989,7 @@ const SettingsScreen: React.FC = () => {
           />
         )}
 
-        {/* UPDATED: Use the new printer connection setting function */}
+        {/* ENHANCED: Use the improved printer connection setting function */}
         {renderPrinterConnectionSetting()}
       </View>
 
@@ -1030,12 +1232,24 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 32,
   },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 16,
+    paddingHorizontal: 4,
+  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 16,
-    paddingHorizontal: 4,
+  },
+  refreshButton: {
+    padding: 8,
+    borderRadius: 8,
+    backgroundColor: '#16213e',
+    borderWidth: 1,
+    borderColor: '#2d3748',
   },
   settingItem: {
     backgroundColor: '#1a1a2e',
@@ -1116,7 +1330,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
-  // NEW STYLES: Disconnect button
   disconnectButton: {
     borderRadius: 12,
     overflow: 'hidden',
