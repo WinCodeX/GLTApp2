@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - ENHANCED with better debugging and data handling
+// components/PackageCreationModal.tsx - ENHANCED with keyboard handling fix and fragile delivery
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -13,6 +13,8 @@ import {
   ActivityIndicator,
   StyleSheet,
   KeyboardAvoidingView,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -48,6 +50,9 @@ const STEP_TITLES = [
 
 type SortOption = 'name' | 'location' | 'area';
 type SortDirection = 'asc' | 'desc';
+
+// Enhanced delivery type with fragile option
+type DeliveryType = 'fragile' | 'doorstep' | 'agent';
 
 // Storage keys for caching
 const STORAGE_KEYS = {
@@ -143,8 +148,8 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Form data
-  const [packageData, setPackageData] = useState<PackageData>({
+  // Form data with updated delivery type
+  const [packageData, setPackageData] = useState<PackageData & { delivery_type: DeliveryType }>({
     sender_name: '',
     sender_phone: '',
     receiver_name: '',
@@ -153,7 +158,7 @@ export default function PackageCreationModal({
     destination_area_id: '',
     origin_agent_id: '',
     destination_agent_id: '',
-    delivery_type: 'doorstep'
+    delivery_type: 'doorstep' as DeliveryType
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -328,7 +333,7 @@ export default function PackageCreationModal({
       destination_area_id: '',
       origin_agent_id: '',
       destination_agent_id: '',
-      delivery_type: 'doorstep'
+      delivery_type: 'doorstep' as DeliveryType
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -351,7 +356,7 @@ export default function PackageCreationModal({
     });
   }, [slideAnim, onClose]);
 
-  // Enhanced area-based cost calculation with detailed debugging
+  // Enhanced area-based cost calculation with fragile delivery pricing
   const calculateCost = useCallback(() => {
     console.log('💰 Starting cost calculation...');
     
@@ -409,7 +414,7 @@ export default function PackageCreationModal({
       deliveryType: packageData.delivery_type
     });
     
-    // Area-based pricing logic
+    // Area-based pricing logic with fragile delivery
     const isIntraArea = String(originArea.id) === String(selectedDestinationArea.id);
     const isIntraLocation = String(originArea.location_id) === String(selectedDestinationArea.location_id);
     
@@ -424,7 +429,19 @@ export default function PackageCreationModal({
     
     let baseCost = 0;
     
-    if (packageData.delivery_type === 'agent') {
+    if (packageData.delivery_type === 'fragile') {
+      // Fragile delivery pricing (premium rates)
+      if (isIntraArea) {
+        baseCost = 350;
+        console.log('💰 Same area fragile delivery: KES 350');
+      } else if (isIntraLocation) {
+        baseCost = 450;
+        console.log('💰 Same location, different areas fragile delivery: KES 450');
+      } else {
+        baseCost = 580;
+        console.log('💰 Different locations fragile delivery: KES 580');
+      }
+    } else if (packageData.delivery_type === 'agent') {
       // Agent-to-Agent pricing
       if (isIntraArea) {
         baseCost = 120;
@@ -460,7 +477,7 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type]);
 
-  const updatePackageData = useCallback((field: keyof PackageData, value: string) => {
+  const updatePackageData = useCallback((field: keyof (PackageData & { delivery_type: DeliveryType }), value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
@@ -651,7 +668,7 @@ export default function PackageCreationModal({
           return packageData.destination_area_id.length > 0;
         }
       case 4:
-        if (packageData.delivery_type === 'doorstep') {
+        if (packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') {
           return deliveryLocation.trim().length > 0;
         }
         return true;
@@ -981,31 +998,34 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
+  // UPDATED: Enhanced delivery method selection with fragile option
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
       <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
       
       <View style={styles.deliveryOptions}>
+        {/* Fragile Delivery - First option */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
-            packageData.delivery_type === 'agent' && styles.selectedDeliveryOption
+            packageData.delivery_type === 'fragile' && styles.selectedDeliveryOption
           ]}
-          onPress={() => updatePackageData('delivery_type', 'agent')}
+          onPress={() => updatePackageData('delivery_type', 'fragile')}
         >
           <View style={styles.deliveryOptionContent}>
-            <Feather name="user" size={24} color="#fff" />
+            <Feather name="alert-triangle" size={24} color="#ff6b6b" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Agent to Agent</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Collect from destination agent</Text>
+              <Text style={styles.deliveryOptionTitle}>Fragile Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Special handling for delicate items</Text>
             </View>
-            {packageData.delivery_type === 'agent' && (
+            {packageData.delivery_type === 'fragile' && (
               <Feather name="check-circle" size={20} color="#10b981" />
             )}
           </View>
         </TouchableOpacity>
 
+        {/* Doorstep Delivery - Second option */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1016,10 +1036,30 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="home" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Agent to Doorstep</Text>
+              <Text style={styles.deliveryOptionTitle}>Doorstep Delivery</Text>
               <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
             </View>
             {packageData.delivery_type === 'doorstep' && (
+              <Feather name="check-circle" size={20} color="#10b981" />
+            )}
+          </View>
+        </TouchableOpacity>
+
+        {/* Agent Delivery - Third option */}
+        <TouchableOpacity
+          style={[
+            styles.deliveryOption,
+            packageData.delivery_type === 'agent' && styles.selectedDeliveryOption
+          ]}
+          onPress={() => updatePackageData('delivery_type', 'agent')}
+        >
+          <View style={styles.deliveryOptionContent}>
+            <Feather name="user" size={24} color="#fff" />
+            <View style={styles.deliveryOptionText}>
+              <Text style={styles.deliveryOptionTitle}>Agent Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Collect from destination agent</Text>
+            </View>
+            {packageData.delivery_type === 'agent' && (
               <Feather name="check-circle" size={20} color="#10b981" />
             )}
           </View>
@@ -1150,22 +1190,39 @@ export default function PackageCreationModal({
   const renderDeliveryLocation = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
-      <Text style={styles.stepSubtitle}>Provide the exact delivery address</Text>
+      <Text style={styles.stepSubtitle}>
+        {packageData.delivery_type === 'fragile' 
+          ? 'Provide specific handling instructions and delivery address'
+          : 'Provide the exact delivery address'
+        }
+      </Text>
       
       <View style={styles.formContainer}>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Enter specific address, building name, floor, etc."
+          placeholder={
+            packageData.delivery_type === 'fragile' 
+              ? "Enter specific address, special handling instructions, fragile item details..."
+              : "Enter specific address, building name, floor, etc."
+          }
           placeholderTextColor="#888"
           value={deliveryLocation}
           onChangeText={setDeliveryLocation}
           multiline
-          numberOfLines={4}
+          numberOfLines={packageData.delivery_type === 'fragile' ? 6 : 4}
           textAlignVertical="top"
         />
+        {packageData.delivery_type === 'fragile' && (
+          <View style={styles.fragileNotice}>
+            <Feather name="info" size={16} color="#ff6b6b" />
+            <Text style={styles.fragileNoticeText}>
+              Include details about the fragile items and any special handling requirements
+            </Text>
+          </View>
+        )}
       </View>
     </View>
-  ), [deliveryLocation]);
+  ), [deliveryLocation, packageData.delivery_type]);
 
   const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
@@ -1217,8 +1274,16 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'doorstep' ? 'Agent to Doorstep' : 'Agent to Agent'}
+            {packageData.delivery_type === 'fragile' ? 'Fragile Delivery' :
+             packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
           </Text>
+          
+          {packageData.delivery_type === 'fragile' && (
+            <View style={styles.fragileInfo}>
+              <Feather name="alert-triangle" size={16} color="#ff6b6b" />
+              <Text style={styles.fragileInfoText}>Special handling required</Text>
+            </View>
+          )}
           
           {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
             <View style={styles.agentInfo}>
@@ -1227,9 +1292,11 @@ export default function PackageCreationModal({
             </View>
           )}
 
-          {packageData.delivery_type === 'doorstep' && deliveryLocation && (
+          {(packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') && deliveryLocation && (
             <View style={styles.deliveryLocationInfo}>
-              <Text style={styles.confirmationSubDetail}>Delivery Address:</Text>
+              <Text style={styles.confirmationSubDetail}>
+                {packageData.delivery_type === 'fragile' ? 'Delivery Address & Instructions:' : 'Delivery Address:'}
+              </Text>
               <Text style={styles.confirmationDetail}>{deliveryLocation}</Text>
             </View>
           )}
@@ -1238,7 +1305,12 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Estimated Cost</Text>
           {estimatedCost ? (
-            <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
+            <View style={styles.costDisplay}>
+              <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
+              {packageData.delivery_type === 'fragile' && (
+                <Text style={styles.fragileNoteText}>*Includes fragile handling surcharge</Text>
+              )}
+            </View>
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
           )}
@@ -1254,6 +1326,9 @@ export default function PackageCreationModal({
               </Text>
               <Text style={styles.debugText}>
                 Same Location: {selectedOriginAgent?.area?.location_id === selectedDestinationArea?.location_id ? 'Yes' : 'No'}
+              </Text>
+              <Text style={styles.debugText}>
+                Delivery Type: {packageData.delivery_type}
               </Text>
             </View>
           )}
@@ -1397,33 +1472,39 @@ export default function PackageCreationModal({
 
   return (
     <Modal visible={visible} transparent animationType="none">
-      <KeyboardAvoidingView 
-        style={styles.keyboardContainer}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-      >
-        <View style={styles.overlay}>
-          <Animated.View
-            style={[
-              styles.modalContainer,
-              { transform: [{ translateY: slideAnim }] }
-            ]}
-          >
-            <LinearGradient
-              colors={['#1a1a2e', '#16213e', '#0f1419']}
-              style={styles.modalContent}
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.safeArea}>
+        <KeyboardAvoidingView 
+          style={styles.keyboardContainer}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
+        >
+          <View style={styles.overlay}>
+            <Animated.View
+              style={[
+                styles.modalContainer,
+                { transform: [{ translateY: slideAnim }] }
+              ]}
             >
-              {renderMainContent()}
-            </LinearGradient>
-          </Animated.View>
-        </View>
-      </KeyboardAvoidingView>
+              <LinearGradient
+                colors={['#1a1a2e', '#16213e', '#0f1419']}
+                style={styles.modalContent}
+              >
+                {renderMainContent()}
+              </LinearGradient>
+            </Animated.View>
+          </View>
+        </KeyboardAvoidingView>
+      </SafeAreaView>
     </Modal>
   );
 }
 
-// Enhanced styles with additional components
+// Enhanced styles with keyboard handling and fragile delivery improvements
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+  },
   keyboardContainer: {
     flex: 1,
   },
@@ -1473,6 +1554,43 @@ const styles = StyleSheet.create({
     color: '#7c3aed',
     fontWeight: '600',
     textAlign: 'center',
+  },
+  
+  // NEW: Fragile delivery styles
+  fragileNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 12,
+    gap: 8,
+  },
+  fragileNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ff6b6b',
+    lineHeight: 20,
+  },
+  fragileInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 8,
+    gap: 8,
+  },
+  fragileInfoText: {
+    fontSize: 14,
+    color: '#ff6b6b',
+    fontWeight: '500',
+  },
+  costDisplay: {
+    alignItems: 'flex-start',
+  },
+  fragileNoteText: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 4,
+    fontStyle: 'italic',
   },
   
   // Header styles
