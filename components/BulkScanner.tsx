@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - Updated with all roles and proper API integration
+// components/BulkScanner.tsx - Updated with Print Integration
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -19,6 +19,7 @@ import * as SecureStore from 'expo-secure-store';
 import QRScanner from './QRScanner';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
+import PrintReceiptService from '../services/PrintReceiptService';
 
 interface ScannedPackage {
   code: string;
@@ -28,6 +29,7 @@ interface ScannedPackage {
   state: string;
   scanned_at: Date;
   processed: boolean;
+  printed?: boolean;
   error?: string;
   offline?: boolean;
 }
@@ -37,6 +39,7 @@ interface BulkScanResult {
   success: boolean;
   message: string;
   new_state?: string;
+  printed?: boolean;
 }
 
 interface BulkScannerProps {
@@ -61,13 +64,16 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   const [showManualEntry, setShowManualEntry] = useState(false);
   const [isOnline, setIsOnline] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
+  const [printingProgress, setPrintingProgress] = useState<string>('');
 
   const offlineService = OfflineScanningService.getInstance();
+  const printService = PrintReceiptService.getInstance();
 
   useEffect(() => {
     if (visible) {
       setScannedPackages([]);
       setManualCode('');
+      setPrintingProgress('');
       loadCurrentUser();
       checkConnectivity();
     }
@@ -153,6 +159,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         state: packageInfo.state || 'unknown',
         scanned_at: new Date(),
         processed: false,
+        printed: false,
         error: canPerformAction.canPerform ? undefined : canPerformAction.reason,
         offline: !online
       };
@@ -338,6 +345,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
   const performBulkAction = async () => {
     setProcessing(true);
+    setPrintingProgress('');
     
     const validPackages = scannedPackages.filter(pkg => !pkg.error);
     const packageCodes = validPackages.map(pkg => pkg.code);
@@ -347,10 +355,10 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       
       if (!online) {
         // Process offline
-        await processBulkOffline(packageCodes);
+        await processBulkOffline(packageCodes, validPackages);
       } else {
         // Process online
-        await processBulkOnline(packageCodes);
+        await processBulkOnline(packageCodes, validPackages);
       }
     } catch (error) {
       console.error('Bulk processing error:', error);
@@ -363,12 +371,65 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       });
     } finally {
       setProcessing(false);
+      setPrintingProgress('');
     }
   };
 
-  const processBulkOffline = async (packageCodes: string[]) => {
-    const results: BulkScanResult[] = [];
+  // NEW FUNCTION: Handle bulk printing
+  const processBulkPrint = async (packages: ScannedPackage[]): Promise<{successCount: number, failCount: number}> => {
+    let successCount = 0;
+    let failCount = 0;
+    
+    for (let i = 0; i < packages.length; i++) {
+      const pkg = packages[i];
+      
+      try {
+        setPrintingProgress(`Printing ${i + 1} of ${packages.length}: ${pkg.code}`);
+        
+        await printService.printPackageReceipt({
+          code: pkg.code,
+          receiver_name: pkg.receiver_name,
+          route_description: pkg.route_description,
+          sender_name: pkg.sender_name,
+        });
+        
+        successCount++;
+        
+        // Update package status
+        setScannedPackages(prev => prev.map(p => 
+          p.code === pkg.code ? { ...p, printed: true } : p
+        ));
+        
+        // Small delay between prints to avoid overwhelming the printer
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+      } catch (error) {
+        console.error(`Failed to print ${pkg.code}:`, error);
+        failCount++;
+        
+        // Mark package with print error
+        setScannedPackages(prev => prev.map(p => 
+          p.code === pkg.code 
+            ? { ...p, error: `Print failed: ${error.message || 'Unknown error'}` } 
+            : p
+        ));
+      }
+    }
+    
+    return { successCount, failCount };
+  };
 
+  const processBulkOffline = async (packageCodes: string[], packages: ScannedPackage[]) => {
+    const results: BulkScanResult[] = [];
+    let printResults = { successCount: 0, failCount: 0 };
+
+    // If it's a print action, handle printing first
+    if (actionType === 'print') {
+      setPrintingProgress('Starting bulk print...');
+      printResults = await processBulkPrint(packages);
+    }
+
+    // Store scan actions for later sync
     for (const code of packageCodes) {
       try {
         const result = await offlineService.storeScanAction(
@@ -382,10 +443,14 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
           }
         );
 
+        const packagePrinted = actionType === 'print' ? 
+          packages.find(p => p.code === code)?.printed || false : false;
+
         results.push({
           package_code: code,
           success: result.success,
-          message: result.success ? 'Queued for sync' : result.message
+          message: result.success ? 'Queued for sync' : result.message,
+          printed: packagePrinted
         });
 
         // Update package status locally
@@ -398,20 +463,32 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         results.push({
           package_code: code,
           success: false,
-          message: 'Failed to queue offline'
+          message: 'Failed to queue offline',
+          printed: false
         });
       }
     }
 
     const successful = results.filter(r => r.success).length;
     
-    Toast.show({
-      type: 'success',
-      text1: 'Queued for Sync',
-      text2: `${successful} of ${results.length} packages queued for sync when online`,
-      position: 'top',
-      visibilityTime: 5000,
-    });
+    // Show appropriate success message
+    if (actionType === 'print') {
+      Toast.show({
+        type: printResults.failCount === 0 ? 'success' : 'warning',
+        text1: 'Bulk Print Complete',
+        text2: `${printResults.successCount} printed, ${printResults.failCount} failed. ${successful} queued for sync.`,
+        position: 'top',
+        visibilityTime: 6000,
+      });
+    } else {
+      Toast.show({
+        type: 'success',
+        text1: 'Queued for Sync',
+        text2: `${successful} of ${results.length} packages queued for sync when online`,
+        position: 'top',
+        visibilityTime: 5000,
+      });
+    }
 
     onBulkComplete?.(results);
     
@@ -419,15 +496,27 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     setTimeout(() => onClose(), 2000);
   };
 
-  const processBulkOnline = async (packageCodes: string[]) => {
+  const processBulkOnline = async (packageCodes: string[], packages: ScannedPackage[]) => {
     try {
+      let printResults = { successCount: 0, failCount: 0 };
+
+      // If it's a print action, handle printing first
+      if (actionType === 'print') {
+        setPrintingProgress('Starting bulk print...');
+        printResults = await processBulkPrint(packages);
+      }
+
+      // Then proceed with API call for tracking/logging
+      setPrintingProgress('Syncing with server...');
+      
       const response = await api.post('/api/v1/scanning/bulk_scan', {
         package_codes: packageCodes,
         action_type: actionType,
         metadata: {
           bulk_operation: true,
           location: await getCurrentLocation(),
-          device_info: getDeviceInfo()
+          device_info: getDeviceInfo(),
+          print_results: actionType === 'print' ? printResults : undefined
         }
       });
 
@@ -453,27 +542,48 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         const successful = response.data.data.summary.successful;
         const total = response.data.data.summary.total;
 
-        if (successful === total) {
-          Toast.show({
-            type: 'success',
-            text1: 'Bulk Action Complete',
-            text2: `Successfully processed all ${total} packages.`,
-            position: 'top',
-            visibilityTime: 4000,
-          });
+        // Show appropriate success message based on action type
+        if (actionType === 'print') {
+          if (printResults.failCount === 0 && successful === total) {
+            Toast.show({
+              type: 'success',
+              text1: 'Bulk Print Complete',
+              text2: `Successfully printed and processed all ${total} packages.`,
+              position: 'top',
+              visibilityTime: 4000,
+            });
+          } else {
+            Toast.show({
+              type: 'warning',
+              text1: 'Bulk Print Partial Success',
+              text2: `${printResults.successCount} printed, ${printResults.failCount} print failures. ${successful} processed.`,
+              position: 'top',
+              visibilityTime: 6000,
+            });
+          }
         } else {
-          Toast.show({
-            type: 'warning',
-            text1: 'Bulk Action Partial',
-            text2: `${successful} of ${total} packages processed successfully.`,
-            position: 'top',
-            visibilityTime: 5000,
-          });
+          if (successful === total) {
+            Toast.show({
+              type: 'success',
+              text1: 'Bulk Action Complete',
+              text2: `Successfully processed all ${total} packages.`,
+              position: 'top',
+              visibilityTime: 4000,
+            });
+          } else {
+            Toast.show({
+              type: 'warning',
+              text1: 'Bulk Action Partial',
+              text2: `${successful} of ${total} packages processed successfully.`,
+              position: 'top',
+              visibilityTime: 5000,
+            });
+          }
         }
 
         onBulkComplete?.(results);
 
-        if (successful === total) {
+        if (successful === total && (actionType !== 'print' || printResults.failCount === 0)) {
           setTimeout(() => onClose(), 2000);
         }
       } else {
@@ -520,14 +630,20 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     <View style={[
       styles.packageItem, 
       item.error && styles.packageItemError,
-      item.offline && styles.packageItemOffline
+      item.offline && styles.packageItemOffline,
+      item.printed && styles.packageItemPrinted
     ]}>
       <View style={styles.packageHeader}>
         <View style={styles.packageCodeContainer}>
           <Text style={styles.packageCode}>{item.code}</Text>
-          {item.offline && (
-            <MaterialIcons name="cloud-off" size={16} color="#FFB000" />
-          )}
+          <View style={styles.packageIcons}>
+            {item.printed && (
+              <MaterialIcons name="print" size={16} color="#34C759" />
+            )}
+            {item.offline && (
+              <MaterialIcons name="cloud-off" size={16} color="#FFB000" />
+            )}
+          </View>
         </View>
         <TouchableOpacity onPress={() => removePackage(item.code)} style={styles.removeButton}>
           <MaterialIcons name="close" size={20} color="#FF6B6B" />
@@ -649,6 +765,14 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               )}
             </View>
 
+            {/* Printing Progress */}
+            {processing && printingProgress && (
+              <View style={styles.progressContainer}>
+                <ActivityIndicator size="small" color="#667eea" />
+                <Text style={styles.progressText}>{printingProgress}</Text>
+              </View>
+            )}
+
             {/* Package List */}
             <FlatList
               data={scannedPackages}
@@ -690,7 +814,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                     ) : (
                       <>
                         <MaterialIcons 
-                          name={!isOnline ? "cloud-queue" : "check-circle"} 
+                          name={!isOnline ? "cloud-queue" : actionType === 'print' ? "print" : "check-circle"} 
                           size={20} 
                           color="#fff" 
                         />
@@ -861,6 +985,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  // NEW STYLES: Progress container
+  progressContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#1a1a2e',
+    borderRadius: 12,
+    padding: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#2d3748',
+  },
+  progressText: {
+    color: '#667eea',
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 8,
+  },
   packageList: {
     flex: 1,
   },
@@ -885,6 +1027,11 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FFB000',
   },
+  // NEW STYLE: Printed package styling
+  packageItemPrinted: {
+    borderRightWidth: 4,
+    borderRightColor: '#34C759',
+  },
   packageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -895,6 +1042,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  // NEW STYLE: Package icons container
+  packageIcons: {
+    flexDirection: 'row',
+    gap: 4,
   },
   packageCode: {
     fontSize: 16,
