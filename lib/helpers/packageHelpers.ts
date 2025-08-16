@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - FIXED: Handle FastJSON format correctly
+// lib/helpers/packageHelpers.ts - FIXED: Improved error handling and proper exports
 import api from '../api';
 
 export interface Location {
@@ -49,7 +49,125 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get all areas with location information - FIXED: Handle FastJSON format
+ * FIXED: Improved data transformation with better error handling
+ */
+const transformAreaData = (rawData: any, included: any[] = []): Area => {
+  try {
+    // Handle different API response formats
+    let areaData = rawData;
+    
+    // If it's JSON API format
+    if (rawData.attributes) {
+      areaData = {
+        id: rawData.id,
+        name: rawData.attributes.name,
+        ...rawData.attributes
+      };
+      
+      // Find related location from included data
+      if (rawData.relationships?.location?.data && included.length > 0) {
+        const locationRef = rawData.relationships.location.data;
+        const includedLocation = included.find((inc: any) => 
+          inc.type === 'location' && inc.id === locationRef.id
+        );
+        
+        if (includedLocation && includedLocation.attributes) {
+          areaData.location = {
+            id: includedLocation.id,
+            name: includedLocation.attributes.name || 'Unknown Location'
+          };
+        }
+      }
+    }
+    
+    return {
+      id: String(areaData.id),
+      name: areaData.name || 'Unknown Area',
+      location: areaData.location ? {
+        id: String(areaData.location.id),
+        name: areaData.location.name || 'Unknown Location'
+      } : undefined
+    };
+  } catch (error) {
+    console.error('Error transforming area data:', error, rawData);
+    return {
+      id: String(rawData.id || 'unknown'),
+      name: rawData.name || rawData.attributes?.name || 'Unknown Area'
+    };
+  }
+};
+
+const transformAgentData = (rawData: any, included: any[] = []): Agent => {
+  try {
+    let agentData = rawData;
+    
+    // If it's JSON API format
+    if (rawData.attributes) {
+      agentData = {
+        id: rawData.id,
+        name: rawData.attributes.name,
+        phone: rawData.attributes.phone,
+        ...rawData.attributes
+      };
+      
+      // Find related area from included data
+      if (rawData.relationships?.area?.data && included.length > 0) {
+        const areaRef = rawData.relationships.area.data;
+        const includedArea = included.find((inc: any) => 
+          inc.type === 'area' && inc.id === areaRef.id
+        );
+        
+        if (includedArea && includedArea.attributes) {
+          // Also find location for this area
+          let location = undefined;
+          if (includedArea.relationships?.location?.data) {
+            const locationRef = includedArea.relationships.location.data;
+            const includedLocation = included.find((inc: any) => 
+              inc.type === 'location' && inc.id === locationRef.id
+            );
+            
+            if (includedLocation && includedLocation.attributes) {
+              location = {
+                id: includedLocation.id,
+                name: includedLocation.attributes.name || 'Unknown Location'
+              };
+            }
+          }
+          
+          agentData.area = {
+            id: includedArea.id,
+            name: includedArea.attributes.name || 'Unknown Area',
+            location
+          };
+        }
+      }
+    }
+    
+    return {
+      id: String(agentData.id),
+      name: agentData.name || 'Unknown Agent',
+      phone: agentData.phone || 'No phone',
+      area: agentData.area ? {
+        id: String(agentData.area.id),
+        name: agentData.area.name || 'Unknown Area',
+        location: agentData.area.location ? {
+          id: String(agentData.area.location.id),
+          name: agentData.area.location.name || 'Unknown Location'
+        } : undefined
+      } : undefined
+    };
+  } catch (error) {
+    console.error('Error transforming agent data:', error, rawData);
+    return {
+      id: String(rawData.id || 'unknown'),
+      name: rawData.name || rawData.attributes?.name || 'Unknown Agent',
+      phone: rawData.phone || rawData.attributes?.phone || 'No phone'
+    };
+  }
+};
+
+/**
+ * FIXED: Get all areas with improved error handling and fallbacks
  */
 export const getAreas = async (): Promise<Area[]> => {
   try {
@@ -67,79 +185,55 @@ export const getAreas = async (): Promise<Area[]> => {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      timeout: 10000
+      timeout: 15000
     });
 
-    console.log('📋 Areas API response:', response.data);
+    console.log('📋 Areas API response structure:', {
+      hasData: !!response.data.data,
+      dataIsArray: Array.isArray(response.data.data),
+      hasIncluded: !!response.data.included,
+      includedCount: response.data.included?.length || 0
+    });
 
-    // FIXED: Handle FastJSON format directly
+    let transformedAreas: Area[] = [];
+
     if (response.data.data) {
+      // Handle JSON API format
       const areasData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
       const included = response.data.included || [];
       
-      const transformedAreas: Area[] = areasData.map((item: any) => {
-        // Find the related location from included data
-        let location = null;
-        if (item.relationships?.location?.data) {
-          const locationRef = item.relationships.location.data;
-          const includedLocation = included.find((inc: any) => 
-            inc.type === 'location' && inc.id === locationRef.id
-          );
-          
-          if (includedLocation) {
-            location = {
-              id: includedLocation.id,
-              name: includedLocation.attributes.name || 'Unknown Location'
-            };
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          name: item.attributes.name || 'Unknown Area',
-          location: location || undefined
-        };
-      });
-
-      // Update cache
-      areasCache = transformedAreas;
-      cacheTimestamp = now;
-
-      console.log('✅ Areas loaded and cached:', transformedAreas.length);
-      return transformedAreas;
+      transformedAreas = areasData.map((item: any) => transformAreaData(item, included));
+    } else if (Array.isArray(response.data)) {
+      // Handle direct array format
+      transformedAreas = response.data.map((item: any) => transformAreaData(item, []));
     } else {
-      // Fallback: try to handle as simple array
-      const areas = Array.isArray(response.data) ? response.data : [];
-      const transformedAreas: Area[] = areas.map((area: any) => ({
-        id: String(area.id),
-        name: area.name || 'Unknown Area',
-        location: area.location ? {
-          id: String(area.location.id),
-          name: area.location.name || 'Unknown Location'
-        } : undefined
-      }));
-
-      areasCache = transformedAreas;
-      cacheTimestamp = now;
-      
-      console.log('✅ Areas loaded (fallback format):', transformedAreas.length);
-      return transformedAreas;
+      console.warn('⚠️ Unexpected API response format:', response.data);
+      throw new Error('Unexpected API response format');
     }
+
+    // Update cache
+    areasCache = transformedAreas;
+    cacheTimestamp = now;
+
+    console.log('✅ Areas loaded and cached:', transformedAreas.length);
+    return transformedAreas;
   } catch (error: any) {
     console.error('❌ Failed to fetch areas:', error);
     
     // Return cached data if available, even if stale
     if (areasCache) {
-      console.log('⚠️ Returning stale cached areas due to error');
+      console.log('⚠️ API failed, returning stale cached areas:', areasCache.length);
       return areasCache;
     }
     
-    throw new Error(`Failed to load areas: ${error.message}`);
+    // Return empty array as fallback
+    console.log('⚠️ No cached data available, returning empty array');
+    return [];
   }
 };
 
 /**
- * Get all agents with area information - FIXED: Handle FastJSON format
+ * FIXED: Get all agents with improved error handling and fallbacks
  */
 export const getAgents = async (): Promise<Agent[]> => {
   try {
@@ -157,97 +251,50 @@ export const getAgents = async (): Promise<Agent[]> => {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
       },
-      timeout: 10000
+      timeout: 15000
     });
 
-    console.log('📋 Agents API response:', response.data);
+    console.log('📋 Agents API response structure:', {
+      hasData: !!response.data.data,
+      dataIsArray: Array.isArray(response.data.data),
+      hasIncluded: !!response.data.included,
+      includedCount: response.data.included?.length || 0
+    });
 
-    // FIXED: Handle FastJSON format directly
+    let transformedAgents: Agent[] = [];
+
     if (response.data.data) {
+      // Handle JSON API format
       const agentsData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
       const included = response.data.included || [];
       
-      const transformedAgents: Agent[] = agentsData.map((item: any) => {
-        // Find the related area from included data
-        let area = null;
-        if (item.relationships?.area?.data) {
-          const areaRef = item.relationships.area.data;
-          const includedArea = included.find((inc: any) => 
-            inc.type === 'area' && inc.id === areaRef.id
-          );
-          
-          if (includedArea) {
-            // Find the location for this area
-            let location = null;
-            if (includedArea.relationships?.location?.data) {
-              const locationRef = includedArea.relationships.location.data;
-              const includedLocation = included.find((inc: any) => 
-                inc.type === 'location' && inc.id === locationRef.id
-              );
-              
-              if (includedLocation) {
-                location = {
-                  id: includedLocation.id,
-                  name: includedLocation.attributes.name || 'Unknown Location'
-                };
-              }
-            }
-            
-            area = {
-              id: includedArea.id,
-              name: includedArea.attributes.name || 'Unknown Area',
-              location: location || undefined
-            };
-          }
-        }
-        
-        return {
-          id: String(item.id),
-          name: item.attributes.name || 'Unknown Agent',
-          phone: item.attributes.phone || 'No phone',
-          area: area || undefined
-        };
-      });
-
-      // Update cache
-      agentsCache = transformedAgents;
-      cacheTimestamp = now;
-
-      console.log('✅ Agents loaded and cached:', transformedAgents.length);
-      return transformedAgents;
+      transformedAgents = agentsData.map((item: any) => transformAgentData(item, included));
+    } else if (Array.isArray(response.data)) {
+      // Handle direct array format
+      transformedAgents = response.data.map((item: any) => transformAgentData(item, []));
     } else {
-      // Fallback: try to handle as simple array
-      const agents = Array.isArray(response.data) ? response.data : [];
-      const transformedAgents: Agent[] = agents.map((agent: any) => ({
-        id: String(agent.id),
-        name: agent.name || 'Unknown Agent',
-        phone: agent.phone || 'No phone',
-        area: agent.area ? {
-          id: String(agent.area.id),
-          name: agent.area.name || 'Unknown Area',
-          location: agent.area.location ? {
-            id: String(agent.area.location.id),
-            name: agent.area.location.name || 'Unknown Location'
-          } : undefined
-        } : undefined
-      }));
-
-      agentsCache = transformedAgents;
-      cacheTimestamp = now;
-      
-      console.log('✅ Agents loaded (fallback format):', transformedAgents.length);
-      return transformedAgents;
+      console.warn('⚠️ Unexpected API response format:', response.data);
+      throw new Error('Unexpected API response format');
     }
+
+    // Update cache
+    agentsCache = transformedAgents;
+    cacheTimestamp = now;
+
+    console.log('✅ Agents loaded and cached:', transformedAgents.length);
+    return transformedAgents;
   } catch (error: any) {
     console.error('❌ Failed to fetch agents:', error);
     
     // Return cached data if available, even if stale
     if (agentsCache) {
-      console.log('⚠️ Returning stale cached agents due to error');
+      console.log('⚠️ API failed, returning stale cached agents:', agentsCache.length);
       return agentsCache;
     }
     
-    throw new Error(`Failed to load agents: ${error.message}`);
+    // Return empty array as fallback
+    console.log('⚠️ No cached data available, returning empty array');
+    return [];
   }
 };
 
@@ -260,7 +307,7 @@ export const getAgentsForArea = async (areaId: string): Promise<Agent[]> => {
     return allAgents.filter(agent => agent.area?.id === areaId);
   } catch (error: any) {
     console.error('❌ Failed to get agents for area:', error);
-    throw error;
+    return [];
   }
 };
 
@@ -280,7 +327,7 @@ export const searchAreas = async (query: string): Promise<Area[]> => {
     );
   } catch (error: any) {
     console.error('❌ Failed to search areas:', error);
-    throw error;
+    return [];
   }
 };
 
@@ -302,7 +349,7 @@ export const searchAgents = async (query: string): Promise<Agent[]> => {
     );
   } catch (error: any) {
     console.error('❌ Failed to search agents:', error);
-    throw error;
+    return [];
   }
 };
 
@@ -472,13 +519,36 @@ export const formatRouteDescription = (
 export const refreshData = async (): Promise<void> => {
   try {
     clearCache();
-    await Promise.all([
+    const [areas, agents] = await Promise.allSettled([
       getAreas(),
       getAgents()
     ]);
-    console.log('✅ Package helpers data refreshed');
+    
+    console.log('✅ Package helpers data refresh complete:', {
+      areas: areas.status === 'fulfilled' ? areas.value.length : 'failed',
+      agents: agents.status === 'fulfilled' ? agents.value.length : 'failed'
+    });
   } catch (error: any) {
     console.error('❌ Failed to refresh package helpers data:', error);
     throw error;
   }
+};
+
+// FIXED: Ensure all functions are properly exported
+export default {
+  getAreas,
+  getAgents,
+  getAgentsForArea,
+  searchAreas,
+  searchAgents,
+  clearCache,
+  getAreaById,
+  getAgentById,
+  isValidPackageState,
+  getStateDisplay,
+  getStateColor,
+  canEditPackage,
+  getNextValidStates,
+  formatRouteDescription,
+  refreshData
 };
