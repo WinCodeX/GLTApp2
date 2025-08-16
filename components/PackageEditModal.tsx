@@ -1,4 +1,4 @@
-// components/PackageEditModal.tsx - FIXED: All states showing and saving properly
+// components/PackageEditModal.tsx - FIXED: Individual field editing and collected state
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -22,7 +22,6 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import api from '../lib/api';
 
-// FIXED: Import proper helper functions
 import { getAreas, getAgents, Area, Agent } from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -62,14 +61,14 @@ interface PackageEditModalProps {
 
 type PackageState = 'pending_unpaid' | 'pending' | 'submitted' | 'in_transit' | 'delivered' | 'collected' | 'rejected';
 
-// FIXED: Complete package states array - ensure all states are included
+// FIXED: Complete package states array including collected after delivered
 const PACKAGE_STATES: { value: PackageState; label: string; description: string; color: string }[] = [
   { value: 'pending_unpaid', label: 'Pending Payment', description: 'Package created, awaiting payment', color: '#FF3B30' },
   { value: 'pending', label: 'Pending', description: 'Payment received, preparing for pickup', color: '#FF9500' },
   { value: 'submitted', label: 'Submitted', description: 'Package submitted for delivery', color: '#667eea' },
   { value: 'in_transit', label: 'In Transit', description: 'Package is in transit', color: '#764ba2' },
   { value: 'delivered', label: 'Delivered', description: 'Package delivered successfully', color: '#34C759' },
-  { value: 'collected', label: 'Collected', description: 'Package collected by receiver', color: '#34C759' },
+  { value: 'collected', label: 'Collected', description: 'Package collected by receiver', color: '#10b981' },
   { value: 'rejected', label: 'Rejected', description: 'Package delivery rejected', color: '#FF3B30' }
 ];
 
@@ -101,13 +100,11 @@ export default function PackageEditModal({
   const [agents, setAgents] = useState<Agent[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Derived state for current package type
   const isAgentDelivery = useMemo(() => 
     packageData?.delivery_type === 'agent', 
     [packageData?.delivery_type]
   );
 
-  // Filtered areas for search
   const filteredAreas = useMemo(() => {
     if (!searchQuery.trim()) return areas;
     const query = searchQuery.toLowerCase();
@@ -117,11 +114,9 @@ export default function PackageEditModal({
     );
   }, [areas, searchQuery]);
 
-  // Filtered agents for the selected area or search
   const availableAgents = useMemo(() => {
     let filteredAgents = agents;
     
-    // Filter by search query if present
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filteredAgents = filteredAgents.filter(agent => 
@@ -132,7 +127,6 @@ export default function PackageEditModal({
       );
     }
     
-    // For agent delivery, if area is selected, filter by area
     if (isAgentDelivery && selectedDestinationArea) {
       filteredAgents = filteredAgents.filter(agent => agent.area?.id === selectedDestinationArea);
     }
@@ -140,7 +134,6 @@ export default function PackageEditModal({
     return filteredAgents;
   }, [agents, searchQuery, isAgentDelivery, selectedDestinationArea]);
 
-  // User permissions based on role and package state
   const canEditPersonalInfo = useMemo(() => {
     return ['admin', 'client'].includes(userRole) && 
            packageData && 
@@ -187,7 +180,6 @@ export default function PackageEditModal({
     setReceiverName(packageData.receiver_name || '');
     setReceiverPhone(packageData.receiver_phone || '');
     
-    // FIXED: Ensure state is properly set and is valid
     const currentState = packageData.state as PackageState;
     const isValidState = PACKAGE_STATES.some(state => state.value === currentState);
     
@@ -212,7 +204,6 @@ export default function PackageEditModal({
     });
   }, [packageData]);
 
-  // FIXED: Use proper helper functions instead of direct API calls
   const loadAreasAndAgents = useCallback(async () => {
     try {
       setIsLoadingData(true);
@@ -220,13 +211,11 @@ export default function PackageEditModal({
       
       console.log('🔄 Loading areas and agents using helper functions...');
       
-      // FIXED: Use the proper helper functions that handle FastJSON
       const [areasData, agentsData] = await Promise.allSettled([
         getAreas(),
         getAgents()
       ]);
       
-      // Process areas result
       if (areasData.status === 'fulfilled') {
         console.log('✅ Areas loaded successfully:', areasData.value.length);
         setAreas(areasData.value);
@@ -239,7 +228,6 @@ export default function PackageEditModal({
         setLoadingError('Failed to load areas');
       }
       
-      // Process agents result
       if (agentsData.status === 'fulfilled') {
         console.log('✅ Agents loaded successfully:', agentsData.value.length);
         setAgents(agentsData.value);
@@ -252,7 +240,6 @@ export default function PackageEditModal({
         setLoadingError('Failed to load agents');
       }
       
-      // Check if we have minimum required data
       const hasAreas = areasData.status === 'fulfilled' && areasData.value.length > 0;
       const hasAgents = agentsData.status === 'fulfilled' && agentsData.value.length > 0;
       
@@ -286,63 +273,67 @@ export default function PackageEditModal({
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
-      // Reset state when modal closes
       setSearchQuery('');
       setLoadingError(null);
       onClose();
     });
   }, [slideAnim, onClose]);
 
+  // FIXED: More flexible validation for individual field editing
   const validateForm = useCallback(() => {
     const errors: string[] = [];
     
     console.log('🔍 Validating form...');
     
+    // Only validate personal info fields if they are being edited and user can edit them
     if (canEditPersonalInfo) {
-      if (!senderName.trim()) {
-        errors.push('Sender name is required');
+      // Only require sender name if it's being changed and is empty
+      if (senderName.trim() === '' && packageData?.sender_name) {
+        errors.push('Sender name cannot be empty');
       }
       
-      if (!senderPhone.trim()) {
-        errors.push('Sender phone is required');
-      } else if (!senderPhone.match(/^\+254\d{9}$/)) {
+      // Only validate sender phone if it's being changed
+      if (senderPhone.trim() !== '' && !senderPhone.match(/^\+254\d{9}$/)) {
         errors.push('Sender phone must be in format +254XXXXXXXXX');
       }
       
-      if (!receiverName.trim()) {
-        errors.push('Receiver name is required');
+      // Only require receiver name if it's being changed and is empty
+      if (receiverName.trim() === '' && packageData?.receiver_name) {
+        errors.push('Receiver name cannot be empty');
       }
       
-      if (!receiverPhone.trim()) {
-        errors.push('Receiver phone is required');
-      } else if (!receiverPhone.match(/^\+254\d{9}$/)) {
+      // Only validate receiver phone if it's being changed
+      if (receiverPhone.trim() !== '' && !receiverPhone.match(/^\+254\d{9}$/)) {
         errors.push('Receiver phone must be in format +254XXXXXXXXX');
       }
     }
     
+    // Only validate destination if it's being changed
     if (canEditDestination) {
-      if (isAgentDelivery) {
-        if (!selectedDestinationAgent) {
-          errors.push('Destination agent is required for agent delivery');
-        }
-      } else {
-        if (!selectedDestinationArea) {
-          errors.push('Destination area is required');
-        }
+      if (isAgentDelivery && selectedDestinationAgent === '' && packageData?.destination_agent?.id) {
+        errors.push('Destination agent is required for agent delivery');
       }
       
-      // Validate delivery location for doorstep deliveries
-      if (['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && !deliveryLocation.trim()) {
-        errors.push('Delivery location is required for doorstep/fragile delivery');
+      if (!isAgentDelivery && selectedDestinationArea === '' && packageData?.destination_area?.id) {
+        errors.push('Destination area is required');
+      }
+      
+      // Only validate delivery location if package type requires it and it's being changed
+      if (['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && 
+          deliveryLocation.trim() === '' && 
+          canEditDeliveryLocation) {
+        // Only error if there was no previous delivery location
+        if (!packageData?.delivery_location) {
+          errors.push('Delivery location is required for doorstep/fragile delivery');
+        }
       }
     }
     
     console.log('🔍 Validation result:', { errors: errors.length, details: errors });
     
     return errors;
-  }, [canEditPersonalInfo, canEditDestination, senderName, senderPhone, receiverName, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
+  }, [canEditPersonalInfo, canEditDestination, canEditDeliveryLocation, senderName, senderPhone, receiverName, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
 
-  // FIXED: Enhanced submit handler with better state handling
   const handleSubmit = useCallback(async () => {
     if (!packageData) return;
     
@@ -367,44 +358,73 @@ export default function PackageEditModal({
       
       const updateData: any = {};
       
-      // Add editable fields based on permissions
+      // FIXED: Only include fields that have actually changed
       if (canEditPersonalInfo) {
-        updateData.sender_name = senderName.trim();
-        updateData.sender_phone = senderPhone.trim();
-        updateData.receiver_name = receiverName.trim();
-        updateData.receiver_phone = receiverPhone.trim();
-        console.log('💾 Added personal info to update');
+        // Only include personal info fields if they've changed
+        if (senderName.trim() !== packageData.sender_name) {
+          updateData.sender_name = senderName.trim();
+        }
+        if (senderPhone.trim() !== (packageData.sender_phone || '')) {
+          updateData.sender_phone = senderPhone.trim();
+        }
+        if (receiverName.trim() !== packageData.receiver_name) {
+          updateData.receiver_name = receiverName.trim();
+        }
+        if (receiverPhone.trim() !== packageData.receiver_phone) {
+          updateData.receiver_phone = receiverPhone.trim();
+        }
+        console.log('💾 Added changed personal info to update');
       }
       
-      // FIXED: Ensure state is always included if user can edit it
-      if (canEditState) {
+      // Only include state if it has changed
+      if (canEditState && selectedState !== packageData.state) {
         updateData.state = selectedState;
-        console.log('💾 Added state to update:', selectedState);
+        console.log('💾 Added state change to update:', selectedState);
       }
       
       if (canEditDestination) {
         if (isAgentDelivery) {
-          updateData.destination_agent_id = selectedDestinationAgent;
-          // When agent is selected, area is derived from agent
-          const selectedAgent = agents.find(a => a.id === selectedDestinationAgent);
-          if (selectedAgent?.area?.id) {
-            updateData.destination_area_id = selectedAgent.area.id;
+          // Only update if agent has changed
+          if (selectedDestinationAgent !== (packageData.destination_agent?.id || '')) {
+            updateData.destination_agent_id = selectedDestinationAgent;
+            const selectedAgent = agents.find(a => a.id === selectedDestinationAgent);
+            if (selectedAgent?.area?.id) {
+              updateData.destination_area_id = selectedAgent.area.id;
+            }
           }
         } else {
-          updateData.destination_area_id = selectedDestinationArea;
-          updateData.destination_agent_id = null; // Clear agent for non-agent delivery
+          // Only update if area has changed
+          if (selectedDestinationArea !== (packageData.destination_area?.id || '')) {
+            updateData.destination_area_id = selectedDestinationArea;
+            updateData.destination_agent_id = null;
+          }
         }
-        console.log('💾 Added destination to update');
+        console.log('💾 Added changed destination to update');
       }
       
       if (canEditDeliveryLocation && ['doorstep', 'fragile'].includes(packageData.delivery_type)) {
-        updateData.delivery_location = deliveryLocation.trim();
-        console.log('💾 Added delivery location to update');
+        // Only update if delivery location has changed
+        if (deliveryLocation.trim() !== (packageData.delivery_location || '')) {
+          updateData.delivery_location = deliveryLocation.trim();
+        }
+        console.log('💾 Added changed delivery location to update');
       }
       
       console.log('💾 Final update payload:', updateData);
       
-      // FIXED: Use proper API endpoint and ensure state is properly handled
+      // If no fields have changed, don't make the API call
+      if (Object.keys(updateData).length === 0) {
+        Toast.show({
+          type: 'info',
+          text1: 'No Changes',
+          text2: 'No fields were modified',
+          position: 'top',
+          visibilityTime: 2000,
+        });
+        closeModal();
+        return;
+      }
+      
       const response = await api.put(`/api/v1/packages/${packageData.code}`, {
         package: updateData
       }, {
@@ -412,7 +432,7 @@ export default function PackageEditModal({
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        timeout: 15000 // 15 second timeout for update
+        timeout: 15000
       });
       
       console.log('💾 Update response:', response.data);
@@ -552,7 +572,6 @@ export default function PackageEditModal({
     );
   }, [canEditPersonalInfo, senderName, senderPhone, receiverName, receiverPhone]);
 
-  // FIXED: Enhanced state edit section with better state handling
   const renderStateEdit = useCallback(() => {
     if (!canEditState) return null;
     
@@ -612,7 +631,6 @@ export default function PackageEditModal({
           {isAgentDelivery ? 'Destination Agent' : 'Destination Area'}
         </Text>
         
-        {/* Search Bar */}
         <View style={styles.searchContainer}>
           <Feather name="search" size={20} color="#888" />
           <TextInput
@@ -630,7 +648,6 @@ export default function PackageEditModal({
         </View>
         
         {!isAgentDelivery ? (
-          // Area selection for doorstep/fragile delivery
           <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
             {filteredAreas.length > 0 ? filteredAreas.map((area) => (
               <TouchableOpacity
@@ -641,7 +658,7 @@ export default function PackageEditModal({
                 ]}
                 onPress={() => {
                   setSelectedDestinationArea(area.id);
-                  setSearchQuery(''); // Clear search after selection
+                  setSearchQuery('');
                 }}
               >
                 <View style={styles.destinationInfo}>
@@ -661,7 +678,6 @@ export default function PackageEditModal({
             )}
           </ScrollView>
         ) : (
-          // Agent selection for agent delivery
           <ScrollView style={styles.destinationList} showsVerticalScrollIndicator={false}>
             {availableAgents.length > 0 ? availableAgents.map((agent) => (
               <TouchableOpacity
@@ -672,7 +688,7 @@ export default function PackageEditModal({
                 ]}
                 onPress={() => {
                   setSelectedDestinationAgent(agent.id);
-                  setSearchQuery(''); // Clear search after selection
+                  setSearchQuery('');
                 }}
               >
                 <View style={styles.destinationInfo}>
@@ -696,7 +712,6 @@ export default function PackageEditModal({
           </ScrollView>
         )}
         
-        {/* Delivery location for doorstep/fragile */}
         {canEditDeliveryLocation && ['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && (
           <View style={styles.deliveryLocationContainer}>
             <Text style={styles.deliveryLocationLabel}>Delivery Address</Text>
@@ -768,7 +783,7 @@ export default function PackageEditModal({
       case 'submitted': return '#667eea';
       case 'in_transit': return '#764ba2';
       case 'delivered': return '#34C759';
-      case 'collected': return '#34C759';
+      case 'collected': return '#10b981';
       case 'rejected': return '#FF3B30';
       default: return '#a0aec0';
     }
@@ -856,7 +871,6 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
-  // Header styles
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -884,7 +898,6 @@ const styles = StyleSheet.create({
     width: 40,
   },
   
-  // Package info styles
   packageInfoContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     margin: 20,
@@ -931,7 +944,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Content styles
   contentContainer: {
     flex: 1,
   },
@@ -939,7 +951,6 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
   },
   
-  // Loading styles
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -953,7 +964,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Error styles
   errorContainer: {
     backgroundColor: 'rgba(255, 59, 48, 0.1)',
     margin: 20,
@@ -982,7 +992,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Edit section styles
   editSection: {
     marginHorizontal: 20,
     marginBottom: 24,
@@ -1000,7 +1009,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   
-  // Input styles
   inputGroup: {
     marginBottom: 16,
   },
@@ -1027,7 +1035,6 @@ const styles = StyleSheet.create({
     paddingTop: 16,
   },
   
-  // Search styles
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1046,7 +1053,6 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
   },
   
-  // FIXED: Enhanced state list styles
   statesList: {
     maxHeight: 400,
   },
@@ -1082,7 +1088,6 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // Destination list styles
   destinationList: {
     maxHeight: 300,
   },
@@ -1119,7 +1124,6 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // Empty state styles
   emptyState: {
     padding: 40,
     alignItems: 'center',
@@ -1130,7 +1134,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   
-  // Delivery location styles
   deliveryLocationContainer: {
     marginTop: 16,
   },
@@ -1141,7 +1144,6 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   
-  // Action buttons
   actionButtons: {
     flexDirection: 'row',
     paddingHorizontal: 20,
