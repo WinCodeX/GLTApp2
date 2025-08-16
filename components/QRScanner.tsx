@@ -1,4 +1,4 @@
-// components/QRScanner.tsx - Updated with proper API integration and all roles
+// components/QRScanner.tsx - Updated with Print Integration
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -21,6 +21,7 @@ import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
+import PrintReceiptService from '../services/PrintReceiptService';
 
 const { width, height } = Dimensions.get('window');
 
@@ -64,7 +65,7 @@ interface QRScannerProps {
   onClose: () => void;
   userRole: 'client' | 'agent' | 'rider' | 'warehouse' | 'admin';
   onScanSuccess?: (result: any) => void;
-  defaultAction?: string; // 'collect', 'deliver', 'print', 'confirm_receipt', 'process'
+  defaultAction?: string;
 }
 
 const QRScanner: React.FC<QRScannerProps> = ({
@@ -88,16 +89,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const cornerAnimation = useRef(new Animated.Value(0)).current;
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
-  // Initialize offline scanning service
   const offlineService = OfflineScanningService.getInstance();
+  const printService = PrintReceiptService.getInstance();
 
-  // Request camera permissions
   useEffect(() => {
     requestCameraPermission();
     initializeOfflineService();
   }, []);
 
-  // Start animations when visible
   useEffect(() => {
     if (visible) {
       startAnimations();
@@ -106,7 +105,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   }, [visible]);
 
-  // Reset scanner when modal becomes visible
   useFocusEffect(
     React.useCallback(() => {
       if (visible) {
@@ -136,7 +134,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
   };
 
   const startAnimations = () => {
-    // Corner animation - rotate colors
     Animated.loop(
       Animated.sequence([
         Animated.timing(cornerAnimation, {
@@ -152,7 +149,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
       ])
     ).start();
 
-    // Pulse animation
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnimation, {
@@ -185,7 +181,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setScanned(true);
     Vibration.vibrate(100);
     
-    // Extract package code from QR data
     const packageCode = extractPackageCode(data);
     
     if (!packageCode) {
@@ -204,19 +199,15 @@ const QRScanner: React.FC<QRScannerProps> = ({
   };
 
   const extractPackageCode = (qrData: string): string | null => {
-    // Handle different QR code formats
-    // Format 1: Direct package code (PKG-XXXX-YYYYMMDD)
     if (qrData.match(/^PKG-[A-Z0-9]+-\d{8}$/)) {
       return qrData;
     }
     
-    // Format 2: Tracking URL (https://domain.com/track/PKG-XXXX-YYYYMMDD)
     const urlMatch = qrData.match(/\/track\/([A-Z0-9-]+)$/);
     if (urlMatch) {
       return urlMatch[1];
     }
     
-    // Format 3: JSON data containing package code
     try {
       const parsed = JSON.parse(qrData);
       if (parsed.package_code) {
@@ -233,12 +224,10 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setLoading(true);
     
     try {
-      // Check if online first
       const online = await offlineService.isOnline();
       setIsOnline(online);
 
       if (!online) {
-        // Try to get from cache
         const cached = await offlineService.getCachedPackage(packageCode);
         if (cached) {
           processCachedPackage(cached, packageCode);
@@ -248,13 +237,11 @@ const QRScanner: React.FC<QRScannerProps> = ({
         return;
       }
 
-      // Make API call to get package details
       const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
 
       if (response.data.success) {
         const packageData = response.data.data;
         
-        // Cache the package for offline use
         await offlineService.cachePackage(
           packageCode,
           packageData.package,
@@ -263,17 +250,13 @@ const QRScanner: React.FC<QRScannerProps> = ({
 
         setScanResult(packageData);
         
-        // If there's a default action and user can perform it, execute immediately
         if (defaultAction && packageData.available_actions.some((a: AvailableAction) => a.action === defaultAction)) {
           performAction(defaultAction, packageCode);
         } else if (packageData.available_actions.length === 1) {
-          // If only one action available, show confirmation
           setShowActionModal(true);
         } else if (packageData.available_actions.length > 1) {
-          // Multiple actions, let user choose
           setShowActionModal(true);
         } else {
-          // No actions available
           Toast.show({
             type: 'warning',
             text1: 'No Actions Available',
@@ -299,7 +282,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     } catch (error: any) {
       console.error('Failed to fetch package details:', error);
       
-      // Check if it's a network error and try offline mode
       if (error.message.includes('Network Error') || error.message.includes('timeout')) {
         const cached = await offlineService.getCachedPackage(packageCode);
         if (cached) {
@@ -356,10 +338,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setProcessingAction(true);
 
     try {
+      // If it's a print action, handle printing first
+      if (actionType === 'print' && scanResult) {
+        await handlePrintAction(scanResult.package);
+      }
+
       const online = await offlineService.isOnline();
       
       if (!online) {
-        // Store action for offline sync
         const user = await getCurrentUser();
         const result = await offlineService.storeScanAction(
           code,
@@ -423,10 +409,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
         setScanned(false);
         setScanResult(null);
         onScanSuccess?.(response.data.data);
-
-        if (actionType === 'print' && response.data.data.print_data) {
-          handlePrintAction(response.data.data.print_data);
-        }
       } else {
         Toast.show({
           type: 'error',
@@ -440,7 +422,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     } catch (error: any) {
       console.error('Action failed:', error);
       
-      // If it's a network error, try to save offline
       if (error.message.includes('Network Error')) {
         const user = await getCurrentUser();
         const result = await offlineService.storeScanAction(
@@ -484,6 +465,43 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   };
 
+  const handlePrintAction = async (packageData: Package) => {
+    try {
+      console.log('Printing receipt for package:', packageData.code);
+      
+      // Use the print service to print the receipt
+      await printService.printPackageReceipt(packageData);
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Receipt Printed',
+        text2: `Receipt for ${packageData.code} sent to printer`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      
+    } catch (error: any) {
+      console.error('Print failed:', error);
+      
+      let errorMessage = 'Failed to print receipt';
+      if (error.message.includes('No printer connected')) {
+        errorMessage = 'No printer connected. Check Bluetooth settings.';
+      } else if (error.message.includes('not connected')) {
+        errorMessage = 'Printer disconnected. Reconnect and try again.';
+      }
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Print Failed',
+        text2: errorMessage,
+        position: 'top',
+        visibilityTime: 4000,
+      });
+      
+      // Don't prevent the scan action from completing if print fails
+    }
+  };
+
   const getCurrentUser = async () => {
     try {
       const userId = await SecureStore.getItemAsync('user_id');
@@ -505,21 +523,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
   };
 
   const getCurrentLocation = async () => {
-    // Implement location services if needed
     return null;
   };
 
   const getDeviceInfo = () => {
-    // Return basic device info
     return {
       platform: 'react-native',
       timestamp: new Date().toISOString()
     };
-  };
-
-  const handlePrintAction = (printData: any) => {
-    console.log('Print data:', printData);
-    // Implement print handling logic
   };
 
   const resetScanner = () => {
@@ -532,7 +543,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setFlashEnabled(!flashEnabled);
   };
 
-  // Animated corner colors
   const cornerColor = cornerAnimation.interpolate({
     inputRange: [0, 0.5, 1],
     outputRange: ['#667eea', '#764ba2', '#667eea'],
@@ -582,7 +592,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
   return (
     <Modal visible={visible} animationType="slide">
       <SafeAreaView style={styles.container}>
-        {/* Header */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -607,7 +616,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
           </TouchableOpacity>
         </LinearGradient>
 
-        {/* Camera Scanner */}
         <View style={styles.scannerContainer}>
           <CameraView
             ref={cameraRef}
@@ -620,23 +628,19 @@ const QRScanner: React.FC<QRScannerProps> = ({
             onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
           />
           
-          {/* Scanner Overlay */}
           <View style={styles.overlay}>
             <Animated.View style={[styles.scanArea, { transform: [{ scale: pulseAnimation }] }]}>
-              {/* Animated Corners */}
               <Animated.View style={[styles.corner, styles.topLeft, { borderColor: cornerColor }]} />
               <Animated.View style={[styles.corner, styles.topRight, { borderColor: cornerColor }]} />
               <Animated.View style={[styles.corner, styles.bottomLeft, { borderColor: cornerColor }]} />
               <Animated.View style={[styles.corner, styles.bottomRight, { borderColor: cornerColor }]} />
             </Animated.View>
             
-            {/* Scan instruction */}
             <Text style={styles.scanInstruction}>
               Position QR code within the frame
             </Text>
           </View>
 
-          {/* Loading Indicator */}
           {loading && (
             <View style={styles.loadingOverlay}>
               <ActivityIndicator size="large" color="#fff" />
@@ -645,7 +649,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
           )}
         </View>
 
-        {/* Instructions */}
         <LinearGradient
           colors={['#1a1a2e', '#16213e']}
           style={styles.instructions}
@@ -661,7 +664,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
           )}
         </LinearGradient>
 
-        {/* Action Selection Modal */}
         <Modal
           visible={showActionModal}
           transparent
@@ -762,35 +764,23 @@ const getActionButtonStyle = (action: string) => {
 
 const getActionGradient = (action: string): string[] => {
   switch (action) {
-    case 'collect':
-      return ['#667eea', '#764ba2'];
-    case 'deliver':
-      return ['#34C759', '#30A46C'];
-    case 'print':
-      return ['#FF9500', '#FF8C00'];
-    case 'confirm_receipt':
-      return ['#764ba2', '#667eea'];
-    case 'process':
-      return ['#9C27B0', '#673AB7'];
-    default:
-      return ['#667eea', '#764ba2'];
+    case 'collect': return ['#667eea', '#764ba2'];
+    case 'deliver': return ['#34C759', '#30A46C'];
+    case 'print': return ['#FF9500', '#FF8C00'];
+    case 'confirm_receipt': return ['#764ba2', '#667eea'];
+    case 'process': return ['#9C27B0', '#673AB7'];
+    default: return ['#667eea', '#764ba2'];
   }
 };
 
 const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
   switch (action) {
-    case 'collect':
-      return 'local-shipping';
-    case 'deliver':
-      return 'check-circle';
-    case 'print':
-      return 'print';
-    case 'confirm_receipt':
-      return 'done-all';
-    case 'process':
-      return 'inventory';
-    default:
-      return 'check';
+    case 'collect': return 'local-shipping';
+    case 'deliver': return 'check-circle';
+    case 'print': return 'print';
+    case 'confirm_receipt': return 'done-all';
+    case 'process': return 'inventory';
+    default: return 'check';
   }
 };
 
