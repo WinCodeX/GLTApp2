@@ -1,4 +1,4 @@
-// app/admin/PackageSearchScreen.tsx - Updated with edit modal integration
+// app/admin/PackageSearchScreen.tsx - FIXED with enhanced edit package support
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -38,6 +38,7 @@ interface Package {
   created_at: string;
   available_actions?: AvailableAction[];
   // Extended fields for edit modal
+  sender_phone?: string;
   origin_area?: Area;
   destination_area?: Area;
   origin_agent?: Agent;
@@ -103,6 +104,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       const storedRole = await SecureStore.getItemAsync('user_role');
       if (storedRole) {
         setCurrentUserRole(storedRole);
+        console.log('👤 Loaded user role:', storedRole);
       }
     } catch (error) {
       console.error('Failed to load user role:', error);
@@ -154,7 +156,14 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       setIsOnline(true);
       
       // Search packages using the API
-      const searchResponse = await api.get(`/api/v1/packages/search?query=${encodeURIComponent(query.trim())}`);
+      const searchResponse = await api.get(`/api/v1/packages/search?query=${encodeURIComponent(query.trim())}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+
+      console.log('🔍 Search response:', searchResponse.data);
 
       if (searchResponse.data.success) {
         const packages = searchResponse.data.data || [];
@@ -232,6 +241,11 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           source: 'package_search',
           timestamp: new Date().toISOString()
         }
+      }, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
       });
 
       if (response.data.success) {
@@ -271,49 +285,94 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     }
   };
 
-  // NEW: Handle edit package
+  // ENHANCED: Better edit package handling with comprehensive data fetching
   const handleEditPackage = async (packageObj: Package) => {
     try {
+      console.log('✏️ Starting edit package process for:', packageObj.code);
       setLoadingPackageDetails(packageObj.code);
       
-      // Fetch full package details for editing
-      const response = await api.get(`/api/v1/packages/${packageObj.code}`);
+      // Fetch full package details for editing with all relationships
+      console.log('📡 Fetching comprehensive package details...');
+      const response = await api.get(`/api/v1/packages/${packageObj.code}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('📡 Package details response:', response.data);
       
       if (response.data.success) {
         const fullPackageData = response.data.data;
+        
+        // Validate that we have the necessary data
+        console.log('🔍 Validating package data:', {
+          hasPackage: !!fullPackageData,
+          packageCode: fullPackageData?.code,
+          hasDestinationArea: !!fullPackageData?.destination_area,
+          hasDestinationAgent: !!fullPackageData?.destination_agent,
+          deliveryType: fullPackageData?.delivery_type,
+          state: fullPackageData?.state
+        });
+        
+        if (!fullPackageData) {
+          throw new Error('Package data is missing');
+        }
+        
+        // Ensure package has required basic fields
+        if (!fullPackageData.code || !fullPackageData.state) {
+          throw new Error('Package data is incomplete');
+        }
+        
+        console.log('✅ Package data validated, opening edit modal');
         setEditingPackage(fullPackageData);
         setShowEditModal(true);
       } else {
-        Toast.show({
-          type: 'error',
-          text1: 'Failed to Load Package',
-          text2: response.data.message || 'Could not load package details',
-          position: 'top',
-          visibilityTime: 3000,
-        });
+        throw new Error(response.data.message || 'Failed to load package details');
       }
     } catch (error: any) {
       console.error('❌ Failed to load package details:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        statusText: error.response?.statusText,
+        data: error.response?.data,
+        url: error.config?.url
+      });
+      
+      let errorMessage = 'Could not load package details for editing';
+      if (error.response?.status === 404) {
+        errorMessage = 'Package not found';
+      } else if (error.response?.status === 401) {
+        errorMessage = 'Authentication failed. Please login again.';
+      } else if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
       
       Toast.show({
         type: 'error',
         text1: 'Loading Failed',
-        text2: 'Could not load package details for editing',
+        text2: errorMessage,
         position: 'top',
-        visibilityTime: 3000,
+        visibilityTime: 4000,
       });
     } finally {
       setLoadingPackageDetails(null);
     }
   };
 
-  // NEW: Handle edit success
+  // ENHANCED: Better edit success handling
   const handleEditSuccess = async () => {
+    console.log('✅ Package edit successful, refreshing data...');
+    
     setShowEditModal(false);
     setEditingPackage(null);
     
     // Refresh search results to show updated data
     if (searchQuery.trim()) {
+      console.log('🔄 Refreshing search results...');
       await handleSearch(searchQuery);
     }
     
@@ -326,25 +385,35 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     });
   };
 
-  // NEW: Check if user can edit package
+  // ENHANCED: More comprehensive edit permission checking
   const canEditPackage = (packageObj: Package): boolean => {
+    console.log('🔒 Checking edit permissions for:', {
+      userRole: currentUserRole,
+      packageState: packageObj.state,
+      packageCode: packageObj.code
+    });
+    
     switch (currentUserRole) {
       case 'admin':
+        // Admins can edit all packages
         return true;
       case 'client':
         // Clients can edit their own packages in certain states
-        return ['pending_unpaid', 'pending'].includes(packageObj.state);
+        const clientEditableStates = ['pending_unpaid', 'pending'];
+        return clientEditableStates.includes(packageObj.state);
       case 'agent':
       case 'rider':
       case 'warehouse':
         // Staff can edit package state and some details
         return true;
       default:
+        console.warn('⚠️ Unknown user role for edit permission:', currentUserRole);
         return false;
     }
   };
 
   const navigateToPackageDetails = (packageCode: string) => {
+    console.log('🔍 Navigating to package details:', packageCode);
     router.push(`/admin/PackageDetailsScreen?code=${packageCode}`);
   };
 
@@ -427,17 +496,22 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         <Text style={styles.routeText}>{item.route_description}</Text>
         <Text style={styles.detailText}>From: {item.sender_name}</Text>
         <Text style={styles.detailText}>To: {item.receiver_name}</Text>
+        <Text style={styles.detailText}>Phone: {item.receiver_phone}</Text>
         <Text style={styles.detailText}>Cost: KES {item.cost}</Text>
+        <Text style={styles.detailText}>Type: {item.delivery_type}</Text>
         <Text style={styles.detailText}>
           Created: {new Date(item.created_at).toLocaleDateString()}
         </Text>
       </View>
 
-      {/* NEW: Edit button */}
+      {/* ENHANCED: Edit button with better loading state */}
       {canEditPackage(item) && (
         <View style={styles.editButtonContainer}>
           <TouchableOpacity
-            style={styles.editButton}
+            style={[
+              styles.editButton,
+              loadingPackageDetails === item.code && styles.editButtonLoading
+            ]}
             onPress={() => handleEditPackage(item)}
             disabled={loadingPackageDetails === item.code}
           >
@@ -446,7 +520,10 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
             ) : (
               <MaterialIcons name="edit" size={16} color="#667eea" />
             )}
-            <Text style={styles.editButtonText}>
+            <Text style={[
+              styles.editButtonText,
+              loadingPackageDetails === item.code && styles.editButtonTextLoading
+            ]}>
               {loadingPackageDetails === item.code ? 'Loading...' : 'Edit'}
             </Text>
           </TouchableOpacity>
@@ -651,12 +728,13 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         onScanSuccess={handleScanSuccess}
       />
 
-      {/* NEW: Edit Modal */}
+      {/* ENHANCED: Edit Modal with proper error handling */}
       <PackageEditModal
         visible={showEditModal}
         package={editingPackage}
         userRole={currentUserRole}
         onClose={() => {
+          console.log('📝 Closing edit modal');
           setShowEditModal(false);
           setEditingPackage(null);
         }}
@@ -854,7 +932,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // NEW: Edit button styles
+  // ENHANCED: Edit button styles with loading states
   editButtonContainer: {
     borderTopWidth: 1,
     borderTopColor: '#2d3748',
@@ -873,10 +951,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     gap: 6,
   },
+  editButtonLoading: {
+    backgroundColor: 'rgba(102, 126, 234, 0.05)',
+    borderColor: 'rgba(102, 126, 234, 0.5)',
+  },
   editButtonText: {
     fontSize: 14,
     fontWeight: '600',
     color: '#667eea',
+  },
+  editButtonTextLoading: {
+    color: 'rgba(102, 126, 234, 0.7)',
   },
   
   actionsContainer: {
