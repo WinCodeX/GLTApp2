@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - FIXED: Improved error handling and proper exports
+// lib/helpers/packageHelpers.ts - COMPLETE with all missing functions
 import api from '../api';
 
 export interface Location {
@@ -40,6 +40,54 @@ export interface Package {
   sender_email?: string;
   receiver_email?: string;
   business_name?: string;
+  // Additional fields your track screen might expect
+  recipient_name?: string;
+  receiver?: { name: string };
+  recipient?: { name: string };
+  to_name?: string;
+  from_location?: string;
+  to_location?: string;
+}
+
+// ADDED: Types that your track screen expects
+export type DrawerState = 
+  | 'pending' 
+  | 'paid' 
+  | 'submitted' 
+  | 'in-transit' 
+  | 'delivered' 
+  | 'collected' 
+  | 'rejected';
+
+// ADDED: State mapping for the drawer navigation
+export const STATE_MAPPING: Record<DrawerState, string> = {
+  'pending': 'pending_unpaid',
+  'paid': 'pending', 
+  'submitted': 'submitted',
+  'in-transit': 'in_transit',
+  'delivered': 'delivered',
+  'collected': 'collected',
+  'rejected': 'rejected'
+};
+
+// ADDED: API response interfaces your track screen expects
+export interface PackageResponse {
+  data: Package[];
+  pagination: {
+    total_count: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  };
+  success: boolean;
+  message?: string;
+}
+
+export interface PackageFilters {
+  state?: DrawerState;
+  page?: number;
+  per_page?: number;
+  search?: string;
 }
 
 // Cache for areas and agents to avoid repeated API calls
@@ -49,14 +97,95 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * FIXED: Improved data transformation with better error handling
+ * ADDED: Get packages with optional filtering - the main missing function
+ * This is what your track screen is calling
+ */
+export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
+  try {
+    console.log('📦 Fetching packages with filters:', filters);
+    
+    // Build query parameters
+    const params = new URLSearchParams();
+    
+    if (filters?.state) {
+      // Map drawer state to API state
+      const apiState = STATE_MAPPING[filters.state];
+      params.append('state', apiState);
+    }
+    
+    if (filters?.page) {
+      params.append('page', filters.page.toString());
+    }
+    
+    if (filters?.per_page) {
+      params.append('per_page', filters.per_page.toString());
+    }
+    
+    if (filters?.search) {
+      params.append('search', filters.search);
+    }
+    
+    const queryString = params.toString();
+    const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
+    
+    console.log('🔗 API call URL:', url);
+    
+    const response = await api.get(url, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    console.log('✅ Packages API response:', {
+      success: response.data.success,
+      dataCount: response.data.data?.length || 0,
+      totalCount: response.data.pagination?.total_count || 0
+    });
+    
+    // Handle different response formats
+    if (response.data.success !== false) {
+      return {
+        data: response.data.data || response.data || [],
+        pagination: response.data.pagination || {
+          total_count: (response.data.data || response.data || []).length,
+          page: 1,
+          per_page: 20,
+          total_pages: 1
+        },
+        success: true,
+        message: response.data.message
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to fetch packages');
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch packages:', error);
+    
+    // Return empty result on error to prevent component crashes
+    return {
+      data: [],
+      pagination: {
+        total_count: 0,
+        page: 1,
+        per_page: 20,
+        total_pages: 0
+      },
+      success: false,
+      message: error.message || 'Failed to fetch packages'
+    };
+  }
+};
+
+/**
+ * IMPROVED: Data transformation with better error handling
  */
 const transformAreaData = (rawData: any, included: any[] = []): Area => {
   try {
-    // Handle different API response formats
     let areaData = rawData;
     
-    // If it's JSON API format
     if (rawData.attributes) {
       areaData = {
         id: rawData.id,
@@ -64,7 +193,6 @@ const transformAreaData = (rawData: any, included: any[] = []): Area => {
         ...rawData.attributes
       };
       
-      // Find related location from included data
       if (rawData.relationships?.location?.data && included.length > 0) {
         const locationRef = rawData.relationships.location.data;
         const includedLocation = included.find((inc: any) => 
@@ -101,7 +229,6 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
   try {
     let agentData = rawData;
     
-    // If it's JSON API format
     if (rawData.attributes) {
       agentData = {
         id: rawData.id,
@@ -110,7 +237,6 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
         ...rawData.attributes
       };
       
-      // Find related area from included data
       if (rawData.relationships?.area?.data && included.length > 0) {
         const areaRef = rawData.relationships.area.data;
         const includedArea = included.find((inc: any) => 
@@ -118,7 +244,6 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
         );
         
         if (includedArea && includedArea.attributes) {
-          // Also find location for this area
           let location = undefined;
           if (includedArea.relationships?.location?.data) {
             const locationRef = includedArea.relationships.location.data;
@@ -167,11 +292,10 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
 };
 
 /**
- * FIXED: Get all areas with improved error handling and fallbacks
+ * Get all areas with improved error handling and fallbacks
  */
 export const getAreas = async (): Promise<Area[]> => {
   try {
-    // Check cache first
     const now = Date.now();
     if (areasCache && (now - cacheTimestamp) < CACHE_DURATION) {
       console.log('📋 Returning cached areas:', areasCache.length);
@@ -188,30 +312,19 @@ export const getAreas = async (): Promise<Area[]> => {
       timeout: 15000
     });
 
-    console.log('📋 Areas API response structure:', {
-      hasData: !!response.data.data,
-      dataIsArray: Array.isArray(response.data.data),
-      hasIncluded: !!response.data.included,
-      includedCount: response.data.included?.length || 0
-    });
-
     let transformedAreas: Area[] = [];
 
     if (response.data.data) {
-      // Handle JSON API format
       const areasData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
       const included = response.data.included || [];
-      
       transformedAreas = areasData.map((item: any) => transformAreaData(item, included));
     } else if (Array.isArray(response.data)) {
-      // Handle direct array format
       transformedAreas = response.data.map((item: any) => transformAreaData(item, []));
     } else {
       console.warn('⚠️ Unexpected API response format:', response.data);
       throw new Error('Unexpected API response format');
     }
 
-    // Update cache
     areasCache = transformedAreas;
     cacheTimestamp = now;
 
@@ -220,24 +333,21 @@ export const getAreas = async (): Promise<Area[]> => {
   } catch (error: any) {
     console.error('❌ Failed to fetch areas:', error);
     
-    // Return cached data if available, even if stale
     if (areasCache) {
       console.log('⚠️ API failed, returning stale cached areas:', areasCache.length);
       return areasCache;
     }
     
-    // Return empty array as fallback
     console.log('⚠️ No cached data available, returning empty array');
     return [];
   }
 };
 
 /**
- * FIXED: Get all agents with improved error handling and fallbacks
+ * Get all agents with improved error handling and fallbacks
  */
 export const getAgents = async (): Promise<Agent[]> => {
   try {
-    // Check cache first
     const now = Date.now();
     if (agentsCache && (now - cacheTimestamp) < CACHE_DURATION) {
       console.log('📋 Returning cached agents:', agentsCache.length);
@@ -254,30 +364,19 @@ export const getAgents = async (): Promise<Agent[]> => {
       timeout: 15000
     });
 
-    console.log('📋 Agents API response structure:', {
-      hasData: !!response.data.data,
-      dataIsArray: Array.isArray(response.data.data),
-      hasIncluded: !!response.data.included,
-      includedCount: response.data.included?.length || 0
-    });
-
     let transformedAgents: Agent[] = [];
 
     if (response.data.data) {
-      // Handle JSON API format
       const agentsData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
       const included = response.data.included || [];
-      
       transformedAgents = agentsData.map((item: any) => transformAgentData(item, included));
     } else if (Array.isArray(response.data)) {
-      // Handle direct array format
       transformedAgents = response.data.map((item: any) => transformAgentData(item, []));
     } else {
       console.warn('⚠️ Unexpected API response format:', response.data);
       throw new Error('Unexpected API response format');
     }
 
-    // Update cache
     agentsCache = transformedAgents;
     cacheTimestamp = now;
 
@@ -286,21 +385,38 @@ export const getAgents = async (): Promise<Agent[]> => {
   } catch (error: any) {
     console.error('❌ Failed to fetch agents:', error);
     
-    // Return cached data if available, even if stale
     if (agentsCache) {
       console.log('⚠️ API failed, returning stale cached agents:', agentsCache.length);
       return agentsCache;
     }
     
-    // Return empty array as fallback
     console.log('⚠️ No cached data available, returning empty array');
     return [];
   }
 };
 
-/**
- * Get agents for a specific area
- */
+// ADDED: Additional helper functions for package management
+export const getPackagesByState = async (state: DrawerState): Promise<Package[]> => {
+  try {
+    const response = await getPackages({ state });
+    return response.data;
+  } catch (error: any) {
+    console.error(`❌ Failed to get packages for state ${state}:`, error);
+    return [];
+  }
+};
+
+export const searchPackages = async (query: string, state?: DrawerState): Promise<Package[]> => {
+  try {
+    const response = await getPackages({ search: query, state });
+    return response.data;
+  } catch (error: any) {
+    console.error('❌ Failed to search packages:', error);
+    return [];
+  }
+};
+
+// Existing helper functions...
 export const getAgentsForArea = async (areaId: string): Promise<Agent[]> => {
   try {
     const allAgents = await getAgents();
@@ -311,9 +427,6 @@ export const getAgentsForArea = async (areaId: string): Promise<Agent[]> => {
   }
 };
 
-/**
- * Search areas by name or location
- */
 export const searchAreas = async (query: string): Promise<Area[]> => {
   try {
     const allAreas = await getAreas();
@@ -331,9 +444,6 @@ export const searchAreas = async (query: string): Promise<Area[]> => {
   }
 };
 
-/**
- * Search agents by name, area, or phone
- */
 export const searchAgents = async (query: string): Promise<Agent[]> => {
   try {
     const allAgents = await getAgents();
@@ -353,9 +463,6 @@ export const searchAgents = async (query: string): Promise<Agent[]> => {
   }
 };
 
-/**
- * Clear the cache (useful for forcing refresh)
- */
 export const clearCache = (): void => {
   areasCache = null;
   agentsCache = null;
@@ -363,9 +470,6 @@ export const clearCache = (): void => {
   console.log('🧹 Package helpers cache cleared');
 };
 
-/**
- * Get area by ID
- */
 export const getAreaById = async (areaId: string): Promise<Area | null> => {
   try {
     const areas = await getAreas();
@@ -376,9 +480,6 @@ export const getAreaById = async (areaId: string): Promise<Area | null> => {
   }
 };
 
-/**
- * Get agent by ID
- */
 export const getAgentById = async (agentId: string): Promise<Agent | null> => {
   try {
     const agents = await getAgents();
@@ -389,9 +490,6 @@ export const getAgentById = async (agentId: string): Promise<Agent | null> => {
   }
 };
 
-/**
- * Validate package state
- */
 export const isValidPackageState = (state: string): boolean => {
   const validStates = [
     'pending_unpaid',
@@ -406,9 +504,6 @@ export const isValidPackageState = (state: string): boolean => {
   return validStates.includes(state);
 };
 
-/**
- * Get human-readable state display
- */
 export const getStateDisplay = (state: string): string => {
   const stateMap: Record<string, string> = {
     'pending_unpaid': 'Pending Payment',
@@ -423,9 +518,6 @@ export const getStateDisplay = (state: string): string => {
   return stateMap[state] || state.charAt(0).toUpperCase() + state.slice(1);
 };
 
-/**
- * Get state color for UI
- */
 export const getStateColor = (state: string): string => {
   const colorMap: Record<string, string> = {
     'pending_unpaid': '#FF3B30',
@@ -440,9 +532,6 @@ export const getStateColor = (state: string): string => {
   return colorMap[state] || '#a0aec0';
 };
 
-/**
- * Check if package can be edited based on state and user role
- */
 export const canEditPackage = (packageData: Package, userRole: string): boolean => {
   switch (userRole) {
     case 'admin':
@@ -458,9 +547,6 @@ export const canEditPackage = (packageData: Package, userRole: string): boolean 
   }
 };
 
-/**
- * Get next valid states for a package
- */
 export const getNextValidStates = (currentState: string, userRole: string): string[] => {
   const stateTransitions: Record<string, string[]> = {
     'pending_unpaid': ['pending', 'rejected'],
@@ -472,12 +558,10 @@ export const getNextValidStates = (currentState: string, userRole: string): stri
     'rejected': ['pending']
   };
   
-  // Admin can make any valid transition
   if (userRole === 'admin') {
     return stateTransitions[currentState] || [];
   }
   
-  // Other roles have limited transitions
   const limitedTransitions: Record<string, string[]> = {
     'agent': ['submitted', 'in_transit', 'delivered'],
     'rider': ['in_transit', 'delivered', 'collected'],
@@ -490,9 +574,6 @@ export const getNextValidStates = (currentState: string, userRole: string): stri
   return nextStates.filter(state => allowedStates.includes(state));
 };
 
-/**
- * Format route description
- */
 export const formatRouteDescription = (
   originArea?: Area,
   destinationArea?: Area
@@ -505,17 +586,12 @@ export const formatRouteDescription = (
   const destinationLocation = destinationArea.location?.name || 'Unknown Destination';
   
   if (originArea.location?.id === destinationArea.location?.id) {
-    // Same location, different areas
     return `${originLocation} (${originArea.name} → ${destinationArea.name})`;
   } else {
-    // Different locations
     return `${originLocation} → ${destinationLocation}`;
   }
 };
 
-/**
- * Refresh cache data
- */
 export const refreshData = async (): Promise<void> => {
   try {
     clearCache();
@@ -534,7 +610,7 @@ export const refreshData = async (): Promise<void> => {
   }
 };
 
-// FIXED: Ensure all functions are properly exported
+// Updated default export with all functions
 export default {
   getAreas,
   getAgents,
@@ -550,5 +626,10 @@ export default {
   canEditPackage,
   getNextValidStates,
   formatRouteDescription,
-  refreshData
+  refreshData,
+  // Package-specific functions
+  getPackages,
+  getPackagesByState,
+  searchPackages,
+  STATE_MAPPING
 };
