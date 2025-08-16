@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Admin Settings Screen with Real Bluetooth Integration
+// app/admin/settings.tsx - Updated with Fixed Printer Connection
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -23,7 +23,6 @@ import AdminLayout from '../../components/AdminLayout';
 
 // Real Bluetooth libraries
 import RNBluetoothClassic, { BluetoothDevice as RNBluetoothDevice } from 'react-native-bluetooth-classic';
-// import { BleManager, Device as BleDevice } from 'react-native-ble-plx';
 
 interface BluetoothDevice {
   id: string;
@@ -44,7 +43,6 @@ interface AppInfo {
 
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
-  // const [bleManager] = useState(() => new BleManager());
   const [bluetoothEnabled, setBluetoothEnabled] = useState(false);
   const [printerConnected, setPrinterConnected] = useState(false);
   const [connectedPrinter, setConnectedPrinter] = useState<string | null>(null);
@@ -66,17 +64,6 @@ const SettingsScreen: React.FC = () => {
   useEffect(() => {
     initializeBluetooth();
     loadStoredSettings();
-
-    // BLE manager setup commented out until proper development build
-    // const subscription = bleManager.onStateChange((state) => {
-    //   console.log('BLE State changed:', state);
-    //   setBluetoothEnabled(state === 'PoweredOn');
-    // }, true);
-
-    // return () => {
-    //   subscription.remove();
-    //   bleManager.destroy();
-    // };
   }, []);
 
   const loadStoredSettings = async () => {
@@ -116,13 +103,8 @@ const SettingsScreen: React.FC = () => {
 
   const initializeBluetooth = async () => {
     try {
-      // Request Bluetooth permissions
       await requestBluetoothPermissions();
-      
-      // Check if Bluetooth is enabled
       await checkBluetoothState();
-      
-      // Load paired devices
       await loadPairedDevices();
     } catch (error) {
       console.error('Failed to initialize Bluetooth:', error);
@@ -139,7 +121,6 @@ const SettingsScreen: React.FC = () => {
   const requestBluetoothPermissions = async () => {
     if (Platform.OS === 'android') {
       try {
-        // Base permissions that are always available
         let permissions = [
           PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
           PermissionsAndroid.PERMISSIONS.ACCESS_COARSE_LOCATION,
@@ -147,10 +128,8 @@ const SettingsScreen: React.FC = () => {
           PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADMIN,
         ];
 
-        // Add Android 12+ permissions if they exist
         const androidApiLevel = Platform.Version;
         if (androidApiLevel >= 31) {
-          // Only add if the permission constants exist
           if (PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN) {
             permissions.push(PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN);
           }
@@ -162,15 +141,11 @@ const SettingsScreen: React.FC = () => {
           }
         }
 
-        // Filter out any undefined permissions
         const validPermissions = permissions.filter(permission => 
           permission && typeof permission === 'string'
         );
 
-        console.log('Requesting permissions:', validPermissions);
-
         const granted = await PermissionsAndroid.requestMultiple(validPermissions);
-
         const allPermissionsGranted = Object.values(granted).every(
           permission => permission === PermissionsAndroid.RESULTS.GRANTED
         );
@@ -194,7 +169,6 @@ const SettingsScreen: React.FC = () => {
         return false;
       }
     } else {
-      // iOS permissions are handled automatically
       setBluetoothPermissions(true);
       return true;
     }
@@ -278,7 +252,6 @@ const SettingsScreen: React.FC = () => {
           });
         }
       } else {
-        // Disconnect all devices first
         await disconnectAllDevices();
         setBluetoothEnabled(false);
         
@@ -304,7 +277,6 @@ const SettingsScreen: React.FC = () => {
 
   const disconnectAllDevices = async () => {
     try {
-      // Disconnect Classic Bluetooth devices
       const connectedDevices = await RNBluetoothClassic.getConnectedDevices();
       for (const device of connectedDevices) {
         try {
@@ -315,7 +287,6 @@ const SettingsScreen: React.FC = () => {
         }
       }
 
-      // Update UI state
       setBluetoothDevices(prev => prev.map(d => ({ ...d, connected: false })));
       setPrinterConnected(false);
       setConnectedPrinter(null);
@@ -347,6 +318,59 @@ const SettingsScreen: React.FC = () => {
     await scanForDevices();
   };
 
+  // NEW FUNCTION: Handle printer disconnect
+  const handlePrinterDisconnect = async () => {
+    if (!connectedPrinterAddress) {
+      Toast.show({
+        type: 'warning',
+        text1: 'No Printer Connected',
+        text2: 'No printer to disconnect',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      return;
+    }
+
+    try {
+      // Disconnect from the printer
+      await RNBluetoothClassic.disconnectFromDevice(connectedPrinterAddress);
+
+      // Update UI state
+      setBluetoothDevices(prev =>
+        prev.map(d => ({
+          ...d,
+          connected: d.address === connectedPrinterAddress ? false : d.connected,
+        }))
+      );
+
+      // Clear printer connection state
+      setPrinterConnected(false);
+      setConnectedPrinter(null);
+      setConnectedPrinterAddress(null);
+      
+      // Remove from storage
+      await AsyncStorage.removeItem('connected_printer');
+
+      Toast.show({
+        type: 'success',
+        text1: 'Printer Disconnected',
+        text2: 'Printer has been disconnected successfully',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } catch (error) {
+      console.error('Failed to disconnect printer:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Disconnect Failed',
+        text2: 'Failed to disconnect from printer',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
+  };
+
   const scanForDevices = async () => {
     if (!bluetoothPermissions) {
       await requestBluetoothPermissions();
@@ -356,10 +380,8 @@ const SettingsScreen: React.FC = () => {
     setScanningDevices(true);
     
     try {
-      // Get bonded devices first
       await loadPairedDevices();
 
-      // Start Classic Bluetooth discovery
       const isDiscovering = await RNBluetoothClassic.isDiscovering();
       if (isDiscovering) {
         await RNBluetoothClassic.cancelDiscovery();
@@ -378,7 +400,6 @@ const SettingsScreen: React.FC = () => {
         isClassic: true,
       }));
 
-      // Combine with existing devices, avoiding duplicates
       setBluetoothDevices(prev => {
         const combined = [...prev];
         newDevices.forEach(newDevice => {
@@ -424,7 +445,6 @@ const SettingsScreen: React.FC = () => {
         visibilityTime: 2000,
       });
 
-      // If device is not bonded, try to pair first
       if (device.bondState !== 'bonded') {
         try {
           const paired = await RNBluetoothClassic.pairDevice(device.address);
@@ -444,11 +464,9 @@ const SettingsScreen: React.FC = () => {
         }
       }
 
-      // Connect to the device
       const connection = await RNBluetoothClassic.connectToDevice(device.address);
       
       if (connection) {
-        // Update device connection status
         setBluetoothDevices(prev =>
           prev.map(d => ({
             ...d,
@@ -461,7 +479,6 @@ const SettingsScreen: React.FC = () => {
           setConnectedPrinter(device.name);
           setConnectedPrinterAddress(device.address);
           
-          // Store connected printer
           await AsyncStorage.setItem('connected_printer', JSON.stringify({
             name: device.name,
             address: device.address,
@@ -609,13 +626,9 @@ const SettingsScreen: React.FC = () => {
     });
 
     try {
-      // Clear cache and reset connections
       await AsyncStorage.multiRemove(['connected_printer', 'bluetooth_cache']);
-      
-      // Disconnect all devices
       await disconnectAllDevices();
       
-      // Reinitialize Bluetooth
       setTimeout(async () => {
         await initializeBluetooth();
         
@@ -640,7 +653,6 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // Save settings when they change
   useEffect(() => {
     saveSettings();
   }, [notifications, autoSync, darkMode]);
@@ -669,6 +681,60 @@ const SettingsScreen: React.FC = () => {
       {rightComponent}
     </TouchableOpacity>
   );
+
+  // NEW FUNCTION: Render printer connection setting with proper connect/disconnect logic
+  const renderPrinterConnectionSetting = () => {
+    return renderSettingItem(
+      'print',
+      'Printer Connection',
+      printerConnected 
+        ? `Connected to ${connectedPrinter}` 
+        : 'No printer connected',
+      <View style={styles.printerActions}>
+        {printerConnected ? (
+          // When printer is connected, show Test and Disconnect buttons
+          <>
+            <TouchableOpacity
+              style={styles.testButton}
+              onPress={testPrinterConnection}
+            >
+              <LinearGradient
+                colors={['#34C759', '#30A46C']}
+                style={styles.testButtonGradient}
+              >
+                <Text style={styles.testButtonText}>Test</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.disconnectButton}
+              onPress={handlePrinterDisconnect}
+            >
+              <LinearGradient
+                colors={['#FF6B6B', '#FF5252']}
+                style={styles.disconnectButtonGradient}
+              >
+                <Text style={styles.disconnectButtonText}>Disconnect</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </>
+        ) : (
+          // When no printer is connected, show Connect button
+          <TouchableOpacity
+            style={styles.connectButton}
+            onPress={handlePrinterConnect}
+          >
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.connectButtonGradient}
+            >
+              <Text style={styles.connectButtonText}>Connect</Text>
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
 
   const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => (
     <TouchableOpacity
@@ -721,39 +787,8 @@ const SettingsScreen: React.FC = () => {
           />
         )}
 
-        {renderSettingItem(
-          'print',
-          'Printer Connection',
-          printerConnected ? `Connected to ${connectedPrinter}` : 'Printer not connected',
-          <View style={styles.printerActions}>
-            {printerConnected && (
-              <TouchableOpacity
-                style={styles.testButton}
-                onPress={testPrinterConnection}
-              >
-                <LinearGradient
-                  colors={['#34C759', '#30A46C']}
-                  style={styles.testButtonGradient}
-                >
-                  <Text style={styles.testButtonText}>Test</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity
-              style={styles.connectButton}
-              onPress={handlePrinterConnect}
-            >
-              <LinearGradient
-                colors={printerConnected ? ['#34C759', '#30A46C'] : ['#FF9500', '#FF8C00']}
-                style={styles.connectButtonGradient}
-              >
-                <Text style={styles.connectButtonText}>
-                  {printerConnected ? 'Change' : 'Connect'}
-                </Text>
-              </LinearGradient>
-            </TouchableOpacity>
-          </View>
-        )}
+        {/* UPDATED: Use the new printer connection setting function */}
+        {renderPrinterConnectionSetting()}
       </View>
 
       {/* General Settings */}
@@ -1051,6 +1086,7 @@ const styles = StyleSheet.create({
   printerActions: {
     flexDirection: 'row',
     gap: 8,
+    alignItems: 'center',
   },
   testButton: {
     borderRadius: 12,
@@ -1078,6 +1114,21 @@ const styles = StyleSheet.create({
   connectButtonText: {
     color: '#fff',
     fontSize: 14,
+    fontWeight: '700',
+  },
+  // NEW STYLES: Disconnect button
+  disconnectButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  disconnectButtonGradient: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    alignItems: 'center',
+  },
+  disconnectButtonText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '700',
   },
   logoutButton: {
