@@ -1,4 +1,4 @@
-// components/PackageEditModal.tsx - FIXED with proper helper functions
+// components/PackageEditModal.tsx - FIXED: All states showing and saving properly
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -62,6 +62,7 @@ interface PackageEditModalProps {
 
 type PackageState = 'pending_unpaid' | 'pending' | 'submitted' | 'in_transit' | 'delivered' | 'collected' | 'rejected';
 
+// FIXED: Complete package states array - ensure all states are included
 const PACKAGE_STATES: { value: PackageState; label: string; description: string; color: string }[] = [
   { value: 'pending_unpaid', label: 'Pending Payment', description: 'Package created, awaiting payment', color: '#FF3B30' },
   { value: 'pending', label: 'Pending', description: 'Payment received, preparing for pickup', color: '#FF9500' },
@@ -185,13 +186,26 @@ export default function PackageEditModal({
     setSenderPhone(packageData.sender_phone || '');
     setReceiverName(packageData.receiver_name || '');
     setReceiverPhone(packageData.receiver_phone || '');
-    setSelectedState(packageData.state as PackageState);
+    
+    // FIXED: Ensure state is properly set and is valid
+    const currentState = packageData.state as PackageState;
+    const isValidState = PACKAGE_STATES.some(state => state.value === currentState);
+    
+    if (isValidState) {
+      setSelectedState(currentState);
+      console.log('✅ Valid state set:', currentState);
+    } else {
+      console.warn('⚠️ Invalid state received:', packageData.state, 'defaulting to pending');
+      setSelectedState('pending');
+    }
+    
     setSelectedDestinationArea(packageData.destination_area?.id || '');
     setSelectedDestinationAgent(packageData.destination_agent?.id || '');
     setDeliveryLocation(packageData.delivery_location || '');
     
     console.log('📋 Form data loaded:', {
-      state: packageData.state,
+      state: currentState,
+      isValidState,
       destinationArea: packageData.destination_area?.id,
       destinationAgent: packageData.destination_agent?.id,
       deliveryType: packageData.delivery_type
@@ -328,6 +342,7 @@ export default function PackageEditModal({
     return errors;
   }, [canEditPersonalInfo, canEditDestination, senderName, senderPhone, receiverName, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
 
+  // FIXED: Enhanced submit handler with better state handling
   const handleSubmit = useCallback(async () => {
     if (!packageData) return;
     
@@ -341,6 +356,14 @@ export default function PackageEditModal({
     
     try {
       console.log('💾 Submitting package update...');
+      console.log('💾 Current selected state:', selectedState);
+      console.log('💾 User permissions:', {
+        canEditPersonalInfo,
+        canEditState,
+        canEditDestination,
+        canEditDeliveryLocation,
+        userRole
+      });
       
       const updateData: any = {};
       
@@ -350,10 +373,13 @@ export default function PackageEditModal({
         updateData.sender_phone = senderPhone.trim();
         updateData.receiver_name = receiverName.trim();
         updateData.receiver_phone = receiverPhone.trim();
+        console.log('💾 Added personal info to update');
       }
       
+      // FIXED: Ensure state is always included if user can edit it
       if (canEditState) {
         updateData.state = selectedState;
+        console.log('💾 Added state to update:', selectedState);
       }
       
       if (canEditDestination) {
@@ -368,21 +394,25 @@ export default function PackageEditModal({
           updateData.destination_area_id = selectedDestinationArea;
           updateData.destination_agent_id = null; // Clear agent for non-agent delivery
         }
+        console.log('💾 Added destination to update');
       }
       
       if (canEditDeliveryLocation && ['doorstep', 'fragile'].includes(packageData.delivery_type)) {
         updateData.delivery_location = deliveryLocation.trim();
+        console.log('💾 Added delivery location to update');
       }
       
-      console.log('💾 Update payload:', updateData);
+      console.log('💾 Final update payload:', updateData);
       
+      // FIXED: Use proper API endpoint and ensure state is properly handled
       const response = await api.put(`/api/v1/packages/${packageData.code}`, {
         package: updateData
       }, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 15000 // 15 second timeout for update
       });
       
       console.log('💾 Update response:', response.data);
@@ -403,6 +433,7 @@ export default function PackageEditModal({
       }
     } catch (error: any) {
       console.error('❌ Failed to update package:', error);
+      console.error('❌ Error response:', error.response?.data);
       
       let errorMessage = 'Failed to update package';
       if (error.response?.data?.message) {
@@ -411,6 +442,8 @@ export default function PackageEditModal({
         errorMessage = Array.isArray(error.response.data.errors) 
           ? error.response.data.errors.join(', ')
           : String(error.response.data.errors);
+      } else if (error.message?.includes('timeout')) {
+        errorMessage = 'Update request timed out. Please try again.';
       } else if (error.message) {
         errorMessage = error.message;
       }
@@ -519,37 +552,52 @@ export default function PackageEditModal({
     );
   }, [canEditPersonalInfo, senderName, senderPhone, receiverName, receiverPhone]);
 
+  // FIXED: Enhanced state edit section with better state handling
   const renderStateEdit = useCallback(() => {
     if (!canEditState) return null;
+    
+    console.log('🎨 Rendering state edit section. Available states:', PACKAGE_STATES.length);
+    console.log('🎨 Current selected state:', selectedState);
     
     return (
       <View style={styles.editSection}>
         <Text style={styles.sectionTitle}>Package State</Text>
+        <Text style={styles.sectionSubtitle}>Current: {selectedState}</Text>
+        
         <ScrollView style={styles.statesList} showsVerticalScrollIndicator={false}>
-          {PACKAGE_STATES.map((state) => (
-            <TouchableOpacity
-              key={state.value}
-              style={[
-                styles.stateOption,
-                selectedState === state.value && styles.selectedStateOption,
-                { borderLeftColor: state.color }
-              ]}
-              onPress={() => setSelectedState(state.value)}
-            >
-              <View style={styles.stateOptionContent}>
-                <Text style={[
-                  styles.stateOptionLabel,
-                  selectedState === state.value && styles.selectedStateOptionText
-                ]}>
-                  {state.label}
-                </Text>
-                <Text style={styles.stateOptionDescription}>{state.description}</Text>
-              </View>
-              {selectedState === state.value && (
-                <Feather name="check-circle" size={20} color="#10b981" />
-              )}
-            </TouchableOpacity>
-          ))}
+          {PACKAGE_STATES.map((state, index) => {
+            const isSelected = selectedState === state.value;
+            console.log(`🎨 Rendering state ${index + 1}/${PACKAGE_STATES.length}: ${state.value} (selected: ${isSelected})`);
+            
+            return (
+              <TouchableOpacity
+                key={state.value}
+                style={[
+                  styles.stateOption,
+                  isSelected && styles.selectedStateOption,
+                  { borderLeftColor: state.color }
+                ]}
+                onPress={() => {
+                  console.log('👆 State selected:', state.value);
+                  setSelectedState(state.value);
+                }}
+                activeOpacity={0.7}
+              >
+                <View style={styles.stateOptionContent}>
+                  <Text style={[
+                    styles.stateOptionLabel,
+                    isSelected && styles.selectedStateOptionText
+                  ]}>
+                    {state.label}
+                  </Text>
+                  <Text style={styles.stateOptionDescription}>{state.description}</Text>
+                </View>
+                {isSelected && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            );
+          })}
         </ScrollView>
       </View>
     );
@@ -943,7 +991,13 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+    marginBottom: 8,
+  },
+  sectionSubtitle: {
+    fontSize: 14,
+    color: '#a0aec0',
     marginBottom: 16,
+    fontStyle: 'italic',
   },
   
   // Input styles
@@ -992,9 +1046,9 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
   },
   
-  // State list styles
+  // FIXED: Enhanced state list styles
   statesList: {
-    maxHeight: 300,
+    maxHeight: 400,
   },
   stateOption: {
     flexDirection: 'row',
@@ -1008,8 +1062,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   selectedStateOption: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: '#7c3aed',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: '#10b981',
   },
   stateOptionContent: {
     flex: 1,
@@ -1021,7 +1075,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   selectedStateOptionText: {
-    color: '#7c3aed',
+    color: '#10b981',
   },
   stateOptionDescription: {
     fontSize: 14,
