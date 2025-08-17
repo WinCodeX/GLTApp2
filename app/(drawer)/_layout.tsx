@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { ActivityIndicator, Dimensions, View } from 'react-native';
+import { Dimensions, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
@@ -16,6 +16,7 @@ import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
+import LoadingSplashScreen from '@/components/LoadingSplashScreen'; // Import the new splash screen
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -171,32 +172,14 @@ export default function DrawerLayout() {
     }
   }, [isLoading, shouldRedirect, router]);
 
-  // Show loading while checking auth
+  // Show custom loading splash while checking auth
   if (isLoading) {
-    return (
-      <View style={{ 
-        flex: 1, 
-        backgroundColor: colors.background, 
-        justifyContent: 'center', 
-        alignItems: 'center' 
-      }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // If we should redirect, show loading until redirect happens
+  // If we should redirect, show custom loading splash until redirect happens
   if (shouldRedirect) {
-    return (
-      <View style={{ 
-        flex: 1, 
-        backgroundColor: colors.background, 
-        justifyContent: 'center', 
-        alignItems: 'center' 
-      }}>
-        <ActivityIndicator size="large" color={colors.primary} />
-      </View>
-    );
+    return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
   // Only render drawer if we're staying here (authenticated client)
