@@ -31,6 +31,7 @@ export interface Package {
   cost: number;
   delivery_type: string;
   created_at: string;
+  updated_at: string;
   origin_area?: Area;
   destination_area?: Area;
   origin_agent?: Agent;
@@ -47,6 +48,19 @@ export interface Package {
   to_name?: string;
   from_location?: string;
   to_location?: string;
+}
+
+// ADDED: QR Code response interface
+export interface QRCodeResponse {
+  data: {
+    qr_code_base64: string | null;
+    tracking_url: string;
+    package_code: string;
+    package_state: string;
+    route_description: string;
+  };
+  success: boolean;
+  message?: string;
 }
 
 // ADDED: Types that your track screen expects
@@ -95,6 +109,227 @@ let areasCache: Area[] | null = null;
 let agentsCache: Agent[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * ADDED: Get detailed package information by package code
+ * This is what your tracking screen is calling
+ */
+export const getPackageDetails = async (packageCode: string): Promise<Package> => {
+  try {
+    console.log('📦 Fetching package details for code:', packageCode);
+    
+    if (!packageCode || typeof packageCode !== 'string') {
+      throw new Error('Package code is required');
+    }
+    
+    const response = await api.get(`/api/v1/packages/${encodeURIComponent(packageCode)}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    console.log('✅ Package details API response:', {
+      success: response.data.success !== false,
+      hasData: !!response.data.data,
+      packageId: response.data.data?.id
+    });
+    
+    let packageData: any;
+    
+    // Handle different response formats
+    if (response.data.data) {
+      packageData = response.data.data;
+    } else if (response.data.id) {
+      packageData = response.data;
+    } else {
+      throw new Error('Package not found');
+    }
+    
+    // Transform the package data
+    const transformedPackage = transformPackageData(packageData, response.data.included || []);
+    
+    console.log('✅ Package details loaded:', transformedPackage.code);
+    return transformedPackage;
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch package details:', error);
+    
+    if (error.response?.status === 404) {
+      throw new Error(`Package ${packageCode} not found`);
+    } else if (error.response?.status === 403) {
+      throw new Error('You do not have permission to view this package');
+    } else if (error.code === 'NETWORK_ERROR' || error.message === 'Network Error') {
+      throw new Error('Network error - please check your connection');
+    } else if (error.code === 'ECONNABORTED') {
+      throw new Error('Request timed out - please try again');
+    }
+    
+    throw new Error(error.message || 'Failed to load package details');
+  }
+};
+
+/**
+ * ADDED: Get QR code for package tracking
+ * This is what your tracking screen is calling
+ */
+export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
+  try {
+    console.log('🔗 Fetching QR code for package:', packageCode);
+    
+    if (!packageCode || typeof packageCode !== 'string') {
+      throw new Error('Package code is required');
+    }
+    
+    const response = await api.get(`/api/v1/packages/${encodeURIComponent(packageCode)}/qr_code`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    console.log('✅ QR code API response:', {
+      success: response.data.success !== false,
+      hasQRCode: !!response.data.data?.qr_code_base64,
+      hasTrackingUrl: !!response.data.data?.tracking_url
+    });
+    
+    // Handle the response
+    if (response.data.success !== false && response.data.data) {
+      return {
+        data: {
+          qr_code_base64: response.data.data.qr_code_base64 || null,
+          tracking_url: response.data.data.tracking_url || `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+          package_code: packageCode,
+          package_state: response.data.data.package_state || 'unknown',
+          route_description: response.data.data.route_description || 'Route information unavailable'
+        },
+        success: true,
+        message: response.data.message
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to generate QR code');
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch QR code:', error);
+    
+    // Return fallback QR data instead of throwing
+    return {
+      data: {
+        qr_code_base64: null,
+        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+        package_code: packageCode,
+        package_state: 'unknown',
+        route_description: 'Route information unavailable'
+      },
+      success: false,
+      message: error.message || 'Failed to generate QR code'
+    };
+  }
+};
+
+/**
+ * ADDED: Transform package data from API response
+ */
+const transformPackageData = (rawData: any, included: any[] = []): Package => {
+  try {
+    let packageData = rawData;
+    
+    // Handle JSON:API format
+    if (rawData.attributes) {
+      packageData = {
+        id: rawData.id,
+        ...rawData.attributes
+      };
+      
+      // Handle relationships
+      if (rawData.relationships && included.length > 0) {
+        // Origin area
+        if (rawData.relationships.origin_area?.data) {
+          const areaRef = rawData.relationships.origin_area.data;
+          const includedArea = included.find((inc: any) => 
+            inc.type === 'area' && inc.id === areaRef.id
+          );
+          if (includedArea) {
+            packageData.origin_area = transformAreaData(includedArea, included);
+          }
+        }
+        
+        // Destination area
+        if (rawData.relationships.destination_area?.data) {
+          const areaRef = rawData.relationships.destination_area.data;
+          const includedArea = included.find((inc: any) => 
+            inc.type === 'area' && inc.id === areaRef.id
+          );
+          if (includedArea) {
+            packageData.destination_area = transformAreaData(includedArea, included);
+          }
+        }
+        
+        // Origin agent
+        if (rawData.relationships.origin_agent?.data) {
+          const agentRef = rawData.relationships.origin_agent.data;
+          const includedAgent = included.find((inc: any) => 
+            inc.type === 'agent' && inc.id === agentRef.id
+          );
+          if (includedAgent) {
+            packageData.origin_agent = transformAgentData(includedAgent, included);
+          }
+        }
+        
+        // Destination agent
+        if (rawData.relationships.destination_agent?.data) {
+          const agentRef = rawData.relationships.destination_agent.data;
+          const includedAgent = included.find((inc: any) => 
+            inc.type === 'agent' && inc.id === agentRef.id
+          );
+          if (includedAgent) {
+            packageData.destination_agent = transformAgentData(includedAgent, included);
+          }
+        }
+      }
+    }
+    
+    // Ensure required fields exist
+    return {
+      id: String(packageData.id || ''),
+      code: packageData.code || '',
+      state: packageData.state || 'unknown',
+      state_display: packageData.state_display || getStateDisplay(packageData.state || ''),
+      sender_name: packageData.sender_name || 'Unknown Sender',
+      receiver_name: packageData.receiver_name || 'Unknown Receiver',
+      receiver_phone: packageData.receiver_phone || '',
+      route_description: packageData.route_description || 'Route information unavailable',
+      cost: Number(packageData.cost) || 0,
+      delivery_type: packageData.delivery_type || 'agent',
+      created_at: packageData.created_at || new Date().toISOString(),
+      updated_at: packageData.updated_at || packageData.created_at || new Date().toISOString(),
+      origin_area: packageData.origin_area,
+      destination_area: packageData.destination_area,
+      origin_agent: packageData.origin_agent,
+      destination_agent: packageData.destination_agent,
+      delivery_location: packageData.delivery_location,
+      sender_phone: packageData.sender_phone,
+      sender_email: packageData.sender_email,
+      receiver_email: packageData.receiver_email,
+      business_name: packageData.business_name,
+      // Additional fields for compatibility
+      recipient_name: packageData.recipient_name || packageData.receiver_name,
+      receiver: packageData.receiver || { name: packageData.receiver_name },
+      recipient: packageData.recipient || { name: packageData.receiver_name },
+      to_name: packageData.to_name || packageData.receiver_name,
+      from_location: packageData.from_location || packageData.origin_area?.name,
+      to_location: packageData.to_location || packageData.destination_area?.name,
+    };
+    
+  } catch (error) {
+    console.error('Error transforming package data:', error, rawData);
+    throw new Error('Failed to transform package data');
+  }
+};
 
 /**
  * ADDED: Get packages with optional filtering - the main missing function
@@ -146,10 +381,18 @@ export const getPackages = async (filters?: PackageFilters): Promise<PackageResp
     
     // Handle different response formats
     if (response.data.success !== false) {
+      const packagesData = response.data.data || response.data || [];
+      const included = response.data.included || [];
+      
+      // Transform each package
+      const transformedPackages = Array.isArray(packagesData) 
+        ? packagesData.map((pkg: any) => transformPackageData(pkg, included))
+        : [transformPackageData(packagesData, included)];
+      
       return {
-        data: response.data.data || response.data || [],
+        data: transformedPackages,
         pagination: response.data.pagination || {
-          total_count: (response.data.data || response.data || []).length,
+          total_count: transformedPackages.length,
           page: 1,
           per_page: 20,
           total_pages: 1
@@ -631,5 +874,7 @@ export default {
   getPackages,
   getPackagesByState,
   searchPackages,
+  getPackageDetails,
+  getPackageQRCode,
   STATE_MAPPING
 };
