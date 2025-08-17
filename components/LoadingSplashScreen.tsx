@@ -1,23 +1,6 @@
-import React from 'react';
-import { View, Dimensions } from 'react-native';
-import Svg, {
-  Defs,
-  LinearGradient,
-  Stop,
-  RadialGradient,
-  Filter,
-  FeGaussianBlur,
-  FeMerge,
-  FeMergeNode,
-  FeDropShadow,
-  Rect,
-  Circle,
-  G,
-  Text,
-  Polygon,
-  Line,
-  Animate
-} from 'react-native-svg';
+import React, { useEffect, useRef } from 'react';
+import { View, Text, Animated, Dimensions, StyleSheet } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -28,181 +11,313 @@ interface LoadingSplashScreenProps {
 export default function LoadingSplashScreen({ 
   backgroundColor = '#1a1b2e' 
 }: LoadingSplashScreenProps) {
+  const fadeAnim = useRef(new Animated.Value(0)).current;
+  const scaleAnim = useRef(new Animated.Value(0.8)).current;
+
+  useEffect(() => {
+    // Main logo entrance animation
+    Animated.parallel([
+      Animated.timing(fadeAnim, {
+        toValue: 1,
+        duration: 1000,
+        useNativeDriver: true,
+      }),
+      Animated.spring(scaleAnim, {
+        toValue: 1,
+        tension: 50,
+        friction: 7,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  }, [fadeAnim, scaleAnim]);
+
+  // Animated blinking dots component
+  const BlinkingDot = ({ 
+    delay = 0, 
+    size = 4, 
+    color = '#9d4edd',
+    top,
+    left,
+    right,
+    bottom 
+  }: {
+    delay?: number;
+    size?: number;
+    color?: string;
+    top?: number;
+    left?: number;
+    right?: number;
+    bottom?: number;
+  }) => {
+    const blinkAnim = useRef(new Animated.Value(0.4)).current;
+
+    useEffect(() => {
+      const blink = () => {
+        Animated.sequence([
+          Animated.timing(blinkAnim, {
+            toValue: 0.9,
+            duration: 1500 + delay,
+            useNativeDriver: true,
+          }),
+          Animated.timing(blinkAnim, {
+            toValue: 0.4,
+            duration: 1500 + delay,
+            useNativeDriver: true,
+          }),
+        ]).start(() => blink());
+      };
+
+      const timeout = setTimeout(blink, delay);
+      return () => clearTimeout(timeout);
+    }, [blinkAnim, delay]);
+
+    return (
+      <Animated.View
+        style={[
+          styles.dot,
+          {
+            width: size,
+            height: size,
+            borderRadius: size / 2,
+            backgroundColor: color,
+            opacity: blinkAnim,
+            top,
+            left,
+            right,
+            bottom,
+          },
+        ]}
+      />
+    );
+  };
+
+  // Movement lines component
+  const MovementLines = () => {
+    const line1Anim = useRef(new Animated.Value(0.6)).current;
+    const line2Anim = useRef(new Animated.Value(0.4)).current;
+    const line3Anim = useRef(new Animated.Value(0.2)).current;
+
+    useEffect(() => {
+      const animateLine1 = () => {
+        Animated.sequence([
+          Animated.timing(line1Anim, { toValue: 1, duration: 2000, useNativeDriver: true }),
+          Animated.timing(line1Anim, { toValue: 0.6, duration: 2000, useNativeDriver: true }),
+        ]).start(() => animateLine1());
+      };
+
+      const animateLine2 = () => {
+        Animated.sequence([
+          Animated.timing(line2Anim, { toValue: 0.8, duration: 2300, useNativeDriver: true }),
+          Animated.timing(line2Anim, { toValue: 0.4, duration: 2300, useNativeDriver: true }),
+        ]).start(() => animateLine2());
+      };
+
+      const animateLine3 = () => {
+        Animated.sequence([
+          Animated.timing(line3Anim, { toValue: 0.6, duration: 2700, useNativeDriver: true }),
+          Animated.timing(line3Anim, { toValue: 0.2, duration: 2700, useNativeDriver: true }),
+        ]).start(() => animateLine3());
+      };
+
+      animateLine1();
+      setTimeout(animateLine2, 300);
+      setTimeout(animateLine3, 700);
+    }, []);
+
+    return (
+      <View style={styles.movementLinesContainer}>
+        <Animated.View style={[styles.movementLine, styles.line1, { opacity: line1Anim }]} />
+        <Animated.View style={[styles.movementLine, styles.line2, { opacity: line2Anim }]} />
+        <Animated.View style={[styles.movementLine, styles.line3, { opacity: line3Anim }]} />
+      </View>
+    );
+  };
+
   return (
-    <View style={{
-      position: 'absolute',
-      top: 0,
-      left: 0,
-      right: 0,
-      bottom: 0,
-      backgroundColor,
-      justifyContent: 'center',
-      alignItems: 'center',
-      zIndex: 9999,
-    }}>
-      <Svg
-        width={screenWidth}
-        height={screenHeight}
-        viewBox={`0 0 ${screenWidth} ${screenHeight}`}
+    <LinearGradient
+      colors={['#1e2749', '#151826', '#0f1015']}
+      style={styles.container}
+      start={{ x: 0.5, y: 0 }}
+      end={{ x: 0.5, y: 1 }}
+    >
+      {/* Scattered blinking dots - matching SVG positions */}
+      <BlinkingDot top={screenHeight * 0.2} left={screenWidth * 0.15} size={6} color="#7b2cbf" delay={0} />
+      <BlinkingDot top={screenHeight * 0.15} right={screenWidth * 0.15} size={4} color="#9d4edd" delay={500} />
+      <BlinkingDot bottom={screenHeight * 0.2} left={screenWidth * 0.2} size={5} color="#c77dff" delay={1000} />
+      <BlinkingDot bottom={screenHeight * 0.25} right={screenWidth * 0.1} size={7} color="#7b2cbf" delay={1500} />
+      <BlinkingDot top={screenHeight * 0.5} left={screenWidth * 0.1} size={3} color="#9d4edd" delay={2000} />
+      <BlinkingDot top={screenHeight * 0.4} right={screenWidth * 0.05} size={5} color="#c77dff" delay={2500} />
+      <BlinkingDot bottom={screenHeight * 0.3} left={screenWidth * 0.08} size={4} color="#7b2cbf" delay={3000} />
+      <BlinkingDot top={screenHeight * 0.15} right={screenWidth * 0.2} size={6} color="#9d4edd" delay={800} />
+      <BlinkingDot top={screenHeight * 0.1} left={screenWidth * 0.3} size={3} color="#c77dff" delay={1200} />
+      <BlinkingDot bottom={screenHeight * 0.05} right={screenWidth * 0.25} size={4} color="#7b2cbf" delay={1800} />
+
+      {/* Main GLT Logo - centered and animated */}
+      <Animated.View 
+        style={[
+          styles.logoContainer,
+          {
+            opacity: fadeAnim,
+            transform: [{ scale: scaleAnim }],
+          },
+        ]}
       >
-        <Defs>
-          {/* Gradient for the crystalline logo mark */}
-          <LinearGradient id="crystalGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-            <Stop offset="0%" stopColor="#9d4edd" stopOpacity="1" />
-            <Stop offset="50%" stopColor="#c77dff" stopOpacity="1" />
-            <Stop offset="100%" stopColor="#7b2cbf" stopOpacity="1" />
-          </LinearGradient>
-          
-          {/* Enhanced glow effect */}
-          <Filter id="glow">
-            <FeGaussianBlur stdDeviation="6" result="coloredBlur"/>
-            <FeMerge> 
-              <FeMergeNode in="coloredBlur"/>
-              <FeMergeNode in="SourceGraphic"/>
-            </FeMerge>
-          </Filter>
-          
-          {/* Shadow filter */}
-          <Filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
-            <FeDropShadow dx="4" dy="4" stdDeviation="4" flood-color="#000000" flood-opacity="0.5"/>
-          </Filter>
-        </Defs>
+        {/* GLT text with gradient background */}
+        <LinearGradient
+          colors={['#c77dff', '#9d4edd', '#7b2cbf']}
+          style={styles.gltGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+        >
+          <Text style={styles.gltText}>GLT</Text>
+        </LinearGradient>
         
-        {/* Background */}
-        <Rect width={screenWidth} height={screenHeight} fill={backgroundColor} />
-        
-        {/* Blinking star-like dots scattered across screen */}
-        <Circle cx={screenWidth * 0.15} cy={screenHeight * 0.2} r="3" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.3;0.9;0.3" dur="3s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.85} cy={screenHeight * 0.15} r="2" fill="#9d4edd">
-          <Animate attributeName="opacity" values="0.2;0.8;0.2" dur="2.5s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.2} cy={screenHeight * 0.8} r="2.5" fill="#c77dff">
-          <Animate attributeName="opacity" values="0.1;0.7;0.1" dur="2.8s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.9} cy={screenHeight * 0.75} r="3.5" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.4;1;0.4" dur="3.2s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.1} cy={screenHeight * 0.5} r="1.5" fill="#9d4edd">
-          <Animate attributeName="opacity" values="0.5;0.9;0.5" dur="2.2s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.95} cy={screenHeight * 0.4} r="2.5" fill="#c77dff">
-          <Animate attributeName="opacity" values="0.2;0.6;0.2" dur="2.7s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.08} cy={screenHeight * 0.7} r="2" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.4;0.8;0.4" dur="2.9s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.82} cy={screenHeight * 0.85} r="3" fill="#9d4edd">
-          <Animate attributeName="opacity" values="0.3;0.7;0.3" dur="3.1s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.3} cy={screenHeight * 0.1} r="1.5" fill="#c77dff">
-          <Animate attributeName="opacity" values="0.4;0.8;0.4" dur="2.4s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.75} cy={screenHeight * 0.95} r="2" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.5;0.9;0.5" dur="2.6s" repeatCount="indefinite"/>
-        </Circle>
-        
-        {/* Additional scattered stars */}
-        <Circle cx={screenWidth * 0.4} cy={screenHeight * 0.25} r="1" fill="#c77dff">
-          <Animate attributeName="opacity" values="0.2;0.6;0.2" dur="2.1s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.6} cy={screenHeight * 0.35} r="1.5" fill="#9d4edd">
-          <Animate attributeName="opacity" values="0.3;0.7;0.3" dur="2.3s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.25} cy={screenHeight * 0.6} r="1" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.2;0.5;0.2" dur="2.8s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.7} cy={screenHeight * 0.2} r="1.5" fill="#c77dff">
-          <Animate attributeName="opacity" values="0.3;0.6;0.3" dur="2.5s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.45} cy={screenHeight * 0.9} r="1" fill="#9d4edd">
-          <Animate attributeName="opacity" values="0.2;0.6;0.2" dur="3.3s" repeatCount="indefinite"/>
-        </Circle>
-        <Circle cx={screenWidth * 0.55} cy={screenHeight * 0.75} r="1.5" fill="#7b2cbf">
-          <Animate attributeName="opacity" values="0.3;0.7;0.3" dur="2.7s" repeatCount="indefinite"/>
-        </Circle>
-        
-        {/* Main GLT Logo centered */}
-        <G transform={`translate(${screenWidth / 2}, ${screenHeight / 2})`}>
-          {/* GLT text */}
-          <Text
-            x="-60"
-            y="30"
-            fontFamily="Arial, sans-serif"
-            fontSize="80"
-            fontWeight="bold"
-            fill="#c77dff"
-            filter="url(#shadow)"
-            textAnchor="middle"
-          >
-            GLT
-          </Text>
-          
-          {/* Crystalline logo mark */}
-          <G transform="translate(50, -60) scale(1.8)">
-            {/* Main crystal structure */}
-            <Polygon
-              points="0,20 10,10 20,20 20,40 10,50 0,40"
-              fill="url(#crystalGrad)"
-              filter="url(#glow)"
-              opacity="0.9"
+        {/* Crystalline box container */}
+        <View style={styles.crystallineContainer}>
+          {/* Main crystal structure */}
+          <View style={styles.crystalBox}>
+            <LinearGradient
+              colors={['#9d4edd', '#c77dff', '#7b2cbf']}
+              style={styles.crystalMain}
+              start={{ x: 0, y: 0 }}
+              end={{ x: 1, y: 1 }}
             />
-            
-            {/* Top facet */}
-            <Polygon
-              points="0,20 10,10 20,20 10,30"
-              fill="#c77dff"
-              opacity="0.7"
-            />
-            
-            {/* Side facet */}
-            <Polygon
-              points="20,20 20,40 10,50 10,30"
-              fill="#7b2cbf"
-              opacity="0.8"
-            />
-            
-            {/* Movement lines with animation */}
-            <G opacity="0.6">
-              <Line x1="25" y1="25" x2="40" y2="25" stroke="#9d4edd" strokeWidth="2">
-                <Animate attributeName="opacity" values="0.4;0.9;0.4" dur="2s" repeatCount="indefinite"/>
-              </Line>
-              <Line x1="25" y1="30" x2="45" y2="30" stroke="#c77dff" strokeWidth="2">
-                <Animate attributeName="opacity" values="0.3;0.7;0.3" dur="2.3s" repeatCount="indefinite"/>
-              </Line>
-              <Line x1="25" y1="35" x2="35" y2="35" stroke="#9d4edd" strokeWidth="2">
-                <Animate attributeName="opacity" values="0.2;0.6;0.2" dur="2.7s" repeatCount="indefinite"/>
-              </Line>
-            </G>
-            
-            {/* Accent dots with animation */}
-            <Circle cx="50" cy="27" r="2.5" fill="#c77dff">
-              <Animate attributeName="opacity" values="0.6;1;0.6" dur="1.8s" repeatCount="indefinite"/>
-            </Circle>
-            <Circle cx="55" cy="22" r="2" fill="#9d4edd">
-              <Animate attributeName="opacity" values="0.4;0.8;0.4" dur="2.2s" repeatCount="indefinite"/>
-            </Circle>
-            <Circle cx="52" cy="37" r="2" fill="#7b2cbf">
-              <Animate attributeName="opacity" values="0.5;0.9;0.5" dur="2.5s" repeatCount="indefinite"/>
-            </Circle>
-          </G>
+            <View style={styles.crystalTop} />
+            <View style={styles.crystalSide} />
+          </View>
           
-          {/* LOGISTICS text */}
-          <Text
-            x="0"
-            y="90"
-            fontFamily="Arial, sans-serif"
-            fontSize="24"
-            fontWeight="normal"
-            fill="#9d4edd"
-            letterSpacing="4"
-            textAnchor="middle"
-          >
-            LOGISTICS
-          </Text>
-        </G>
-      </Svg>
-    </View>
+          {/* Movement lines */}
+          <MovementLines />
+          
+          {/* Accent dots with blinking */}
+          <View style={styles.accentDotsContainer}>
+            <BlinkingDot size={3} color="#c77dff" delay={100} />
+            <BlinkingDot size={2} color="#9d4edd" delay={600} />
+            <BlinkingDot size={2.5} color="#7b2cbf" delay={1100} />
+          </View>
+        </View>
+        
+        {/* LOGISTICS text */}
+        <Text style={styles.logisticsText}>LOGISTICS</Text>
+      </Animated.View>
+    </LinearGradient>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 9999,
+  },
+  dot: {
+    position: 'absolute',
+  },
+  logoContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  gltGradient: {
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 15,
+    marginBottom: 15,
+    shadowColor: '#000',
+    shadowOffset: { width: 3, height: 3 },
+    shadowOpacity: 0.4,
+    shadowRadius: 4,
+    elevation: 8,
+  },
+  gltText: {
+    fontSize: 120,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    textAlign: 'center',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 2, height: 2 },
+    textShadowRadius: 4,
+  },
+  crystallineContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 25,
+    transform: [{ translateX: 50 }, { translateY: -60 }, { scale: 2.2 }],
+  },
+  crystalBox: {
+    width: 20,
+    height: 30,
+    position: 'relative',
+  },
+  crystalMain: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    width: 20,
+    height: 30,
+    borderRadius: 4,
+    opacity: 0.9,
+  },
+  crystalTop: {
+    position: 'absolute',
+    top: 5,
+    left: 5,
+    width: 10,
+    height: 10,
+    backgroundColor: '#c77dff',
+    opacity: 0.7,
+    transform: [{ rotate: '45deg' }],
+  },
+  crystalSide: {
+    position: 'absolute',
+    top: 10,
+    right: 0,
+    width: 10,
+    height: 20,
+    backgroundColor: '#7b2cbf',
+    opacity: 0.8,
+    borderRadius: 2,
+  },
+  movementLinesContainer: {
+    marginLeft: 25,
+    justifyContent: 'space-around',
+    height: 30,
+  },
+  movementLine: {
+    backgroundColor: '#9d4edd',
+    borderRadius: 1,
+    marginVertical: 2,
+  },
+  line1: {
+    width: 15,
+    height: 3,
+  },
+  line2: {
+    width: 20,
+    height: 3,
+    backgroundColor: '#c77dff',
+  },
+  line3: {
+    width: 10,
+    height: 3,
+  },
+  accentDotsContainer: {
+    marginLeft: 15,
+    justifyContent: 'space-around',
+    height: 30,
+    alignItems: 'center',
+  },
+  logisticsText: {
+    fontSize: 36,
+    fontWeight: 'normal',
+    color: '#9d4edd',
+    letterSpacing: 6,
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 1, height: 1 },
+    textShadowRadius: 2,
+  },
+});
