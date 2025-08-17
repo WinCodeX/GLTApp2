@@ -9,13 +9,16 @@ export interface Location {
 export interface Area {
   id: string;
   name: string;
+  location_id?: string;
   location?: Location;
+  initials?: string;
 }
 
 export interface Agent {
   id: string;
   name: string;
   phone: string;
+  area_id?: string;
   area?: Area;
 }
 
@@ -48,6 +51,33 @@ export interface Package {
   to_name?: string;
   from_location?: string;
   to_location?: string;
+}
+
+// ADDED: Package creation data interface
+export interface PackageData {
+  sender_name: string;
+  sender_phone: string;
+  receiver_name: string;
+  receiver_phone: string;
+  origin_area_id: string;
+  destination_area_id: string;
+  origin_agent_id: string;
+  destination_agent_id: string;
+  delivery_type: string;
+  delivery_location?: string;
+}
+
+// ADDED: Form data interface for the modal
+export interface PackageFormData {
+  locations: Location[];
+  areas: Area[];
+  agents: Agent[];
+}
+
+// ADDED: Validation result interface
+export interface ValidationResult {
+  isValid: boolean;
+  issues: string[];
 }
 
 // ADDED: QR Code response interface
@@ -107,12 +137,395 @@ export interface PackageFilters {
 // Cache for areas and agents to avoid repeated API calls
 let areasCache: Area[] | null = null;
 let agentsCache: Agent[] | null = null;
+let locationsCache: Location[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * ADDED: Get detailed package information by package code
- * This is what your tracking screen is calling
+ * MAIN MISSING FUNCTION: Get all package form data required by the modal
+ * This is the function your modal is looking for!
+ */
+export const getPackageFormData = async (): Promise<PackageFormData> => {
+  try {
+    console.log('📦 Starting getPackageFormData...');
+    
+    // Check if we have valid cached data
+    const now = Date.now();
+    const isCacheValid = cacheTimestamp && (now - cacheTimestamp) < CACHE_DURATION;
+    
+    if (isCacheValid && locationsCache && areasCache && agentsCache) {
+      console.log('✅ Returning cached package form data:', {
+        locations: locationsCache.length,
+        areas: areasCache.length,
+        agents: agentsCache.length
+      });
+      
+      return {
+        locations: locationsCache,
+        areas: areasCache,
+        agents: agentsCache
+      };
+    }
+    
+    console.log('🌐 Fetching fresh package form data from API...');
+    
+    // Fetch all required data in parallel
+    const [locationsResult, areasResult, agentsResult] = await Promise.allSettled([
+      getLocations(),
+      getAreas(),
+      getAgents()
+    ]);
+    
+    // Handle locations
+    let locations: Location[] = [];
+    if (locationsResult.status === 'fulfilled') {
+      locations = locationsResult.value;
+      console.log('✅ Locations loaded:', locations.length);
+    } else {
+      console.error('❌ Failed to load locations:', locationsResult.reason);
+      // Don't throw here, continue with empty array
+    }
+    
+    // Handle areas
+    let areas: Area[] = [];
+    if (areasResult.status === 'fulfilled') {
+      areas = areasResult.value;
+      console.log('✅ Areas loaded:', areas.length);
+    } else {
+      console.error('❌ Failed to load areas:', areasResult.reason);
+      throw new Error('Failed to load areas - required for package creation');
+    }
+    
+    // Handle agents
+    let agents: Agent[] = [];
+    if (agentsResult.status === 'fulfilled') {
+      agents = agentsResult.value;
+      console.log('✅ Agents loaded:', agents.length);
+    } else {
+      console.error('❌ Failed to load agents:', agentsResult.reason);
+      throw new Error('Failed to load agents - required for package creation');
+    }
+    
+    // Validate minimum required data
+    if (areas.length === 0) {
+      throw new Error('No areas available - cannot create packages');
+    }
+    
+    if (agents.length === 0) {
+      throw new Error('No agents available - cannot create packages');
+    }
+    
+    // Update cache
+    locationsCache = locations;
+    areasCache = areas;
+    agentsCache = agents;
+    cacheTimestamp = now;
+    
+    const formData: PackageFormData = {
+      locations,
+      areas,
+      agents
+    };
+    
+    console.log('✅ Package form data assembled successfully:', {
+      locations: locations.length,
+      areas: areas.length,
+      agents: agents.length
+    });
+    
+    return formData;
+    
+  } catch (error: any) {
+    console.error('❌ getPackageFormData failed:', error);
+    
+    // Try to return cached data if available, even if stale
+    if (locationsCache && areasCache && agentsCache) {
+      console.log('📋 Returning stale cached data as fallback...');
+      return {
+        locations: locationsCache,
+        areas: areasCache,
+        agents: agentsCache
+      };
+    }
+    
+    throw new Error(`Failed to load package form data: ${error.message}`);
+  }
+};
+
+/**
+ * ADDED: Get all locations (this might be missing too)
+ */
+export const getLocations = async (): Promise<Location[]> => {
+  try {
+    console.log('🌍 Fetching locations from API...');
+    
+    const response = await api.get('/api/v1/locations', {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    let transformedLocations: Location[] = [];
+    
+    if (response.data.data) {
+      const locationsData = Array.isArray(response.data.data) ? response.data.data : [response.data.data];
+      transformedLocations = locationsData.map((item: any) => transformLocationData(item));
+    } else if (Array.isArray(response.data)) {
+      transformedLocations = response.data.map((item: any) => transformLocationData(item));
+    } else {
+      console.warn('⚠️ Unexpected locations API response format:', response.data);
+    }
+    
+    console.log('✅ Locations loaded:', transformedLocations.length);
+    return transformedLocations;
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch locations:', error);
+    
+    // Return empty array instead of throwing - locations are optional
+    console.log('⚠️ Continuing without locations data');
+    return [];
+  }
+};
+
+/**
+ * ADDED: Transform location data from API response
+ */
+const transformLocationData = (rawData: any): Location => {
+  try {
+    let locationData = rawData;
+    
+    // Handle JSON:API format
+    if (rawData.attributes) {
+      locationData = {
+        id: rawData.id,
+        ...rawData.attributes
+      };
+    }
+    
+    return {
+      id: String(locationData.id || ''),
+      name: locationData.name || 'Unknown Location'
+    };
+    
+  } catch (error) {
+    console.error('Error transforming location data:', error, rawData);
+    return {
+      id: String(rawData.id || 'unknown'),
+      name: rawData.name || rawData.attributes?.name || 'Unknown Location'
+    };
+  }
+};
+
+/**
+ * ADDED: Validate package form data structure
+ */
+export const validatePackageFormData = (data: any): ValidationResult => {
+  const issues: string[] = [];
+  
+  try {
+    if (!data || typeof data !== 'object') {
+      issues.push('Data is not a valid object');
+      return { isValid: false, issues };
+    }
+    
+    // Check locations (optional)
+    if (data.locations !== undefined) {
+      if (!Array.isArray(data.locations)) {
+        issues.push('Locations must be an array');
+      } else {
+        data.locations.forEach((location: any, index: number) => {
+          if (!location.id || !location.name) {
+            issues.push(`Location ${index} missing required fields (id, name)`);
+          }
+        });
+      }
+    }
+    
+    // Check areas (required)
+    if (!data.areas || !Array.isArray(data.areas)) {
+      issues.push('Areas must be a non-empty array');
+    } else if (data.areas.length === 0) {
+      issues.push('At least one area is required');
+    } else {
+      data.areas.forEach((area: any, index: number) => {
+        if (!area.id || !area.name) {
+          issues.push(`Area ${index} missing required fields (id, name)`);
+        }
+      });
+    }
+    
+    // Check agents (required)
+    if (!data.agents || !Array.isArray(data.agents)) {
+      issues.push('Agents must be a non-empty array');
+    } else if (data.agents.length === 0) {
+      issues.push('At least one agent is required');
+    } else {
+      data.agents.forEach((agent: any, index: number) => {
+        if (!agent.id || !agent.name) {
+          issues.push(`Agent ${index} missing required fields (id, name)`);
+        }
+      });
+    }
+    
+    return {
+      isValid: issues.length === 0,
+      issues
+    };
+    
+  } catch (error: any) {
+    issues.push(`Validation error: ${error.message}`);
+    return { isValid: false, issues };
+  }
+};
+
+/**
+ * ADDED: Create a new package
+ */
+export const createPackage = async (packageData: PackageData): Promise<any> => {
+  try {
+    console.log('📦 Creating package with data:', packageData);
+    
+    // Validate required fields
+    if (!packageData.origin_agent_id) {
+      throw new Error('Origin agent is required');
+    }
+    
+    if (!packageData.receiver_name?.trim()) {
+      throw new Error('Receiver name is required');
+    }
+    
+    if (!packageData.receiver_phone?.trim()) {
+      throw new Error('Receiver phone is required');
+    }
+    
+    if (!packageData.delivery_type) {
+      throw new Error('Delivery type is required');
+    }
+    
+    // Validate delivery-specific requirements
+    if (packageData.delivery_type === 'agent' && !packageData.destination_agent_id) {
+      throw new Error('Destination agent is required for agent delivery');
+    }
+    
+    if ((packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') && !packageData.delivery_location?.trim()) {
+      throw new Error('Delivery location is required for doorstep/fragile delivery');
+    }
+    
+    // Prepare API payload
+    const payload = {
+      package: {
+        sender_name: packageData.sender_name || 'Current User',
+        sender_phone: packageData.sender_phone || '+254700000000',
+        receiver_name: packageData.receiver_name.trim(),
+        receiver_phone: packageData.receiver_phone.trim(),
+        origin_agent_id: packageData.origin_agent_id,
+        destination_agent_id: packageData.destination_agent_id || null,
+        destination_area_id: packageData.destination_area_id || null,
+        delivery_type: packageData.delivery_type,
+        delivery_location: packageData.delivery_location?.trim() || null
+      }
+    };
+    
+    console.log('🚀 Sending package creation request:', payload);
+    
+    const response = await api.post('/api/v1/packages', payload, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 20000
+    });
+    
+    console.log('✅ Package creation response:', response.data);
+    
+    if (response.data.success !== false) {
+      const packageResponse = response.data.data || response.data;
+      
+      return {
+        id: packageResponse.id,
+        tracking_code: packageResponse.code || packageResponse.tracking_code,
+        message: response.data.message || 'Package created successfully'
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to create package');
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Package creation failed:', error);
+    
+    if (error.response?.data?.message) {
+      throw new Error(error.response.data.message);
+    } else if (error.response?.data?.errors) {
+      const errors = Object.values(error.response.data.errors).flat();
+      throw new Error(errors.join(', '));
+    } else if (error.message) {
+      throw new Error(error.message);
+    } else {
+      throw new Error('Failed to create package - please try again');
+    }
+  }
+};
+
+/**
+ * ADDED: Get package pricing estimation
+ */
+export const getPackagePricing = async (originAreaId: string, destinationAreaId: string, deliveryType: string): Promise<number> => {
+  try {
+    console.log('💰 Calculating package pricing...');
+    
+    const params = new URLSearchParams({
+      origin_area_id: originAreaId,
+      destination_area_id: destinationAreaId,
+      delivery_type: deliveryType
+    });
+    
+    const response = await api.get(`/api/v1/packages/pricing?${params.toString()}`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 10000
+    });
+    
+    if (response.data.success !== false && response.data.cost) {
+      return Number(response.data.cost);
+    } else {
+      throw new Error('Pricing not available');
+    }
+    
+  } catch (error: any) {
+    console.warn('⚠️ API pricing failed, using fallback calculation:', error.message);
+    
+    // Fallback to client-side calculation
+    return calculateFallbackPricing(originAreaId, destinationAreaId, deliveryType);
+  }
+};
+
+/**
+ * ADDED: Fallback pricing calculation
+ */
+const calculateFallbackPricing = (originAreaId: string, destinationAreaId: string, deliveryType: string): number => {
+  // Simple fallback pricing logic
+  const isSameArea = originAreaId === destinationAreaId;
+  
+  if (deliveryType === 'fragile') {
+    return isSameArea ? 350 : 580;
+  } else if (deliveryType === 'agent') {
+    return isSameArea ? 120 : 180;
+  } else {
+    return isSameArea ? 250 : 380;
+  }
+};
+
+/**
+ * EXISTING FUNCTIONS (keeping all your current functions)
+ */
+
+/**
+ * Get detailed package information by package code
  */
 export const getPackageDetails = async (packageCode: string): Promise<Package> => {
   try {
@@ -171,8 +584,7 @@ export const getPackageDetails = async (packageCode: string): Promise<Package> =
 };
 
 /**
- * ADDED: Get QR code for package tracking
- * This is what your tracking screen is calling
+ * Get QR code for package tracking
  */
 export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
   try {
@@ -232,7 +644,7 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
 };
 
 /**
- * ADDED: Transform package data from API response
+ * Transform package data from API response
  */
 const transformPackageData = (rawData: any, included: any[] = []): Package => {
   try {
@@ -332,8 +744,7 @@ const transformPackageData = (rawData: any, included: any[] = []): Package => {
 };
 
 /**
- * ADDED: Get packages with optional filtering - the main missing function
- * This is what your track screen is calling
+ * Get packages with optional filtering
  */
 export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
   try {
@@ -423,7 +834,7 @@ export const getPackages = async (filters?: PackageFilters): Promise<PackageResp
 };
 
 /**
- * IMPROVED: Data transformation with better error handling
+ * Data transformation with better error handling
  */
 const transformAreaData = (rawData: any, included: any[] = []): Area => {
   try {
@@ -454,10 +865,12 @@ const transformAreaData = (rawData: any, included: any[] = []): Area => {
     return {
       id: String(areaData.id),
       name: areaData.name || 'Unknown Area',
+      location_id: areaData.location_id || areaData.location?.id,
       location: areaData.location ? {
         id: String(areaData.location.id),
         name: areaData.location.name || 'Unknown Location'
-      } : undefined
+      } : undefined,
+      initials: areaData.initials || areaData.name?.substring(0, 2).toUpperCase()
     };
   } catch (error) {
     console.error('Error transforming area data:', error, rawData);
@@ -505,6 +918,7 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
           agentData.area = {
             id: includedArea.id,
             name: includedArea.attributes.name || 'Unknown Area',
+            location_id: includedArea.attributes.location_id,
             location
           };
         }
@@ -515,9 +929,11 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
       id: String(agentData.id),
       name: agentData.name || 'Unknown Agent',
       phone: agentData.phone || 'No phone',
+      area_id: agentData.area_id || agentData.area?.id,
       area: agentData.area ? {
         id: String(agentData.area.id),
         name: agentData.area.name || 'Unknown Area',
+        location_id: agentData.area.location_id,
         location: agentData.area.location ? {
           id: String(agentData.area.location.id),
           name: agentData.area.location.name || 'Unknown Location'
@@ -638,7 +1054,7 @@ export const getAgents = async (): Promise<Agent[]> => {
   }
 };
 
-// ADDED: Additional helper functions for package management
+// Additional helper functions for package management
 export const getPackagesByState = async (state: DrawerState): Promise<Package[]> => {
   try {
     const response = await getPackages({ state });
@@ -709,6 +1125,7 @@ export const searchAgents = async (query: string): Promise<Agent[]> => {
 export const clearCache = (): void => {
   areasCache = null;
   agentsCache = null;
+  locationsCache = null;
   cacheTimestamp = 0;
   console.log('🧹 Package helpers cache cleared');
 };
@@ -838,12 +1255,14 @@ export const formatRouteDescription = (
 export const refreshData = async (): Promise<void> => {
   try {
     clearCache();
-    const [areas, agents] = await Promise.allSettled([
+    const [locations, areas, agents] = await Promise.allSettled([
+      getLocations(),
       getAreas(),
       getAgents()
     ]);
     
     console.log('✅ Package helpers data refresh complete:', {
+      locations: locations.status === 'fulfilled' ? locations.value.length : 'failed',
       areas: areas.status === 'fulfilled' ? areas.value.length : 'failed',
       agents: agents.status === 'fulfilled' ? agents.value.length : 'failed'
     });
@@ -855,6 +1274,14 @@ export const refreshData = async (): Promise<void> => {
 
 // Updated default export with all functions
 export default {
+  // NEW MAIN FUNCTIONS
+  getPackageFormData,
+  validatePackageFormData,
+  createPackage,
+  getPackagePricing,
+  getLocations,
+  
+  // EXISTING FUNCTIONS
   getAreas,
   getAgents,
   getAgentsForArea,
@@ -870,6 +1297,7 @@ export default {
   getNextValidStates,
   formatRouteDescription,
   refreshData,
+  
   // Package-specific functions
   getPackages,
   getPackagesByState,
