@@ -17,6 +17,7 @@ import api, { getCurrentBaseUrl, refreshBaseUrl, initializeApi } from '../../lib
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
 import { toastConfig } from '../../lib/toastConfig';
 import { checkServerStatus } from '../../lib/netStatus';
+import LoadingSplashScreen from '../../components/LoadingSplashScreen'; // Import the splash screen
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -440,120 +441,118 @@ export default function LoginScreen() {
     </LinearGradient>
   );
 
+  // Show custom splash screen instead of loading spinner
+  if (!ready) {
+    return <LoadingSplashScreen backgroundColor="#0a0a0f" />;
+  }
+
   return (
     <>
       <LinearGradient colors={['#0a0a0f', '#1a1a2e']} style={styles.container}>
         <View style={styles.inner}>
-          {!ready ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator size="large" color="#bd93f9" />
-              <Text style={styles.loadingText}>Initializing...</Text>
+          <View style={styles.formContainer}>
+            {/* Welcome Back Title - Moved closer to form */}
+            <View style={styles.titleContainer}>
+              <GradientText>Welcome Back!</GradientText>
             </View>
-          ) : (
-            <View style={styles.formContainer}>
-              {/* Welcome Back Title - Moved closer to form */}
-              <View style={styles.titleContainer}>
-                <GradientText>Welcome Back!</GradientText>
-              </View>
 
-              {/* Server Status Indicator - Moved closer to form */}
-              <View style={styles.statusContainer}>
-                <View style={[styles.statusDot, { backgroundColor: getServerStatusColor() }]} />
-                <Text style={[styles.statusText, { color: getServerStatusColor() }]}>
-                  {getServerStatusText()}
-                </Text>
-                {serverStatus === 'unreachable' && (
-                  <TouchableOpacity onPress={handleRetryConnection} style={styles.retryButton}>
-                    <Text style={styles.retryText}>Retry</Text>
-                  </TouchableOpacity>
-                )}
-              </View>
+            {/* Server Status Indicator - Moved closer to form */}
+            <View style={styles.statusContainer}>
+              <View style={[styles.statusDot, { backgroundColor: getServerStatusColor() }]} />
+              <Text style={[styles.statusText, { color: getServerStatusColor() }]}>
+                {getServerStatusText()}
+              </Text>
+              {serverStatus === 'unreachable' && (
+                <TouchableOpacity onPress={handleRetryConnection} style={styles.retryButton}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              )}
+            </View>
 
-              <TextInput
-                label="Email"
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                mode="outlined"
-                style={styles.input}
-                textColor="#f8f8f2"
-                placeholderTextColor="#ccc"
-                outlineColor="#44475a"
-                activeOutlineColor="#bd93f9"
-                disabled={isLoggingIn || isGoogleLoading}
-              />
+            <TextInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+              disabled={isLoggingIn || isGoogleLoading}
+            />
 
-              <TextInput
-                label="Password"
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry={!showPassword}
-                mode="outlined"
-                style={styles.input}
-                textColor="#f8f8f2"
-                placeholderTextColor="#ccc"
-                outlineColor="#44475a"
-                activeOutlineColor="#bd93f9"
-                disabled={isLoggingIn || isGoogleLoading}
-                right={
-                  <TextInput.Icon
-                    icon={showPassword ? 'eye-off' : 'eye'}
-                    onPress={() => setShowPassword((v) => !v)}
-                    forceTextInputFocus={false}
-                    color="#aaa"
-                  />
-                }
-              />
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+              disabled={isLoggingIn || isGoogleLoading}
+              right={
+                <TextInput.Icon
+                  icon={showPassword ? 'eye-off' : 'eye'}
+                  onPress={() => setShowPassword((v) => !v)}
+                  forceTextInputFocus={false}
+                  color="#aaa"
+                />
+              }
+            />
 
-              {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
+            {errorMsg && <Text style={styles.error}>{errorMsg}</Text>}
 
-              <TouchableOpacity
-                style={[
-                  styles.googleBtn,
-                  (isGoogleLoading || !request || googleLoginInProgress.current) && styles.disabledBtn,
-                ]}
-                disabled={isGoogleLoading || !request || isLoggingIn || googleLoginInProgress.current}
-                onPress={handleGoogleLogin}
-              >
-                {isGoogleLoading ? (
-                  <ActivityIndicator size="small" color="white" />
-                ) : (
-                  <AntDesign name="google" size={20} color="white" />
-                )}
-                <Text style={styles.googleText}>
-                  {isGoogleLoading ? 'Signing in...' : 'Sign in with Google'}
-                </Text>
-              </TouchableOpacity>
+            <TouchableOpacity
+              style={[
+                styles.googleBtn,
+                (isGoogleLoading || !request || googleLoginInProgress.current) && styles.disabledBtn,
+              ]}
+              disabled={isGoogleLoading || !request || isLoggingIn || googleLoginInProgress.current}
+              onPress={handleGoogleLogin}
+            >
+              {isGoogleLoading ? (
+                <ActivityIndicator size="small" color="white" />
+              ) : (
+                <AntDesign name="google" size={20} color="white" />
+              )}
+              <Text style={styles.googleText}>
+                {isGoogleLoading ? 'Signing in...' : 'Sign in with Google'}
+              </Text>
+            </TouchableOpacity>
 
-              <LinearGradient
-                colors={['#7c3aed', '#3b82f6', '#10b981']}
-                style={[
-                  styles.loginButtonGradient,
-                  isLoggingIn && styles.disabledBtn,
-                ]}
-              >
-                <Button
-                  mode="contained"
-                  onPress={handleLogin}
-                  style={styles.button}
-                  labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-                  disabled={isLoggingIn || isGoogleLoading}
-                >
-                  {isLoggingIn ? 'Logging In...' : 'Log In'}
-                </Button>
-              </LinearGradient>
-
+            <LinearGradient
+              colors={['#7c3aed', '#3b82f6', '#10b981']}
+              style={[
+                styles.loginButtonGradient,
+                isLoggingIn && styles.disabledBtn,
+              ]}
+            >
               <Button
-                onPress={() => router.push('/signup')}
-                textColor="#bd93f9"
-                style={styles.link}
+                mode="contained"
+                onPress={handleLogin}
+                style={styles.button}
+                labelStyle={{ color: '#fff', fontWeight: 'bold' }}
                 disabled={isLoggingIn || isGoogleLoading}
               >
-                Don't have an account? Sign up
+                {isLoggingIn ? 'Logging In...' : 'Log In'}
               </Button>
-            </View>
-          )}
+            </LinearGradient>
+
+            <Button
+              onPress={() => router.push('/signup')}
+              textColor="#bd93f9"
+              style={styles.link}
+              disabled={isLoggingIn || isGoogleLoading}
+            >
+              Don't have an account? Sign up
+            </Button>
+          </View>
         </View>
       </LinearGradient>
       
@@ -621,11 +620,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1, // Take full height for loading
-  },
   formContainer: {
     justifyContent: 'center',
     alignItems: 'stretch', // Stretch to full width
@@ -654,12 +648,6 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     fontSize: 14,
     fontWeight: '500',
-  },
-  loadingText: {
-    color: '#ccc',
-    textAlign: 'center',
-    marginTop: 16,
-    fontSize: 16,
   },
   googleBtn: {
     flexDirection: 'row',
