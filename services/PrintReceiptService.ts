@@ -1,6 +1,7 @@
-// services/PrintReceiptService.ts - FIXED: Improved error handling and connection verification
+// services/PrintReceiptService.ts - FIXED: Added proper permission handling
 import RNBluetoothClassic from 'react-native-bluetooth-classic';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { PermissionsAndroid, Platform } from 'react-native';
 
 interface PackageData {
   code: string;
@@ -21,6 +22,7 @@ interface PrintStatus {
   printerAddress?: string;
   error?: string;
   bluetoothEnabled?: boolean;
+  permissionsGranted?: boolean;
 }
 
 class PrintReceiptService {
@@ -33,16 +35,61 @@ class PrintReceiptService {
     return PrintReceiptService.instance;
   }
 
-  // ENHANCED: Comprehensive printer status check
+  // NEW: Request all required permissions
+  async requestBluetoothPermissions(): Promise<boolean> {
+    if (Platform.OS !== 'android') {
+      return true; // iOS handles permissions differently
+    }
+
+    try {
+      const permissions = Platform.Version >= 31 ? [
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_SCAN,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_CONNECT,
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      ] : [
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH,
+        PermissionsAndroid.PERMISSIONS.BLUETOOTH_ADMIN,
+        PermissionsAndroid.PERMISSIONS.ACCESS_FINE_LOCATION,
+      ];
+
+      const results = await PermissionsAndroid.requestMultiple(permissions);
+      
+      // Check if all permissions were granted
+      const allPermissionsGranted = Object.values(results).every(
+        result => result === PermissionsAndroid.RESULTS.GRANTED
+      );
+
+      console.log('🔐 [PERMISSIONS] Bluetooth permissions granted:', allPermissionsGranted);
+      console.log('🔐 [PERMISSIONS] Results:', results);
+      
+      return allPermissionsGranted;
+    } catch (error) {
+      console.error('🔐 [PERMISSIONS] Error requesting permissions:', error);
+      return false;
+    }
+  }
+
+  // ENHANCED: Check permissions first, then status
   async checkPrinterStatus(): Promise<PrintStatus> {
     try {
-      console.log('🖨️ [STATUS] Checking comprehensive printer status...');
+      console.log('🖨️ [STATUS] Checking printer status with permissions...');
       
-      // Step 1: Check if printer is configured
+      // Step 1: Check permissions first
+      const permissionsGranted = await this.requestBluetoothPermissions();
+      if (!permissionsGranted) {
+        return {
+          isReady: false,
+          permissionsGranted: false,
+          error: 'Bluetooth permissions not granted. Please grant permissions in app settings.'
+        };
+      }
+
+      // Step 2: Check if printer is configured
       const connectedPrinter = await AsyncStorage.getItem('connected_printer');
       if (!connectedPrinter) {
         return {
           isReady: false,
+          permissionsGranted: true,
           error: 'No printer configured. Please connect a printer in Settings.'
         };
       }
@@ -50,7 +97,7 @@ class PrintReceiptService {
       const printer: PrinterConnection = JSON.parse(connectedPrinter);
       console.log('🖨️ [STATUS] Found configured printer:', printer.name);
 
-      // Step 2: Check Bluetooth status
+      // Step 3: Check Bluetooth status
       let bluetoothEnabled = false;
       try {
         bluetoothEnabled = await RNBluetoothClassic.isBluetoothEnabled();
@@ -62,7 +109,8 @@ class PrintReceiptService {
           printerName: printer.name,
           printerAddress: printer.address,
           bluetoothEnabled: false,
-          error: 'Failed to access Bluetooth. Please check permissions.'
+          permissionsGranted: true,
+          error: 'Failed to access Bluetooth. Check permissions and try again.'
         };
       }
 
@@ -72,14 +120,15 @@ class PrintReceiptService {
           printerName: printer.name,
           printerAddress: printer.address,
           bluetoothEnabled: false,
-          error: 'Bluetooth is disabled. Please enable Bluetooth.'
+          permissionsGranted: true,
+          error: 'Bluetooth is disabled. Please enable Bluetooth and try again.'
         };
       }
 
-      // Step 3: Check device connection with retry
+      // Step 4: Check device connection with retry
       let isConnected = false;
       let attempts = 0;
-      const maxAttempts = 2;
+      const maxAttempts = 3;
 
       while (!isConnected && attempts < maxAttempts) {
         try {
@@ -92,7 +141,7 @@ class PrintReceiptService {
             console.log('🔄 [STATUS] Attempting reconnection...');
             try {
               await RNBluetoothClassic.connectToDevice(printer.address);
-              await new Promise(resolve => setTimeout(resolve, 1000)); // Wait for connection
+              await new Promise(resolve => setTimeout(resolve, 2000)); // Wait longer for connection
               isConnected = await RNBluetoothClassic.isDeviceConnected(printer.address);
             } catch (connectError) {
               console.warn('⚠️ [STATUS] Reconnection failed:', connectError);
@@ -103,7 +152,7 @@ class PrintReceiptService {
           console.warn(`⚠️ [STATUS] Connection check ${attempts + 1} failed:`, checkError);
           attempts++;
           if (attempts < maxAttempts) {
-            await new Promise(resolve => setTimeout(resolve, 500));
+            await new Promise(resolve => setTimeout(resolve, 1000));
           }
         }
       }
@@ -111,7 +160,8 @@ class PrintReceiptService {
       console.log('✅ [STATUS] Final printer status:', {
         isReady: isConnected,
         printerName: printer.name,
-        bluetoothEnabled
+        bluetoothEnabled,
+        permissionsGranted: true
       });
 
       return {
@@ -119,24 +169,26 @@ class PrintReceiptService {
         printerName: printer.name,
         printerAddress: printer.address,
         bluetoothEnabled,
-        error: isConnected ? undefined : `Printer "${printer.name}" is not connected. Please check connection.`
+        permissionsGranted: true,
+        error: isConnected ? undefined : `Printer "${printer.name}" is not connected. Turn on printer and try again.`
       };
       
     } catch (error: any) {
       console.error('❌ [STATUS] Comprehensive status check failed:', error);
       return {
         isReady: false,
+        permissionsGranted: true,
         error: `Status check failed: ${error.message || 'Unknown error'}`
       };
     }
   }
 
-  // ENHANCED: Print with comprehensive pre-checks
+  // ENHANCED: Print with better error handling
   async printPackageReceipt(packageData: PackageData): Promise<boolean> {
     try {
       console.log('🖨️ [PRINT] Starting print process for:', packageData.code);
       
-      // Pre-flight check
+      // Pre-flight check with permissions
       const status = await this.checkPrinterStatus();
       if (!status.isReady) {
         throw new Error(status.error || 'Printer not ready');
@@ -146,7 +198,7 @@ class PrintReceiptService {
       const receiptData = this.formatReceipt(packageData);
       
       console.log('📤 [PRINT] Sending to printer...');
-      await this.sendToPrinterWithTimeout(status.printerAddress!, receiptData, 15000);
+      await this.sendToPrinterWithTimeout(status.printerAddress!, receiptData, 20000);
       
       console.log('✅ [PRINT] Print completed successfully');
       return true;
@@ -157,18 +209,21 @@ class PrintReceiptService {
     }
   }
 
-  // ENHANCED: Better error messages for users
+  // ENHANCED: Better error messages
   private getDetailedErrorMessage(error: any): string {
     const message = error.message || error.toString();
     
+    if (message.includes('permissions not granted')) {
+      return 'Bluetooth permission denied. Go to Settings → App permissions → Enable Bluetooth.';
+    }
     if (message.includes('No printer configured')) {
       return 'No printer setup found. Go to Settings → Bluetooth to connect a printer.';
     }
     if (message.includes('Bluetooth is disabled')) {
-      return 'Bluetooth is off. Enable Bluetooth and try again.';
+      return 'Bluetooth is off. Enable Bluetooth in device settings and try again.';
     }
     if (message.includes('not connected')) {
-      return 'Printer connection lost. Check if printer is on and reconnect in Settings.';
+      return 'Printer connection lost. Turn on printer and reconnect in Settings.';
     }
     if (message.includes('timed out')) {
       return 'Print job timed out. Printer may be busy - wait and try again.';
@@ -176,14 +231,14 @@ class PrintReceiptService {
     if (message.includes('Device not found')) {
       return 'Printer not found. Turn printer on and reconnect in Settings.';
     }
-    if (message.includes('permission')) {
-      return 'Bluetooth permission denied. Grant permissions in Settings.';
+    if (message.includes('Failed to access Bluetooth')) {
+      return 'Bluetooth access failed. Restart app and grant permissions.';
     }
     
     return `Print failed: ${message}`;
   }
 
-  private async sendToPrinterWithTimeout(address: string, data: string, timeoutMs: number = 15000): Promise<void> {
+  private async sendToPrinterWithTimeout(address: string, data: string, timeoutMs: number = 20000): Promise<void> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         reject(new Error('Print operation timed out. The printer may be busy or disconnected.'));
@@ -264,7 +319,7 @@ class PrintReceiptService {
     return receipt;
   }
 
-  // Test print with enhanced error reporting
+  // ENHANCED: Test print with better error handling
   async testPrint(): Promise<boolean> {
     const testPackage: PackageData = {
       code: 'PKG-TEST-' + Date.now(),
