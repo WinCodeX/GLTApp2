@@ -1,4 +1,5 @@
-// components/BulkScanner.tsx - Updated with Print Integration
+// components/BulkScanner.tsx - FIXED: Updated with new actions and proper state validation
+
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -45,7 +46,7 @@ interface BulkScanResult {
 interface BulkScannerProps {
   visible: boolean;
   onClose: () => void;
-  actionType: 'print' | 'collect' | 'deliver' | 'process';
+  actionType: 'print' | 'collect' | 'collect_from_sender' | 'deliver' | 'give_to_receiver' | 'process' | 'confirm_receipt';
   userRole: 'client' | 'agent' | 'rider' | 'warehouse' | 'admin';
   onBulkComplete?: (results: BulkScanResult[]) => void;
 }
@@ -125,18 +126,15 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       let packageInfo = packageData;
 
       if (!online) {
-        // Try to get from cache
         const cached = await offlineService.getCachedPackage(packageCode);
         if (cached) {
           packageInfo = cached.package;
         }
       } else {
-        // Fetch fresh package details
         try {
           const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
           if (response.data.success) {
             packageInfo = response.data.data.package;
-            // Cache for offline use
             await offlineService.cachePackage(
               packageCode,
               packageInfo,
@@ -193,47 +191,66 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       const online = await offlineService.isOnline();
       
       if (online) {
-        // Use API validation
-        const response = await api.post(`/api/v1/scanning/package/${packageInfo.code}/validate`, {
-          action_type: action
-        });
-        
-        if (response.data.success) {
-          return {
-            canPerform: response.data.data.can_execute,
-            reason: response.data.data.can_execute ? undefined : 'Action not allowed in current state'
-          };
+        try {
+          const response = await api.post(`/api/v1/scanning/package/${packageInfo.code}/validate`, {
+            action_type: action
+          });
+          
+          if (response.data.success) {
+            return {
+              canPerform: response.data.data.can_execute,
+              reason: response.data.data.can_execute ? undefined : 'Action not allowed in current state'
+            };
+          }
+        } catch (error) {
+          // Fall back to local validation
         }
       }
       
-      // Fallback validation
       return validatePackageActionLocally(packageInfo, action);
     } catch (error) {
-      // Fallback to local validation
       return validatePackageActionLocally(packageInfo, action);
     }
   };
 
+  // UPDATED: Enhanced local validation with correct state transitions
   const validatePackageActionLocally = (packageInfo: any, action: string): {canPerform: boolean, reason?: string} => {
     const state = packageInfo.state;
     
     switch (action) {
+      case 'collect_from_sender':
+        return {
+          canPerform: state === 'pending',
+          reason: state !== 'pending' ? `Cannot collect from sender - package is ${state}` : undefined
+        };
+      case 'collect':
+        return {
+          canPerform: state === 'submitted',
+          reason: state !== 'submitted' ? `Cannot collect from agent - package is ${state}` : undefined
+        };
+      case 'deliver':
+        return {
+          canPerform: state === 'in_transit',
+          reason: state !== 'in_transit' ? `Cannot mark as delivered - package is ${state}` : undefined
+        };
+      case 'give_to_receiver':
+        return {
+          canPerform: ['in_transit', 'delivered'].includes(state),
+          reason: !['in_transit', 'delivered'].includes(state) 
+            ? `Cannot give to receiver - package is ${state}` 
+            : undefined
+        };
+      case 'confirm_receipt':
+        return {
+          canPerform: state === 'delivered',
+          reason: state !== 'delivered' ? `Cannot confirm receipt - package is ${state}` : undefined
+        };
       case 'print':
         return {
           canPerform: ['pending', 'submitted', 'in_transit', 'delivered'].includes(state),
           reason: !['pending', 'submitted', 'in_transit', 'delivered'].includes(state) 
             ? `Cannot print package in ${state} state` 
             : undefined
-        };
-      case 'collect':
-        return {
-          canPerform: state === 'submitted',
-          reason: state !== 'submitted' ? `Cannot collect package in ${state} state` : undefined
-        };
-      case 'deliver':
-        return {
-          canPerform: state === 'in_transit',
-          reason: state !== 'in_transit' ? `Cannot deliver package in ${state} state` : undefined
         };
       case 'process':
         return {
@@ -263,7 +280,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       const online = await offlineService.isOnline();
       
       if (online) {
-        // Try API call
         const response = await api.get(`/api/v1/scanning/package_details?package_code=${manualCode.trim()}`);
         
         if (response.data.success) {
@@ -280,7 +296,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
           });
         }
       } else {
-        // Try cached data
         const cached = await offlineService.getCachedPackage(manualCode.trim());
         if (cached) {
           await handleScanSuccess({ package: cached.package });
@@ -354,10 +369,8 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       const online = await offlineService.isOnline();
       
       if (!online) {
-        // Process offline
         await processBulkOffline(packageCodes, validPackages);
       } else {
-        // Process online
         await processBulkOnline(packageCodes, validPackages);
       }
     } catch (error) {
@@ -375,7 +388,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
   };
 
-  // NEW FUNCTION: Handle bulk printing
   const processBulkPrint = async (packages: ScannedPackage[]): Promise<{successCount: number, failCount: number}> => {
     let successCount = 0;
     let failCount = 0;
@@ -395,19 +407,16 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         
         successCount++;
         
-        // Update package status
         setScannedPackages(prev => prev.map(p => 
           p.code === pkg.code ? { ...p, printed: true } : p
         ));
         
-        // Small delay between prints to avoid overwhelming the printer
         await new Promise(resolve => setTimeout(resolve, 500));
         
       } catch (error) {
         console.error(`Failed to print ${pkg.code}:`, error);
         failCount++;
         
-        // Mark package with print error
         setScannedPackages(prev => prev.map(p => 
           p.code === pkg.code 
             ? { ...p, error: `Print failed: ${error.message || 'Unknown error'}` } 
@@ -423,13 +432,11 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     const results: BulkScanResult[] = [];
     let printResults = { successCount: 0, failCount: 0 };
 
-    // If it's a print action, handle printing first
     if (actionType === 'print') {
       setPrintingProgress('Starting bulk print...');
       printResults = await processBulkPrint(packages);
     }
 
-    // Store scan actions for later sync
     for (const code of packageCodes) {
       try {
         const result = await offlineService.storeScanAction(
@@ -453,7 +460,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
           printed: packagePrinted
         });
 
-        // Update package status locally
         if (result.success) {
           setScannedPackages(prev => prev.map(pkg => 
             pkg.code === code ? { ...pkg, processed: true, offline: true } : pkg
@@ -471,7 +477,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
     const successful = results.filter(r => r.success).length;
     
-    // Show appropriate success message
     if (actionType === 'print') {
       Toast.show({
         type: printResults.failCount === 0 ? 'success' : 'warning',
@@ -491,8 +496,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
 
     onBulkComplete?.(results);
-    
-    // Close after a delay to show results
     setTimeout(() => onClose(), 2000);
   };
 
@@ -500,13 +503,11 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     try {
       let printResults = { successCount: 0, failCount: 0 };
 
-      // If it's a print action, handle printing first
       if (actionType === 'print') {
         setPrintingProgress('Starting bulk print...');
         printResults = await processBulkPrint(packages);
       }
 
-      // Then proceed with API call for tracking/logging
       setPrintingProgress('Syncing with server...');
       
       const response = await api.post('/api/v1/scanning/bulk_scan', {
@@ -523,7 +524,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       if (response.data.success) {
         const results = response.data.data.results;
         
-        // Update package statuses based on results
         const updatedPackages = scannedPackages.map(pkg => {
           const processResult = results.find((r: any) => r.package_code === pkg.code);
           if (processResult) {
@@ -542,7 +542,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         const successful = response.data.data.summary.successful;
         const total = response.data.data.summary.total;
 
-        // Show appropriate success message based on action type
         if (actionType === 'print') {
           if (printResults.failCount === 0 && successful === total) {
             Toast.show({
@@ -566,7 +565,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             Toast.show({
               type: 'success',
               text1: 'Bulk Action Complete',
-              text2: `Successfully processed all ${total} packages.`,
+              text2: `Successfully ${getActionLabel(actionType).toLowerCase()} all ${total} packages.`,
               position: 'top',
               visibilityTime: 4000,
             });
@@ -595,7 +594,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   };
 
   const getCurrentLocation = async () => {
-    // Implement location services if needed
     return null;
   };
 
@@ -606,22 +604,30 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     };
   };
 
+  // UPDATED: Action labels with new actions
   const getActionLabel = (action: string): string => {
     switch (action) {
-      case 'print': return 'Print';
-      case 'collect': return 'Collect';
+      case 'collect_from_sender': return 'Collect from Sender';
+      case 'collect': return 'Collect from Agent';
       case 'deliver': return 'Mark as Delivered';
+      case 'give_to_receiver': return 'Give to Receiver';
+      case 'print': return 'Print';
       case 'process': return 'Process';
+      case 'confirm_receipt': return 'Confirm Receipt';
       default: return action;
     }
   };
 
+  // UPDATED: Action colors with new actions
   const getActionColor = (action: string): string[] => {
     switch (action) {
-      case 'print': return ['#FF9500', '#FF8C00'];
+      case 'collect_from_sender':
       case 'collect': return ['#667eea', '#764ba2'];
       case 'deliver': return ['#34C759', '#30A46C'];
+      case 'give_to_receiver': return ['#FF6B35', '#FF5722'];
+      case 'print': return ['#FF9500', '#FF8C00'];
       case 'process': return ['#9C27B0', '#673AB7'];
+      case 'confirm_receipt': return ['#764ba2', '#667eea'];
       default: return ['#667eea', '#764ba2'];
     }
   };
@@ -653,6 +659,9 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       <Text style={styles.packageRoute}>{item.route_description}</Text>
       <Text style={styles.packageDetails}>
         From: {item.sender_name} → To: {item.receiver_name}
+      </Text>
+      <Text style={styles.packageState}>
+        Current State: {item.state.replace('_', ' ').toUpperCase()}
       </Text>
       
       <View style={styles.packageFooter}>
@@ -790,7 +799,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                   </LinearGradient>
                   <Text style={styles.emptyText}>No packages scanned yet</Text>
                   <Text style={styles.emptySubtext}>
-                    Scan QR codes to add packages for bulk {actionType}
+                    Scan QR codes to add packages for bulk {getActionLabel(actionType).toLowerCase()}
                     {!isOnline && ' (offline mode active)'}
                   </Text>
                 </View>
@@ -985,7 +994,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  // NEW STYLES: Progress container
   progressContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1027,7 +1035,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#FFB000',
   },
-  // NEW STYLE: Printed package styling
   packageItemPrinted: {
     borderRightWidth: 4,
     borderRightColor: '#34C759',
@@ -1043,7 +1050,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  // NEW STYLE: Package icons container
   packageIcons: {
     flexDirection: 'row',
     gap: 4,
@@ -1065,8 +1071,14 @@ const styles = StyleSheet.create({
   packageDetails: {
     fontSize: 12,
     color: '#718096',
-    marginBottom: 8,
+    marginBottom: 4,
     fontWeight: '500',
+  },
+  packageState: {
+    fontSize: 12,
+    color: '#34C759',
+    marginBottom: 8,
+    fontWeight: '600',
   },
   packageFooter: {
     flexDirection: 'row',
