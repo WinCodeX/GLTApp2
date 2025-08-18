@@ -1,4 +1,4 @@
-// app/admin/ScanningScreen.tsx - FIXED: Toast handling and correct workflow
+// app/admin/ScanningScreen.tsx - FIXED: Better action flows and toast handling
 
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -176,10 +176,13 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     setShowBulkScanner(true);
   };
 
-  // FIXED: Toast now shown in QRScanner component before closing
+  // FIXED: Better scan success handling with proper toast messages
   const handleScanSuccess = (result: any) => {
     loadUserStats();
     console.log('✅ Scan successful:', result);
+    
+    // The toast message is now handled in the QRScanner component before closing
+    // So we don't need to show another toast here to avoid duplication
   };
 
   const handleBulkComplete = (results: any[]) => {
@@ -188,6 +191,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.length - successCount;
 
+    // FIXED: Better bulk completion messages
     if (failureCount === 0) {
       Toast.show({
         type: 'success',
@@ -215,7 +219,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-  // FIXED: Correct workflow mapping with proper state transitions
+  // FIXED: Improved action configurations with proper descriptions
   const getAvailableActions = () => {
     switch (currentUserRole) {
       case 'agent':
@@ -636,6 +640,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
       
       {renderQuickActions()}
 
+      {/* FIXED: Pass defaultAction to QRScanner and better success handling */}
       <QRScanner
         visible={showQRScanner}
         onClose={() => setShowQRScanner(false)}
