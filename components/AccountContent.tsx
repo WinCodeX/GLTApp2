@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Fixed version with proper avatar URL handling
+// components/AccountContent.tsx - Updated with fixed API imports
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -32,35 +32,16 @@ import { useUser } from '../context/UserContext';
 import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 import { registerStatusUpdater, checkServerStatus } from '../lib/netStatus';
-import { API_BASE_URL } from '../lib/api';
 
-// ✅ Avatar URL Helper - Add this helper function
-const getFullAvatarUrl = (avatarUrl: string | null | undefined): string | null => {
-  if (!avatarUrl) return null;
-  
-  try {
-    // If it's already a full URL, return as-is
-    if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
-      return avatarUrl;
-    }
-    
-    // If it's a relative URL, combine with base URL
-    if (avatarUrl.startsWith('/')) {
-      const baseUrl = API_BASE_URL.replace('/api/v1', ''); // Remove API path
-      return `${baseUrl}${avatarUrl}`;
-    }
-    
-    // If it's just a path fragment, build the full URL
-    const baseUrl = API_BASE_URL.replace('/api/v1', '');
-    return `${baseUrl}/${avatarUrl}`;
-    
-  } catch (error) {
-    console.error('❌ Error building avatar URL:', error);
-    return null;
-  }
-};
+// ✅ FIXED: Import from the updated api.ts file
+import { 
+  getFullAvatarUrl, 
+  getApiBaseUrl, 
+  getBaseDomain,
+  getCurrentApiBaseUrl 
+} from '../lib/api';
 
-// ✅ Safe Avatar Component with error handling
+// ✅ Safe Avatar Component with error handling and updated API functions
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
@@ -86,7 +67,8 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         raw: avatarUrl,
         full: fullAvatarUrl,
         hasError,
-        baseUrl: API_BASE_URL
+        apiBaseUrl: getCurrentApiBaseUrl(),
+        baseDomain: getBaseDomain()
       });
     }
   }, [avatarUrl, fullAvatarUrl, hasError]);
@@ -224,8 +206,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         userId: user.id,
         rawAvatarUrl: user.avatar_url,
         fullAvatarUrl: fullUrl,
-        apiBaseUrl: API_BASE_URL,
-        baseUrl: API_BASE_URL.replace('/api/v1', '')
+        apiBaseUrl: getCurrentApiBaseUrl(),
+        baseDomain: getBaseDomain()
       });
     }
   }, [user?.avatar_url]);
