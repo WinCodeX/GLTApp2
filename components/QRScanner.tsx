@@ -1,4 +1,4 @@
-// components/QRScanner.tsx - Updated with Print Integration
+// components/QRScanner.tsx - FIXED: Show toast on scanner before closing
 import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
@@ -358,18 +358,25 @@ const QRScanner: React.FC<QRScannerProps> = ({
         );
         
         if (result.success) {
+          // FIXED: Show success toast on scanner with delay before closing
           Toast.show({
             type: 'success',
             text1: 'Action Queued',
-            text2: 'Action saved for sync when online',
+            text2: `${getActionLabel(actionType)} action saved for sync when online`,
             position: 'top',
             visibilityTime: 3000,
           });
           
-          setShowActionModal(false);
-          setScanned(false);
-          setScanResult(null);
+          // Call parent success handler
           onScanSuccess?.({ package: { code }, action: actionType, offline: true });
+          
+          // Close modals and scanner after showing toast
+          setTimeout(() => {
+            setShowActionModal(false);
+            setScanned(false);
+            setScanResult(null);
+            onClose();
+          }, 1500);
         } else {
           Toast.show({
             type: 'error',
@@ -397,18 +404,26 @@ const QRScanner: React.FC<QRScannerProps> = ({
       if (response.data.success) {
         Vibration.vibrate([100, 50, 100]);
         
+        // FIXED: Show success toast on scanner with action-specific message
+        const actionLabel = getActionLabel(actionType);
         Toast.show({
           type: 'success',
           text1: 'Action Successful',
-          text2: response.data.message,
+          text2: `Package ${code} has been ${actionLabel.toLowerCase()} successfully`,
           position: 'top',
           visibilityTime: 3000,
         });
 
-        setShowActionModal(false);
-        setScanned(false);
-        setScanResult(null);
+        // Call parent success handler
         onScanSuccess?.(response.data.data);
+
+        // Close modals and scanner after showing toast
+        setTimeout(() => {
+          setShowActionModal(false);
+          setScanned(false);
+          setScanResult(null);
+          onClose();
+        }, 1500);
       } else {
         Toast.show({
           type: 'error',
@@ -484,10 +499,12 @@ const QRScanner: React.FC<QRScannerProps> = ({
       console.error('Print failed:', error);
       
       let errorMessage = 'Failed to print receipt';
-      if (error.message.includes('No printer connected')) {
+      if (error.message.includes('No printer configured')) {
         errorMessage = 'No printer connected. Check Bluetooth settings.';
       } else if (error.message.includes('not connected')) {
         errorMessage = 'Printer disconnected. Reconnect and try again.';
+      } else if (error.message.includes('permissions not granted')) {
+        errorMessage = 'Bluetooth permission needed. Grant in app settings.';
       }
       
       Toast.show({
@@ -499,6 +516,19 @@ const QRScanner: React.FC<QRScannerProps> = ({
       });
       
       // Don't prevent the scan action from completing if print fails
+    }
+  };
+
+  // NEW: Get action label for better toast messages
+  const getActionLabel = (action: string): string => {
+    switch (action) {
+      case 'collect_from_sender': return 'Collected from Sender';
+      case 'collect': return 'Collected';
+      case 'deliver': return 'Delivered';
+      case 'print': return 'Printed';
+      case 'process': return 'Processed';
+      case 'confirm_receipt': return 'Receipt Confirmed';
+      default: return action;
     }
   };
 
@@ -742,6 +772,9 @@ const QRScanner: React.FC<QRScannerProps> = ({
             </View>
           </View>
         </Modal>
+
+        {/* FIXED: Toast component for scanner */}
+        <Toast />
       </SafeAreaView>
     </Modal>
   );
@@ -749,7 +782,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
 
 const getRoleInstructions = (role: string): string => {
   switch (role) {
-    case 'agent': return 'Scan to print package labels';
+    case 'agent': return 'Scan to print package labels or collect from sender';
     case 'rider': return 'Scan to collect or deliver packages';
     case 'warehouse': return 'Scan to process packages in warehouse';
     case 'client': return 'Scan to confirm package receipt';
@@ -764,6 +797,7 @@ const getActionButtonStyle = (action: string) => {
 
 const getActionGradient = (action: string): string[] => {
   switch (action) {
+    case 'collect_from_sender': 
     case 'collect': return ['#667eea', '#764ba2'];
     case 'deliver': return ['#34C759', '#30A46C'];
     case 'print': return ['#FF9500', '#FF8C00'];
@@ -775,6 +809,7 @@ const getActionGradient = (action: string): string[] => {
 
 const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
   switch (action) {
+    case 'collect_from_sender': return 'how-to-reg';
     case 'collect': return 'local-shipping';
     case 'deliver': return 'check-circle';
     case 'print': return 'print';
