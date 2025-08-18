@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - FIXED: Updated with new actions and proper state validation
+// components/BulkScanner.tsx - FIXED: Better toast handling and action management
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -165,15 +165,24 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       setScannedPackages(prev => [newPackage, ...prev]);
       setShowScanner(false);
       
-      Toast.show({
-        type: canPerformAction.canPerform ? 'success' : 'warning',
-        text1: 'Package Scanned',
-        text2: canPerformAction.canPerform 
-          ? `${packageCode} added to batch${!online ? ' (offline)' : ''}` 
-          : `${packageCode} has validation errors`,
-        position: 'top',
-        visibilityTime: 2000,
-      });
+      // Show appropriate toast based on validation
+      if (canPerformAction.canPerform) {
+        Toast.show({
+          type: 'success',
+          text1: 'Package Added',
+          text2: `${packageCode} added to batch${!online ? ' (offline)' : ''}`,
+          position: 'top',
+          visibilityTime: 2000,
+        });
+      } else {
+        Toast.show({
+          type: 'warning',
+          text1: 'Package Has Issues',
+          text2: `${packageCode} added but cannot be processed: ${canPerformAction.reason}`,
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      }
     } catch (error) {
       console.error('Error processing scanned package:', error);
       Toast.show({
@@ -213,7 +222,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
   };
 
-  // UPDATED: Enhanced local validation with correct state transitions
   const validatePackageActionLocally = (packageInfo: any, action: string): {canPerform: boolean, reason?: string} => {
     const state = packageInfo.state;
     
@@ -348,14 +356,39 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       return;
     }
 
+    // FIXED: Different confirmation messages for different actions
+    const confirmationMessage = getConfirmationMessage(actionType, validPackages.length);
+    const offlineNote = !isOnline ? '\n\nNote: You are offline. Actions will be queued for sync.' : '';
+
     Alert.alert(
       'Confirm Bulk Action',
-      `${getActionLabel(actionType)} ${validPackages.length} packages?${!isOnline ? '\n\nNote: You are offline. Actions will be queued for sync.' : ''}`,
+      `${confirmationMessage}${offlineNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Proceed', onPress: performBulkAction, style: 'default' }
       ]
     );
+  };
+
+  const getConfirmationMessage = (action: string, count: number): string => {
+    switch (action) {
+      case 'collect_from_sender':
+        return `Collect ${count} package${count !== 1 ? 's' : ''} from sender${count !== 1 ? 's' : ''}?`;
+      case 'collect':
+        return `Collect ${count} package${count !== 1 ? 's' : ''} from agent${count !== 1 ? 's' : ''}?`;
+      case 'deliver':
+        return `Mark ${count} package${count !== 1 ? 's' : ''} as delivered?`;
+      case 'give_to_receiver':
+        return `Give ${count} package${count !== 1 ? 's' : ''} to receiver${count !== 1 ? 's' : ''}?`;
+      case 'print':
+        return `Print receipt${count !== 1 ? 's' : ''} for ${count} package${count !== 1 ? 's' : ''}?`;
+      case 'process':
+        return `Process ${count} package${count !== 1 ? 's' : ''} in warehouse?`;
+      case 'confirm_receipt':
+        return `Confirm receipt of ${count} package${count !== 1 ? 's' : ''}?`;
+      default:
+        return `Process ${count} package${count !== 1 ? 's' : ''}?`;
+    }
   };
 
   const performBulkAction = async () => {
@@ -432,11 +465,13 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     const results: BulkScanResult[] = [];
     let printResults = { successCount: 0, failCount: 0 };
 
+    // Handle printing first if it's a print action
     if (actionType === 'print') {
       setPrintingProgress('Starting bulk print...');
       printResults = await processBulkPrint(packages);
     }
 
+    // Queue actions for sync
     for (const code of packageCodes) {
       try {
         const result = await offlineService.storeScanAction(
@@ -477,22 +512,43 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
     const successful = results.filter(r => r.success).length;
     
+    // FIXED: Better toast messages for different scenarios
     if (actionType === 'print') {
-      Toast.show({
-        type: printResults.failCount === 0 ? 'success' : 'warning',
-        text1: 'Bulk Print Complete',
-        text2: `${printResults.successCount} printed, ${printResults.failCount} failed. ${successful} queued for sync.`,
-        position: 'top',
-        visibilityTime: 6000,
-      });
+      if (printResults.failCount === 0 && successful === packageCodes.length) {
+        Toast.show({
+          type: 'success',
+          text1: 'Bulk Print Complete',
+          text2: `Successfully printed all ${printResults.successCount} receipts and queued for sync`,
+          position: 'top',
+          visibilityTime: 5000,
+        });
+      } else {
+        Toast.show({
+          type: 'warning',
+          text1: 'Bulk Print Partial',
+          text2: `${printResults.successCount} printed, ${printResults.failCount} failed. ${successful} queued for sync.`,
+          position: 'top',
+          visibilityTime: 6000,
+        });
+      }
     } else {
-      Toast.show({
-        type: 'success',
-        text1: 'Queued for Sync',
-        text2: `${successful} of ${results.length} packages queued for sync when online`,
-        position: 'top',
-        visibilityTime: 5000,
-      });
+      if (successful === packageCodes.length) {
+        Toast.show({
+          type: 'success',
+          text1: 'Queued for Sync',
+          text2: `All ${successful} ${getActionLabel(actionType).toLowerCase()} actions queued for sync`,
+          position: 'top',
+          visibilityTime: 4000,
+        });
+      } else {
+        Toast.show({
+          type: 'warning',
+          text1: 'Partially Queued',
+          text2: `${successful} of ${packageCodes.length} actions queued for sync`,
+          position: 'top',
+          visibilityTime: 5000,
+        });
+      }
     }
 
     onBulkComplete?.(results);
@@ -503,6 +559,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     try {
       let printResults = { successCount: 0, failCount: 0 };
 
+      // Handle printing first if it's a print action
       if (actionType === 'print') {
         setPrintingProgress('Starting bulk print...');
         printResults = await processBulkPrint(packages);
@@ -524,6 +581,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       if (response.data.success) {
         const results = response.data.data.results;
         
+        // Update package states
         const updatedPackages = scannedPackages.map(pkg => {
           const processResult = results.find((r: any) => r.package_code === pkg.code);
           if (processResult) {
@@ -542,20 +600,21 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         const successful = response.data.data.summary.successful;
         const total = response.data.data.summary.total;
 
+        // FIXED: Better success messages for different actions
         if (actionType === 'print') {
           if (printResults.failCount === 0 && successful === total) {
             Toast.show({
               type: 'success',
               text1: 'Bulk Print Complete',
-              text2: `Successfully printed and processed all ${total} packages.`,
+              text2: `Successfully printed and processed all ${total} packages`,
               position: 'top',
               visibilityTime: 4000,
             });
           } else {
             Toast.show({
               type: 'warning',
-              text1: 'Bulk Print Partial Success',
-              text2: `${printResults.successCount} printed, ${printResults.failCount} print failures. ${successful} processed.`,
+              text1: 'Bulk Print Issues',
+              text2: `${printResults.successCount} printed, ${printResults.failCount} print failures. ${successful}/${total} processed.`,
               position: 'top',
               visibilityTime: 6000,
             });
@@ -564,16 +623,16 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
           if (successful === total) {
             Toast.show({
               type: 'success',
-              text1: 'Bulk Action Complete',
-              text2: `Successfully ${getActionLabel(actionType).toLowerCase()} all ${total} packages.`,
+              text1: `Bulk ${getActionLabel(actionType)} Complete`,
+              text2: `Successfully processed all ${total} packages`,
               position: 'top',
               visibilityTime: 4000,
             });
           } else {
             Toast.show({
               type: 'warning',
-              text1: 'Bulk Action Partial',
-              text2: `${successful} of ${total} packages processed successfully.`,
+              text1: `Bulk ${getActionLabel(actionType)} Partial`,
+              text2: `${successful} of ${total} packages processed successfully`,
               position: 'top',
               visibilityTime: 5000,
             });
@@ -582,6 +641,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
         onBulkComplete?.(results);
 
+        // Close if everything was successful
         if (successful === total && (actionType !== 'print' || printResults.failCount === 0)) {
           setTimeout(() => onClose(), 2000);
         }
@@ -604,21 +664,19 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     };
   };
 
-  // UPDATED: Action labels with new actions
   const getActionLabel = (action: string): string => {
     switch (action) {
-      case 'collect_from_sender': return 'Collect from Sender';
-      case 'collect': return 'Collect from Agent';
-      case 'deliver': return 'Mark as Delivered';
-      case 'give_to_receiver': return 'Give to Receiver';
+      case 'collect_from_sender': return 'Collection from Sender';
+      case 'collect': return 'Collection from Agent';
+      case 'deliver': return 'Delivery';
+      case 'give_to_receiver': return 'Handover to Receiver';
       case 'print': return 'Print';
-      case 'process': return 'Process';
-      case 'confirm_receipt': return 'Confirm Receipt';
+      case 'process': return 'Processing';
+      case 'confirm_receipt': return 'Receipt Confirmation';
       default: return action;
     }
   };
 
-  // UPDATED: Action colors with new actions
   const getActionColor = (action: string): string[] => {
     switch (action) {
       case 'collect_from_sender':
