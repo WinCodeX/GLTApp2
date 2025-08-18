@@ -98,7 +98,7 @@ android {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode appVersionCode
+        versionCode 1
         versionName appVersionName
         
         // App display name and metadata - using consistent values

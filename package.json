@@ -60,7 +60,8 @@
     "react-native-vector-icons": "^10.3.0",
     "react-native-web": "~0.20.0",
     "react-native-webview": "13.13.5",
-    "@react-native-masked-view/masked-view": "0.3.2"
+    "@react-native-masked-view/masked-view": "0.3.2",
+    "react-native-svg": "15.11.2"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
