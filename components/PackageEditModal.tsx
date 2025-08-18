@@ -1,4 +1,4 @@
-// components/PackageEditModal.tsx - FIXED: Individual field editing and collected state
+// components/PackageEditModal.tsx - FIXED: Flexible validation for individual field editing
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -279,60 +279,58 @@ export default function PackageEditModal({
     });
   }, [slideAnim, onClose]);
 
-  // FIXED: More flexible validation for individual field editing
+  // FIXED: Completely flexible validation - only validate what's actually being changed
   const validateForm = useCallback(() => {
     const errors: string[] = [];
     
-    console.log('🔍 Validating form...');
+    console.log('🔍 Validating form with flexible rules...');
     
-    // Only validate personal info fields if they are being edited and user can edit them
-    if (canEditPersonalInfo) {
-      // Only require sender name if it's being changed and is empty
-      if (senderName.trim() === '' && packageData?.sender_name) {
-        errors.push('Sender name cannot be empty');
-      }
-      
-      // Only validate sender phone if it's being changed
-      if (senderPhone.trim() !== '' && !senderPhone.match(/^\+254\d{9}$/)) {
+    // Only validate phone format if it's being changed and not empty
+    if (senderPhone.trim() !== '' && senderPhone.trim() !== (packageData?.sender_phone || '')) {
+      if (!senderPhone.match(/^\+254\d{9}$/)) {
         errors.push('Sender phone must be in format +254XXXXXXXXX');
       }
-      
-      // Only require receiver name if it's being changed and is empty
-      if (receiverName.trim() === '' && packageData?.receiver_name) {
-        errors.push('Receiver name cannot be empty');
-      }
-      
-      // Only validate receiver phone if it's being changed
-      if (receiverPhone.trim() !== '' && !receiverPhone.match(/^\+254\d{9}$/)) {
+    }
+    
+    if (receiverPhone.trim() !== '' && receiverPhone.trim() !== packageData?.receiver_phone) {
+      if (!receiverPhone.match(/^\+254\d{9}$/)) {
         errors.push('Receiver phone must be in format +254XXXXXXXXX');
       }
     }
     
-    // Only validate destination if it's being changed
-    if (canEditDestination) {
-      if (isAgentDelivery && selectedDestinationAgent === '' && packageData?.destination_agent?.id) {
+    // Only validate destination if it's being changed and the field is actually required
+    if (canEditDestination && isAgentDelivery) {
+      // Only validate agent if it's being changed and there was no previous agent
+      if (selectedDestinationAgent === '' && 
+          packageData?.destination_agent?.id === undefined &&
+          selectedDestinationAgent !== (packageData?.destination_agent?.id || '')) {
         errors.push('Destination agent is required for agent delivery');
-      }
-      
-      if (!isAgentDelivery && selectedDestinationArea === '' && packageData?.destination_area?.id) {
-        errors.push('Destination area is required');
-      }
-      
-      // Only validate delivery location if package type requires it and it's being changed
-      if (['doorstep', 'fragile'].includes(packageData?.delivery_type || '') && 
-          deliveryLocation.trim() === '' && 
-          canEditDeliveryLocation) {
-        // Only error if there was no previous delivery location
-        if (!packageData?.delivery_location) {
-          errors.push('Delivery location is required for doorstep/fragile delivery');
-        }
       }
     }
     
-    console.log('🔍 Validation result:', { errors: errors.length, details: errors });
+    if (canEditDestination && !isAgentDelivery) {
+      // Only validate area if it's being changed and there was no previous area
+      if (selectedDestinationArea === '' && 
+          packageData?.destination_area?.id === undefined &&
+          selectedDestinationArea !== (packageData?.destination_area?.id || '')) {
+        errors.push('Destination area is required');
+      }
+    }
+    
+    // Only validate delivery location if it's being changed to empty and was previously required
+    if (canEditDeliveryLocation && 
+        ['doorstep', 'fragile'].includes(packageData?.delivery_type || '')) {
+      if (deliveryLocation.trim() === '' && 
+          packageData?.delivery_location === undefined &&
+          deliveryLocation !== (packageData?.delivery_location || '')) {
+        errors.push('Delivery location is required for doorstep/fragile delivery');
+      }
+    }
+    
+    console.log('🔍 Flexible validation result:', { errors: errors.length, details: errors });
     
     return errors;
-  }, [canEditPersonalInfo, canEditDestination, canEditDeliveryLocation, senderName, senderPhone, receiverName, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
+  }, [canEditDestination, canEditDeliveryLocation, senderPhone, receiverPhone, selectedDestinationArea, selectedDestinationAgent, deliveryLocation, isAgentDelivery, packageData]);
 
   const handleSubmit = useCallback(async () => {
     if (!packageData) return;
@@ -358,19 +356,19 @@ export default function PackageEditModal({
       
       const updateData: any = {};
       
-      // FIXED: Only include fields that have actually changed
+      // FIXED: Only include fields that have actually changed and pass minimal required validation
       if (canEditPersonalInfo) {
         // Only include personal info fields if they've changed
-        if (senderName.trim() !== packageData.sender_name) {
+        if (senderName.trim() !== packageData.sender_name && senderName.trim() !== '') {
           updateData.sender_name = senderName.trim();
         }
-        if (senderPhone.trim() !== (packageData.sender_phone || '')) {
+        if (senderPhone.trim() !== (packageData.sender_phone || '') && senderPhone.trim() !== '') {
           updateData.sender_phone = senderPhone.trim();
         }
-        if (receiverName.trim() !== packageData.receiver_name) {
+        if (receiverName.trim() !== packageData.receiver_name && receiverName.trim() !== '') {
           updateData.receiver_name = receiverName.trim();
         }
-        if (receiverPhone.trim() !== packageData.receiver_phone) {
+        if (receiverPhone.trim() !== packageData.receiver_phone && receiverPhone.trim() !== '') {
           updateData.receiver_phone = receiverPhone.trim();
         }
         console.log('💾 Added changed personal info to update');
@@ -386,17 +384,21 @@ export default function PackageEditModal({
         if (isAgentDelivery) {
           // Only update if agent has changed
           if (selectedDestinationAgent !== (packageData.destination_agent?.id || '')) {
-            updateData.destination_agent_id = selectedDestinationAgent;
-            const selectedAgent = agents.find(a => a.id === selectedDestinationAgent);
-            if (selectedAgent?.area?.id) {
-              updateData.destination_area_id = selectedAgent.area.id;
+            if (selectedDestinationAgent !== '') {
+              updateData.destination_agent_id = selectedDestinationAgent;
+              const selectedAgent = agents.find(a => a.id === selectedDestinationAgent);
+              if (selectedAgent?.area?.id) {
+                updateData.destination_area_id = selectedAgent.area.id;
+              }
             }
           }
         } else {
           // Only update if area has changed
           if (selectedDestinationArea !== (packageData.destination_area?.id || '')) {
-            updateData.destination_area_id = selectedDestinationArea;
-            updateData.destination_agent_id = null;
+            if (selectedDestinationArea !== '') {
+              updateData.destination_area_id = selectedDestinationArea;
+              updateData.destination_agent_id = null;
+            }
           }
         }
         console.log('💾 Added changed destination to update');
@@ -518,12 +520,13 @@ export default function PackageEditModal({
     return (
       <View style={styles.editSection}>
         <Text style={styles.sectionTitle}>Personal Information</Text>
+        <Text style={styles.sectionSubtitle}>Only change the fields you need to update</Text>
         
         <View style={styles.inputGroup}>
           <Text style={styles.inputLabel}>Sender Name</Text>
           <TextInput
             style={styles.input}
-            placeholder="Sender's full name"
+            placeholder="Leave empty to keep current value"
             placeholderTextColor="#888"
             value={senderName}
             onChangeText={setSenderName}
@@ -535,7 +538,7 @@ export default function PackageEditModal({
           <Text style={styles.inputLabel}>Sender Phone</Text>
           <TextInput
             style={styles.input}
-            placeholder="Sender's phone (+254...)"
+            placeholder="Leave empty to keep current value"
             placeholderTextColor="#888"
             value={senderPhone}
             onChangeText={setSenderPhone}
@@ -548,7 +551,7 @@ export default function PackageEditModal({
           <Text style={styles.inputLabel}>Receiver Name</Text>
           <TextInput
             style={styles.input}
-            placeholder="Receiver's full name"
+            placeholder="Leave empty to keep current value"
             placeholderTextColor="#888"
             value={receiverName}
             onChangeText={setReceiverName}
@@ -560,7 +563,7 @@ export default function PackageEditModal({
           <Text style={styles.inputLabel}>Receiver Phone</Text>
           <TextInput
             style={styles.input}
-            placeholder="Receiver's phone (+254...)"
+            placeholder="Leave empty to keep current value"
             placeholderTextColor="#888"
             value={receiverPhone}
             onChangeText={setReceiverPhone}
@@ -630,6 +633,7 @@ export default function PackageEditModal({
         <Text style={styles.sectionTitle}>
           {isAgentDelivery ? 'Destination Agent' : 'Destination Area'}
         </Text>
+        <Text style={styles.sectionSubtitle}>Only change if you need to update the destination</Text>
         
         <View style={styles.searchContainer}>
           <Feather name="search" size={20} color="#888" />
@@ -717,7 +721,7 @@ export default function PackageEditModal({
             <Text style={styles.deliveryLocationLabel}>Delivery Address</Text>
             <TextInput
               style={[styles.input, styles.textArea]}
-              placeholder="Enter specific delivery address..."
+              placeholder="Leave empty to keep current address..."
               placeholderTextColor="#888"
               value={deliveryLocation}
               onChangeText={setDeliveryLocation}
