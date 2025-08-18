@@ -1,4 +1,4 @@
-// components/QRScanner.tsx - FIXED: Different flows for actions with proper confirmations
+// components/QRScanner.tsx - FIXED: Removed ToastComponent import and standardized toast usage
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -19,7 +19,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import Toast from 'react-native-toast-message';
+import Toast from 'react-native-toast-message'; // FIXED: Only this import needed
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
@@ -186,6 +186,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
     const packageCode = extractPackageCode(data);
     
     if (!packageCode) {
+      // FIXED: Use 'error' instead of 'warning'
       Toast.show({
         type: 'error',
         text1: 'Invalid QR Code',
@@ -302,8 +303,9 @@ const QRScanner: React.FC<QRScannerProps> = ({
     const hasAction = packageData.available_actions.some(a => a.action === action);
     
     if (!hasAction) {
+      // FIXED: Use 'info' instead of 'warning'
       Toast.show({
-        type: 'warning',
+        type: 'info',
         text1: 'Action Not Available',
         text2: `Cannot ${getActionLabel(action).toLowerCase()} - package is in ${packageData.package.state_display} state`,
         position: 'top',
@@ -544,8 +546,9 @@ const QRScanner: React.FC<QRScannerProps> = ({
         );
         
         if (result.success) {
+          // FIXED: Use 'info' instead of 'warning'
           Toast.show({
-            type: 'warning',
+            type: 'info',
             text1: 'Saved Offline',
             text2: 'Action will sync when connection is restored',
             position: 'top',
