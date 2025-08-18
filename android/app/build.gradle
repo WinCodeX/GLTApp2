@@ -112,6 +112,9 @@ android {
         buildConfigField "int", "VERSION_CODE", "${appVersionCode}"
         buildConfigField "String", "APP_NAME", "\"${appName}\""
         buildConfigField "String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\""
+        
+        // ADDED: Enable multidex for better Bluetooth compatibility
+        multiDexEnabled true
     }
     
     signingConfigs {
@@ -144,6 +147,12 @@ android {
             // Release-specific build config
             buildConfigField "boolean", "IS_DEBUG", "false"
         }
+    }
+    
+    // ADDED: Java compatibility for better Bluetooth support
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
     }
     
     // Custom APK naming configuration
@@ -225,4 +234,7 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+    
+    // ADDED: Multidex support for better compatibility
+    implementation 'androidx.multidex:multidex:2.0.1'
 }
