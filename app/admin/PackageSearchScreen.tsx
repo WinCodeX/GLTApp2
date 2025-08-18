@@ -1,4 +1,5 @@
-// app/admin/PackageSearchScreen.tsx - FIXED: Removed admin title, better header
+// app/admin/PackageSearchScreen.tsx - FIXED: Status bar spacing and improved UX
+
 import React, { useState, useRef, useEffect } from 'react';
 import {
   View,
@@ -14,6 +15,7 @@ import {
   RefreshControl,
   SafeAreaView,
   StatusBar,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -25,6 +27,7 @@ import PackageEditModal from '../../components/PackageEditModal';
 import api from '../../lib/api';
 
 const { width } = Dimensions.get('window');
+const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 24;
 
 interface Package {
   id: string;
@@ -39,7 +42,6 @@ interface Package {
   delivery_type: string;
   created_at: string;
   available_actions?: AvailableAction[];
-  // Extended fields
   sender_phone?: string;
   sender_email?: string;
   receiver_email?: string;
@@ -175,7 +177,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         const packages = searchResponse.data.data || [];
         setSearchResults(packages);
         
-        // Save to recent searches
         await saveRecentSearch(query.trim());
         
         Toast.show({
@@ -240,10 +241,35 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 
   const performPackageAction = async (packageObj: Package, action: string) => {
     try {
+      // Show appropriate confirmation for different actions
+      if (action === 'give_to_receiver') {
+        Alert.alert(
+          'Confirm Handover',
+          `Are you sure you want to give package ${packageObj.code} to the receiver?\n\nReceiver: ${packageObj.receiver_name}\nPhone: ${packageObj.receiver_phone}`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            { 
+              text: 'Confirm Handover', 
+              style: 'default',
+              onPress: () => executePackageAction(packageObj, action)
+            }
+          ]
+        );
+        return;
+      }
+
+      await executePackageAction(packageObj, action);
+    } catch (error) {
+      console.error('Action error:', error);
+    }
+  };
+
+  const executePackageAction = async (packageObj: Package, action: string) => {
+    try {
       Toast.show({
         type: 'info',
         text1: 'Processing Action',
-        text2: `${action} for ${packageObj.code}...`,
+        text2: `${getActionLabel(action)} for ${packageObj.code}...`,
         position: 'top',
         visibilityTime: 2000,
       });
@@ -265,8 +291,8 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       if (response.data.success) {
         Toast.show({
           type: 'success',
-          text1: 'Action Successful',
-          text2: response.data.message,
+          text1: getActionSuccessTitle(action),
+          text2: response.data.message || getActionSuccessMessage(action, packageObj.code),
           position: 'top',
           visibilityTime: 3000,
         });
@@ -299,20 +325,57 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     }
   };
 
-  // ENHANCED: Better edit package handling with comprehensive data fetching
+  const getActionLabel = (action: string): string => {
+    switch (action) {
+      case 'collect_from_sender': return 'Collecting from sender';
+      case 'collect': return 'Collecting from agent';
+      case 'deliver': return 'Marking as delivered';
+      case 'give_to_receiver': return 'Giving to receiver';
+      case 'print': return 'Printing receipt';
+      case 'process': return 'Processing';
+      case 'confirm_receipt': return 'Confirming receipt';
+      default: return action;
+    }
+  };
+
+  const getActionSuccessTitle = (action: string): string => {
+    switch (action) {
+      case 'collect_from_sender': return 'Package Collected';
+      case 'collect': return 'Package Collected';
+      case 'deliver': return 'Delivery Confirmed';
+      case 'give_to_receiver': return 'Handover Complete';
+      case 'print': return 'Receipt Printed';
+      case 'process': return 'Package Processed';
+      case 'confirm_receipt': return 'Receipt Confirmed';
+      default: return 'Action Complete';
+    }
+  };
+
+  const getActionSuccessMessage = (action: string, packageCode: string): string => {
+    switch (action) {
+      case 'collect_from_sender': return `${packageCode} collected from sender successfully`;
+      case 'collect': return `${packageCode} collected from agent successfully`;
+      case 'deliver': return `${packageCode} marked as delivered successfully`;
+      case 'give_to_receiver': return `${packageCode} handed over to receiver successfully`;
+      case 'print': return `Receipt for ${packageCode} printed successfully`;
+      case 'process': return `${packageCode} processed successfully`;
+      case 'confirm_receipt': return `Receipt for ${packageCode} confirmed`;
+      default: return `Action completed for ${packageCode}`;
+    }
+  };
+
   const handleEditPackage = async (packageObj: Package) => {
     try {
       console.log('✏️ Starting edit package process for:', packageObj.code);
       setLoadingPackageDetails(packageObj.code);
       
-      // First try to fetch comprehensive package details
       console.log('📡 Fetching comprehensive package details...');
       const response = await api.get(`/api/v1/packages/${packageObj.code}`, {
         headers: {
           'Accept': 'application/json',
           'Content-Type': 'application/json'
         },
-        timeout: 10000 // 10 second timeout
+        timeout: 10000
       });
       
       console.log('📡 Package details response:', response.data);
@@ -320,7 +383,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       if (response.data.success) {
         const fullPackageData = response.data.data;
         
-        // Validate that we have the necessary data
         console.log('🔍 Validating package data:', {
           hasPackage: !!fullPackageData,
           packageCode: fullPackageData?.code,
@@ -333,7 +395,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           throw new Error('Package data is missing from server response');
         }
         
-        // Ensure package has required basic fields - use fallback data if needed
         const packageForEdit = {
           ...fullPackageData,
           id: fullPackageData.id || packageObj.id,
@@ -347,7 +408,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           cost: fullPackageData.cost || packageObj.cost || 0,
           delivery_type: fullPackageData.delivery_type || packageObj.delivery_type || 'agent',
           created_at: fullPackageData.created_at || packageObj.created_at,
-          // Extended fields with fallbacks
           sender_phone: fullPackageData.sender_phone || packageObj.sender_phone || '',
           sender_email: fullPackageData.sender_email || packageObj.sender_email || '',
           receiver_email: fullPackageData.receiver_email || packageObj.receiver_email || '',
@@ -380,11 +440,9 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         url: error.config?.url
       });
       
-      // If API call fails, try to use the package data we already have for basic editing
       if (error.response?.status !== 404) {
         console.log('🔄 API call failed, attempting to edit with available data...');
         
-        // Check if we have enough data from the search result to edit
         if (packageObj.code && packageObj.state) {
           const basicPackageForEdit = {
             ...packageObj,
@@ -407,7 +465,7 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
             visibilityTime: 4000,
           });
           
-          return; // Don't show error if we can still edit with basic data
+          return;
         }
       }
       
@@ -438,14 +496,12 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     }
   };
 
-  // ENHANCED: Better edit success handling
   const handleEditSuccess = async () => {
     console.log('✅ Package edit successful, refreshing data...');
     
     setShowEditModal(false);
     setEditingPackage(null);
     
-    // Refresh search results to show updated data
     if (searchQuery.trim()) {
       console.log('🔄 Refreshing search results...');
       await handleSearch(searchQuery);
@@ -460,7 +516,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     });
   };
 
-  // ENHANCED: More comprehensive edit permission checking
   const canEditPackage = (packageObj: Package): boolean => {
     console.log('🔒 Checking edit permissions for:', {
       userRole: currentUserRole,
@@ -470,16 +525,13 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     
     switch (currentUserRole) {
       case 'admin':
-        // Admins can edit all packages
         return true;
       case 'client':
-        // Clients can edit their own packages in certain states
         const clientEditableStates = ['pending_unpaid', 'pending'];
         return clientEditableStates.includes(packageObj.state);
       case 'agent':
       case 'rider':
       case 'warehouse':
-        // Staff can edit package state and some details
         return true;
       default:
         console.warn('⚠️ Unknown user role for edit permission:', currentUserRole);
@@ -513,10 +565,13 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 
   const getActionColor = (action: string): string => {
     switch (action) {
+      case 'collect_from_sender':
       case 'collect':
         return '#667eea';
       case 'deliver':
         return '#34C759';
+      case 'give_to_receiver':
+        return '#FF6B35';
       case 'print':
         return '#FF9500';
       case 'confirm_receipt':
@@ -530,10 +585,14 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
 
   const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
     switch (action) {
+      case 'collect_from_sender':
+        return 'how-to-reg';
       case 'collect':
         return 'local-shipping';
       case 'deliver':
         return 'check-circle';
+      case 'give_to_receiver':
+        return 'person-pin';
       case 'print':
         return 'print';
       case 'confirm_receipt':
@@ -549,7 +608,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     return ['agent', 'rider', 'warehouse', 'admin'].includes(currentUserRole);
   };
 
-  // ENHANCED: Better package display with more details
   const renderPackageItem = ({ item }: { item: Package }) => (
     <View style={styles.packageItem}>
       <TouchableOpacity
@@ -571,7 +629,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
       <View style={styles.packageDetails}>
         <Text style={styles.routeText}>{item.route_description}</Text>
         
-        {/* ENHANCED: Sender Information */}
         <View style={styles.contactSection}>
           <Text style={styles.sectionLabel}>Sender:</Text>
           <Text style={styles.detailText}>{item.sender_name || 'Unknown Sender'}</Text>
@@ -586,7 +643,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           )}
         </View>
 
-        {/* ENHANCED: Receiver Information */}
         <View style={styles.contactSection}>
           <Text style={styles.sectionLabel}>Receiver:</Text>
           <Text style={styles.detailText}>{item.receiver_name || 'Unknown Receiver'}</Text>
@@ -598,7 +654,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
           )}
         </View>
 
-        {/* Package Information */}
         <View style={styles.packageInfoSection}>
           <Text style={styles.detailText}>💰 Cost: KES {item.cost || 'Unknown'}</Text>
           <Text style={styles.detailText}>📦 Type: {item.delivery_type || 'Unknown'}</Text>
@@ -611,7 +666,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         </View>
       </View>
 
-      {/* ENHANCED: Edit button with better loading state */}
       {canEditPackage(item) && (
         <View style={styles.editButtonContainer}>
           <TouchableOpacity
@@ -760,7 +814,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
     <View style={styles.container}>
       {renderHeader()}
       
-      {/* Connection Status */}
       {!isOnline && (
         <View style={styles.offlineBar}>
           <MaterialIcons name="cloud-off" size={16} color="#FFB000" />
@@ -768,7 +821,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         </View>
       )}
 
-      {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <MaterialIcons name="search" size={20} color="#a0aec0" />
@@ -825,7 +877,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         </View>
       </View>
 
-      {/* Recent Searches */}
       {!hasSearched && recentSearches.length > 0 && (
         <View style={styles.recentSearchesContainer}>
           <Text style={styles.recentSearchesTitle}>Recent Searches</Text>
@@ -840,7 +891,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         </View>
       )}
 
-      {/* Search Results */}
       <View style={styles.content}>
         {loading ? (
           <View style={styles.loadingContainer}>
@@ -867,7 +917,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         )}
       </View>
 
-      {/* QR Scanner Modal */}
       <QRScanner
         visible={showScanner}
         onClose={() => setShowScanner(false)}
@@ -875,7 +924,6 @@ const PackageSearchScreen: React.FC<PackageSearchScreenProps> = ({
         onScanSuccess={handleScanSuccess}
       />
 
-      {/* ENHANCED: Edit Modal with proper error handling */}
       <PackageEditModal
         visible={showEditModal}
         package={editingPackage}
@@ -899,12 +947,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f1419',
   },
   
-  // FIXED: Custom header styles
+  // FIXED: Header styles with proper status bar spacing
   headerContainer: {
     zIndex: 10,
   },
   headerGradient: {
     paddingBottom: 8,
+    paddingTop: STATUS_BAR_HEIGHT, // FIXED: Added proper status bar spacing
   },
   headerContent: {
     flexDirection: 'row',
@@ -1118,7 +1167,6 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   
-  // ENHANCED: Better contact and info sections
   contactSection: {
     backgroundColor: 'rgba(102, 126, 234, 0.05)',
     borderRadius: 12,
@@ -1173,7 +1221,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Edit button styles with loading states
   editButtonContainer: {
     borderTopWidth: 1,
     borderTopColor: '#2d3748',
