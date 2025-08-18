@@ -1,5 +1,4 @@
-// =================== 2. FIXED SCANNING SCREEN WITH CORRECT WORKFLOW ===================
-// app/admin/ScanningScreen.tsx - CORRECTED action mapping
+// app/admin/ScanningScreen.tsx - FIXED: Toast handling and correct workflow
 
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -64,7 +63,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   useFocusEffect(
     React.useCallback(() => {
       loadUserStats();
-      checkPrinterStatus(); // Check printer status when screen focuses
+      checkPrinterStatus();
     }, [])
   );
 
@@ -79,7 +78,6 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-  // NEW: Check printer status on load
   const checkPrinterStatus = async () => {
     try {
       const status = await printService.checkPrinterStatus();
@@ -130,7 +128,6 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-  // ENHANCED: Pre-check printer for print actions
   const handleQuickScan = async (actionType: string) => {
     if (actionType === 'print') {
       await checkPrinterStatus();
@@ -179,27 +176,10 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     setShowBulkScanner(true);
   };
 
-  // ENHANCED: Better success handling
+  // FIXED: Toast now shown in QRScanner component before closing
   const handleScanSuccess = (result: any) => {
     loadUserStats();
-    
-    const actionLabels = {
-      'collect_from_sender': 'collected from sender',
-      'print': 'printed',
-      'collect': 'collected',
-      'deliver': 'delivered',
-      'process': 'processed'
-    };
-    
-    const actionLabel = actionLabels[selectedAction as keyof typeof actionLabels] || selectedAction;
-    
-    Toast.show({
-      type: 'success',
-      text1: 'Scan Successful',
-      text2: `Package ${result.package?.code || 'PKG-DEMO'} has been ${actionLabel} successfully`,
-      position: 'top',
-      visibilityTime: 3000,
-    });
+    console.log('✅ Scan successful:', result);
   };
 
   const handleBulkComplete = (results: any[]) => {
@@ -235,7 +215,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-  // FIXED: Correct workflow mapping
+  // FIXED: Correct workflow mapping with proper state transitions
   const getAvailableActions = () => {
     switch (currentUserRole) {
       case 'agent':
@@ -243,7 +223,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'collect_from_sender',
             title: 'Collect from Sender',
-            description: 'Scan to confirm package pickup from sender/customer',
+            description: 'Confirm package pickup from sender/customer (Pending → Submitted)',
             icon: 'how-to-reg' as keyof typeof MaterialIcons.glyphMap,
             color: '#667eea',
             allowBulk: true,
@@ -264,7 +244,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'collect',
             title: 'Collect from Agent',
-            description: 'Pick up packages from agent for delivery',
+            description: 'Pick up packages from agent for delivery (Submitted → In Transit)',
             icon: 'local-shipping' as keyof typeof MaterialIcons.glyphMap,
             color: '#9C27B0',
             allowBulk: true,
@@ -272,10 +252,19 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           },
           {
             id: 'deliver',
-            title: 'Deliver to Customer',
-            description: 'Confirm final delivery to recipient',
+            title: 'Mark as Delivered',
+            description: 'Mark package as delivered to address (In Transit → Delivered)',
             icon: 'check-circle' as keyof typeof MaterialIcons.glyphMap,
             color: '#34C759',
+            allowBulk: true,
+            requiresPrinter: false,
+          },
+          {
+            id: 'give_to_receiver',
+            title: 'Give to Receiver',
+            description: 'Hand package directly to recipient (In Transit/Delivered → Collected)',
+            icon: 'person-pin' as keyof typeof MaterialIcons.glyphMap,
+            color: '#FF6B35',
             allowBulk: true,
             requiresPrinter: false,
           },
@@ -306,7 +295,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'confirm_receipt',
             title: 'Confirm Receipt',
-            description: 'Confirm you received your package',
+            description: 'Confirm you received your package (Delivered → Collected)',
             icon: 'done-all' as keyof typeof MaterialIcons.glyphMap,
             color: '#34C759',
             allowBulk: false,
@@ -318,7 +307,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'collect_from_sender',
             title: 'Collect from Sender',
-            description: 'Admin: Confirm package pickup',
+            description: 'Admin: Confirm package pickup (Pending → Submitted)',
             icon: 'how-to-reg' as keyof typeof MaterialIcons.glyphMap,
             color: '#667eea',
             allowBulk: true,
@@ -327,7 +316,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'collect',
             title: 'Collect from Agent',
-            description: 'Admin: Pick up from agent',
+            description: 'Admin: Pick up from agent (Submitted → In Transit)',
             icon: 'local-shipping' as keyof typeof MaterialIcons.glyphMap,
             color: '#9C27B0',
             allowBulk: true,
@@ -336,9 +325,18 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           {
             id: 'deliver',
             title: 'Mark as Delivered',
-            description: 'Admin: Confirm delivery',
+            description: 'Admin: Mark delivery complete (In Transit → Delivered)',
             icon: 'check-circle' as keyof typeof MaterialIcons.glyphMap,
             color: '#34C759',
+            allowBulk: true,
+            requiresPrinter: false,
+          },
+          {
+            id: 'give_to_receiver',
+            title: 'Give to Receiver',
+            description: 'Admin: Hand to recipient (In Transit/Delivered → Collected)',
+            icon: 'person-pin' as keyof typeof MaterialIcons.glyphMap,
+            color: '#FF6B35',
             allowBulk: true,
             requiresPrinter: false,
           },
@@ -371,7 +369,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   const getRoleWelcomeMessage = () => {
     switch (currentUserRole) {
       case 'agent': return 'Collect packages and print labels';
-      case 'rider': return 'Collect and deliver packages';
+      case 'rider': return 'Collect, deliver, and hand packages to recipients';
       case 'warehouse': return 'Process and manage packages';
       case 'client': return 'Confirm package receipts';
       case 'admin': return 'Full system access';
@@ -387,7 +385,6 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
-  // ENHANCED: Test printer connectivity
   const handleTestPrinter = async () => {
     try {
       await checkPrinterStatus();
@@ -480,7 +477,6 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     );
   };
 
-  // ENHANCED: Action card with printer status
   const renderActionCard = (action: any) => (
     <View key={action.id} style={styles.actionCard}>
       <LinearGradient
@@ -665,7 +661,6 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   );
 };
 
-// ENHANCED STYLES
 const styles = StyleSheet.create({
   scrollView: { flex: 1 },
   scrollContent: { padding: 16, paddingBottom: 100 },
@@ -774,7 +769,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // NEW: Printer warning styles
   printerWarning: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -812,7 +806,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // NEW: Printer test button
   printerTestButton: {
     flexDirection: 'row',
     alignItems: 'center',
