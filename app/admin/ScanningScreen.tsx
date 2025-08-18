@@ -1,4 +1,4 @@
-// app/admin/ScanningScreen.tsx - FIXED: Better action flows and toast handling
+// app/admin/ScanningScreen.tsx - FIXED: Standardized toast usage with existing toastConfig types
 
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
@@ -115,6 +115,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
         last_scan_time: new Date().toISOString(),
       });
       
+      // FIXED: Use 'info' instead of any potential undefined toast type
       Toast.show({
         type: 'info',
         text1: 'Offline Mode',
@@ -191,7 +192,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     const successCount = results.filter(r => r.success).length;
     const failureCount = results.length - successCount;
 
-    // FIXED: Better bulk completion messages
+    // FIXED: Better bulk completion messages using standard toast types
     if (failureCount === 0) {
       Toast.show({
         type: 'success',
