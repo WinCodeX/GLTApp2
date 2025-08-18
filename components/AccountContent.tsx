@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Enhanced version with proper toast integration
+// components/AccountContent.tsx - Fixed version with proper avatar URL handling
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -32,6 +32,101 @@ import { useUser } from '../context/UserContext';
 import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 import { registerStatusUpdater, checkServerStatus } from '../lib/netStatus';
+import { API_BASE_URL } from '../lib/api';
+
+// ✅ Avatar URL Helper - Add this helper function
+const getFullAvatarUrl = (avatarUrl: string | null | undefined): string | null => {
+  if (!avatarUrl) return null;
+  
+  try {
+    // If it's already a full URL, return as-is
+    if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
+      return avatarUrl;
+    }
+    
+    // If it's a relative URL, combine with base URL
+    if (avatarUrl.startsWith('/')) {
+      const baseUrl = API_BASE_URL.replace('/api/v1', ''); // Remove API path
+      return `${baseUrl}${avatarUrl}`;
+    }
+    
+    // If it's just a path fragment, build the full URL
+    const baseUrl = API_BASE_URL.replace('/api/v1', '');
+    return `${baseUrl}/${avatarUrl}`;
+    
+  } catch (error) {
+    console.error('❌ Error building avatar URL:', error);
+    return null;
+  }
+};
+
+// ✅ Safe Avatar Component with error handling
+interface SafeAvatarProps {
+  size: number;
+  avatarUrl?: string | null;
+  fallbackSource?: any;
+  style?: any;
+  onPress?: () => void;
+}
+
+const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
+  size, 
+  avatarUrl, 
+  fallbackSource = require('../assets/images/avatar_placeholder.png'),
+  style,
+  onPress 
+}) => {
+  const [hasError, setHasError] = useState(false);
+  const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
+  
+  // Debug avatar URL
+  useEffect(() => {
+    if (avatarUrl) {
+      console.log('🔍 Avatar Debug:', {
+        raw: avatarUrl,
+        full: fullAvatarUrl,
+        hasError,
+        baseUrl: API_BASE_URL
+      });
+    }
+  }, [avatarUrl, fullAvatarUrl, hasError]);
+  
+  // Use fallback if no URL or error occurred
+  if (!fullAvatarUrl || hasError) {
+    return (
+      <TouchableOpacity onPress={onPress} disabled={!onPress}>
+        <Avatar.Image
+          size={size}
+          source={fallbackSource}
+          style={style}
+        />
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity onPress={onPress} disabled={!onPress}>
+      <Avatar.Image
+        size={size}
+        source={{ 
+          uri: fullAvatarUrl,
+          // Add cache headers for better performance
+          headers: {
+            'Cache-Control': 'max-age=3600'
+          }
+        }}
+        style={style}
+        onError={(error) => {
+          console.warn('❌ Avatar failed to load:', {
+            url: fullAvatarUrl,
+            error: error
+          });
+          setHasError(true);
+        }}
+      />
+    </TouchableOpacity>
+  );
+};
 
 // ✅ Constants
 const CHANGELOG_KEY = 'changelog_seen';
@@ -120,6 +215,20 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [showChangelog, setShowChangelog] = useState(false);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+
+  // ✅ Debug avatar URL whenever user changes
+  useEffect(() => {
+    if (user?.avatar_url) {
+      const fullUrl = getFullAvatarUrl(user.avatar_url);
+      console.log('👤 User Avatar Debug:', {
+        userId: user.id,
+        rawAvatarUrl: user.avatar_url,
+        fullAvatarUrl: fullUrl,
+        apiBaseUrl: API_BASE_URL,
+        baseUrl: API_BASE_URL.replace('/api/v1', '')
+      });
+    }
+  }, [user?.avatar_url]);
 
   // ✅ Network connectivity helpers with defensive programming
   const isConnected = useCallback(() => {
@@ -402,6 +511,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             email: user.email,
             hasDisplayName: !!user.display_name,
             hasFirstName: !!user.first_name,
+            avatarUrl: user.avatar_url,
             networkStatus
           });
         }
@@ -659,7 +769,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [networkStatus, isConnected]);
 
-  // ✅ Avatar upload with network status handling and crash protection
+  // ✅ Enhanced avatar upload with proper URL handling
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
@@ -672,14 +782,25 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
       setLoading(true);
       
-      await uploadAvatar(previewUri);
+      const result = await uploadAvatar(previewUri);
+      
+      // Check if we got a valid avatar URL back
+      if (result?.avatar_url) {
+        console.log('✅ New avatar URL received:', result.avatar_url);
+        const fullUrl = getFullAvatarUrl(result.avatar_url);
+        console.log('✅ Full avatar URL:', fullUrl);
+      }
+      
       showToast.success('Avatar updated!');
+      
+      // Refresh user data to get the new avatar URL
       await refreshUser();
+      
     } catch (error) {
       console.error('❌ Error uploading avatar:', error);
       const errorMessage = networkStatus === 'server_error' 
         ? 'Server temporarily unavailable' 
-        : 'Check your connection';
+        : 'Check your connection and try again';
       showToast.error('Upload failed', errorMessage);
     } finally {
       setPreviewUri(null);
@@ -1041,16 +1162,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               <Text style={styles.accountType}>Glt Account</Text>
               <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
             </View>
-            <TouchableOpacity onPress={pickAndPreviewAvatar}>
-              <Avatar.Image
-                size={60}
-                source={
-                  user?.avatar_url
-                    ? { uri: user.avatar_url }
-                    : require('../assets/images/avatar_placeholder.png')
-                }
-              />
-            </TouchableOpacity>
+            {/* ✅ FIXED: Use SafeAvatar component with proper URL handling */}
+            <SafeAvatar
+              size={60}
+              avatarUrl={user?.avatar_url}
+              fallbackSource={require('../assets/images/avatar_placeholder.png')}
+              onPress={pickAndPreviewAvatar}
+            />
           </View>
         </View>
 
