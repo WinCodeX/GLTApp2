@@ -1,4 +1,4 @@
-// app/admin/PackageSearchScreen.tsx - FIXED: Status bar spacing and improved UX
+// app/admin/PackageSearchScreen.tsx - FIXED: Standardized toast usage with existing toastConfig types
 
 import React, { useState, useRef, useEffect } from 'react';
 import {
