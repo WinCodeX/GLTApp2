@@ -12,6 +12,89 @@ const FALLBACK_BASE = PROD_BASE; // Use production as fallback when no servers a
 let resolvedBaseUrl: string | null = null;
 let isResolvingBaseUrl = false;
 
+// ✅ FIXED: Export API_BASE_URL for compatibility with avatar components
+export const API_BASE_URL = (() => {
+  // Return the resolved URL if available, otherwise return a sensible default
+  if (resolvedBaseUrl) {
+    return `${resolvedBaseUrl}/api/v1`;
+  }
+  
+  // Default based on environment while base URL is being resolved
+  const isDev = __DEV__;
+  if (isDev) {
+    return `${LOCAL_BASE_1}/api/v1`;
+  } else {
+    return `${PROD_BASE}/api/v1`;
+  }
+})();
+
+// ✅ FIXED: Safe function to get current API base URL
+export const getApiBaseUrl = (): string => {
+  try {
+    if (resolvedBaseUrl) {
+      return `${resolvedBaseUrl}/api/v1`;
+    }
+    
+    // Fallback to environment-appropriate default
+    const isDev = __DEV__;
+    if (isDev) {
+      return `${LOCAL_BASE_1}/api/v1`;
+    } else {
+      return `${PROD_BASE}/api/v1`;
+    }
+  } catch (error) {
+    console.error('❌ Error getting API base URL:', error);
+    return `${FALLBACK_BASE}/api/v1`;
+  }
+};
+
+// ✅ FIXED: Safe function to get base domain for avatar URLs
+export const getBaseDomain = (): string => {
+  try {
+    if (resolvedBaseUrl) {
+      return resolvedBaseUrl;
+    }
+    
+    // Fallback to environment-appropriate default
+    const isDev = __DEV__;
+    if (isDev) {
+      return LOCAL_BASE_1;
+    } else {
+      return PROD_BASE;
+    }
+  } catch (error) {
+    console.error('❌ Error getting base domain:', error);
+    return FALLBACK_BASE;
+  }
+};
+
+// ✅ FIXED: Safe avatar URL helper that works with dynamic base URLs
+export const getFullAvatarUrl = (avatarUrl: string | null | undefined): string | null => {
+  if (!avatarUrl) return null;
+  
+  try {
+    // If it's already a full URL, return as-is
+    if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
+      return avatarUrl;
+    }
+    
+    // Get the current base domain
+    const baseUrl = getBaseDomain();
+    
+    // If it's a relative URL starting with /, combine with base URL
+    if (avatarUrl.startsWith('/')) {
+      return `${baseUrl}${avatarUrl}`;
+    }
+    
+    // If it's just a path fragment, build the full URL
+    return `${baseUrl}/${avatarUrl}`;
+    
+  } catch (error) {
+    console.error('❌ Error building avatar URL:', error);
+    return null;
+  }
+};
+
 const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean> => {
   try {
     console.log(`🔍 Testing connection to: ${baseUrl}`);
@@ -204,7 +287,12 @@ export const refreshBaseUrl = async (): Promise<string> => {
   console.log('🔄 Manually refreshing base URL...');
   resolvedBaseUrl = null;
   isResolvingBaseUrl = false; // Reset the flag
-  return await getBaseUrl();
+  const newBaseUrl = await getBaseUrl();
+  
+  // ✅ FIXED: Update the API instance baseURL when URL changes
+  api.defaults.baseURL = newBaseUrl;
+  
+  return newBaseUrl;
 };
 
 // Export a function to get current base URL without making requests
@@ -212,14 +300,34 @@ export const getCurrentBaseUrl = (): string | null => {
   return resolvedBaseUrl;
 };
 
+// ✅ FIXED: Function to get current resolved base URL for components
+export const getCurrentApiBaseUrl = (): string => {
+  return getApiBaseUrl();
+};
+
 // Function to initialize API (call this when app starts, not during module load)
 export const initializeApi = async (): Promise<void> => {
   try {
     console.log('🏁 Initializing API...');
-    await getBaseUrl();
-    console.log('✅ API initialization complete');
+    const baseUrl = await getBaseUrl();
+    
+    // ✅ FIXED: Update the API instance baseURL after resolution
+    api.defaults.baseURL = baseUrl;
+    
+    console.log('✅ API initialization complete with base URL:', baseUrl);
   } catch (error) {
     console.error('❌ API initialization failed:', error);
+  }
+};
+
+// ✅ FIXED: Helper to update resolved base URL (for when servers come online)
+export const updateResolvedBaseUrl = (newBaseUrl: string): void => {
+  try {
+    resolvedBaseUrl = newBaseUrl;
+    api.defaults.baseURL = newBaseUrl;
+    console.log('📍 Updated resolved base URL to:', newBaseUrl);
+  } catch (error) {
+    console.error('❌ Error updating resolved base URL:', error);
   }
 };
 
