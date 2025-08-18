@@ -1,11 +1,11 @@
-// lib/toastConfig.tsx - Add these MISSING types to your existing config
+// lib/toastConfig.tsx - COMPLETE: All toast types properly defined
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 
 export const toastConfig = {
-  // ✅ Your existing types (keep these)
+  // ✅ Standard Toast Types - Use these in your components
   success: ({ text1, text2 }: any) => (
     <View style={styles.toastContainer}>
       <LinearGradient
@@ -40,6 +40,7 @@ export const toastConfig = {
     </View>
   ),
 
+  // 🔥 ADDED: 'warning' type that components were trying to use
   warning: ({ text1, text2 }: any) => (
     <View style={styles.toastContainer}>
       <LinearGradient
@@ -74,24 +75,7 @@ export const toastConfig = {
     </View>
   ),
 
-  // 🔥 ADD THESE MISSING TYPES - This will fix your crash immediately:
-  errorToast: ({ text1, text2 }: any) => (
-    <View style={styles.toastContainer}>
-      <LinearGradient
-        colors={['rgba(239, 68, 68, 0.15)', 'rgba(220, 38, 38, 0.15)']}
-        style={[styles.toast, styles.errorToast]}
-      >
-        <View style={[styles.iconContainer, styles.errorIconContainer]}>
-          <MaterialCommunityIcons name="alert-circle" size={22} color="#ef4444" />
-        </View>
-        <View style={styles.textContainer}>
-          <Text style={[styles.toastText, styles.errorText]}>{text1}</Text>
-          {text2 && <Text style={[styles.toastSubText, styles.errorSubText]}>{text2}</Text>}
-        </View>
-      </LinearGradient>
-    </View>
-  ),
-
+  // ✅ Alternative Toast Names - For backward compatibility and variants
   successToast: ({ text1, text2 }: any) => (
     <View style={styles.toastContainer}>
       <LinearGradient
@@ -104,6 +88,23 @@ export const toastConfig = {
         <View style={styles.textContainer}>
           <Text style={[styles.toastText, styles.successText]}>{text1}</Text>
           {text2 && <Text style={[styles.toastSubText, styles.successSubText]}>{text2}</Text>}
+        </View>
+      </LinearGradient>
+    </View>
+  ),
+
+  errorToast: ({ text1, text2 }: any) => (
+    <View style={styles.toastContainer}>
+      <LinearGradient
+        colors={['rgba(239, 68, 68, 0.15)', 'rgba(220, 38, 38, 0.15)']}
+        style={[styles.toast, styles.errorToast]}
+      >
+        <View style={[styles.iconContainer, styles.errorIconContainer]}>
+          <MaterialCommunityIcons name="alert-circle" size={22} color="#ef4444" />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={[styles.toastText, styles.errorText]}>{text1}</Text>
+          {text2 && <Text style={[styles.toastSubText, styles.errorSubText]}>{text2}</Text>}
         </View>
       </LinearGradient>
     </View>
@@ -142,9 +143,43 @@ export const toastConfig = {
       </LinearGradient>
     </View>
   ),
+
+  // 🔥 ADDED: Additional common toast types for full coverage
+  loading: ({ text1, text2 }: any) => (
+    <View style={styles.toastContainer}>
+      <LinearGradient
+        colors={['rgba(100, 116, 139, 0.15)', 'rgba(71, 85, 105, 0.15)']}
+        style={[styles.toast, styles.loadingToast]}
+      >
+        <View style={[styles.iconContainer, styles.loadingIconContainer]}>
+          <MaterialCommunityIcons name="loading" size={22} color="#64748b" />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={[styles.toastText, styles.loadingText]}>{text1}</Text>
+          {text2 && <Text style={[styles.toastSubText, styles.loadingSubText]}>{text2}</Text>}
+        </View>
+      </LinearGradient>
+    </View>
+  ),
+
+  offline: ({ text1, text2 }: any) => (
+    <View style={styles.toastContainer}>
+      <LinearGradient
+        colors={['rgba(245, 158, 11, 0.15)', 'rgba(217, 119, 6, 0.15)']}
+        style={[styles.toast, styles.offlineToast]}
+      >
+        <View style={[styles.iconContainer, styles.offlineIconContainer]}>
+          <MaterialCommunityIcons name="wifi-off" size={22} color="#f59e0b" />
+        </View>
+        <View style={styles.textContainer}>
+          <Text style={[styles.toastText, styles.offlineText]}>{text1}</Text>
+          {text2 && <Text style={[styles.toastSubText, styles.offlineSubText]}>{text2}</Text>}
+        </View>
+      </LinearGradient>
+    </View>
+  ),
 };
 
-// Keep all your existing styles exactly the same
 const styles = StyleSheet.create({
   toastContainer: {
     paddingHorizontal: 16,
@@ -169,6 +204,8 @@ const styles = StyleSheet.create({
     minHeight: 64,
     width: '100%',
   },
+  
+  // Toast Variants
   successToast: {
     borderColor: 'rgba(16, 185, 129, 0.6)',
     backgroundColor: 'rgba(26, 46, 37, 0.98)',
@@ -185,6 +222,16 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.6)',
     backgroundColor: 'rgba(35, 26, 46, 0.98)',
   },
+  loadingToast: {
+    borderColor: 'rgba(100, 116, 139, 0.6)',
+    backgroundColor: 'rgba(30, 32, 37, 0.98)',
+  },
+  offlineToast: {
+    borderColor: 'rgba(245, 158, 11, 0.6)',
+    backgroundColor: 'rgba(46, 39, 26, 0.98)',
+  },
+  
+  // Icon Containers
   iconContainer: {
     width: 36,
     height: 36,
@@ -205,6 +252,14 @@ const styles = StyleSheet.create({
   infoIconContainer: {
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
   },
+  loadingIconContainer: {
+    backgroundColor: 'rgba(100, 116, 139, 0.2)',
+  },
+  offlineIconContainer: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+  },
+  
+  // Text Styles
   textContainer: {
     flex: 1,
     alignItems: 'flex-start',
@@ -231,6 +286,8 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 1,
   },
+  
+  // Text Color Variants
   successText: {
     color: '#22c55e',
     textShadowColor: 'rgba(34, 197, 94, 0.4)',
@@ -266,5 +323,23 @@ const styles = StyleSheet.create({
   },
   infoSubText: {
     color: 'rgba(167, 139, 250, 0.95)',
+  },
+  loadingText: {
+    color: '#94a3b8',
+    textShadowColor: 'rgba(148, 163, 184, 0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  loadingSubText: {
+    color: 'rgba(148, 163, 184, 0.95)',
+  },
+  offlineText: {
+    color: '#fbbf24',
+    textShadowColor: 'rgba(251, 191, 36, 0.4)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
+  offlineSubText: {
+    color: 'rgba(251, 191, 36, 0.95)',
   },
 });
