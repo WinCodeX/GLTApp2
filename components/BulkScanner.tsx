@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - FIXED: Better toast handling and action management
+// components/BulkScanner.tsx - FIXED: Clean toast usage with existing toastConfig
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -109,7 +109,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     const packageData = result.package || result;
     const packageCode = packageData.code || result.code || 'PKG-DEMO-20240814';
 
-    // Check if already scanned
     if (scannedPackages.some(pkg => pkg.code === packageCode)) {
       Toast.show({
         type: 'warning',
@@ -146,7 +145,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         }
       }
 
-      // Validate if action can be performed
       const canPerformAction = await validatePackageAction(packageInfo, actionType);
 
       const newPackage: ScannedPackage = {
@@ -165,7 +163,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       setScannedPackages(prev => [newPackage, ...prev]);
       setShowScanner(false);
       
-      // Show appropriate toast based on validation
       if (canPerformAction.canPerform) {
         Toast.show({
           type: 'success',
@@ -356,7 +353,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       return;
     }
 
-    // FIXED: Different confirmation messages for different actions
     const confirmationMessage = getConfirmationMessage(actionType, validPackages.length);
     const offlineNote = !isOnline ? '\n\nNote: You are offline. Actions will be queued for sync.' : '';
 
@@ -465,13 +461,11 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     const results: BulkScanResult[] = [];
     let printResults = { successCount: 0, failCount: 0 };
 
-    // Handle printing first if it's a print action
     if (actionType === 'print') {
       setPrintingProgress('Starting bulk print...');
       printResults = await processBulkPrint(packages);
     }
 
-    // Queue actions for sync
     for (const code of packageCodes) {
       try {
         const result = await offlineService.storeScanAction(
@@ -512,7 +506,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
     const successful = results.filter(r => r.success).length;
     
-    // FIXED: Better toast messages for different scenarios
     if (actionType === 'print') {
       if (printResults.failCount === 0 && successful === packageCodes.length) {
         Toast.show({
@@ -559,7 +552,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     try {
       let printResults = { successCount: 0, failCount: 0 };
 
-      // Handle printing first if it's a print action
       if (actionType === 'print') {
         setPrintingProgress('Starting bulk print...');
         printResults = await processBulkPrint(packages);
@@ -581,7 +573,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       if (response.data.success) {
         const results = response.data.data.results;
         
-        // Update package states
         const updatedPackages = scannedPackages.map(pkg => {
           const processResult = results.find((r: any) => r.package_code === pkg.code);
           if (processResult) {
@@ -600,7 +591,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         const successful = response.data.data.summary.successful;
         const total = response.data.data.summary.total;
 
-        // FIXED: Better success messages for different actions
         if (actionType === 'print') {
           if (printResults.failCount === 0 && successful === total) {
             Toast.show({
@@ -641,7 +631,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
         onBulkComplete?.(results);
 
-        // Close if everything was successful
         if (successful === total && (actionType !== 'print' || printResults.failCount === 0)) {
           setTimeout(() => onClose(), 2000);
         }
@@ -762,7 +751,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
         style={styles.container}
       >
         <SafeAreaView style={styles.container}>
-          {/* Header */}
           <LinearGradient
             colors={getActionColor(actionType)}
             style={styles.header}
@@ -781,9 +769,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             <View style={styles.headerButton} />
           </LinearGradient>
 
-          {/* Content */}
           <View style={styles.content}>
-            {/* Action Buttons */}
             <View style={styles.actionRow}>
               <TouchableOpacity
                 style={styles.scanButton}
@@ -807,7 +793,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               </TouchableOpacity>
             </View>
 
-            {/* Package Count */}
             <View style={styles.countRow}>
               <Text style={styles.countText}>
                 {scannedPackages.length} packages scanned
@@ -832,7 +817,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               )}
             </View>
 
-            {/* Printing Progress */}
             {processing && printingProgress && (
               <View style={styles.progressContainer}>
                 <ActivityIndicator size="small" color="#667eea" />
@@ -840,7 +824,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               </View>
             )}
 
-            {/* Package List */}
             <FlatList
               data={scannedPackages}
               keyExtractor={(item) => item.code}
@@ -864,7 +847,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               }
             />
 
-            {/* Process Button */}
             {scannedPackages.length > 0 && (
               <View style={styles.processContainer}>
                 <TouchableOpacity
@@ -899,7 +881,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             )}
           </View>
 
-          {/* QR Scanner Modal */}
           <QRScanner
             visible={showScanner}
             onClose={() => setShowScanner(false)}
@@ -908,7 +889,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             defaultAction={actionType}
           />
 
-          {/* Manual Entry Modal */}
           <Modal visible={showManualEntry} transparent animationType="fade">
             <View style={styles.modalOverlay}>
               <View style={styles.manualEntryModal}>
