@@ -228,13 +228,13 @@ export default function HomeScreen() {
       id: 'fragile',
       label: 'Fragile Items',
       icon: 'alert-triangle',
-      color: '#fb923c',
+      color: '#DDCD56',
       gradientColors: [
-        'rgba(251, 146, 60, 0.95)',   // Orange
-        'rgba(59, 130, 246, 0.85)',   // Complementary Blue
-        'rgba(251, 146, 60, 0.9)'     // Back to Orange
+        'rgba(221, 205, 86, 0.95)',   // #DDCD56 - Golden Yellow
+        'rgba(86, 221, 205, 0.85)',   // #56DDCD - Complementary Cyan
+        'rgba(221, 205, 86, 0.9)'     // Back to Golden Yellow
       ],
-      glowColor: '#fb923c',
+      glowColor: '#DDCD56',
       action: handleFragileDelivery,
       infoAction: () => showDeliveryInfo('fragile'),
     },
@@ -242,13 +242,13 @@ export default function HomeScreen() {
       id: 'send',
       label: 'Send to Someone',
       icon: 'send',
-      color: '#a78bfa',
+      color: '#CD56DD',
       gradientColors: [
-        'rgba(167, 139, 250, 0.95)',  // Purple
-        'rgba(251, 191, 36, 0.85)',   // Complementary Yellow
-        'rgba(139, 92, 246, 0.9)'     // Back to Purple
+        'rgba(205, 86, 221, 0.95)',   // #CD56DD - Purple/Magenta
+        'rgba(221, 205, 86, 0.85)',   // #DDCD56 - Complementary Yellow
+        'rgba(205, 86, 221, 0.9)'     // Back to Purple/Magenta
       ],
-      glowColor: '#a78bfa',
+      glowColor: '#CD56DD',
       action: handleSendToSomeone,
       infoAction: () => showDeliveryInfo('send'),
     },
@@ -256,13 +256,13 @@ export default function HomeScreen() {
       id: 'collect',
       label: 'Collect my packages',
       icon: 'package',
-      color: '#34d399',
+      color: '#56DDCD',
       gradientColors: [
-        'rgba(52, 211, 153, 0.95)',   // Green
-        'rgba(244, 63, 94, 0.85)',    // Complementary Red/Pink
-        'rgba(110, 231, 183, 0.9)'    // Back to Light Green
+        'rgba(86, 221, 205, 0.95)',   // #56DDCD - Cyan/Turquoise
+        'rgba(205, 86, 221, 0.85)',   // #CD56DD - Complementary Purple
+        'rgba(86, 221, 205, 0.9)'     // Back to Cyan/Turquoise
       ],
-      glowColor: '#34d399',
+      glowColor: '#56DDCD',
       action: handleCollectAndDeliver,
       infoAction: () => showDeliveryInfo('collect'),
     },
@@ -511,9 +511,9 @@ export default function HomeScreen() {
             <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
               <LinearGradient
                 colors={[
-                  'rgba(167, 139, 250, 0.95)',
-                  'rgba(251, 191, 36, 0.85)',
-                  'rgba(139, 92, 246, 0.9)'
+                  'rgba(205, 86, 221, 0.95)',   // #CD56DD - Purple/Magenta
+                  'rgba(221, 205, 86, 0.85)',   // #DDCD56 - Complementary Yellow
+                  'rgba(205, 86, 221, 0.9)'     // Back to Purple/Magenta
                 ]}
                 style={styles.infoModalButtonGradient}
                 start={{ x: 0, y: 0 }}
