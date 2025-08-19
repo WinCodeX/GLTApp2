@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED: origin_area_id bug and default fragile delivery
+// components/PackageCreationModal.tsx - FIXED: Keyboard handling and modal spacing
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -15,6 +15,7 @@ import {
   KeyboardAvoidingView,
   SafeAreaView,
   StatusBar,
+  Keyboard,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -137,6 +138,8 @@ export default function PackageCreationModal({
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   const { isCacheValid, loadFromCache, saveToCache, clearCache } = useDataCache();
@@ -158,7 +161,7 @@ export default function PackageCreationModal({
     destination_area_id: '',
     origin_agent_id: '',
     destination_agent_id: '',
-    delivery_type: 'fragile' as DeliveryType // FIXED: Changed from 'doorstep' to 'fragile'
+    delivery_type: 'fragile' as DeliveryType
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -178,6 +181,40 @@ export default function PackageCreationModal({
     field: 'name',
     direction: 'asc'
   });
+
+  // FIXED: Keyboard handling
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
+      }
+    );
+
+    return () => {
+      keyboardDidHideListener?.remove();
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
+
+  // FIXED: Calculate modal height based on keyboard state
+  const modalHeight = useMemo(() => {
+    if (isKeyboardVisible) {
+      // When keyboard is visible, make modal smaller and ensure header is visible
+      const maxHeightWithKeyboard = SCREEN_HEIGHT - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
+      return Math.min(maxHeightWithKeyboard, SCREEN_HEIGHT * 0.85);
+    }
+    // When keyboard is hidden, use normal height
+    return SCREEN_HEIGHT * 0.90;
+  }, [isKeyboardVisible, keyboardHeight]);
 
   // Memoized selectors for better performance
   const selectedOriginAgent = useMemo(() => 
@@ -334,7 +371,7 @@ export default function PackageCreationModal({
       destination_area_id: '',
       origin_agent_id: '',
       destination_agent_id: '',
-      delivery_type: 'fragile' as DeliveryType // FIXED: Default to fragile
+      delivery_type: 'fragile' as DeliveryType
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -348,6 +385,7 @@ export default function PackageCreationModal({
   }, []);
 
   const closeModal = useCallback(() => {
+    Keyboard.dismiss(); // FIXED: Dismiss keyboard when closing
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
       duration: 250,
@@ -489,7 +527,7 @@ export default function PackageCreationModal({
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
         if (selectedAgent && selectedAgent.area?.id) {
-          updated.origin_area_id = selectedAgent.area.id; // FIXED: Use area.id instead of area_id
+          updated.origin_area_id = selectedAgent.area.id;
           console.log('🎯 Origin agent selected:', {
             agentName: selectedAgent.name,
             agentId: selectedAgent.id,
@@ -740,7 +778,7 @@ export default function PackageCreationModal({
 
       const finalPackageData = {
         ...packageData,
-        origin_area_id: finalOriginAreaId, // FIXED: Ensure this is included
+        origin_area_id: finalOriginAreaId,
         sender_name: 'Current User',
         sender_phone: '+254700000000',
         delivery_location: deliveryLocation
@@ -1521,18 +1559,21 @@ export default function PackageCreationModal({
 
   return (
     <Modal visible={visible} transparent animationType="none">
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <SafeAreaView style={styles.safeArea}>
         <KeyboardAvoidingView 
           style={styles.keyboardContainer}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={0}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <View style={styles.overlay}>
             <Animated.View
               style={[
                 styles.modalContainer,
-                { transform: [{ translateY: slideAnim }] }
+                { 
+                  transform: [{ translateY: slideAnim }],
+                  height: modalHeight // FIXED: Dynamic height based on keyboard state
+                }
               ]}
             >
               <LinearGradient
@@ -1549,10 +1590,11 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced styles with keyboard handling and fragile delivery improvements
+// FIXED: Enhanced styles with better keyboard handling and reduced spacing
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
+    backgroundColor: 'transparent', // FIXED: Make SafeAreaView transparent
   },
   keyboardContainer: {
     flex: 1,
@@ -1563,9 +1605,8 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.95,
-    minHeight: SCREEN_HEIGHT * 0.7,
     width: SCREEN_WIDTH,
+    // Height is now dynamic - set via style prop
   },
   modalContent: {
     flex: 1,
@@ -1574,13 +1615,104 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
+  // FIXED: Reduced header padding for better keyboard handling
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 10 : 15, // FIXED: Reduced top padding
+    paddingBottom: 8, // FIXED: Reduced bottom padding
+  },
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeButtonAbsolute: {
+    position: 'absolute',
+    top: Platform.OS === 'ios' ? 10 : 15, // FIXED: Match header padding
+    right: 20,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 10,
+  },
+  headerTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 4, // FIXED: Reduced margin
+  },
+  placeholder: {
+    width: 40,
+  },
+  
+  // FIXED: Reduced progress bar padding
+  progressContainer: {
+    paddingHorizontal: 20,
+    paddingVertical: 10, // FIXED: Reduced from 15 to 10
+  },
+  progressBackground: {
+    height: 4,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 2,
+  },
+  progressForeground: {
+    height: '100%',
+    backgroundColor: '#7c3aed',
+    borderRadius: 2,
+  },
+  progressText: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 6, // FIXED: Reduced from 8 to 6
+  },
+  
+  // FIXED: Optimized content container for keyboard
+  contentContainer: {
+    flex: 1,
+  },
+  scrollContentContainer: {
+    flexGrow: 1,
+    paddingHorizontal: 20,
+    paddingBottom: 10, // FIXED: Reduced bottom padding
+  },
+  stepContent: {
+    flex: 1,
+    minHeight: 300, // FIXED: Reduced from 400
+  },
+  stepContentConfirmation: {
+    flex: 1,
+    minHeight: 450, // FIXED: Reduced from 600
+  },
+  stepTitle: {
+    fontSize: 22, // FIXED: Slightly smaller
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 6, // FIXED: Reduced spacing
+  },
+  stepSubtitle: {
+    fontSize: 15, // FIXED: Slightly smaller
+    color: '#888',
+    marginBottom: 20, // FIXED: Reduced from 30
+    lineHeight: 20,
+  },
+  
   // ENHANCED: Data info container
   dataInfoContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 4,
-    marginBottom: 12,
+    marginBottom: 10, // FIXED: Reduced from 12
   },
   dataInfoText: {
     fontSize: 12,
@@ -1590,9 +1722,9 @@ const styles = StyleSheet.create({
   
   // ENHANCED: Clear search button
   clearSearchButton: {
-    marginTop: 16,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    marginTop: 12, // FIXED: Reduced from 16
+    paddingHorizontal: 20, // FIXED: Reduced from 24
+    paddingVertical: 10, // FIXED: Reduced from 12
     borderRadius: 8,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
@@ -1611,15 +1743,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(255, 107, 107, 0.1)',
     borderRadius: 8,
-    padding: 12,
-    marginTop: 12,
+    padding: 10, // FIXED: Reduced from 12
+    marginTop: 10, // FIXED: Reduced from 12
     gap: 8,
   },
   fragileNoticeText: {
     flex: 1,
     fontSize: 14,
     color: '#ff6b6b',
-    lineHeight: 20,
+    lineHeight: 18, // FIXED: Reduced line height
   },
   fragileInfo: {
     flexDirection: 'row',
@@ -1642,99 +1774,9 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   
-  // Header styles
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 20,
-    paddingBottom: 10,
-  },
-  closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  closeButtonAbsolute: {
-    position: 'absolute',
-    top: 20,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 8,
-  },
-  placeholder: {
-    width: 40,
-  },
-  
-  // Progress bar
-  progressContainer: {
-    paddingHorizontal: 20,
-    paddingVertical: 15,
-  },
-  progressBackground: {
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderRadius: 2,
-  },
-  progressForeground: {
-    height: '100%',
-    backgroundColor: '#7c3aed',
-    borderRadius: 2,
-  },
-  progressText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 8,
-  },
-  
-  // Content styles
-  contentContainer: {
-    flex: 1,
-  },
-  scrollContentContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 20,
-  },
-  stepContent: {
-    flex: 1,
-    minHeight: 400,
-  },
-  stepContentConfirmation: {
-    flex: 1,
-    minHeight: 600,
-  },
-  stepTitle: {
-    fontSize: 24,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  stepSubtitle: {
-    fontSize: 16,
-    color: '#888',
-    marginBottom: 30,
-  },
-  
-  // Enhanced Search and Sort styles
+  // FIXED: Enhanced Search and Sort styles with reduced spacing
   searchAndSortContainer: {
-    marginBottom: 20,
+    marginBottom: 15, // FIXED: Reduced from 20
   },
   searchInputContainer: {
     flexDirection: 'row',
@@ -1744,15 +1786,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     paddingHorizontal: 16,
-    minHeight: 48,
+    minHeight: 44, // FIXED: Reduced from 48
     gap: 12,
-    marginBottom: 12,
+    marginBottom: 10, // FIXED: Reduced from 12
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: '#fff',
-    paddingVertical: 12,
+    paddingVertical: 10, // FIXED: Reduced from 12
   },
   
   // Sort container styles
@@ -1774,8 +1816,8 @@ const styles = StyleSheet.create({
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingHorizontal: 10, // FIXED: Reduced from 12
+    paddingVertical: 5, // FIXED: Reduced from 6
     borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
@@ -1796,15 +1838,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Location header styles
+  // FIXED: Location header styles with reduced spacing
   locationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 4,
-    paddingVertical: 8,
-    marginTop: 12,
-    marginBottom: 8,
+    paddingVertical: 6, // FIXED: Reduced from 8
+    marginTop: 8, // FIXED: Reduced from 12
+    marginBottom: 6, // FIXED: Reduced from 8
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
@@ -1818,12 +1860,12 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // Selection list styles
+  // FIXED: Selection list styles with reduced spacing
   selectionList: {
     flex: 1,
   },
   selectionItem: {
-    marginBottom: 12,
+    marginBottom: 8, // FIXED: Reduced from 12
     borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     overflow: 'hidden',
@@ -1836,19 +1878,19 @@ const styles = StyleSheet.create({
   selectionItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
+    padding: 14, // FIXED: Reduced from 16
   },
   selectionInitials: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 44, // FIXED: Reduced from 50
+    height: 44, // FIXED: Reduced from 50
+    borderRadius: 22, // FIXED: Adjusted for new size
     backgroundColor: 'rgba(124, 58, 237, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 16,
+    marginRight: 14, // FIXED: Reduced from 16
   },
   selectionInitialsText: {
-    fontSize: 16,
+    fontSize: 15, // FIXED: Reduced from 16
     fontWeight: '600',
     color: '#fff',
   },
@@ -1859,7 +1901,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: 3, // FIXED: Reduced from 4
   },
   selectionLocation: {
     fontSize: 14,
@@ -1875,7 +1917,7 @@ const styles = StyleSheet.create({
   noResultsContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 60,
+    paddingVertical: 40, // FIXED: Reduced from 60
   },
   noResultsTitle: {
     fontSize: 18,
@@ -1891,31 +1933,31 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // Form styles
+  // FIXED: Form styles with reduced spacing
   formContainer: {
-    gap: 20,
-    paddingVertical: 10,
+    gap: 16, // FIXED: Reduced from 20
+    paddingVertical: 8, // FIXED: Reduced from 10
   },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingVertical: 14, // FIXED: Reduced from 16
     fontSize: 16,
     color: '#fff',
-    minHeight: 56,
+    minHeight: 52, // FIXED: Reduced from 56
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   textArea: {
-    minHeight: 120,
+    minHeight: 100, // FIXED: Reduced from 120
     textAlignVertical: 'top',
-    paddingTop: 16,
+    paddingTop: 14, // FIXED: Reduced from 16
   },
   
-  // Delivery options
+  // FIXED: Delivery options with reduced spacing
   deliveryOptions: {
-    gap: 16,
+    gap: 12, // FIXED: Reduced from 16
   },
   deliveryOption: {
     borderRadius: 12,
@@ -1931,47 +1973,47 @@ const styles = StyleSheet.create({
   deliveryOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
+    padding: 16, // FIXED: Reduced from 20
   },
   deliveryOptionText: {
     flex: 1,
     marginLeft: 16,
   },
   deliveryOptionTitle: {
-    fontSize: 18,
+    fontSize: 17, // FIXED: Reduced from 18
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: 3, // FIXED: Reduced from 4
   },
   deliveryOptionSubtitle: {
     fontSize: 14,
     color: '#888',
   },
   
-  // Confirmation styles
+  // FIXED: Confirmation styles with reduced spacing
   confirmationContainer: {
-    gap: 20,
+    gap: 16, // FIXED: Reduced from 20
   },
   confirmationSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
-    padding: 16,
+    padding: 14, // FIXED: Reduced from 16
   },
   confirmationSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#7c3aed',
-    marginBottom: 12,
+    marginBottom: 10, // FIXED: Reduced from 12
   },
   confirmationDetail: {
     fontSize: 16,
     color: '#fff',
-    marginBottom: 4,
+    marginBottom: 3, // FIXED: Reduced from 4
   },
   confirmationSubDetail: {
     fontSize: 14,
     color: '#888',
-    marginBottom: 8,
+    marginBottom: 6, // FIXED: Reduced from 8
   },
   routeDisplay: {
     flexDirection: 'row',
@@ -2047,12 +2089,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Navigation
+  // FIXED: Navigation with reduced spacing
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 20,
+    paddingVertical: 16, // FIXED: Reduced from 20
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -2062,8 +2104,8 @@ const styles = StyleSheet.create({
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
+    paddingHorizontal: 18, // FIXED: Reduced from 20
+    paddingVertical: 10, // FIXED: Reduced from 12
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     gap: 8,
@@ -2076,8 +2118,8 @@ const styles = StyleSheet.create({
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20, // FIXED: Reduced from 24
+    paddingVertical: 10, // FIXED: Reduced from 12
     borderRadius: 8,
     backgroundColor: '#7c3aed',
     gap: 8,
@@ -2090,8 +2132,8 @@ const styles = StyleSheet.create({
   submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
+    paddingHorizontal: 20, // FIXED: Reduced from 24
+    paddingVertical: 10, // FIXED: Reduced from 12
     borderRadius: 8,
     backgroundColor: '#10b981',
     gap: 8,
