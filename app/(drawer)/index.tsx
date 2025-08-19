@@ -51,11 +51,11 @@ const DELIVERY_INFO: Record<string, DeliveryInfo> = {
     description: 'We have a dedicated delivery service for items that require extra care which will be prioritised & sent out immediately. Please select your current location and the rider will come collect the package and send it to where it\'s supposed to go.'
   },
   send: {
-    title: 'Send a package',
+    title: 'Send a Package',
     description: 'There are 2 options - doorstep and office. The doorstep option will have the item delivered right to their location while the office option will be delivered to our office for the receiver to collect.'
   },
   collect: {
-    title: 'Collect my packages',
+    title: 'Collect my Packages',
     description: 'This is where we collect your packages after you\'ve made an order and then dispatch it. Payment needs to be paid in advance.'
   }
 };
