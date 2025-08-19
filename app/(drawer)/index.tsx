@@ -29,6 +29,17 @@ const locations = [
   'Thika', 'Machakos', 'Kisii', 'Kakamega', 'Meru',
 ];
 
+interface FABOption {
+  id: string;
+  label: string;
+  icon: string;
+  color: string;
+  backgroundColor: string;
+  glowColor: string;
+  action: () => void;
+  infoAction: () => void;
+}
+
 interface DeliveryInfo {
   title: string;
   description: string;
@@ -56,6 +67,7 @@ export default function HomeScreen() {
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [showFragileModal, setShowFragileModal] = useState(false);
   const [showCollectModal, setShowCollectModal] = useState(false);
+  const [fabMenuOpen, setFabMenuOpen] = useState(false);
   
   // Info modal states
   const [showInfoModal, setShowInfoModal] = useState(false);
@@ -68,6 +80,12 @@ export default function HomeScreen() {
   });
   
   const scrollX = useRef(new Animated.Value(0)).current;
+  
+  // FAB Menu Animations
+  const fabRotation = useRef(new Animated.Value(0)).current;
+  const overlayOpacity = useRef(new Animated.Value(0)).current;
+  const optionsScale = useRef(new Animated.Value(0)).current;
+  const optionsTranslateY = useRef(new Animated.Value(100)).current;
 
   useEffect(() => {
     const locationTagWidth = 120;
@@ -101,6 +119,77 @@ export default function HomeScreen() {
     }
   };
 
+  // FAB Menu Handlers
+  const openFabMenu = () => {
+    setFabMenuOpen(true);
+    
+    Animated.parallel([
+      Animated.timing(fabRotation, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.bezier(0.4, 0.0, 0.2, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsScale, {
+        toValue: 1,
+        duration: 400,
+        easing: Easing.bezier(0.34, 1.56, 0.64, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsTranslateY, {
+        toValue: 0,
+        duration: 400,
+        easing: Easing.bezier(0.34, 1.56, 0.64, 1),
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  const closeFabMenu = () => {
+    Animated.parallel([
+      Animated.timing(fabRotation, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.bezier(0.4, 0.0, 0.2, 1),
+        useNativeDriver: true,
+      }),
+      Animated.timing(overlayOpacity, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsScale, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(optionsTranslateY, {
+        toValue: 100,
+        duration: 250,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setFabMenuOpen(false);
+    });
+  };
+
+  const handleFabPress = () => {
+    if (fabMenuOpen) {
+      closeFabMenu();
+    } else {
+      openFabMenu();
+    }
+  };
+
   // Info Modal Handlers
   const showDeliveryInfo = (type: string) => {
     setSelectedInfo(DELIVERY_INFO[type]);
@@ -112,18 +201,60 @@ export default function HomeScreen() {
     setSelectedInfo(null);
   };
 
-  // Button Actions
+  // FAB Options Actions
   const handleFragileDelivery = () => {
-    setShowFragileModal(true);
+    closeFabMenu();
+    setTimeout(() => {
+      setShowFragileModal(true);
+    }, 300);
   };
 
   const handleSendToSomeone = () => {
-    setShowPackageModal(true);
+    closeFabMenu();
+    setTimeout(() => {
+      setShowPackageModal(true);
+    }, 300);
   };
 
   const handleCollectAndDeliver = () => {
-    setShowCollectModal(true);
+    closeFabMenu();
+    setTimeout(() => {
+      setShowCollectModal(true);
+    }, 300);
   };
+
+  const fabOptions: FABOption[] = [
+    {
+      id: 'fragile',
+      label: 'Fragile Items',
+      icon: 'alert-triangle',
+      color: '#FF9500',
+      backgroundColor: '#FF9500',
+      glowColor: '#FF9500',
+      action: handleFragileDelivery,
+      infoAction: () => showDeliveryInfo('fragile'),
+    },
+    {
+      id: 'send',
+      label: 'Send to Someone',
+      icon: 'send',
+      color: '#8B5CF6',
+      backgroundColor: '#8B5CF6',
+      glowColor: '#8B5CF6',
+      action: handleSendToSomeone,
+      infoAction: () => showDeliveryInfo('send'),
+    },
+    {
+      id: 'collect',
+      label: 'Collect my packages',
+      icon: 'package',
+      color: '#10B981',
+      backgroundColor: '#10B981',
+      glowColor: '#10B981',
+      action: handleCollectAndDeliver,
+      infoAction: () => showDeliveryInfo('collect'),
+    },
+  ];
 
   const handlePackageSubmit = async (packageData: PackageData) => {
     try {
@@ -263,31 +394,85 @@ export default function HomeScreen() {
     </LinearGradient>
   );
 
-  const renderActionButton = (title: string, icon: string, color: string, action: () => void, infoAction: () => void) => (
-    <View style={styles.actionButtonContainer}>
-      <TouchableOpacity
-        style={[styles.actionButton, { backgroundColor: color }]}
-        onPress={action}
-        activeOpacity={0.8}
+  const renderFabOption = (option: FABOption, index: number) => {
+    const optionOpacity = overlayOpacity.interpolate({
+      inputRange: [0, 1],
+      outputRange: [0, 1],
+    });
+
+    const optionTranslateY = optionsTranslateY.interpolate({
+      inputRange: [0, 100],
+      outputRange: [0, 100 + (index * 20)],
+    });
+
+    return (
+      <Animated.View
+        key={option.id}
+        style={[
+          styles.fabOptionWrapper,
+          {
+            opacity: optionOpacity,
+            transform: [
+              { scale: optionsScale },
+              { translateY: optionTranslateY },
+            ],
+          },
+        ]}
       >
-        <View style={styles.actionButtonContent}>
-          <View style={styles.actionButtonIcon}>
-            <Feather name={icon as any} size={24} color="white" />
-          </View>
-          <Text style={styles.actionButtonText}>{title}</Text>
-          <TouchableOpacity 
-            style={styles.actionButtonInfo}
-            onPress={(e) => {
-              e.stopPropagation();
-              infoAction();
-            }}
+        <TouchableOpacity
+          style={[
+            styles.fabOptionContainer,
+            {
+              shadowColor: option.glowColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.6,
+              shadowRadius: 15,
+              elevation: 15,
+            }
+          ]}
+          onPress={option.action}
+          activeOpacity={0.8}
+        >
+          <View
+            style={[
+              styles.fabOptionBackground,
+              {
+                backgroundColor: option.backgroundColor,
+                shadowColor: option.glowColor,
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.4,
+                shadowRadius: 10,
+              }
+            ]}
           >
-            <Feather name="info" size={20} color="white" />
-          </TouchableOpacity>
-        </View>
-      </TouchableOpacity>
-    </View>
-  );
+            <View style={styles.fabOptionContent}>
+              <View style={[
+                styles.fabOptionIcon,
+                {
+                  shadowColor: option.glowColor,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 8,
+                }
+              ]}>
+                <Feather name={option.icon as any} size={22} color="white" />
+              </View>
+              <Text style={styles.fabOptionLabel}>{option.label}</Text>
+              <TouchableOpacity 
+                style={styles.infoButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  option.infoAction();
+                }}
+              >
+                <Feather name="info" size={18} color="rgba(255, 255, 255, 0.9)" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Animated.View>
+    );
+  };
 
   const renderInfoModal = () => (
     <Modal
@@ -324,6 +509,11 @@ export default function HomeScreen() {
       </View>
     </Modal>
   );
+
+  const fabIconRotation = fabRotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '45deg'],
+  });
 
   return (
     <SafeAreaView style={styles.container}>
@@ -369,6 +559,11 @@ export default function HomeScreen() {
                 onChangeText={setDestination}
               />
             </LinearGradient>
+            <TouchableOpacity onPress={calculateCost} activeOpacity={0.8}>
+              <LinearGradient colors={['#7c3aed', '#3b82f6', '#10b981']} style={styles.calculateButton}>
+                <Text style={styles.calculateButtonText}>Calculate Cost</Text>
+              </LinearGradient>
+            </TouchableOpacity>
 
             {cost !== null && (
               <View style={styles.costContainer}>
@@ -379,50 +574,54 @@ export default function HomeScreen() {
             )}
           </View>
         </View>
-
-        {/* Action Buttons */}
-        <View style={styles.actionsContainer}>
-          {renderActionButton(
-            'Fragile Items',
-            'alert-triangle',
-            '#FF9500', // Orange color to match the image
-            handleFragileDelivery,
-            () => showDeliveryInfo('fragile')
-          )}
-          
-          {renderActionButton(
-            'Send to Someone',
-            'send',
-            '#8B5CF6', // Purple color to match the image
-            handleSendToSomeone,
-            () => showDeliveryInfo('send')
-          )}
-          
-          {renderActionButton(
-            'Collect my packages',
-            'package',
-            '#10B981', // Green color to match the image
-            handleCollectAndDeliver,
-            () => showDeliveryInfo('collect')
-          )}
-        </View>
-
-        {/* Bottom spacing */}
-        <View style={styles.bottomSpacing} />
       </ScrollView>
 
-      {/* Close Button */}
-      <View style={styles.closeButtonContainer}>
-        <TouchableOpacity
-          style={styles.closeButton}
-          onPress={() => {
-            // Handle close action - maybe navigate back or minimize
-            Alert.alert('Close', 'Close the app?');
-          }}
-          activeOpacity={0.8}
+      {/* FAB Menu Overlay */}
+      {fabMenuOpen && (
+        <Animated.View
+          style={[
+            styles.fabOverlay,
+            { opacity: overlayOpacity },
+          ]}
         >
-          <Feather name="x" size={24} color="white" />
-        </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.fabOverlayTouchable}
+            onPress={closeFabMenu}
+            activeOpacity={1}
+          />
+        </Animated.View>
+      )}
+
+      {/* FAB Options */}
+      {fabMenuOpen && (
+        <View style={styles.fabOptionsContainer}>
+          {fabOptions.map((option, index) => renderFabOption(option, index))}
+        </View>
+      )}
+
+      {/* Main FAB */}
+      <View style={styles.fabContainer}>
+        <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
+          <TouchableOpacity
+            style={styles.fabTouchable}
+            onPress={handleFabPress}
+            activeOpacity={0.8}
+          >
+            <Animated.View
+              style={[
+                styles.fabIconContainer,
+                { transform: [{ rotate: fabIconRotation }] },
+              ]}
+            >
+              <Feather 
+                name="plus" 
+                size={24} 
+                color="white" 
+                style={styles.fabIcon}
+              />
+            </Animated.View>
+          </TouchableOpacity>
+        </LinearGradient>
       </View>
 
       {/* Info Modal */}
@@ -535,6 +734,26 @@ const styles = StyleSheet.create({
     fontSize: 16, 
     width: '100%',
   },
+  calculateButton: {
+    paddingVertical: 16, 
+    paddingHorizontal: 40, 
+    borderRadius: 25,
+    alignItems: 'center', 
+    marginTop: 10,
+    shadowColor: '#7c3aed', 
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3, 
+    shadowRadius: 8, 
+    elevation: 8,
+  },
+  calculateButtonText: {
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(0, 0, 0, 0.3)',
+    textShadowOffset: { width: 0, height: 1 },
+    textShadowRadius: 2,
+  },
   costContainer: { 
     marginTop: 20, 
     width: '90%' 
@@ -553,82 +772,106 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Action Buttons
-  actionsContainer: {
-    padding: 20,
-    gap: 20,
-  },
-  actionButtonContainer: {
-    width: '100%',
-    alignItems: 'center',
-  },
-  actionButton: {
-    width: '90%',
-    borderRadius: 16,
-    paddingVertical: 20,
-    paddingHorizontal: 20,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  actionButtonContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  actionButtonIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  actionButtonText: {
-    flex: 1,
-    fontSize: 18,
-    fontWeight: '600',
-    color: 'white',
-    marginLeft: 16,
-    textShadowColor: 'rgba(0, 0, 0, 0.3)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 2,
-  },
-  actionButtonInfo: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-
-  // Close Button
-  closeButtonContainer: {
+  // Enhanced FAB Styles
+  fabContainer: {
     position: 'absolute',
     right: 20,
     bottom: 30,
     zIndex: 1000,
   },
-  closeButton: {
-    width: 56,
-    height: 56,
+  fabGradient: {
     borderRadius: 28,
-    backgroundColor: '#8B5CF6',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#8B5CF6',
+    shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.4,
     shadowRadius: 8,
     elevation: 8,
   },
+  fabTouchable: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabIconContainer: {
+    width: 24,
+    height: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  fabIcon: {},
 
-  // Bottom spacing for scroll
-  bottomSpacing: {
-    height: 100,
+  // FAB Overlay
+  fabOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.6)',
+    zIndex: 999,
+  },
+  fabOverlayTouchable: {
+    flex: 1,
+  },
+
+  // Single Color FAB Options with Glow
+  fabOptionsContainer: {
+    position: 'absolute',
+    right: 20,
+    bottom: 100,
+    alignItems: 'flex-end',
+    zIndex: 1001,
+  },
+  fabOptionWrapper: {
+    marginBottom: 20, // Increased spacing for glow effect
+    alignItems: 'flex-end',
+  },
+  fabOptionContainer: {
+    borderRadius: 20,
+    overflow: 'visible', // Changed to visible for glow effect
+  },
+  fabOptionBackground: {
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    minWidth: 240,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    overflow: 'visible',
+  },
+  fabOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  fabOptionIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 16,
+    elevation: 8,
+  },
+  fabOptionLabel: {
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'white',
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  infoButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
 
   // Info Modal Styles
