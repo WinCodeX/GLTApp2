@@ -36,6 +36,7 @@ interface FABOption {
   icon: string;
   color: string;
   gradientColors: string[];
+  glowColor: string;
   action: () => void;
   infoAction: () => void;
 }
@@ -259,8 +260,9 @@ export default function HomeScreen() {
       id: 'fragile',
       label: 'Fragile Items',
       icon: 'alert-triangle',
-      color: '#f97316',
-      gradientColors: ['rgba(249, 115, 22, 0.9)', 'rgba(251, 146, 60, 0.8)'],
+      color: '#fb923c', // Lighter orange
+      gradientColors: ['rgba(251, 146, 60, 0.95)', 'rgba(253, 186, 116, 0.9)'],
+      glowColor: '#fb923c',
       action: handleFragileDelivery,
       infoAction: () => showDeliveryInfo('fragile'),
     },
@@ -268,8 +270,9 @@ export default function HomeScreen() {
       id: 'send',
       label: 'Send to Someone',
       icon: 'send',
-      color: '#7c3aed',
-      gradientColors: ['rgba(124, 58, 237, 0.9)', 'rgba(59, 130, 246, 0.8)'],
+      color: '#a78bfa', // Lighter purple
+      gradientColors: ['rgba(167, 139, 250, 0.95)', 'rgba(139, 92, 246, 0.9)'],
+      glowColor: '#a78bfa',
       action: handleSendToSomeone,
       infoAction: () => showDeliveryInfo('send'),
     },
@@ -277,8 +280,9 @@ export default function HomeScreen() {
       id: 'collect',
       label: 'Collect my packages',
       icon: 'package',
-      color: '#10b981',
-      gradientColors: ['rgba(16, 185, 129, 0.9)', 'rgba(52, 211, 153, 0.8)'],
+      color: '#34d399', // Lighter green
+      gradientColors: ['rgba(52, 211, 153, 0.95)', 'rgba(110, 231, 183, 0.9)'],
+      glowColor: '#34d399',
       action: handleCollectAndDeliver,
       infoAction: () => showDeliveryInfo('collect'),
     },
@@ -448,18 +452,43 @@ export default function HomeScreen() {
         ]}
       >
         <TouchableOpacity
-          style={styles.fabOptionContainer}
+          style={[
+            styles.fabOptionContainer,
+            {
+              shadowColor: option.glowColor,
+              shadowOffset: { width: 0, height: 0 },
+              shadowOpacity: 0.6,
+              shadowRadius: 15,
+              elevation: 15,
+            }
+          ]}
           onPress={option.action}
           activeOpacity={0.8}
         >
           <LinearGradient
             colors={option.gradientColors}
-            style={styles.fabOptionGradient}
+            style={[
+              styles.fabOptionGradient,
+              {
+                shadowColor: option.glowColor,
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0.4,
+                shadowRadius: 10,
+              }
+            ]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
           >
             <View style={styles.fabOptionContent}>
-              <View style={styles.fabOptionIcon}>
+              <View style={[
+                styles.fabOptionIcon,
+                {
+                  shadowColor: option.glowColor,
+                  shadowOffset: { width: 0, height: 0 },
+                  shadowOpacity: 0.8,
+                  shadowRadius: 8,
+                }
+              ]}>
                 <Feather name={option.icon as any} size={22} color="white" />
               </View>
               <Text style={styles.fabOptionLabel}>{option.label}</Text>
@@ -470,7 +499,7 @@ export default function HomeScreen() {
                   option.infoAction();
                 }}
               >
-                <Feather name="info" size={18} color="rgba(255, 255, 255, 0.8)" />
+                <Feather name="info" size={18} color="rgba(255, 255, 255, 0.9)" />
               </TouchableOpacity>
             </View>
           </LinearGradient>
@@ -501,7 +530,7 @@ export default function HomeScreen() {
             <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
             <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
               <LinearGradient
-                colors={['#7c3aed', '#3b82f6']}
+                colors={['#a78bfa', '#8b5cf6']}
                 style={styles.infoModalButtonGradient}
               >
                 <Text style={styles.infoModalButtonText}>Got it</Text>
@@ -821,7 +850,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Enhanced FAB Options with Bubble Style
+  // Enhanced FAB Options with Bubble Style and Glow
   fabOptionsContainer: {
     position: 'absolute',
     right: 20,
@@ -830,26 +859,22 @@ const styles = StyleSheet.create({
     zIndex: 1001,
   },
   fabOptionWrapper: {
-    marginBottom: 16,
+    marginBottom: 20, // Increased spacing for glow effect
     alignItems: 'flex-end',
   },
   fabOptionContainer: {
     borderRadius: 20,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.4,
-    shadowRadius: 12,
-    elevation: 12,
+    overflow: 'visible', // Changed to visible for glow effect
   },
   fabOptionGradient: {
     paddingVertical: 18,
     paddingHorizontal: 24,
     minWidth: 240,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
+    borderColor: 'rgba(255, 255, 255, 0.25)',
+    overflow: 'visible',
   },
   fabOptionContent: {
     flexDirection: 'row',
@@ -859,21 +884,18 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
-    shadowColor: '#fff',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
+    elevation: 8,
   },
   fabOptionLabel: {
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
-    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
@@ -881,7 +903,7 @@ const styles = StyleSheet.create({
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
