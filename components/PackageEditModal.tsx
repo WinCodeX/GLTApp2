@@ -1,4 +1,5 @@
-// components/PackageEditModal.tsx - FIXED: Flexible validation for individual field editing
+// components/PackageEditModal.tsx - FIXED: Improved scrolling to show all states including "Collected"
+
 import { Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -584,9 +585,17 @@ export default function PackageEditModal({
     return (
       <View style={styles.editSection}>
         <Text style={styles.sectionTitle}>Package State</Text>
-        <Text style={styles.sectionSubtitle}>Current: {selectedState}</Text>
+        <Text style={styles.sectionSubtitle}>Current: {selectedState} • Scroll to see all {PACKAGE_STATES.length} states</Text>
         
-        <ScrollView style={styles.statesList} showsVerticalScrollIndicator={false}>
+        {/* FIXED: Better scrolling with increased height and scroll indicators */}
+        <ScrollView 
+          style={styles.statesList} 
+          contentContainerStyle={styles.statesListContent}
+          showsVerticalScrollIndicator={true}
+          indicatorStyle="white"
+          nestedScrollEnabled={true}
+          persistentScrollbar={true}
+        >
           {PACKAGE_STATES.map((state, index) => {
             const isSelected = selectedState === state.value;
             console.log(`🎨 Rendering state ${index + 1}/${PACKAGE_STATES.length}: ${state.value} (selected: ${isSelected})`);
@@ -620,7 +629,16 @@ export default function PackageEditModal({
               </TouchableOpacity>
             );
           })}
+          
+          {/* FIXED: Add padding at bottom to ensure last items are visible */}
+          <View style={styles.statesListBottomPadding} />
         </ScrollView>
+        
+        {/* FIXED: Add scroll hint */}
+        <View style={styles.scrollHint}>
+          <Feather name="chevrons-down" size={16} color="#888" />
+          <Text style={styles.scrollHintText}>Scroll down for more states (showing {PACKAGE_STATES.length} total)</Text>
+        </View>
       </View>
     );
   }, [canEditState, selectedState]);
@@ -1057,8 +1075,20 @@ const styles = StyleSheet.create({
     paddingLeft: 12,
   },
   
+  // FIXED: Improved states list styling with better height and scroll behavior
   statesList: {
-    maxHeight: 400,
+    maxHeight: SCREEN_HEIGHT * 0.35, // Increased from 400 to be responsive
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  statesListContent: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  statesListBottomPadding: {
+    height: 20, // Extra padding to ensure last item is visible
   },
   stateOption: {
     flexDirection: 'row',
@@ -1090,6 +1120,23 @@ const styles = StyleSheet.create({
   stateOptionDescription: {
     fontSize: 14,
     color: '#888',
+  },
+  
+  // FIXED: Added scroll hint styling
+  scrollHint: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 8,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.03)',
+    borderRadius: 8,
+    gap: 6,
+  },
+  scrollHintText: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
   },
   
   destinationList: {
