@@ -12,6 +12,7 @@ import {
   Easing,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
