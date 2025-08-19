@@ -53,16 +53,16 @@ interface DeliveryInfo {
 
 const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   fragile: {
-    title: 'Fragile Delivery',
-    description: 'We do fragile delivery on items that are breakable which are prioritized by the rider and are sent out immediately. Please select your current location and the rider will come collect the package and send it to where it\'s supposed to go.'
+    title: 'Fragile Items',
+    description: 'We have a dedicated delivery service for items that require extra care which will be prioritised & sent out immediately. Please select your current location and the rider will come collect the package and send it to where it\'s supposed to go.'
   },
   send: {
     title: 'Send to Someone',
-    description: 'We have two delivery options to send to someone. Door delivery and agent delivery. Door delivery packages are sent straight to their home address. For agent delivery that\'s from one agent to another and the receiver will have to go and collect from the agent of their choice. For bulky packages - these are heavy packages that exceed our threshold and packages that exceed our stipulated size guidelines - we recommend using our Fragile delivery option.'
+    description: 'There are 2 options - doorstep and office. The doorstep option will have the item delivered right to their door while the office option will be delivered to our office for the receiver to collect.'
   },
   collect: {
-    title: 'Collect & Deliver to Me',
-    description: 'This is a service we provide whereby you can shop things online or from any shop within CBD and have us collect it for you - at a fee - and deliver it to you. Please note that collection and delivery will require you to pay in advance for both.'
+    title: 'Collect my packages',
+    description: 'This is where we collect your packages after you\'ve made an order and then dispatch it. Payment needs to be payed in advance.'
   }
 };
 
@@ -257,10 +257,10 @@ export default function HomeScreen() {
   const fabOptions: FABOption[] = [
     {
       id: 'fragile',
-      label: 'Fragile Delivery',
+      label: 'Fragile Items',
       icon: 'alert-triangle',
-      color: '#ff6b6b',
-      gradientColors: ['rgba(255, 107, 107, 0.9)', 'rgba(255, 142, 142, 0.8)'],
+      color: '#f97316',
+      gradientColors: ['rgba(249, 115, 22, 0.9)', 'rgba(251, 146, 60, 0.8)'],
       action: handleFragileDelivery,
       infoAction: () => showDeliveryInfo('fragile'),
     },
@@ -275,7 +275,7 @@ export default function HomeScreen() {
     },
     {
       id: 'collect',
-      label: 'Collect & Deliver to Me',
+      label: 'Collect my packages',
       icon: 'package',
       color: '#10b981',
       gradientColors: ['rgba(16, 185, 129, 0.9)', 'rgba(52, 211, 153, 0.8)'],
@@ -339,8 +339,8 @@ export default function HomeScreen() {
       console.log('✅ Fragile package created successfully:', response);
       
       Alert.alert(
-        'Fragile Delivery Scheduled! ⚠️',
-        `Your fragile delivery has been scheduled with special handling.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
+        'Fragile Items Scheduled! ⚠️',
+        `Your fragile items delivery has been scheduled with special handling.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
         [
           {
             text: 'Schedule Another',
@@ -356,7 +356,7 @@ export default function HomeScreen() {
       console.error('❌ Error creating fragile package:', error);
       Alert.alert(
         'Error',
-        error.message || 'Failed to schedule fragile delivery. Please try again.',
+        error.message || 'Failed to schedule fragile items delivery. Please try again.',
         [{ text: 'OK' }]
       );
       throw error;
@@ -365,7 +365,7 @@ export default function HomeScreen() {
 
   const handleCollectSubmit = async (packageData: PackageData) => {
     try {
-      console.log('📦 Creating collect & deliver package:', packageData);
+      console.log('📦 Creating collect package:', packageData);
       
       const enhancedPackageData = {
         ...packageData,
@@ -378,11 +378,11 @@ export default function HomeScreen() {
       
       const response = await createPackage(enhancedPackageData);
       
-      console.log('✅ Collect & deliver package created successfully:', response);
+      console.log('✅ Collect package created successfully:', response);
       
       Alert.alert(
-        'Collection Scheduled! 📦',
-        `Your collection and delivery request has been scheduled.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
+        'Package Collection Scheduled! 📦',
+        `Your package collection request has been scheduled.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
         [
           {
             text: 'Schedule Another',
@@ -395,10 +395,10 @@ export default function HomeScreen() {
       );
       
     } catch (error: any) {
-      console.error('❌ Error creating collect & deliver package:', error);
+      console.error('❌ Error creating collect package:', error);
       Alert.alert(
         'Error',
-        error.message || 'Failed to schedule collection. Please try again.',
+        error.message || 'Failed to schedule package collection. Please try again.',
         [{ text: 'OK' }]
       );
       throw error;
