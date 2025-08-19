@@ -260,8 +260,12 @@ export default function HomeScreen() {
       id: 'fragile',
       label: 'Fragile Items',
       icon: 'alert-triangle',
-      color: '#fb923c', // Lighter orange
-      gradientColors: ['rgba(251, 146, 60, 0.95)', 'rgba(253, 186, 116, 0.9)'],
+      color: '#fb923c',
+      gradientColors: [
+        'rgba(251, 146, 60, 0.95)',   // Orange
+        'rgba(59, 130, 246, 0.85)',   // Complementary Blue
+        'rgba(251, 146, 60, 0.9)'     // Back to Orange
+      ],
       glowColor: '#fb923c',
       action: handleFragileDelivery,
       infoAction: () => showDeliveryInfo('fragile'),
@@ -270,8 +274,12 @@ export default function HomeScreen() {
       id: 'send',
       label: 'Send to Someone',
       icon: 'send',
-      color: '#a78bfa', // Lighter purple
-      gradientColors: ['rgba(167, 139, 250, 0.95)', 'rgba(139, 92, 246, 0.9)'],
+      color: '#a78bfa',
+      gradientColors: [
+        'rgba(167, 139, 250, 0.95)',  // Purple
+        'rgba(251, 191, 36, 0.85)',   // Complementary Yellow
+        'rgba(139, 92, 246, 0.9)'     // Back to Purple
+      ],
       glowColor: '#a78bfa',
       action: handleSendToSomeone,
       infoAction: () => showDeliveryInfo('send'),
@@ -280,8 +288,12 @@ export default function HomeScreen() {
       id: 'collect',
       label: 'Collect my packages',
       icon: 'package',
-      color: '#34d399', // Lighter green
-      gradientColors: ['rgba(52, 211, 153, 0.95)', 'rgba(110, 231, 183, 0.9)'],
+      color: '#34d399',
+      gradientColors: [
+        'rgba(52, 211, 153, 0.95)',   // Green
+        'rgba(244, 63, 94, 0.85)',    // Complementary Red/Pink
+        'rgba(110, 231, 183, 0.9)'    // Back to Light Green
+      ],
       glowColor: '#34d399',
       action: handleCollectAndDeliver,
       infoAction: () => showDeliveryInfo('collect'),
@@ -530,8 +542,14 @@ export default function HomeScreen() {
             <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
             <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
               <LinearGradient
-                colors={['#a78bfa', '#8b5cf6']}
+                colors={[
+                  'rgba(167, 139, 250, 0.95)',
+                  'rgba(251, 191, 36, 0.85)',
+                  'rgba(139, 92, 246, 0.9)'
+                ]}
                 style={styles.infoModalButtonGradient}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
               >
                 <Text style={styles.infoModalButtonText}>Got it</Text>
               </LinearGradient>
