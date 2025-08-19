@@ -236,7 +236,7 @@ export default function HomeScreen() {
     },
     {
       id: 'send',
-      label: 'Send a package',
+      label: 'Send a Package',
       icon: 'send',
       color: '#8B5CF6',
       backgroundColor: '#8B5CF6',
@@ -246,7 +246,7 @@ export default function HomeScreen() {
     },
     {
       id: 'collect',
-      label: 'Collect my packages',
+      label: 'Collect my Packages',
       icon: 'package',
       color: '#10B981',
       backgroundColor: '#10B981',
