@@ -58,7 +58,7 @@ const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   },
   send: {
     title: 'Send to Someone',
-    description: 'There are 2 options - doorstep and office. The doorstep option will have the item delivered right to their door while the office option will be delivered to our office for the receiver to collect.'
+    description: 'There are 2 options - doorstep and office. The doorstep option will have the item delivered right to their location while the office option will be delivered to our office for the receiver to collect.'
   },
   collect: {
     title: 'Collect my packages',
