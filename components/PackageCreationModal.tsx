@@ -1358,7 +1358,7 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'fragile' ? '⚠️ Fragile Delivery' :
+            {packageData.delivery_type === 'fragile' ? 'Fragile Delivery' :
              packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
           </Text>
           
