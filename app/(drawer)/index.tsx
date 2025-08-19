@@ -34,7 +34,7 @@ interface FABOption {
   label: string;
   icon: string;
   color: string;
-  gradientColors: string[];
+  backgroundColor: string;
   glowColor: string;
   action: () => void;
   infoAction: () => void;
@@ -229,11 +229,7 @@ export default function HomeScreen() {
       label: 'Fragile Items',
       icon: 'alert-triangle',
       color: '#DDCD56',
-      gradientColors: [
-        'rgba(221, 205, 86, 0.95)',   // #DDCD56 - Golden Yellow
-        'rgba(86, 221, 205, 0.85)',   // #56DDCD - Complementary Cyan
-        'rgba(221, 205, 86, 0.9)'     // Back to Golden Yellow
-      ],
+      backgroundColor: '#DDCD56',
       glowColor: '#DDCD56',
       action: handleFragileDelivery,
       infoAction: () => showDeliveryInfo('fragile'),
@@ -243,11 +239,7 @@ export default function HomeScreen() {
       label: 'Send to Someone',
       icon: 'send',
       color: '#CD56DD',
-      gradientColors: [
-        'rgba(205, 86, 221, 0.95)',   // #CD56DD - Purple/Magenta
-        'rgba(221, 205, 86, 0.85)',   // #DDCD56 - Complementary Yellow
-        'rgba(205, 86, 221, 0.9)'     // Back to Purple/Magenta
-      ],
+      backgroundColor: '#CD56DD',
       glowColor: '#CD56DD',
       action: handleSendToSomeone,
       infoAction: () => showDeliveryInfo('send'),
@@ -257,11 +249,7 @@ export default function HomeScreen() {
       label: 'Collect my packages',
       icon: 'package',
       color: '#56DDCD',
-      gradientColors: [
-        'rgba(86, 221, 205, 0.95)',   // #56DDCD - Cyan/Turquoise
-        'rgba(205, 86, 221, 0.85)',   // #CD56DD - Complementary Purple
-        'rgba(86, 221, 205, 0.9)'     // Back to Cyan/Turquoise
-      ],
+      backgroundColor: '#56DDCD',
       glowColor: '#56DDCD',
       action: handleCollectAndDeliver,
       infoAction: () => showDeliveryInfo('collect'),
@@ -445,19 +433,17 @@ export default function HomeScreen() {
           onPress={option.action}
           activeOpacity={0.8}
         >
-          <LinearGradient
-            colors={option.gradientColors}
+          <View
             style={[
-              styles.fabOptionGradient,
+              styles.fabOptionBackground,
               {
+                backgroundColor: option.backgroundColor,
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
                 shadowRadius: 10,
               }
             ]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
           >
             <View style={styles.fabOptionContent}>
               <View style={[
@@ -482,7 +468,7 @@ export default function HomeScreen() {
                 <Feather name="info" size={18} color="rgba(255, 255, 255, 0.9)" />
               </TouchableOpacity>
             </View>
-          </LinearGradient>
+          </View>
         </TouchableOpacity>
       </Animated.View>
     );
@@ -509,18 +495,14 @@ export default function HomeScreen() {
             </View>
             <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
             <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
-              <LinearGradient
-                colors={[
-                  'rgba(205, 86, 221, 0.95)',   // #CD56DD - Purple/Magenta
-                  'rgba(221, 205, 86, 0.85)',   // #DDCD56 - Complementary Yellow
-                  'rgba(205, 86, 221, 0.9)'     // Back to Purple/Magenta
+              <View
+                style={[
+                  styles.infoModalButtonBackground,
+                  { backgroundColor: '#CD56DD' }
                 ]}
-                style={styles.infoModalButtonGradient}
-                start={{ x: 0, y: 0 }}
-                end={{ x: 1, y: 1 }}
               >
                 <Text style={styles.infoModalButtonText}>Got it</Text>
-              </LinearGradient>
+              </View>
             </TouchableOpacity>
           </LinearGradient>
         </View>
@@ -834,7 +816,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // Enhanced FAB Options with Bubble Style and Glow
+  // Single Color FAB Options with Glow
   fabOptionsContainer: {
     position: 'absolute',
     right: 20,
@@ -850,12 +832,11 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'visible', // Changed to visible for glow effect
   },
-  fabOptionGradient: {
+  fabOptionBackground: {
     paddingVertical: 18,
     paddingHorizontal: 24,
     minWidth: 240,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'visible',
@@ -948,9 +929,10 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  infoModalButtonGradient: {
+  infoModalButtonBackground: {
     paddingVertical: 14,
     alignItems: 'center',
+    borderRadius: 12,
   },
   infoModalButtonText: {
     fontSize: 16,
