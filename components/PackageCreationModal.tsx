@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - ENHANCED with keyboard handling fix and fragile delivery
+// components/PackageCreationModal.tsx - FIXED: origin_area_id bug and default fragile delivery
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -148,7 +148,7 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // Form data with updated delivery type
+  // FIXED: Form data with fragile as default delivery type
   const [packageData, setPackageData] = useState<PackageData & { delivery_type: DeliveryType }>({
     sender_name: '',
     sender_phone: '',
@@ -158,7 +158,7 @@ export default function PackageCreationModal({
     destination_area_id: '',
     origin_agent_id: '',
     destination_agent_id: '',
-    delivery_type: 'doorstep' as DeliveryType
+    delivery_type: 'fragile' as DeliveryType // FIXED: Changed from 'doorstep' to 'fragile'
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -324,6 +324,7 @@ export default function PackageCreationModal({
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
+    // FIXED: Default to fragile delivery
     setPackageData({
       sender_name: '',
       sender_phone: '',
@@ -333,7 +334,7 @@ export default function PackageCreationModal({
       destination_area_id: '',
       origin_agent_id: '',
       destination_agent_id: '',
-      delivery_type: 'doorstep' as DeliveryType
+      delivery_type: 'fragile' as DeliveryType // FIXED: Default to fragile
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -368,20 +369,22 @@ export default function PackageCreationModal({
     console.log('✅ Origin agent found:', {
       agentId: selectedOriginAgent.id,
       agentName: selectedOriginAgent.name,
-      agentAreaId: selectedOriginAgent.area_id,
-      agentAreaIdType: typeof selectedOriginAgent.area_id
+      agentArea: selectedOriginAgent.area,
+      agentAreaId: selectedOriginAgent.area?.id
     });
 
-    // Enhanced area lookup with debugging
+    // FIXED: Enhanced area lookup using selectedOriginAgent.area.id instead of area_id
     console.log('🔍 Searching for origin area...');
     const originArea = areas.find(a => {
-      return a.id === selectedOriginAgent.area_id || 
-             a.id == selectedOriginAgent.area_id || 
-             String(a.id) === String(selectedOriginAgent.area_id);
+      return a.id === selectedOriginAgent.area?.id || 
+             a.id == selectedOriginAgent.area?.id || 
+             String(a.id) === String(selectedOriginAgent.area?.id);
     });
     
     if (!originArea) {
       console.log('❌ Origin area not found for cost calculation');
+      console.log('🔍 Available areas:', areas.map(a => ({ id: a.id, name: a.name })));
+      console.log('🔍 Looking for area with ID:', selectedOriginAgent.area?.id);
       return;
     }
 
@@ -477,24 +480,38 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type]);
 
+  // FIXED: Updated package data function with proper origin_area_id handling
   const updatePackageData = useCallback((field: keyof (PackageData & { delivery_type: DeliveryType }), value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
-      // Auto-update origin_area_id when origin_agent_id changes
+      // FIXED: Auto-update origin_area_id when origin_agent_id changes
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
-        if (selectedAgent) {
-          updated.origin_area_id = selectedAgent.area_id || '';
+        if (selectedAgent && selectedAgent.area?.id) {
+          updated.origin_area_id = selectedAgent.area.id; // FIXED: Use area.id instead of area_id
           console.log('🎯 Origin agent selected:', {
             agentName: selectedAgent.name,
             agentId: selectedAgent.id,
-            areaId: selectedAgent.area_id,
-            areaName: selectedAgent.area?.name,
-            locationName: selectedAgent.area?.location?.name
+            areaId: selectedAgent.area.id,
+            areaName: selectedAgent.area.name,
+            locationName: selectedAgent.area.location?.name
           });
+          console.log('🎯 Updated origin_area_id to:', selectedAgent.area.id);
+        } else {
+          console.warn('⚠️ Selected agent has no area or area.id:', selectedAgent);
         }
       }
+      
+      // Debug the full package data state
+      console.log('📦 Package data updated:', {
+        field,
+        value,
+        origin_agent_id: updated.origin_agent_id,
+        origin_area_id: updated.origin_area_id,
+        destination_area_id: updated.destination_area_id,
+        delivery_type: updated.delivery_type
+      });
       
       return updated;
     });
@@ -702,19 +719,48 @@ export default function PackageCreationModal({
     }
   }, [currentStep, packageData.delivery_type]);
 
+  // FIXED: Enhanced submit handler with proper data validation and debugging
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
+    console.log('📦 Starting package submission...');
+    console.log('📦 Current package data before submission:', packageData);
+    console.log('📦 Origin agent:', selectedOriginAgent);
+    console.log('📦 Delivery location:', deliveryLocation);
+
     setIsSubmitting(true);
     try {
+      // FIXED: Ensure origin_area_id is properly set from the selected agent
+      let finalOriginAreaId = packageData.origin_area_id;
+      
+      if (!finalOriginAreaId && selectedOriginAgent?.area?.id) {
+        finalOriginAreaId = selectedOriginAgent.area.id;
+        console.log('🔧 Fixed missing origin_area_id from selected agent:', finalOriginAreaId);
+      }
+
       const finalPackageData = {
         ...packageData,
+        origin_area_id: finalOriginAreaId, // FIXED: Ensure this is included
         sender_name: 'Current User',
         sender_phone: '+254700000000',
         delivery_location: deliveryLocation
       };
 
-      console.log('📦 Submitting package data:', finalPackageData);
+      console.log('📦 Final submission data:', finalPackageData);
+      
+      // FIXED: Validate that origin_area_id is present
+      if (!finalPackageData.origin_area_id) {
+        console.error('❌ Missing origin_area_id in final submission');
+        Toast.show({
+          type: 'error',
+          text1: 'Missing Origin Area',
+          text2: 'Please select an origin agent first',
+          position: 'top',
+          visibilityTime: 4000,
+        });
+        setIsSubmitting(false);
+        return;
+      }
       
       // ENHANCED: Use the helper function directly
       const packageResponse = await createPackage(finalPackageData);
@@ -722,7 +768,7 @@ export default function PackageCreationModal({
       
       // Show success toast
       Toast.show({
-        type: 'successToast',
+        type: 'success',
         text1: 'Package Created Successfully!',
         text2: `Tracking: ${packageResponse.tracking_code}`,
         position: 'top',
@@ -735,7 +781,7 @@ export default function PackageCreationModal({
       
       // Show error toast
       Toast.show({
-        type: 'errorToast',
+        type: 'error',
         text1: 'Failed to Create Package',
         text2: error.message,
         position: 'top',
@@ -744,7 +790,7 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, onSubmit, closeModal]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, closeModal]);
 
   const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
@@ -757,7 +803,7 @@ export default function PackageCreationModal({
       
       // Show cache cleared toast
       Toast.show({
-        type: 'defaultToast',
+        type: 'success',
         text1: 'Cache Cleared - Refreshing Data',
         position: 'top',
         visibilityTime: 2000,
@@ -770,7 +816,7 @@ export default function PackageCreationModal({
       console.error('Error clearing cache:', error);
       
       Toast.show({
-        type: 'errorToast',
+        type: 'error',
         text1: 'Failed to Clear Cache',
         position: 'top',
         visibilityTime: 3000,
@@ -998,14 +1044,14 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  // UPDATED: Enhanced delivery method selection with fragile option
+  // UPDATED: Enhanced delivery method selection with fragile as first option
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
       <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
       
       <View style={styles.deliveryOptions}>
-        {/* Fragile Delivery - First option */}
+        {/* Fragile Delivery - First option (DEFAULT) */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1016,8 +1062,8 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="alert-triangle" size={24} color="#ff6b6b" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Fragile Delivery</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Special handling for delicate items</Text>
+              <Text style={styles.deliveryOptionTitle}>⚠️ Fragile Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Special handling for delicate items (RECOMMENDED)</Text>
             </View>
             {packageData.delivery_type === 'fragile' && (
               <Feather name="check-circle" size={20} color="#10b981" />
@@ -1274,7 +1320,7 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'fragile' ? 'Fragile Delivery' :
+            {packageData.delivery_type === 'fragile' ? '⚠️ Fragile Delivery' :
              packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
           </Text>
           
@@ -1322,13 +1368,16 @@ export default function PackageCreationModal({
                 Debug: {selectedOriginAgent?.area?.name} → {selectedDestinationArea?.name}
               </Text>
               <Text style={styles.debugText}>
-                Same Area: {selectedOriginAgent?.area_id === selectedDestinationArea?.id ? 'Yes' : 'No'}
+                Same Area: {selectedOriginAgent?.area?.id === selectedDestinationArea?.id ? 'Yes' : 'No'}
               </Text>
               <Text style={styles.debugText}>
                 Same Location: {selectedOriginAgent?.area?.location_id === selectedDestinationArea?.location_id ? 'Yes' : 'No'}
               </Text>
               <Text style={styles.debugText}>
                 Delivery Type: {packageData.delivery_type}
+              </Text>
+              <Text style={styles.debugText}>
+                Origin Area ID: {packageData.origin_area_id}
               </Text>
             </View>
           )}
