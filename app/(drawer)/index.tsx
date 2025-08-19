@@ -62,7 +62,7 @@ const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   },
   collect: {
     title: 'Collect my packages',
-    description: 'This is where we collect your packages after you\'ve made an order and then dispatch it. Payment needs to be payed in advance.'
+    description: 'This is where we collect your packages after you\'ve made an order and then dispatch it. Payment needs to be paid in advance.'
   }
 };
 
