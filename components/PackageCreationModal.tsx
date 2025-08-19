@@ -1,5 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED: Keyboard handling and modal spacing
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -52,8 +51,8 @@ const STEP_TITLES = [
 type SortOption = 'name' | 'location' | 'area';
 type SortDirection = 'asc' | 'desc';
 
-// Enhanced delivery type with fragile option
-type DeliveryType = 'fragile' | 'doorstep' | 'agent';
+// Updated delivery type without fragile option (now handled by separate modal)
+type DeliveryType = 'doorstep' | 'agent';
 
 // Storage keys for caching
 const STORAGE_KEYS = {
@@ -151,7 +150,7 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // FIXED: Form data with fragile as default delivery type
+  // UPDATED: Form data without fragile option, defaulting to doorstep
   const [packageData, setPackageData] = useState<PackageData & { delivery_type: DeliveryType }>({
     sender_name: '',
     sender_phone: '',
@@ -161,7 +160,7 @@ export default function PackageCreationModal({
     destination_area_id: '',
     origin_agent_id: '',
     destination_agent_id: '',
-    delivery_type: 'fragile' as DeliveryType
+    delivery_type: 'doorstep' as DeliveryType // Default to doorstep instead of fragile
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -182,7 +181,7 @@ export default function PackageCreationModal({
     direction: 'asc'
   });
 
-  // FIXED: Keyboard handling
+  // Keyboard handling
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -205,14 +204,12 @@ export default function PackageCreationModal({
     };
   }, []);
 
-  // FIXED: Calculate modal height based on keyboard state
+  // Calculate modal height based on keyboard state
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
-      // When keyboard is visible, make modal smaller and ensure header is visible
       const maxHeightWithKeyboard = SCREEN_HEIGHT - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
       return Math.min(maxHeightWithKeyboard, SCREEN_HEIGHT * 0.85);
     }
-    // When keyboard is hidden, use normal height
     return SCREEN_HEIGHT * 0.90;
   }, [isKeyboardVisible, keyboardHeight]);
 
@@ -272,11 +269,9 @@ export default function PackageCreationModal({
             agents: cachedData.agents.length
           });
           
-          // ENHANCED: Validate cached data structure
           const validation = validatePackageFormData(cachedData);
           if (!validation.isValid) {
             console.warn('⚠️ Cached data validation failed:', validation.issues);
-            // Clear cache and fetch fresh data
             await clearCache();
             throw new Error('Cached data is invalid, fetching fresh data...');
           }
@@ -292,7 +287,6 @@ export default function PackageCreationModal({
       
       const formData = await getPackageFormData();
       
-      // ENHANCED: Debug the helper response
       console.log('📦 Helper Response Structure:', {
         hasLocations: !!formData.locations,
         hasAreas: !!formData.areas,
@@ -328,7 +322,6 @@ export default function PackageCreationModal({
         agents: formData.agents.length
       });
       
-      // ENHANCED: Sample data structure for debugging
       if (formData.agents.length > 0) {
         console.log('🔍 Sample agent structure:', JSON.stringify(formData.agents[0], null, 2));
       }
@@ -352,7 +345,7 @@ export default function PackageCreationModal({
         setLocations(cachedData.locations);
         setAreas(cachedData.areas);
         setAgents(cachedData.agents);
-        setDataError(null); // Clear error since we have fallback data
+        setDataError(null);
       }
     } finally {
       setIsDataLoading(false);
@@ -361,7 +354,7 @@ export default function PackageCreationModal({
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
-    // FIXED: Default to fragile delivery
+    // UPDATED: Default to doorstep delivery instead of fragile
     setPackageData({
       sender_name: '',
       sender_phone: '',
@@ -371,7 +364,7 @@ export default function PackageCreationModal({
       destination_area_id: '',
       origin_agent_id: '',
       destination_agent_id: '',
-      delivery_type: 'fragile' as DeliveryType
+      delivery_type: 'doorstep' as DeliveryType
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -385,7 +378,7 @@ export default function PackageCreationModal({
   }, []);
 
   const closeModal = useCallback(() => {
-    Keyboard.dismiss(); // FIXED: Dismiss keyboard when closing
+    Keyboard.dismiss();
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
       duration: 250,
@@ -395,7 +388,7 @@ export default function PackageCreationModal({
     });
   }, [slideAnim, onClose]);
 
-  // Enhanced area-based cost calculation with fragile delivery pricing
+  // UPDATED: Cost calculation without fragile delivery pricing
   const calculateCost = useCallback(() => {
     console.log('💰 Starting cost calculation...');
     
@@ -411,7 +404,6 @@ export default function PackageCreationModal({
       agentAreaId: selectedOriginAgent.area?.id
     });
 
-    // FIXED: Enhanced area lookup using selectedOriginAgent.area.id instead of area_id
     console.log('🔍 Searching for origin area...');
     const originArea = areas.find(a => {
       return a.id === selectedOriginAgent.area?.id || 
@@ -445,7 +437,6 @@ export default function PackageCreationModal({
       locationName: selectedDestinationArea.location?.name
     });
     
-    // Enhanced logging for debugging
     console.log('💰 Calculating cost with areas:', {
       originAgent: selectedOriginAgent.name,
       originArea: originArea.name,
@@ -455,7 +446,7 @@ export default function PackageCreationModal({
       deliveryType: packageData.delivery_type
     });
     
-    // Area-based pricing logic with fragile delivery
+    // UPDATED: Area-based pricing logic without fragile delivery
     const isIntraArea = String(originArea.id) === String(selectedDestinationArea.id);
     const isIntraLocation = String(originArea.location_id) === String(selectedDestinationArea.location_id);
     
@@ -470,19 +461,7 @@ export default function PackageCreationModal({
     
     let baseCost = 0;
     
-    if (packageData.delivery_type === 'fragile') {
-      // Fragile delivery pricing (premium rates)
-      if (isIntraArea) {
-        baseCost = 350;
-        console.log('💰 Same area fragile delivery: KES 350');
-      } else if (isIntraLocation) {
-        baseCost = 450;
-        console.log('💰 Same location, different areas fragile delivery: KES 450');
-      } else {
-        baseCost = 580;
-        console.log('💰 Different locations fragile delivery: KES 580');
-      }
-    } else if (packageData.delivery_type === 'agent') {
+    if (packageData.delivery_type === 'agent') {
       // Agent-to-Agent pricing
       if (isIntraArea) {
         baseCost = 120;
@@ -518,12 +497,11 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type]);
 
-  // FIXED: Updated package data function with proper origin_area_id handling
   const updatePackageData = useCallback((field: keyof (PackageData & { delivery_type: DeliveryType }), value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
-      // FIXED: Auto-update origin_area_id when origin_agent_id changes
+      // Auto-update origin_area_id when origin_agent_id changes
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
         if (selectedAgent && selectedAgent.area?.id) {
@@ -559,7 +537,7 @@ export default function PackageCreationModal({
     setSearchQueries(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  // ENHANCED: Better sorting and filtering with detailed logging
+  // Better sorting and filtering with detailed logging
   const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     console.log(`🔍 Starting filter for ${itemType}s:`, {
       inputCount: items.length,
@@ -659,7 +637,7 @@ export default function PackageCreationModal({
     return sorted;
   }, [sortConfig]);
 
-  // ENHANCED: Better grouping with detailed logging
+  // Better grouping with detailed logging
   const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
@@ -723,7 +701,7 @@ export default function PackageCreationModal({
           return packageData.destination_area_id.length > 0;
         }
       case 4:
-        if (packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') {
+        if (packageData.delivery_type === 'doorstep') {
           return deliveryLocation.trim().length > 0;
         }
         return true;
@@ -757,7 +735,6 @@ export default function PackageCreationModal({
     }
   }, [currentStep, packageData.delivery_type]);
 
-  // FIXED: Enhanced submit handler with proper data validation and debugging
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
@@ -768,7 +745,7 @@ export default function PackageCreationModal({
 
     setIsSubmitting(true);
     try {
-      // FIXED: Ensure origin_area_id is properly set from the selected agent
+      // Ensure origin_area_id is properly set from the selected agent
       let finalOriginAreaId = packageData.origin_area_id;
       
       if (!finalOriginAreaId && selectedOriginAgent?.area?.id) {
@@ -786,7 +763,6 @@ export default function PackageCreationModal({
 
       console.log('📦 Final submission data:', finalPackageData);
       
-      // FIXED: Validate that origin_area_id is present
       if (!finalPackageData.origin_area_id) {
         console.error('❌ Missing origin_area_id in final submission');
         Toast.show({
@@ -800,11 +776,9 @@ export default function PackageCreationModal({
         return;
       }
       
-      // ENHANCED: Use the helper function directly
       const packageResponse = await createPackage(finalPackageData);
       console.log('✅ Package created successfully:', packageResponse);
       
-      // Show success toast
       Toast.show({
         type: 'success',
         text1: 'Package Created Successfully!',
@@ -817,7 +791,6 @@ export default function PackageCreationModal({
     } catch (error: any) {
       console.error('❌ Failed to submit package:', error);
       
-      // Show error toast
       Toast.show({
         type: 'error',
         text1: 'Failed to Create Package',
@@ -839,7 +812,6 @@ export default function PackageCreationModal({
     try {
       await clearCache();
       
-      // Show cache cleared toast
       Toast.show({
         type: 'success',
         text1: 'Cache Cleared - Refreshing Data',
@@ -847,7 +819,6 @@ export default function PackageCreationModal({
         visibilityTime: 2000,
       });
       
-      // Immediately reload fresh data after clearing cache
       await loadModalData();
       
     } catch (error) {
@@ -946,7 +917,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // ENHANCED: Step 0: Origin Agent Selection with better error handling and data validation
+  // Step 0: Origin Agent Selection
   const renderOriginAgentSelection = useCallback(() => {
     console.log('🎯 Rendering origin agent selection...');
     console.log('🎯 Agents available:', agents.length);
@@ -960,7 +931,6 @@ export default function PackageCreationModal({
         <Text style={styles.stepTitle}>Select Origin Agent</Text>
         <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
         
-        {/* ENHANCED: Show data loading/count info */}
         <View style={styles.dataInfoContainer}>
           <Text style={styles.dataInfoText}>
             {agents.length} agents available
@@ -1054,7 +1024,6 @@ export default function PackageCreationModal({
     );
   }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery]);
 
-  // Keep the rest of the render methods the same as they're working...
   const renderReceiverDetails = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -1082,34 +1051,14 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  // UPDATED: Enhanced delivery method selection with fragile as first option
+  // UPDATED: Delivery method selection without fragile option
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
       <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
       
       <View style={styles.deliveryOptions}>
-        {/* Fragile Delivery - First option (DEFAULT) */}
-        <TouchableOpacity
-          style={[
-            styles.deliveryOption,
-            packageData.delivery_type === 'fragile' && styles.selectedDeliveryOption
-          ]}
-          onPress={() => updatePackageData('delivery_type', 'fragile')}
-        >
-          <View style={styles.deliveryOptionContent}>
-            <Feather name="alert-triangle" size={24} color="#ff6b6b" />
-            <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>⚠️ Fragile Delivery</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Special handling for delicate items (RECOMMENDED)</Text>
-            </View>
-            {packageData.delivery_type === 'fragile' && (
-              <Feather name="check-circle" size={20} color="#10b981" />
-            )}
-          </View>
-        </TouchableOpacity>
-
-        {/* Doorstep Delivery - Second option */}
+        {/* Doorstep Delivery - First option (now default) */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1120,8 +1069,8 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="home" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Doorstep Delivery</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
+              <Text style={styles.deliveryOptionTitle}>🏠 Doorstep Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address (RECOMMENDED)</Text>
             </View>
             {packageData.delivery_type === 'doorstep' && (
               <Feather name="check-circle" size={20} color="#10b981" />
@@ -1129,7 +1078,7 @@ export default function PackageCreationModal({
           </View>
         </TouchableOpacity>
 
-        {/* Agent Delivery - Third option */}
+        {/* Agent Delivery - Second option */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1140,7 +1089,7 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="user" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>Agent Delivery</Text>
+              <Text style={styles.deliveryOptionTitle}>👤 Agent Delivery</Text>
               <Text style={styles.deliveryOptionSubtitle}>Collect from destination agent</Text>
             </View>
             {packageData.delivery_type === 'agent' && (
@@ -1148,6 +1097,13 @@ export default function PackageCreationModal({
             )}
           </View>
         </TouchableOpacity>
+      </View>
+
+      <View style={styles.deliveryNote}>
+        <Feather name="info" size={16} color="#7c3aed" />
+        <Text style={styles.deliveryNoteText}>
+          For fragile items requiring special handling, use the "Fragile Delivery" option from the main menu
+        </Text>
       </View>
     </View>
   ), [packageData.delivery_type, updatePackageData]);
@@ -1275,38 +1231,23 @@ export default function PackageCreationModal({
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
       <Text style={styles.stepSubtitle}>
-        {packageData.delivery_type === 'fragile' 
-          ? 'Provide specific handling instructions and delivery address'
-          : 'Provide the exact delivery address'
-        }
+        Provide the exact delivery address
       </Text>
       
       <View style={styles.formContainer}>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder={
-            packageData.delivery_type === 'fragile' 
-              ? "Enter specific address, special handling instructions, fragile item details..."
-              : "Enter specific address, building name, floor, etc."
-          }
+          placeholder="Enter specific address, building name, floor, etc."
           placeholderTextColor="#888"
           value={deliveryLocation}
           onChangeText={setDeliveryLocation}
           multiline
-          numberOfLines={packageData.delivery_type === 'fragile' ? 6 : 4}
+          numberOfLines={4}
           textAlignVertical="top"
         />
-        {packageData.delivery_type === 'fragile' && (
-          <View style={styles.fragileNotice}>
-            <Feather name="info" size={16} color="#ff6b6b" />
-            <Text style={styles.fragileNoticeText}>
-              Include details about the fragile items and any special handling requirements
-            </Text>
-          </View>
-        )}
       </View>
     </View>
-  ), [deliveryLocation, packageData.delivery_type]);
+  ), [deliveryLocation]);
 
   const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
@@ -1358,16 +1299,8 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'fragile' ? 'Fragile Delivery' :
-             packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
+            {packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
           </Text>
-          
-          {packageData.delivery_type === 'fragile' && (
-            <View style={styles.fragileInfo}>
-              <Feather name="alert-triangle" size={16} color="#ff6b6b" />
-              <Text style={styles.fragileInfoText}>Special handling required</Text>
-            </View>
-          )}
           
           {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
             <View style={styles.agentInfo}>
@@ -1376,11 +1309,9 @@ export default function PackageCreationModal({
             </View>
           )}
 
-          {(packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') && deliveryLocation && (
+          {packageData.delivery_type === 'doorstep' && deliveryLocation && (
             <View style={styles.deliveryLocationInfo}>
-              <Text style={styles.confirmationSubDetail}>
-                {packageData.delivery_type === 'fragile' ? 'Delivery Address & Instructions:' : 'Delivery Address:'}
-              </Text>
+              <Text style={styles.confirmationSubDetail}>Delivery Address:</Text>
               <Text style={styles.confirmationDetail}>{deliveryLocation}</Text>
             </View>
           )}
@@ -1391,9 +1322,6 @@ export default function PackageCreationModal({
           {estimatedCost ? (
             <View style={styles.costDisplay}>
               <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
-              {packageData.delivery_type === 'fragile' && (
-                <Text style={styles.fragileNoteText}>*Includes fragile handling surcharge</Text>
-              )}
             </View>
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
@@ -1572,7 +1500,7 @@ export default function PackageCreationModal({
                 styles.modalContainer,
                 { 
                   transform: [{ translateY: slideAnim }],
-                  height: modalHeight // FIXED: Dynamic height based on keyboard state
+                  height: modalHeight
                 }
               ]}
             >
@@ -1590,11 +1518,11 @@ export default function PackageCreationModal({
   );
 }
 
-// FIXED: Enhanced styles with better keyboard handling and reduced spacing
+// Enhanced styles with updated delivery note
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: 'transparent', // FIXED: Make SafeAreaView transparent
+    backgroundColor: 'transparent',
   },
   keyboardContainer: {
     flex: 1,
@@ -1606,7 +1534,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: SCREEN_WIDTH,
-    // Height is now dynamic - set via style prop
   },
   modalContent: {
     flex: 1,
@@ -1615,14 +1542,13 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
-  // FIXED: Reduced header padding for better keyboard handling
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 10 : 15, // FIXED: Reduced top padding
-    paddingBottom: 8, // FIXED: Reduced bottom padding
+    paddingTop: Platform.OS === 'ios' ? 10 : 15,
+    paddingBottom: 8,
   },
   closeButton: {
     width: 40,
@@ -1634,7 +1560,7 @@ const styles = StyleSheet.create({
   },
   closeButtonAbsolute: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 10 : 15, // FIXED: Match header padding
+    top: Platform.OS === 'ios' ? 10 : 15,
     right: 20,
     width: 40,
     height: 40,
@@ -1648,16 +1574,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    marginTop: 4, // FIXED: Reduced margin
+    marginTop: 4,
   },
   placeholder: {
     width: 40,
   },
   
-  // FIXED: Reduced progress bar padding
   progressContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 10, // FIXED: Reduced from 15 to 10
+    paddingVertical: 10,
   },
   progressBackground: {
     height: 4,
@@ -1673,46 +1598,44 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     textAlign: 'center',
-    marginTop: 6, // FIXED: Reduced from 8 to 6
+    marginTop: 6,
   },
   
-  // FIXED: Optimized content container for keyboard
   contentContainer: {
     flex: 1,
   },
   scrollContentContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingBottom: 10, // FIXED: Reduced bottom padding
+    paddingBottom: 10,
   },
   stepContent: {
     flex: 1,
-    minHeight: 300, // FIXED: Reduced from 400
+    minHeight: 300,
   },
   stepContentConfirmation: {
     flex: 1,
-    minHeight: 450, // FIXED: Reduced from 600
+    minHeight: 450,
   },
   stepTitle: {
-    fontSize: 22, // FIXED: Slightly smaller
+    fontSize: 22,
     fontWeight: '700',
     color: '#fff',
-    marginBottom: 6, // FIXED: Reduced spacing
+    marginBottom: 6,
   },
   stepSubtitle: {
-    fontSize: 15, // FIXED: Slightly smaller
+    fontSize: 15,
     color: '#888',
-    marginBottom: 20, // FIXED: Reduced from 30
+    marginBottom: 20,
     lineHeight: 20,
   },
   
-  // ENHANCED: Data info container
   dataInfoContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 4,
-    marginBottom: 10, // FIXED: Reduced from 12
+    marginBottom: 10,
   },
   dataInfoText: {
     fontSize: 12,
@@ -1720,11 +1643,10 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // ENHANCED: Clear search button
   clearSearchButton: {
-    marginTop: 12, // FIXED: Reduced from 16
-    paddingHorizontal: 20, // FIXED: Reduced from 24
-    paddingVertical: 10, // FIXED: Reduced from 12
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
@@ -1737,46 +1659,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   
-  // NEW: Fragile delivery styles
-  fragileNotice: {
+  // UPDATED: Delivery note for fragile reference
+  deliveryNote: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
     borderRadius: 8,
-    padding: 10, // FIXED: Reduced from 12
-    marginTop: 10, // FIXED: Reduced from 12
+    padding: 10,
+    marginTop: 16,
     gap: 8,
   },
-  fragileNoticeText: {
+  deliveryNoteText: {
     flex: 1,
     fontSize: 14,
-    color: '#ff6b6b',
-    lineHeight: 18, // FIXED: Reduced line height
-  },
-  fragileInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 8,
-    gap: 8,
-  },
-  fragileInfoText: {
-    fontSize: 14,
-    color: '#ff6b6b',
-    fontWeight: '500',
-  },
-  costDisplay: {
-    alignItems: 'flex-start',
-  },
-  fragileNoteText: {
-    fontSize: 12,
-    color: '#888',
-    marginTop: 4,
-    fontStyle: 'italic',
+    color: '#7c3aed',
+    lineHeight: 18,
   },
   
-  // FIXED: Enhanced Search and Sort styles with reduced spacing
   searchAndSortContainer: {
-    marginBottom: 15, // FIXED: Reduced from 20
+    marginBottom: 15,
   },
   searchInputContainer: {
     flexDirection: 'row',
@@ -1786,18 +1687,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     paddingHorizontal: 16,
-    minHeight: 44, // FIXED: Reduced from 48
+    minHeight: 44,
     gap: 12,
-    marginBottom: 10, // FIXED: Reduced from 12
+    marginBottom: 10,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: '#fff',
-    paddingVertical: 10, // FIXED: Reduced from 12
+    paddingVertical: 10,
   },
   
-  // Sort container styles
   sortContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1816,8 +1716,8 @@ const styles = StyleSheet.create({
   sortButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10, // FIXED: Reduced from 12
-    paddingVertical: 5, // FIXED: Reduced from 6
+    paddingHorizontal: 10,
+    paddingVertical: 5,
     borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
@@ -1838,15 +1738,14 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // FIXED: Location header styles with reduced spacing
   locationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 4,
-    paddingVertical: 6, // FIXED: Reduced from 8
-    marginTop: 8, // FIXED: Reduced from 12
-    marginBottom: 6, // FIXED: Reduced from 8
+    paddingVertical: 6,
+    marginTop: 8,
+    marginBottom: 6,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
@@ -1860,12 +1759,11 @@ const styles = StyleSheet.create({
     color: '#888',
   },
   
-  // FIXED: Selection list styles with reduced spacing
   selectionList: {
     flex: 1,
   },
   selectionItem: {
-    marginBottom: 8, // FIXED: Reduced from 12
+    marginBottom: 8,
     borderRadius: 12,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     overflow: 'hidden',
@@ -1878,19 +1776,19 @@ const styles = StyleSheet.create({
   selectionItemContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14, // FIXED: Reduced from 16
+    padding: 14,
   },
   selectionInitials: {
-    width: 44, // FIXED: Reduced from 50
-    height: 44, // FIXED: Reduced from 50
-    borderRadius: 22, // FIXED: Adjusted for new size
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(124, 58, 237, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 14, // FIXED: Reduced from 16
+    marginRight: 14,
   },
   selectionInitialsText: {
-    fontSize: 15, // FIXED: Reduced from 16
+    fontSize: 15,
     fontWeight: '600',
     color: '#fff',
   },
@@ -1901,7 +1799,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 3, // FIXED: Reduced from 4
+    marginBottom: 3,
   },
   selectionLocation: {
     fontSize: 14,
@@ -1913,11 +1811,10 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // No results styles
   noResultsContainer: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 40, // FIXED: Reduced from 60
+    paddingVertical: 40,
   },
   noResultsTitle: {
     fontSize: 18,
@@ -1933,31 +1830,29 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // FIXED: Form styles with reduced spacing
   formContainer: {
-    gap: 16, // FIXED: Reduced from 20
-    paddingVertical: 8, // FIXED: Reduced from 10
+    gap: 16,
+    paddingVertical: 8,
   },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
     paddingHorizontal: 16,
-    paddingVertical: 14, // FIXED: Reduced from 16
+    paddingVertical: 14,
     fontSize: 16,
     color: '#fff',
-    minHeight: 52, // FIXED: Reduced from 56
+    minHeight: 52,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   textArea: {
-    minHeight: 100, // FIXED: Reduced from 120
+    minHeight: 100,
     textAlignVertical: 'top',
-    paddingTop: 14, // FIXED: Reduced from 16
+    paddingTop: 14,
   },
   
-  // FIXED: Delivery options with reduced spacing
   deliveryOptions: {
-    gap: 12, // FIXED: Reduced from 16
+    gap: 12,
   },
   deliveryOption: {
     borderRadius: 12,
@@ -1973,47 +1868,46 @@ const styles = StyleSheet.create({
   deliveryOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16, // FIXED: Reduced from 20
+    padding: 16,
   },
   deliveryOptionText: {
     flex: 1,
     marginLeft: 16,
   },
   deliveryOptionTitle: {
-    fontSize: 17, // FIXED: Reduced from 18
+    fontSize: 17,
     fontWeight: '600',
     color: '#fff',
-    marginBottom: 3, // FIXED: Reduced from 4
+    marginBottom: 3,
   },
   deliveryOptionSubtitle: {
     fontSize: 14,
     color: '#888',
   },
   
-  // FIXED: Confirmation styles with reduced spacing
   confirmationContainer: {
-    gap: 16, // FIXED: Reduced from 20
+    gap: 16,
   },
   confirmationSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
-    padding: 14, // FIXED: Reduced from 16
+    padding: 14,
   },
   confirmationSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#7c3aed',
-    marginBottom: 10, // FIXED: Reduced from 12
+    marginBottom: 10,
   },
   confirmationDetail: {
     fontSize: 16,
     color: '#fff',
-    marginBottom: 3, // FIXED: Reduced from 4
+    marginBottom: 3,
   },
   confirmationSubDetail: {
     fontSize: 14,
     color: '#888',
-    marginBottom: 6, // FIXED: Reduced from 8
+    marginBottom: 6,
   },
   routeDisplay: {
     flexDirection: 'row',
@@ -2054,6 +1948,9 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
+  costDisplay: {
+    alignItems: 'flex-start',
+  },
   estimatedCost: {
     fontSize: 24,
     fontWeight: '700',
@@ -2064,7 +1961,6 @@ const styles = StyleSheet.create({
     color: '#ef4444',
   },
   
-  // Debug styles (only visible in development)
   debugInfo: {
     marginTop: 12,
     padding: 8,
@@ -2089,12 +1985,11 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // FIXED: Navigation with reduced spacing
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingVertical: 16, // FIXED: Reduced from 20
+    paddingVertical: 16,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -2104,8 +1999,8 @@ const styles = StyleSheet.create({
   backButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 18, // FIXED: Reduced from 20
-    paddingVertical: 10, // FIXED: Reduced from 12
+    paddingHorizontal: 18,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     gap: 8,
@@ -2118,8 +2013,8 @@ const styles = StyleSheet.create({
   nextButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20, // FIXED: Reduced from 24
-    paddingVertical: 10, // FIXED: Reduced from 12
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: '#7c3aed',
     gap: 8,
@@ -2132,8 +2027,8 @@ const styles = StyleSheet.create({
   submitButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20, // FIXED: Reduced from 24
-    paddingVertical: 10, // FIXED: Reduced from 12
+    paddingHorizontal: 20,
+    paddingVertical: 10,
     borderRadius: 8,
     backgroundColor: '#10b981',
     gap: 8,
@@ -2150,7 +2045,6 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // Loading and error
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
