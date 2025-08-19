@@ -15,6 +15,7 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  FlatList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -27,6 +28,8 @@ interface LocationData {
   latitude: number;
   longitude: number;
   address?: string;
+  name?: string;
+  description?: string;
 }
 
 interface FragileDeliveryModalProps {
@@ -35,6 +38,295 @@ interface FragileDeliveryModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
   currentLocation: LocationData | null;
 }
+
+// Sample locations for demo (would come from a places API in real app)
+const SAMPLE_LOCATIONS: LocationData[] = [
+  {
+    latitude: -1.2921,
+    longitude: 36.8219,
+    address: "Tom Mboya Street, Nairobi",
+    name: "Tom Mboya Street",
+    description: "Central Business District"
+  },
+  {
+    latitude: -1.2833,
+    longitude: 36.8167,
+    address: "Kenyatta Avenue, Nairobi",
+    name: "Kenyatta Avenue",
+    description: "City Center"
+  },
+  {
+    latitude: -1.2902,
+    longitude: 36.8236,
+    address: "Moi Avenue, Nairobi",
+    name: "Moi Avenue",
+    description: "Downtown"
+  },
+  {
+    latitude: -1.3028,
+    longitude: 36.7750,
+    address: "Westlands, Nairobi",
+    name: "Westlands",
+    description: "Business District"
+  },
+  {
+    latitude: -1.2631,
+    longitude: 36.8056,
+    address: "Upperhill, Nairobi",
+    name: "Upperhill",
+    description: "Financial District"
+  }
+];
+
+// Map Picker Modal Component
+const LocationPickerModal = ({ 
+  visible, 
+  onClose, 
+  onLocationSelect, 
+  title = "Select Location",
+  currentLocation 
+}: {
+  visible: boolean;
+  onClose: () => void;
+  onLocationSelect: (location: LocationData) => void;
+  title?: string;
+  currentLocation?: LocationData | null;
+}) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedLocation, setSelectedLocation] = useState<LocationData | null>(null);
+  const [isSearching, setIsSearching] = useState(false);
+  const [searchResults, setSearchResults] = useState<LocationData[]>([]);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+      setSearchResults(SAMPLE_LOCATIONS);
+    }
+  }, [visible]);
+
+  const closeModal = () => {
+    Animated.timing(slideAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
+      setSearchQuery('');
+      setSelectedLocation(null);
+      setSearchResults([]);
+    });
+  };
+
+  const handleSearch = (query: string) => {
+    setSearchQuery(query);
+    setIsSearching(true);
+    
+    // Simulate search delay
+    setTimeout(() => {
+      if (query.trim() === '') {
+        setSearchResults(SAMPLE_LOCATIONS);
+      } else {
+        const filtered = SAMPLE_LOCATIONS.filter(location =>
+          location.name?.toLowerCase().includes(query.toLowerCase()) ||
+          location.address?.toLowerCase().includes(query.toLowerCase()) ||
+          location.description?.toLowerCase().includes(query.toLowerCase())
+        );
+        setSearchResults(filtered);
+      }
+      setIsSearching(false);
+    }, 300);
+  };
+
+  const handleLocationTap = (location: LocationData) => {
+    setSelectedLocation(location);
+  };
+
+  const confirmLocation = () => {
+    if (selectedLocation) {
+      onLocationSelect(selectedLocation);
+      closeModal();
+    }
+  };
+
+  const useCurrentLocation = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({});
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+
+      const currentLoc: LocationData = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location',
+        name: 'Current Location',
+        description: 'Your current position'
+      };
+
+      onLocationSelect(currentLoc);
+      closeModal();
+    } catch (error) {
+      Alert.alert('Error', 'Failed to get current location');
+    }
+  };
+
+  const renderLocationItem = ({ item }: { item: LocationData }) => (
+    <TouchableOpacity
+      style={[
+        styles.locationItem,
+        selectedLocation?.latitude === item.latitude && 
+        selectedLocation?.longitude === item.longitude && styles.selectedLocationItem
+      ]}
+      onPress={() => handleLocationTap(item)}
+    >
+      <View style={styles.locationIcon}>
+        <Feather name="map-pin" size={20} color="#ff6b6b" />
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <Text style={styles.locationAddress}>{item.address}</Text>
+        <Text style={styles.locationDescription}>{item.description}</Text>
+      </View>
+      {selectedLocation?.latitude === item.latitude && 
+       selectedLocation?.longitude === item.longitude && (
+        <Feather name="check-circle" size={20} color="#ff6b6b" />
+      )}
+    </TouchableOpacity>
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="none">
+      <StatusBar barStyle="light-content" />
+      <SafeAreaView style={styles.mapModalSafeArea}>
+        <Animated.View
+          style={[
+            styles.mapModalContainer,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          {/* Map Area (Simulated) */}
+          <View style={styles.mapContainer}>
+            <LinearGradient
+              colors={['#1a1a2e', '#2d3748', '#4a5568']}
+              style={styles.mapGradient}
+            >
+              {/* Map Header */}
+              <View style={styles.mapHeader}>
+                <TouchableOpacity onPress={closeModal} style={styles.mapCloseButton}>
+                  <Feather name="arrow-left" size={24} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.mapTitle}>{title}</Text>
+                <TouchableOpacity onPress={useCurrentLocation} style={styles.currentLocationButton}>
+                  <Feather name="crosshair" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+
+              {/* Simulated Map Content */}
+              <View style={styles.mapContent}>
+                <View style={styles.mapGrid}>
+                  {/* Grid lines to simulate map */}
+                  {Array.from({ length: 8 }).map((_, i) => (
+                    <View key={`h-${i}`} style={[styles.gridLine, styles.horizontalLine, { top: `${i * 12.5}%` }]} />
+                  ))}
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <View key={`v-${i}`} style={[styles.gridLine, styles.verticalLine, { left: `${i * 16.67}%` }]} />
+                  ))}
+                </View>
+
+                {/* Sample location pins */}
+                <View style={[styles.mapPin, { top: '20%', left: '30%' }]}>
+                  <View style={styles.mapPinInner}>
+                    <Text style={styles.mapPinText}>H</Text>
+                  </View>
+                  <Text style={styles.mapPinLabel}>MP Shah Hospital</Text>
+                </View>
+
+                <View style={[styles.mapPin, { top: '40%', left: '60%' }]}>
+                  <View style={[styles.mapPinInner, { backgroundColor: '#8b5cf6' }]}>
+                    <Text style={styles.mapPinText}>M</Text>
+                  </View>
+                  <Text style={styles.mapPinLabel}>Museum</Text>
+                </View>
+
+                <View style={[styles.mapPin, { top: '60%', left: '25%' }]}>
+                  <View style={[styles.mapPinInner, { backgroundColor: '#ef4444' }]}>
+                    <Text style={styles.mapPinText}>📍</Text>
+                  </View>
+                  <Text style={styles.mapPinLabel}>Selected</Text>
+                </View>
+
+                {/* Road lines */}
+                <View style={[styles.roadLine, { top: '35%', left: '10%', width: '80%', transform: [{ rotate: '15deg' }] }]} />
+                <View style={[styles.roadLine, { top: '55%', left: '5%', width: '90%', transform: [{ rotate: '-10deg' }] }]} />
+                <View style={[styles.roadLine, { top: '25%', left: '40%', height: '50%', width: 3 }]} />
+              </View>
+
+              {/* Location confirmation overlay */}
+              {selectedLocation && (
+                <View style={styles.locationConfirmOverlay}>
+                  <View style={styles.locationConfirmCard}>
+                    <Text style={styles.locationConfirmName}>{selectedLocation.name}</Text>
+                    <Text style={styles.locationConfirmAddress}>{selectedLocation.address}</Text>
+                    <TouchableOpacity 
+                      style={styles.confirmLocationButton}
+                      onPress={confirmLocation}
+                    >
+                      <Text style={styles.confirmLocationButtonText}>Confirm Location</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              )}
+            </LinearGradient>
+          </View>
+
+          {/* Search Bottom Sheet */}
+          <View style={styles.searchBottomSheet}>
+            <View style={styles.searchContainer}>
+              <Feather name="search" size={20} color="#888" />
+              <TextInput
+                style={styles.mapSearchInput}
+                placeholder="Where to?"
+                placeholderTextColor="#888"
+                value={searchQuery}
+                onChangeText={handleSearch}
+              />
+              {isSearching && <ActivityIndicator size="small" color="#ff6b6b" />}
+            </View>
+
+            <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
+              {searchResults.length > 0 ? (
+                <FlatList
+                  data={searchResults}
+                  keyExtractor={(item, index) => `${item.latitude}-${item.longitude}-${index}`}
+                  renderItem={renderLocationItem}
+                  scrollEnabled={false}
+                />
+              ) : (
+                <View style={styles.noResults}>
+                  <Feather name="map-pin" size={48} color="#666" />
+                  <Text style={styles.noResultsText}>No locations found</Text>
+                  <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </Animated.View>
+      </SafeAreaView>
+    </Modal>
+  );
+};
 
 export default function FragileDeliveryModal({
   visible,
@@ -59,6 +351,10 @@ export default function FragileDeliveryModal({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [itemDescription, setItemDescription] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
+  
+  // Map modal states
+  const [showPickupMapModal, setShowPickupMapModal] = useState(false);
+  const [showDeliveryMapModal, setShowDeliveryMapModal] = useState(false);
   
   const STEP_TITLES = [
     'Location Setup',
@@ -119,7 +415,8 @@ export default function FragileDeliveryModal({
         setPickupLocation({
           latitude: location.coords.latitude,
           longitude: location.coords.longitude,
-          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
+          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location',
+          name: 'Current Location'
         });
       }
     } catch (error) {
@@ -140,45 +437,16 @@ export default function FragileDeliveryModal({
     });
   };
 
-  const selectLocationOnMap = async (type: 'pickup' | 'delivery') => {
-    // In a real app, this would open a map picker
-    // For now, we'll simulate location selection
-    Alert.alert(
-      'Select Location',
-      `This would open a map to select ${type} location. For demo purposes, we'll use current location.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Use Current Location',
-          onPress: async () => {
-            try {
-              const location = await Location.getCurrentPositionAsync({});
-              const address = await Location.reverseGeocodeAsync({
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-              });
-              
-              const locationData = {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Selected Location'
-              };
-              
-              if (type === 'pickup') {
-                setPickupLocation(locationData);
-              } else {
-                setDeliveryLocation(locationData);
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to get location');
-            }
-          }
-        }
-      ]
-    );
+  const handlePickupLocationSelect = (location: LocationData) => {
+    setPickupLocation(location);
+  };
+
+  const handleDeliveryLocationSelect = (location: LocationData) => {
+    setDeliveryLocation(location);
+    // Auto-fill delivery address if available
+    if (location.address) {
+      setDeliveryAddress(location.address);
+    }
   };
 
   const isStepValid = (step: number) => {
@@ -209,8 +477,7 @@ export default function FragileDeliveryModal({
   };
 
   const calculateEstimatedCost = () => {
-    // Enhanced pricing for fragile delivery
-    const baseCost = 580; // Premium fragile delivery base rate
+    const baseCost = 580;
     const specialHandlingSurcharge = 120;
     const urgentDeliveryFee = 80;
     return baseCost + specialHandlingSurcharge + urgentDeliveryFee;
@@ -297,12 +564,12 @@ export default function FragileDeliveryModal({
         <Text style={styles.locationLabel}>📍 Pickup Location</Text>
         <TouchableOpacity 
           style={[styles.locationInput, pickupLocation && styles.locationInputSelected]}
-          onPress={() => selectLocationOnMap('pickup')}
+          onPress={() => setShowPickupMapModal(true)}
         >
           <Text style={[styles.locationText, pickupLocation && styles.locationTextSelected]}>
-            {pickupLocation?.address || 'Tap to set pickup location'}
+            {pickupLocation?.address || 'Tap to select pickup location'}
           </Text>
-          <Feather name="map-pin" size={20} color={pickupLocation ? "#ff6b6b" : "#666"} />
+          <Feather name="map" size={20} color={pickupLocation ? "#ff6b6b" : "#666"} />
         </TouchableOpacity>
       </View>
       
@@ -310,12 +577,12 @@ export default function FragileDeliveryModal({
         <Text style={styles.locationLabel}>🎯 Delivery Location</Text>
         <TouchableOpacity 
           style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
-          onPress={() => selectLocationOnMap('delivery')}
+          onPress={() => setShowDeliveryMapModal(true)}
         >
           <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
-            {deliveryLocation?.address || 'Tap to set delivery location'}
+            {deliveryLocation?.address || 'Tap to select delivery location'}
           </Text>
-          <Feather name="map-pin" size={20} color={deliveryLocation ? "#ff6b6b" : "#666"} />
+          <Feather name="map" size={20} color={deliveryLocation ? "#ff6b6b" : "#666"} />
         </TouchableOpacity>
       </View>
 
@@ -556,43 +823,62 @@ export default function FragileDeliveryModal({
   );
 
   return (
-    <Modal visible={visible} transparent animationType="none">
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView 
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-          <View style={styles.overlay}>
-            <Animated.View
-              style={[
-                styles.modalContainer,
-                { transform: [{ translateY: slideAnim }] }
-              ]}
-            >
-              <LinearGradient
-                colors={['#1a1a2e', '#16213e', '#0f1419']}
-                style={styles.modalContent}
+    <>
+      <Modal visible={visible} transparent animationType="none">
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <SafeAreaView style={styles.safeArea}>
+          <KeyboardAvoidingView 
+            style={styles.keyboardContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          >
+            <View style={styles.overlay}>
+              <Animated.View
+                style={[
+                  styles.modalContainer,
+                  { transform: [{ translateY: slideAnim }] }
+                ]}
               >
-                {renderHeader()}
-                {renderProgressBar()}
-                
-                <ScrollView 
-                  style={styles.contentContainer}
-                  contentContainerStyle={styles.scrollContentContainer}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
+                <LinearGradient
+                  colors={['#1a1a2e', '#16213e', '#0f1419']}
+                  style={styles.modalContent}
                 >
-                  {renderCurrentStep()}
-                </ScrollView>
-                
-                {renderNavigationButtons()}
-              </LinearGradient>
-            </Animated.View>
-          </View>
-        </KeyboardAvoidingView>
-      </SafeAreaView>
-    </Modal>
+                  {renderHeader()}
+                  {renderProgressBar()}
+                  
+                  <ScrollView 
+                    style={styles.contentContainer}
+                    contentContainerStyle={styles.scrollContentContainer}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                  >
+                    {renderCurrentStep()}
+                  </ScrollView>
+                  
+                  {renderNavigationButtons()}
+                </LinearGradient>
+              </Animated.View>
+            </View>
+          </KeyboardAvoidingView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* Location Picker Modals */}
+      <LocationPickerModal
+        visible={showPickupMapModal}
+        onClose={() => setShowPickupMapModal(false)}
+        onLocationSelect={handlePickupLocationSelect}
+        title="Select Pickup Location"
+        currentLocation={pickupLocation}
+      />
+      
+      <LocationPickerModal
+        visible={showDeliveryMapModal}
+        onClose={() => setShowDeliveryMapModal(false)}
+        onLocationSelect={handleDeliveryLocationSelect}
+        title="Select Delivery Location"
+        currentLocation={deliveryLocation}
+      />
+    </>
   );
 }
 
@@ -979,5 +1265,235 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: '#666',
+  },
+
+  // MAP MODAL STYLES
+  mapModalSafeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
+  mapModalContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0f',
+  },
+  mapContainer: {
+    flex: 1,
+  },
+  mapGradient: {
+    flex: 1,
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingBottom: 15,
+    backgroundColor: 'rgba(26, 26, 46, 0.9)',
+  },
+  mapCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  currentLocationButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  mapContent: {
+    flex: 1,
+    position: 'relative',
+  },
+  mapGrid: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+  },
+  gridLine: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  horizontalLine: {
+    left: 0,
+    right: 0,
+    height: 1,
+  },
+  verticalLine: {
+    top: 0,
+    bottom: 0,
+    width: 1,
+  },
+  mapPin: {
+    position: 'absolute',
+    alignItems: 'center',
+  },
+  mapPinInner: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 5,
+  },
+  mapPinText: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  mapPinLabel: {
+    marginTop: 4,
+    fontSize: 12,
+    color: '#fff',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  roadLine: {
+    position: 'absolute',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)',
+    height: 2,
+  },
+  locationConfirmOverlay: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(26, 26, 46, 0.95)',
+    padding: 20,
+  },
+  locationConfirmCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 107, 107, 0.3)',
+  },
+  locationConfirmName: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  locationConfirmAddress: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 16,
+  },
+  confirmLocationButton: {
+    backgroundColor: '#ff6b6b',
+    borderRadius: 8,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  confirmLocationButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  searchBottomSheet: {
+    backgroundColor: 'rgba(26, 26, 46, 0.98)',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingTop: 20,
+    paddingHorizontal: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20,
+    maxHeight: SCREEN_HEIGHT * 0.4,
+  },
+  searchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    gap: 12,
+  },
+  mapSearchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 4,
+  },
+  searchResults: {
+    flex: 1,
+  },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  selectedLocationItem: {
+    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderRadius: 8,
+    borderBottomWidth: 0,
+  },
+  locationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  locationAddress: {
+    fontSize: 14,
+    color: '#ccc',
+    marginBottom: 2,
+  },
+  locationDescription: {
+    fontSize: 12,
+    color: '#888',
+  },
+  noResults: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 12,
+  },
+  noResultsSubtext: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 4,
   },
 });
