@@ -236,7 +236,7 @@ export default function HomeScreen() {
     },
     {
       id: 'send',
-      label: 'Send to Someone',
+      label: 'Send a package',
       icon: 'send',
       color: '#8B5CF6',
       backgroundColor: '#8B5CF6',
