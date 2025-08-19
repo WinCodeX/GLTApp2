@@ -11,10 +11,13 @@ import {
   Dimensions,
   Easing,
   Alert,
+  Modal,
+  Platform,
 } from 'react-native';
 import { FAB } from 'react-native-paper';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import * as Location from 'expo-location';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import { createPackage, type PackageData } from '../../lib/helpers/packageHelpers';
@@ -34,7 +37,34 @@ interface FABOption {
   color: string;
   gradientColors: string[];
   action: () => void;
+  infoAction: () => void;
 }
+
+interface LocationData {
+  latitude: number;
+  longitude: number;
+  address?: string;
+}
+
+interface DeliveryInfo {
+  title: string;
+  description: string;
+}
+
+const DELIVERY_INFO: Record<string, DeliveryInfo> = {
+  fragile: {
+    title: 'Fragile Delivery',
+    description: 'We do fragile delivery on items that are breakable which are prioritized by the rider and are sent out immediately. Please select your current location and the rider will come collect the package and send it to where it\'s supposed to go.'
+  },
+  send: {
+    title: 'Send to Someone',
+    description: 'We have two delivery options to send to someone. Door delivery and agent delivery. Door delivery packages are sent straight to their home address. For agent delivery that\'s from one agent to another and the receiver will have to go and collect from the agent of their choice. For bulky packages - these are heavy packages that exceed our threshold and packages that exceed our stipulated size guidelines - we recommend using our Fragile delivery option.'
+  },
+  collect: {
+    title: 'Collect & Deliver to Me',
+    description: 'This is a service we provide whereby you can shop things online or from any shop within CBD and have us collect it for you - at a fee - and deliver it to you. Please note that collection and delivery will require you to pay in advance for both.'
+  }
+};
 
 export default function HomeScreen() {
   const [origin, setOrigin] = useState('');
@@ -42,6 +72,24 @@ export default function HomeScreen() {
   const [cost, setCost] = useState<number | null>(null);
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
+  
+  // New modal states
+  const [showInfoModal, setShowInfoModal] = useState(false);
+  const [selectedInfo, setSelectedInfo] = useState<DeliveryInfo | null>(null);
+  const [showFragileModal, setShowFragileModal] = useState(false);
+  const [showCollectModal, setShowCollectModal] = useState(false);
+  
+  // Location states
+  const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
+  const [destinationLocation, setDestinationLocation] = useState<LocationData | null>(null);
+  const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
+  const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(null);
+  
+  // User info (this would come from authentication/user context in real app)
+  const [userInfo] = useState({
+    name: 'Current User',
+    phone: '+254700000000'
+  });
   
   const scrollX = useRef(new Animated.Value(0)).current;
   
@@ -70,9 +118,31 @@ export default function HomeScreen() {
     };
 
     loop();
+    requestLocationPermission();
 
     return () => scrollX.stopAnimation();
   }, [scrollX]);
+
+  const requestLocationPermission = async () => {
+    try {
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status === 'granted') {
+        const location = await Location.getCurrentPositionAsync({});
+        const address = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
+        
+        setCurrentLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
+        });
+      }
+    } catch (error) {
+      console.error('Error getting location:', error);
+    }
+  };
 
   const calculateCost = () => {
     if (origin && destination) {
@@ -154,11 +224,22 @@ export default function HomeScreen() {
     }
   };
 
+  // Info Modal Handlers
+  const showDeliveryInfo = (type: string) => {
+    setSelectedInfo(DELIVERY_INFO[type]);
+    setShowInfoModal(true);
+  };
+
+  const closeInfoModal = () => {
+    setShowInfoModal(false);
+    setSelectedInfo(null);
+  };
+
   // FAB Options Actions
   const handleFragileDelivery = () => {
     closeFabMenu();
     setTimeout(() => {
-      setShowPackageModal(true);
+      setShowFragileModal(true);
     }, 300);
   };
 
@@ -172,14 +253,7 @@ export default function HomeScreen() {
   const handleCollectAndDeliver = () => {
     closeFabMenu();
     setTimeout(() => {
-      Alert.alert(
-        'Collect & Deliver',
-        'This feature allows you to have items collected from your location and delivered to someone else.',
-        [
-          { text: 'Learn More', onPress: () => console.log('Learn more pressed') },
-          { text: 'OK' }
-        ]
-      );
+      setShowCollectModal(true);
     }, 300);
   };
 
@@ -189,24 +263,27 @@ export default function HomeScreen() {
       label: 'Fragile Delivery',
       icon: 'alert-triangle',
       color: '#ff6b6b',
-      gradientColors: ['#ff6b6b', '#ff8e8e'],
+      gradientColors: ['rgba(255, 107, 107, 0.9)', 'rgba(255, 142, 142, 0.8)'],
       action: handleFragileDelivery,
+      infoAction: () => showDeliveryInfo('fragile'),
     },
     {
       id: 'send',
       label: 'Send to Someone',
       icon: 'send',
       color: '#7c3aed',
-      gradientColors: ['#7c3aed', '#3b82f6'],
+      gradientColors: ['rgba(124, 58, 237, 0.9)', 'rgba(59, 130, 246, 0.8)'],
       action: handleSendToSomeone,
+      infoAction: () => showDeliveryInfo('send'),
     },
     {
       id: 'collect',
       label: 'Collect & Deliver to Me',
       icon: 'package',
       color: '#10b981',
-      gradientColors: ['#10b981', '#34d399'],
+      gradientColors: ['rgba(16, 185, 129, 0.9)', 'rgba(52, 211, 153, 0.8)'],
       action: handleCollectAndDeliver,
+      infoAction: () => showDeliveryInfo('collect'),
     },
   ];
 
@@ -214,7 +291,14 @@ export default function HomeScreen() {
     try {
       console.log('📦 Creating package with data:', packageData);
       
-      const response = await createPackage(packageData);
+      // Auto-fill user info
+      const enhancedPackageData = {
+        ...packageData,
+        sender_name: userInfo.name,
+        sender_phone: userInfo.phone,
+      };
+      
+      const response = await createPackage(enhancedPackageData);
       
       console.log('✅ Package created successfully:', response);
       
@@ -248,6 +332,67 @@ export default function HomeScreen() {
     setShowPackageModal(false);
   };
 
+  const handleFragileSubmit = async () => {
+    if (!currentLocation || !destinationLocation) {
+      Alert.alert('Error', 'Please set both pickup and delivery locations');
+      return;
+    }
+    
+    try {
+      const packageData = {
+        sender_name: userInfo.name,
+        sender_phone: userInfo.phone,
+        receiver_name: '', // Will be filled in the next step
+        receiver_phone: '', // Will be filled in the next step
+        delivery_type: 'fragile',
+        pickup_location: currentLocation.address || 'Current Location',
+        delivery_location: destinationLocation.address || 'Destination',
+        coordinates: {
+          pickup: currentLocation,
+          delivery: destinationLocation
+        }
+      };
+      
+      setShowFragileModal(false);
+      // Open regular modal to complete receiver details
+      setTimeout(() => setShowPackageModal(true), 300);
+      
+    } catch (error) {
+      console.error('Error with fragile delivery:', error);
+      Alert.alert('Error', 'Failed to process fragile delivery request');
+    }
+  };
+
+  const handleCollectSubmit = async () => {
+    if (!collectionLocation || !deliveryLocation) {
+      Alert.alert('Error', 'Please set both collection and delivery locations');
+      return;
+    }
+    
+    try {
+      const packageData = {
+        sender_name: userInfo.name,
+        sender_phone: userInfo.phone,
+        receiver_name: userInfo.name, // Delivering to self
+        receiver_phone: userInfo.phone,
+        delivery_type: 'doorstep',
+        pickup_location: collectionLocation.address || 'Collection Point',
+        delivery_location: deliveryLocation.address || 'Delivery Location',
+        coordinates: {
+          pickup: collectionLocation,
+          delivery: deliveryLocation
+        }
+      };
+      
+      setShowCollectModal(false);
+      Alert.alert('Success', 'Collection & delivery request submitted successfully!');
+      
+    } catch (error) {
+      console.error('Error with collect and deliver:', error);
+      Alert.alert('Error', 'Failed to process collection request');
+    }
+  };
+
   const LocationTag = ({ location }) => (
     <LinearGradient
       colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
@@ -266,8 +411,6 @@ export default function HomeScreen() {
   );
 
   const renderFabOption = (option: FABOption, index: number) => {
-    const animationDelay = (fabOptions.length - index - 1) * 50;
-    
     const optionOpacity = overlayOpacity.interpolate({
       inputRange: [0, 1],
       outputRange: [0, 1],
@@ -305,15 +448,204 @@ export default function HomeScreen() {
           >
             <View style={styles.fabOptionContent}>
               <View style={styles.fabOptionIcon}>
-                <Feather name={option.icon as any} size={24} color="white" />
+                <Feather name={option.icon as any} size={22} color="white" />
               </View>
               <Text style={styles.fabOptionLabel}>{option.label}</Text>
+              <TouchableOpacity 
+                style={styles.infoButton}
+                onPress={(e) => {
+                  e.stopPropagation();
+                  option.infoAction();
+                }}
+              >
+                <Feather name="info" size={18} color="rgba(255, 255, 255, 0.8)" />
+              </TouchableOpacity>
             </View>
           </LinearGradient>
         </TouchableOpacity>
       </Animated.View>
     );
   };
+
+  const renderInfoModal = () => (
+    <Modal
+      visible={showInfoModal}
+      transparent
+      animationType="fade"
+      onRequestClose={closeInfoModal}
+    >
+      <View style={styles.infoModalOverlay}>
+        <View style={styles.infoModalContainer}>
+          <LinearGradient
+            colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+            style={styles.infoModalContent}
+          >
+            <View style={styles.infoModalHeader}>
+              <Text style={styles.infoModalTitle}>{selectedInfo?.title}</Text>
+              <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalClose}>
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
+            <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
+              <LinearGradient
+                colors={['#7c3aed', '#3b82f6']}
+                style={styles.infoModalButtonGradient}
+              >
+                <Text style={styles.infoModalButtonText}>Got it</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderFragileModal = () => (
+    <Modal
+      visible={showFragileModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowFragileModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <LinearGradient
+            colors={['#1a1a2e', '#16213e', '#0f1419']}
+            style={styles.modalContent}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>⚠️ Fragile Delivery</Text>
+              <TouchableOpacity onPress={() => setShowFragileModal(false)}>
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalScrollContent}>
+              <Text style={styles.modalSubtitle}>
+                Set your pickup and delivery locations for fragile items
+              </Text>
+              
+              <View style={styles.locationSection}>
+                <Text style={styles.locationLabel}>📍 Pickup Location</Text>
+                <TouchableOpacity style={styles.locationInput}>
+                  <Text style={styles.locationText}>
+                    {currentLocation?.address || 'Tap to set pickup location'}
+                  </Text>
+                  <Feather name="map-pin" size={20} color="#7c3aed" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.locationSection}>
+                <Text style={styles.locationLabel}>🎯 Delivery Location</Text>
+                <TouchableOpacity style={styles.locationInput}>
+                  <Text style={styles.locationText}>
+                    {destinationLocation?.address || 'Tap to set delivery location'}
+                  </Text>
+                  <Feather name="map-pin" size={20} color="#7c3aed" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.costEstimate}>
+                <Text style={styles.costLabel}>Estimated Cost:</Text>
+                <Text style={styles.costValue}>KES 580 - 750</Text>
+                <Text style={styles.costNote}>*Includes fragile handling surcharge</Text>
+              </View>
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.submitButton}
+              onPress={handleFragileSubmit}
+            >
+              <LinearGradient
+                colors={['#ff6b6b', '#ff8e8e']}
+                style={styles.submitButtonGradient}
+              >
+                <Text style={styles.submitButtonText}>Continue with Fragile Delivery</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderCollectModal = () => (
+    <Modal
+      visible={showCollectModal}
+      transparent
+      animationType="slide"
+      onRequestClose={() => setShowCollectModal(false)}
+    >
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContainer}>
+          <LinearGradient
+            colors={['#1a1a2e', '#16213e', '#0f1419']}
+            style={styles.modalContent}
+          >
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>📦 Collect & Deliver</Text>
+              <TouchableOpacity onPress={() => setShowCollectModal(false)}>
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.modalScrollContent}>
+              <Text style={styles.modalSubtitle}>
+                We'll collect your items and deliver them to you
+              </Text>
+              
+              <View style={styles.locationSection}>
+                <Text style={styles.locationLabel}>🛍️ Collection Point</Text>
+                <TouchableOpacity style={styles.locationInput}>
+                  <Text style={styles.locationText}>
+                    {collectionLocation?.address || 'Tap to set collection point'}
+                  </Text>
+                  <Feather name="map-pin" size={20} color="#10b981" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.locationSection}>
+                <Text style={styles.locationLabel}>🏠 Delivery to You</Text>
+                <TouchableOpacity style={styles.locationInput}>
+                  <Text style={styles.locationText}>
+                    {deliveryLocation?.address || currentLocation?.address || 'Tap to set delivery location'}
+                  </Text>
+                  <Feather name="map-pin" size={20} color="#10b981" />
+                </TouchableOpacity>
+              </View>
+              
+              <View style={styles.serviceNote}>
+                <Feather name="info" size={16} color="#10b981" />
+                <Text style={styles.serviceNoteText}>
+                  Collection and delivery fees apply. Payment required in advance.
+                </Text>
+              </View>
+              
+              <View style={styles.costEstimate}>
+                <Text style={styles.costLabel}>Service Fees:</Text>
+                <Text style={styles.costValue}>Collection: KES 200</Text>
+                <Text style={styles.costValue}>Delivery: KES 250</Text>
+                <Text style={styles.costNote}>*Total: KES 450 + item cost</Text>
+              </View>
+            </ScrollView>
+            
+            <TouchableOpacity 
+              style={styles.submitButton}
+              onPress={handleCollectSubmit}
+            >
+              <LinearGradient
+                colors={['#10b981', '#34d399']}
+                style={styles.submitButtonGradient}
+              >
+                <Text style={styles.submitButtonText}>Request Collection & Delivery</Text>
+              </LinearGradient>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
 
   const fabIconRotation = fabRotation.interpolate({
     inputRange: [0, 1],
@@ -428,6 +760,11 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </LinearGradient>
       </View>
+
+      {/* Modals */}
+      {renderInfoModal()}
+      {renderFragileModal()}
+      {renderCollectModal()}
 
       {/* Package Creation Modal */}
       <PackageCreationModal
@@ -558,7 +895,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // FAB Styles
+  // Enhanced FAB Styles
   fabContainer: {
     position: 'absolute',
     right: 20,
@@ -586,9 +923,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  fabIcon: {
-    // Additional icon styling if needed
-  },
+  fabIcon: {},
 
   // FAB Overlay
   fabOverlay: {
@@ -604,7 +939,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
 
-  // FAB Options
+  // Enhanced FAB Options with Bubble Style
   fabOptionsContainer: {
     position: 'absolute',
     right: 20,
@@ -617,37 +952,244 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
   },
   fabOptionContainer: {
-    borderRadius: 16,
+    borderRadius: 20,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 12,
+    elevation: 12,
   },
   fabOptionGradient: {
-    paddingVertical: 16,
-    paddingHorizontal: 20,
-    minWidth: 200,
+    paddingVertical: 18,
+    paddingHorizontal: 24,
+    minWidth: 240,
+    borderRadius: 20,
+    // Glass morphism effect
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   fabOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
   fabOptionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.25)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
+    // Inner glow effect
+    shadowColor: '#fff',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   fabOptionLabel: {
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
     color: 'white',
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  infoButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+
+  // Info Modal Styles
+  infoModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  infoModalContainer: {
+    width: '100%',
+    maxWidth: 400,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  infoModalContent: {
+    padding: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  infoModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  infoModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+  },
+  infoModalClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  infoModalText: {
+    fontSize: 16,
+    color: '#ccc',
+    lineHeight: 24,
+    marginBottom: 24,
+  },
+  infoModalButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  infoModalButtonGradient: {
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  infoModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+
+  // Delivery Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContainer: {
+    height: screenHeight * 0.8,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  modalContent: {
+    flex: 1,
+    padding: 20,
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  modalSubtitle: {
+    fontSize: 16,
+    color: '#888',
+    marginBottom: 24,
+    lineHeight: 22,
+  },
+  modalScrollContent: {
+    flex: 1,
+  },
+
+  // Location Selection Styles
+  locationSection: {
+    marginBottom: 24,
+  },
+  locationLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  locationInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  locationText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+  },
+
+  // Service Note Styles
+  serviceNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+    gap: 12,
+  },
+  serviceNoteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#10b981',
+    lineHeight: 20,
+  },
+
+  // Cost Estimate Styles
+  costEstimate: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 24,
+  },
+  costLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 8,
+  },
+  costValue: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 4,
+  },
+  costNote: {
+    fontSize: 12,
+    color: '#888',
+    fontStyle: 'italic',
+    marginTop: 8,
+  },
+
+  // Submit Button Styles
+  submitButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    marginBottom: Platform.OS === 'ios' ? 34 : 20,
+  },
+  submitButtonGradient: {
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  submitButtonText: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
