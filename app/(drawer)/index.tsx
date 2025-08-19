@@ -16,7 +16,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import * as Location from 'expo-location';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
@@ -39,12 +38,6 @@ interface FABOption {
   glowColor: string;
   action: () => void;
   infoAction: () => void;
-}
-
-interface LocationData {
-  latitude: number;
-  longitude: number;
-  address?: string;
 }
 
 interface DeliveryInfo {
@@ -80,9 +73,6 @@ export default function HomeScreen() {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedInfo, setSelectedInfo] = useState<DeliveryInfo | null>(null);
   
-  // Location states
-  const [currentLocation, setCurrentLocation] = useState<LocationData | null>(null);
-  
   // User info (this would come from authentication/user context in real app)
   const [userInfo] = useState({
     name: 'Current User',
@@ -116,31 +106,9 @@ export default function HomeScreen() {
     };
 
     loop();
-    requestLocationPermission();
 
     return () => scrollX.stopAnimation();
   }, [scrollX]);
-
-  const requestLocationPermission = async () => {
-    try {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status === 'granted') {
-        const location = await Location.getCurrentPositionAsync({});
-        const address = await Location.reverseGeocodeAsync({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-        });
-        
-        setCurrentLocation({
-          latitude: location.coords.latitude,
-          longitude: location.coords.longitude,
-          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
-        });
-      }
-    } catch (error) {
-      console.error('Error getting location:', error);
-    }
-  };
 
   const calculateCost = () => {
     if (origin && destination) {
@@ -569,7 +537,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* FIXED: Animated Scrolling Section with proper text styling */}
+      {/* Animated Scrolling Section */}
       <View style={styles.locationsContainer}>
         <Text style={styles.sectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
@@ -689,7 +657,6 @@ export default function HomeScreen() {
         visible={showFragileModal}
         onClose={() => setShowFragileModal(false)}
         onSubmit={handleFragileSubmit}
-        currentLocation={currentLocation}
       />
 
       {/* Collect & Deliver Modal */}
@@ -697,7 +664,6 @@ export default function HomeScreen() {
         visible={showCollectModal}
         onClose={() => setShowCollectModal(false)}
         onSubmit={handleCollectSubmit}
-        currentLocation={currentLocation}
       />
     </SafeAreaView>
   );
@@ -711,19 +677,19 @@ const styles = StyleSheet.create({
   locationsContainer: { 
     paddingTop: 20, 
     paddingBottom: 20,
-    backgroundColor: '#0a0a0f', // FIXED: Ensure background
+    backgroundColor: '#0a0a0f',
   },
   sectionTitle: {
     fontSize: 24, 
     fontWeight: 'bold', 
-    color: '#ffffff', // FIXED: Ensure white color
+    color: '#ffffff',
     textAlign: 'center', 
     marginBottom: 15, 
-    opacity: 1, // FIXED: Ensure full opacity
+    opacity: 1,
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    zIndex: 10, // FIXED: Ensure text is on top
+    zIndex: 10,
   },
   animatedContainer: { 
     height: 60, 
