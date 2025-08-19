@@ -8,6 +8,7 @@ import {
   View,
   ScrollView,
   Animated,
+Modal,
 } from 'react-native';
 // ✅ CRITICAL FIX: Import from react-native-gesture-handler
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
