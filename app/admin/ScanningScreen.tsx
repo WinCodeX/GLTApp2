@@ -4,7 +4,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   Alert,
   Dimensions,
@@ -66,7 +66,7 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   }, []);
 
   useFocusEffect(
-    React.useCallback(() => {
+    useCallback(() => {
       loadUserStats();
       // NEW: Refresh printer status when screen comes into focus
       if (isBluetoothInitialized) {
