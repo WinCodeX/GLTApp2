@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Simplified version using direct hook
+// app/admin/settings.tsx - Updated to use global Bluetooth context
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -16,7 +16,7 @@ import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AdminLayout from '../../components/AdminLayout';
 import DeviceModal from '../../components/DeviceModal';
-import useBluetooth, { BluetoothDevice } from '../../hooks/useBluetooth';
+import { useBluetooth, BluetoothDevice } from '../../contexts/BluetoothContext';
 
 interface AppInfo {
   version: string;
@@ -27,17 +27,20 @@ interface AppInfo {
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
   
-  // Use simple Bluetooth hook
+  // Use global Bluetooth context
   const {
     requestPermissions,
     scanForDevices,
     connectToDevice,
     disconnectFromDevice,
     testPrint,
+    printText,
+    printReceipt,
     connectedPrinter,
     allDevices,
     isScanning,
     isPrintReady,
+    isBluetoothAvailable,
   } = useBluetooth();
   
   // Local state for UI
@@ -85,10 +88,29 @@ const SettingsScreen: React.FC = () => {
   };
 
   const handlePrinterConnect = async () => {
+    if (!isBluetoothAvailable) {
+      Alert.alert(
+        'Bluetooth Not Available',
+        'Bluetooth is not available in this environment (Expo Go doesn\'t support native Bluetooth). Please use a development build or production build.',
+        [{ text: 'OK', style: 'default' }]
+      );
+      return;
+    }
+
     const hasPermissions = await requestPermissions();
     if (hasPermissions) {
       setShowDeviceModal(true);
-      scanForDevices();
+      try {
+        scanForDevices();
+      } catch (error: any) {
+        Toast.show({
+          type: 'error',
+          text1: 'Scan Failed',
+          text2: error.message,
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      }
     } else {
       Alert.alert(
         'Permissions Required',
@@ -182,6 +204,78 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
+  const handleAdvancedPrintTest = async () => {
+    if (!isPrintReady) {
+      Toast.show({
+        type: 'warning',
+        text1: 'No Printer Ready',
+        text2: 'Please connect a printer first',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      return;
+    }
+
+    Alert.alert(
+      'Print Test Options',
+      'Choose what to print:',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Simple Text',
+          onPress: async () => {
+            try {
+              await printText('Hello from the app!\nThis is a test print.\nPrinter: ' + connectedPrinter?.name);
+              Toast.show({
+                type: 'success',
+                text1: 'Text Printed',
+                text2: 'Simple text sent to printer',
+                position: 'top',
+                visibilityTime: 3000,
+              });
+            } catch (error: any) {
+              Toast.show({
+                type: 'error',
+                text1: 'Print Failed',
+                text2: error.message,
+                position: 'top',
+                visibilityTime: 3000,
+              });
+            }
+          }
+        },
+        {
+          text: 'Sample Receipt',
+          onPress: async () => {
+            try {
+              await printReceipt({
+                packageCode: 'PKG-123456',
+                customerName: 'John Doe',
+                status: 'Delivered',
+                location: 'Main Office'
+              });
+              Toast.show({
+                type: 'success',
+                text1: 'Receipt Printed',
+                text2: 'Sample receipt sent to printer',
+                position: 'top',
+                visibilityTime: 3000,
+              });
+            } catch (error: any) {
+              Toast.show({
+                type: 'error',
+                text1: 'Print Failed',
+                text2: error.message,
+                position: 'top',
+                visibilityTime: 3000,
+              });
+            }
+          }
+        }
+      ]
+    );
+  };
+
   const handleLogout = () => {
     Alert.alert(
       'Confirm Logout',
@@ -227,8 +321,9 @@ const SettingsScreen: React.FC = () => {
             try {
               await disconnectFromDevice();
               await AsyncStorage.multiRemove([
-                'connected_printer', 
-                'bluetooth_cache'
+                'bluetooth_connected_printer', 
+                'bluetooth_cache',
+                'app_settings'
               ]);
               
               Toast.show({
@@ -286,9 +381,9 @@ const SettingsScreen: React.FC = () => {
   const renderPrinterConnectionSetting = () => {
     const statusText = connectedPrinter 
       ? `Connected to ${connectedPrinter.name} (${connectedPrinter.type.toUpperCase()})`
-      : 'No printer connected';
-    
-    const statusColor = connectedPrinter ? '#34C759' : '#a0aec0';
+      : isBluetoothAvailable 
+        ? 'No printer connected' 
+        : 'Bluetooth not available (Expo Go)';
     
     return renderSettingItem(
       'print',
@@ -325,14 +420,17 @@ const SettingsScreen: React.FC = () => {
         ) : (
           // When no printer is connected, show Connect button
           <TouchableOpacity
-            style={styles.connectButton}
+            style={[styles.connectButton, !isBluetoothAvailable && styles.disabledButton]}
             onPress={handlePrinterConnect}
+            disabled={!isBluetoothAvailable}
           >
             <LinearGradient
-              colors={['#667eea', '#764ba2']}
+              colors={!isBluetoothAvailable ? ['#666', '#777'] : ['#667eea', '#764ba2']}
               style={styles.connectButtonGradient}
             >
-              <Text style={styles.connectButtonText}>Connect</Text>
+              <Text style={styles.connectButtonText}>
+                {!isBluetoothAvailable ? 'Not Available' : 'Connect'}
+              </Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -340,44 +438,32 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => (
-    <TouchableOpacity
-      style={styles.deviceItem}
-      onPress={() => connectToDeviceHandler(item)}
-    >
-      <View style={styles.deviceInfo}>
-        <MaterialIcons
-          name={
-            item.deviceType === 'printer' ? 'print' : 
-            item.deviceType === 'scanner' ? 'qr-code-scanner' : 
-            'bluetooth'
-          }
-          size={24}
-          color="#a0aec0"
-        />
-        <View style={styles.deviceText}>
-          <Text style={styles.deviceName}>{item.name}</Text>
-          <Text style={styles.deviceStatus}>
-            {item.type.toUpperCase()} • {item.deviceType}
-          </Text>
-          <Text style={styles.deviceAddress}>{item.address}</Text>
-          {item.rssi && (
-            <Text style={styles.deviceRssi}>Signal: {item.rssi} dBm</Text>
-          )}
-        </View>
-      </View>
-      <View style={styles.deviceStatusBadge}>
-        <Text style={styles.deviceStatusText}>Connect</Text>
-      </View>
-    </TouchableOpacity>
-  );
-
   const renderContent = () => (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
       {/* Printer Section */}
       <View style={styles.section}>
         <Text style={styles.sectionTitle}>Printer</Text>
         {renderPrinterConnectionSetting()}
+        
+        {/* Advanced Print Test when connected */}
+        {isPrintReady && (
+          <TouchableOpacity
+            style={styles.advancedTestCard}
+            onPress={handleAdvancedPrintTest}
+          >
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.advancedTestGradient}
+            >
+              <MaterialIcons name="receipt" size={24} color="#fff" />
+              <View style={styles.advancedTestText}>
+                <Text style={styles.advancedTestTitle}>Advanced Print Test</Text>
+                <Text style={styles.advancedTestSubtitle}>Test different print formats</Text>
+              </View>
+              <MaterialIcons name="chevron-right" size={20} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* General Settings */}
@@ -510,7 +596,19 @@ const SettingsScreen: React.FC = () => {
         isScanning={isScanning}
         connectToDevice={connectToDeviceHandler}
         closeModal={() => setShowDeviceModal(false)}
-        onRescan={scanForDevices}
+        onRescan={() => {
+          try {
+            scanForDevices();
+          } catch (error: any) {
+            Toast.show({
+              type: 'error',
+              text1: 'Rescan Failed',
+              text2: error.message,
+              position: 'top',
+              visibilityTime: 3000,
+            });
+          }
+        }}
       />
     </ScrollView>
   );
@@ -634,6 +732,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
   },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  
+  advancedTestCard: {
+    borderRadius: 16,
+    overflow: 'hidden',
+    marginTop: 12,
+  },
+  advancedTestGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 20,
+  },
+  advancedTestText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  advancedTestTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  advancedTestSubtitle: {
+    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontWeight: '500',
+  },
+  
   logoutButton: {
     borderRadius: 12,
     overflow: 'hidden',
