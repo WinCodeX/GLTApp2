@@ -1,4 +1,4 @@
-// components/DeviceModal.tsx - Simple device modal following the working heart rate monitor pattern
+// components/DeviceModal.tsx - Updated to use global Bluetooth context
 import React, { FC, useCallback } from "react";
 import {
   FlatList,
@@ -13,7 +13,7 @@ import {
 } from "react-native";
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
-import { BluetoothDevice } from '../hooks/useBluetooth';
+import { BluetoothDevice } from '../contexts/BluetoothContext'; // FIXED: Import from context
 
 type DeviceModalListItemProps = {
   item: ListRenderItemInfo<BluetoothDevice>;
