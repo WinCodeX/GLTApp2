@@ -59,7 +59,16 @@
       "expo-web-browser",
       "expo-dev-client",
       "react-native-ble-plx",
-      "react-native-permissions"
+      [
+        "react-native-permissions",
+        {
+          "iosPermissionsArray": [
+            "NSBluetoothAlwaysUsageDescription",
+            "NSBluetoothPeripheralUsageDescription", 
+            "NSLocationWhenInUseUsageDescription"
+          ]
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true
