@@ -117,11 +117,14 @@ const DeviceModal: FC<DeviceModalProps> = (props) => {
               </View>
             ) : (
               <FlatList
+                style={{ flex: 1 }} // FIXED: Add flex to FlatList itself
                 contentContainerStyle={modalStyle.modalFlatlistContainer}
                 data={devices}
                 renderItem={renderDeviceModalListItem}
                 keyExtractor={(item) => item.id}
-                showsVerticalScrollIndicator={false}
+                showsVerticalScrollIndicator={true} // FIXED: Show scroll indicator so users know they can scroll
+                nestedScrollEnabled={true} // FIXED: Enable nested scrolling
+                bounces={true} // FIXED: Enable bouncing for better UX
                 ListEmptyComponent={
                   <View style={modalStyle.emptyDeviceList}>
                     <MaterialIcons name="bluetooth-disabled" size={48} color="#a0aec0" />
@@ -133,7 +136,10 @@ const DeviceModal: FC<DeviceModalProps> = (props) => {
                 }
               />
             )}
+          </View>
 
+          {/* FIXED: Move rescan button outside of scrollable content */}
+          <View style={modalStyle.modalFooter}>
             <TouchableOpacity
               style={modalStyle.rescanButton}
               onPress={onRescan}
@@ -166,7 +172,8 @@ const modalStyle = StyleSheet.create({
     backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
-    maxHeight: '70%',
+    maxHeight: '85%', // FIXED: Increased from 70% to 85% for more space
+    minHeight: '50%', // FIXED: Added minimum height
     borderWidth: 1,
     borderTopColor: '#2d3748',
     borderLeftColor: '#2d3748',
@@ -189,10 +196,20 @@ const modalStyle = StyleSheet.create({
     padding: 4,
   },
   modalContent: {
-    padding: 20,
+    flex: 1, // FIXED: Use flex instead of padding to manage space better
+    paddingHorizontal: 20,
+    paddingTop: 10, // FIXED: Reduced top padding
+  },
+  modalFooter: {
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: '#2d3748',
   },
   modalFlatlistContainer: {
     flexGrow: 1,
+    paddingBottom: 10, // FIXED: Reduced bottom padding since button is now separate
   },
   scanningContainer: {
     alignItems: 'center',
@@ -278,7 +295,7 @@ const modalStyle = StyleSheet.create({
   rescanButton: {
     borderRadius: 12,
     overflow: 'hidden',
-    marginTop: 16,
+    // FIXED: Removed marginTop since button is now in separate footer
   },
   rescanButtonGradient: {
     flexDirection: 'row',
