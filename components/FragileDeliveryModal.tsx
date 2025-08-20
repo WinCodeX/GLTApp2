@@ -192,7 +192,7 @@ const LocationPickerModal = ({
       onPress={() => handleLocationTap(item)}
     >
       <View style={styles.locationIcon}>
-        <Feather name="map-pin" size={20} color="#ff6b6b" />
+        <Feather name="map-pin" size={20} color="#f97316" />
       </View>
       <View style={styles.locationInfo}>
         <Text style={styles.locationName}>{item.name}</Text>
@@ -201,14 +201,14 @@ const LocationPickerModal = ({
       </View>
       {selectedLocation?.latitude === item.latitude && 
        selectedLocation?.longitude === item.longitude && (
-        <Feather name="check-circle" size={20} color="#ff6b6b" />
+        <Feather name="check-circle" size={20} color="#f97316" />
       )}
     </TouchableOpacity>
   );
 
   return (
     <Modal visible={visible} transparent animationType="none">
-      <StatusBar barStyle="light-content" />
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
       <SafeAreaView style={styles.mapModalSafeArea}>
         <Animated.View
           style={[
@@ -261,7 +261,7 @@ const LocationPickerModal = ({
                 </View>
 
                 <View style={[styles.mapPin, { top: '60%', left: '25%' }]}>
-                  <View style={[styles.mapPinInner, { backgroundColor: '#ef4444' }]}>
+                  <View style={[styles.mapPinInner, { backgroundColor: '#f97316' }]}>
                     <Text style={styles.mapPinText}>📍</Text>
                   </View>
                   <Text style={styles.mapPinLabel}>Selected</Text>
@@ -302,7 +302,7 @@ const LocationPickerModal = ({
                 value={searchQuery}
                 onChangeText={handleSearch}
               />
-              {isSearching && <ActivityIndicator size="small" color="#ff6b6b" />}
+              {isSearching && <ActivityIndicator size="small" color="#f97316" />}
             </View>
 
             <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
@@ -545,7 +545,7 @@ export default function FragileDeliveryModal({
       
       {locationError && (
         <View style={styles.errorBanner}>
-          <Feather name="alert-circle" size={16} color="#ef4444" />
+          <Feather name="alert-circle" size={16} color="#ea580c" />
           <Text style={styles.errorText}>{locationError}</Text>
           <TouchableOpacity onPress={requestLocationPermission}>
             <Text style={styles.retryText}>Retry</Text>
@@ -555,7 +555,7 @@ export default function FragileDeliveryModal({
       
       {isLocationLoading && (
         <View style={styles.loadingBanner}>
-          <ActivityIndicator size="small" color="#ff6b6b" />
+          <ActivityIndicator size="small" color="#f97316" />
           <Text style={styles.loadingText}>Getting your location...</Text>
         </View>
       )}
@@ -569,7 +569,7 @@ export default function FragileDeliveryModal({
           <Text style={[styles.locationText, pickupLocation && styles.locationTextSelected]}>
             {pickupLocation?.address || 'Tap to select pickup location'}
           </Text>
-          <Feather name="map" size={20} color={pickupLocation ? "#ff6b6b" : "#666"} />
+          <Feather name="map" size={20} color={pickupLocation ? "#f97316" : "#666"} />
         </TouchableOpacity>
       </View>
       
@@ -582,12 +582,12 @@ export default function FragileDeliveryModal({
           <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
             {deliveryLocation?.address || 'Tap to select delivery location'}
           </Text>
-          <Feather name="map" size={20} color={deliveryLocation ? "#ff6b6b" : "#666"} />
+          <Feather name="map" size={20} color={deliveryLocation ? "#f97316" : "#666"} />
         </TouchableOpacity>
       </View>
 
       <View style={styles.fragileInfo}>
-        <Feather name="alert-triangle" size={20} color="#ff6b6b" />
+        <Feather name="alert-triangle" size={20} color="#f97316" />
         <View style={styles.fragileInfoText}>
           <Text style={styles.fragileInfoTitle}>Special Handling Included</Text>
           <Text style={styles.fragileInfoDescription}>
@@ -668,7 +668,7 @@ export default function FragileDeliveryModal({
       </View>
 
       <View style={styles.fragileNotice}>
-        <Feather name="info" size={16} color="#ff6b6b" />
+        <Feather name="info" size={16} color="#f97316" />
         <Text style={styles.fragileNoticeText}>
           Our riders are specially trained to handle fragile items with maximum care
         </Text>
@@ -689,7 +689,7 @@ export default function FragileDeliveryModal({
               <Text style={styles.routeLabel}>From</Text>
               <Text style={styles.routeAddress}>{pickupLocation?.address}</Text>
             </View>
-            <Feather name="arrow-right" size={20} color="#ff6b6b" />
+            <Feather name="arrow-right" size={20} color="#f97316" />
             <View style={styles.routePoint}>
               <Text style={styles.routeLabel}>To</Text>
               <Text style={styles.routeAddress}>{deliveryLocation?.address}</Text>
@@ -718,15 +718,15 @@ export default function FragileDeliveryModal({
           <Text style={styles.confirmationSectionTitle}>⚠️ Fragile Service</Text>
           <View style={styles.serviceFeatures}>
             <View style={styles.serviceFeature}>
-              <Feather name="shield" size={16} color="#ff6b6b" />
+              <Feather name="shield" size={16} color="#f97316" />
               <Text style={styles.serviceFeatureText}>Special handling care</Text>
             </View>
             <View style={styles.serviceFeature}>
-              <Feather name="clock" size={16} color="#ff6b6b" />
+              <Feather name="clock" size={16} color="#f97316" />
               <Text style={styles.serviceFeatureText}>Priority delivery</Text>
             </View>
             <View style={styles.serviceFeature}>
-              <Feather name="phone" size={16} color="#ff6b6b" />
+              <Feather name="phone" size={16} color="#f97316" />
               <Text style={styles.serviceFeatureText}>Real-time updates</Text>
             </View>
           </View>
@@ -830,6 +830,7 @@ export default function FragileDeliveryModal({
           <KeyboardAvoidingView 
             style={styles.keyboardContainer}
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
           >
             <View style={styles.overlay}>
               <Animated.View
@@ -906,7 +907,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
-  // Header
+  // Header - Fixed padding for proper status bar handling
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -945,7 +946,7 @@ const styles = StyleSheet.create({
   },
   progressForeground: {
     height: '100%',
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#f97316',
     borderRadius: 2,
   },
   progressText: {
@@ -985,7 +986,7 @@ const styles = StyleSheet.create({
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'rgba(234, 88, 12, 0.1)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
@@ -994,17 +995,17 @@ const styles = StyleSheet.create({
   errorText: {
     flex: 1,
     fontSize: 14,
-    color: '#ef4444',
+    color: '#ea580c',
   },
   retryText: {
     fontSize: 14,
-    color: '#ef4444',
+    color: '#ea580c',
     fontWeight: '600',
   },
   loadingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
     borderRadius: 8,
     padding: 12,
     marginBottom: 16,
@@ -1012,7 +1013,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#ff6b6b',
+    color: '#f97316',
   },
   
   // Location section
@@ -1032,11 +1033,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
+    borderColor: 'rgba(249, 115, 22, 0.3)',
   },
   locationInputSelected: {
-    borderColor: '#ff6b6b',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    borderColor: '#f97316',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
   },
   locationText: {
     flex: 1,
@@ -1051,7 +1052,7 @@ const styles = StyleSheet.create({
   fragileInfo: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
     borderRadius: 12,
     padding: 16,
     marginTop: 10,
@@ -1063,12 +1064,12 @@ const styles = StyleSheet.create({
   fragileInfoTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ff6b6b',
+    color: '#f97316',
     marginBottom: 4,
   },
   fragileInfoDescription: {
     fontSize: 14,
-    color: '#ff6b6b',
+    color: '#f97316',
     lineHeight: 18,
   },
   
@@ -1086,7 +1087,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     minHeight: 52,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
+    borderColor: 'rgba(249, 115, 22, 0.3)',
   },
   textArea: {
     minHeight: 100,
@@ -1098,7 +1099,7 @@ const styles = StyleSheet.create({
   fragileNotice: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
     borderRadius: 8,
     padding: 10,
     marginTop: 10,
@@ -1107,7 +1108,7 @@ const styles = StyleSheet.create({
   fragileNoticeText: {
     flex: 1,
     fontSize: 14,
-    color: '#ff6b6b',
+    color: '#f97316',
     lineHeight: 18,
   },
   
@@ -1124,7 +1125,7 @@ const styles = StyleSheet.create({
   confirmationSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#ff6b6b',
+    color: '#f97316',
     marginBottom: 10,
   },
   confirmationDetail: {
@@ -1203,7 +1204,7 @@ const styles = StyleSheet.create({
   totalCostValue: {
     fontSize: 18,
     fontWeight: '700',
-    color: '#ff6b6b',
+    color: '#f97316',
   },
   
   // Navigation
@@ -1238,7 +1239,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#f97316',
     gap: 8,
   },
   nextButtonText: {
@@ -1252,7 +1253,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#f97316',
     gap: 8,
   },
   submitButtonText: {
@@ -1287,7 +1288,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 50 : 30,
+    paddingTop: Platform.OS === 'ios' ? 50 : 40,
     paddingBottom: 15,
     backgroundColor: 'rgba(26, 26, 46, 0.9)',
   },
@@ -1308,7 +1309,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    backgroundColor: 'rgba(249, 115, 22, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -1345,7 +1346,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: '#ef4444',
+    backgroundColor: '#ea580c',
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 3,
@@ -1388,7 +1389,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 107, 0.3)',
+    borderColor: 'rgba(249, 115, 22, 0.3)',
   },
   locationConfirmName: {
     fontSize: 18,
@@ -1402,7 +1403,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   confirmLocationButton: {
-    backgroundColor: '#ff6b6b',
+    backgroundColor: '#f97316',
     borderRadius: 8,
     paddingVertical: 12,
     alignItems: 'center',
@@ -1449,7 +1450,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(255, 255, 255, 0.05)',
   },
   selectedLocationItem: {
-    backgroundColor: 'rgba(255, 107, 107, 0.1)',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
     borderRadius: 8,
     borderBottomWidth: 0,
   },
@@ -1457,7 +1458,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(255, 107, 107, 0.2)',
+    backgroundColor: 'rgba(249, 115, 22, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
