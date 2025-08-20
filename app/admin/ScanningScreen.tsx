@@ -1,12 +1,12 @@
-// app/admin/ScanningScreen.tsx - Updated to use global Bluetooth context
+// app/admin/ScanningScreen.tsx - Updated with styled modal
+
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
 import * as SecureStore from 'expo-secure-store';
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
-  Alert,
   Dimensions,
   RefreshControl,
   ScrollView,
@@ -18,9 +18,10 @@ import {
 import Toast from 'react-native-toast-message';
 import AdminLayout from '../../components/AdminLayout';
 import BulkScanner from '../../components/BulkScanner';
+import PrinterConnectionModal from '../../components/PrinterConnectionModal';
 import QRScanner from '../../components/QRScanner';
-import api from '../../lib/api';
 import { useBluetooth } from '../../contexts/BluetoothContext';
+import api from '../../lib/api';
 
 const { width } = Dimensions.get('window');
 
@@ -50,6 +51,15 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   const [refreshing, setRefreshing] = useState(false);
   const [loading, setLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<string>(userRole);
+  
+  // Styled modal state
+  const [showPrinterModal, setShowPrinterModal] = useState(false);
+  const [printerModalConfig, setPrinterModalConfig] = useState({
+    title: '',
+    message: '',
+    isBluetoothUnavailable: false,
+    onContinue: () => {},
+  });
 
   // Use global Bluetooth context
   const { 
@@ -123,41 +133,38 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     }
   };
 
+  const showPrinterConnectionModal = (actionType: string, title: string, message: string, isBluetoothUnavailable = false) => {
+    setPrinterModalConfig({
+      title,
+      message,
+      isBluetoothUnavailable,
+      onContinue: () => {
+        setSelectedAction(actionType);
+        setShowPrinterModal(false);
+        setShowQRScanner(true);
+      },
+    });
+    setShowPrinterModal(true);
+  };
+
   const handleQuickScan = async (actionType: string) => {
     if (actionType === 'print') {
       if (!isBluetoothAvailable) {
-        Alert.alert(
+        showPrinterConnectionModal(
+          actionType,
           'Bluetooth Not Available',
           'Bluetooth is not available in this environment (Expo Go). Printing features require a development build.',
-          [
-            { text: 'Continue Anyway', onPress: () => {
-              setSelectedAction(actionType);
-              setShowQRScanner(true);
-            }},
-            { text: 'Cancel', style: 'cancel' }
-          ]
+          true
         );
         return;
       }
       
       if (!isPrintReady) {
-        Alert.alert(
+        showPrinterConnectionModal(
+          actionType,
           'Printer Not Ready',
-          'No printer connected. Please connect a printer in Settings first.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Go to Settings', 
-              onPress: () => router.push('/admin/settings')
-            },
-            { 
-              text: 'Continue Without Printer', 
-              onPress: () => {
-                setSelectedAction(actionType);
-                setShowQRScanner(true);
-              }
-            }
-          ]
+          'No printer connected. Please connect a printer in Settings first to enable printing functionality.',
+          false
         );
         return;
       }
@@ -170,38 +177,21 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   const handleBulkScan = async (actionType: string) => {
     if (actionType === 'print') {
       if (!isBluetoothAvailable) {
-        Alert.alert(
+        showPrinterConnectionModal(
+          actionType,
           'Bluetooth Not Available',
           'Bluetooth is not available in this environment (Expo Go). Printing features require a development build.',
-          [
-            { text: 'Continue Anyway', onPress: () => {
-              setSelectedAction(actionType);
-              setShowBulkScanner(true);
-            }},
-            { text: 'Cancel', style: 'cancel' }
-          ]
+          true
         );
         return;
       }
       
       if (!isPrintReady) {
-        Alert.alert(
+        showPrinterConnectionModal(
+          actionType,
           'Printer Required for Bulk Print',
-          'Please connect a printer in Settings before bulk printing.',
-          [
-            { text: 'Cancel', style: 'cancel' },
-            { 
-              text: 'Go to Settings', 
-              onPress: () => router.push('/admin/settings')
-            },
-            { 
-              text: 'Continue Without Printer', 
-              onPress: () => {
-                setSelectedAction(actionType);
-                setShowBulkScanner(true);
-              }
-            }
-          ]
+          'Please connect a printer in Settings before performing bulk printing operations.',
+          false
         );
         return;
       }
@@ -218,65 +208,30 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     // Auto-print if this was a print action
     if (selectedAction === 'print') {
       if (isPrintReady && isBluetoothAvailable) {
-        Alert.alert(
-          'Print Receipt',
-          `Print receipt for package ${result.package_code || result.code || 'UNKNOWN'}?`,
-          [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Print Receipt',
-              onPress: async () => {
-                try {
-                  await printReceipt({
-                    packageCode: result.package_code || result.code,
-                    customerName: result.customer_name || 'N/A',
-                    status: result.status || 'Processed',
-                    location: result.location || 'Current Location',
-                    timestamp: new Date().toISOString()
-                  });
-                  Toast.show({
-                    type: 'success',
-                    text1: 'Receipt Printed',
-                    text2: `Receipt printed for ${result.package_code || result.code}`,
-                    position: 'top',
-                    visibilityTime: 3000,
-                  });
-                } catch (error: any) {
-                  Toast.show({
-                    type: 'error',
-                    text1: 'Print Failed',
-                    text2: error.message,
-                    position: 'top',
-                    visibilityTime: 3000,
-                  });
-                }
-              }
-            },
-            {
-              text: 'Test Print',
-              onPress: async () => {
-                try {
-                  await testPrint();
-                  Toast.show({
-                    type: 'success',
-                    text1: 'Test Print Sent',
-                    text2: `Test sent to ${connectedPrinter?.name}`,
-                    position: 'top',
-                    visibilityTime: 3000,
-                  });
-                } catch (error: any) {
-                  Toast.show({
-                    type: 'error',
-                    text1: 'Test Print Failed',
-                    text2: error.message,
-                    position: 'top',
-                    visibilityTime: 3000,
-                  });
-                }
-              }
-            }
-          ]
-        );
+        try {
+          await printReceipt({
+            packageCode: result.package_code || result.code,
+            customerName: result.customer_name || 'N/A',
+            status: result.status || 'Processed',
+            location: result.location || 'Current Location',
+            timestamp: new Date().toISOString()
+          });
+          Toast.show({
+            type: 'success',
+            text1: 'Receipt Printed',
+            text2: `Receipt printed for ${result.package_code || result.code}`,
+            position: 'top',
+            visibilityTime: 3000,
+          });
+        } catch (error: any) {
+          Toast.show({
+            type: 'error',
+            text1: 'Print Failed',
+            text2: error.message,
+            position: 'top',
+            visibilityTime: 3000,
+          });
+        }
       } else {
         // No printer available, just show success
         Toast.show({
@@ -488,7 +443,13 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     if (['admin', 'warehouse', 'agent'].includes(currentUserRole)) {
       router.push('/admin/ReportsScreen');
     } else {
-      Alert.alert('Access Denied', 'You do not have permission to view reports.');
+      Toast.show({
+        type: 'warning',
+        text1: 'Access Denied',
+        text2: 'You do not have permission to view reports.',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
@@ -795,6 +756,19 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
         actionType={selectedAction as any}
         userRole={currentUserRole as any}
         onBulkComplete={handleBulkComplete}
+      />
+
+      <PrinterConnectionModal
+        visible={showPrinterModal}
+        onClose={() => setShowPrinterModal(false)}
+        onGoToSettings={() => {
+          setShowPrinterModal(false);
+          router.push('/admin/settings');
+        }}
+        onContinueAnyway={printerModalConfig.onContinue}
+        title={printerModalConfig.title}
+        message={printerModalConfig.message}
+        isBluetoothUnavailable={printerModalConfig.isBluetoothUnavailable}
       />
     </ScrollView>
   );

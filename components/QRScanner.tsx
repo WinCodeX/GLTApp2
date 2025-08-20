@@ -1,30 +1,29 @@
-// components/QRScanner.tsx - Updated to use global Bluetooth context
+// components/QRScanner.tsx - Updated with new action flows
 
-import React, { useState, useEffect, useRef } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  TouchableOpacity,
-  Modal,
-  ScrollView,
-  ActivityIndicator,
-  Vibration,
-  Dimensions,
-  SafeAreaView,
-  Animated,
-  Alert,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import Toast from 'react-native-toast-message';
+import { Camera, CameraView } from 'expo-camera';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as SecureStore from 'expo-secure-store';
+import React, { useEffect, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  Dimensions,
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  Vibration,
+  View,
+} from 'react-native';
+import Toast from 'react-native-toast-message';
+import { useBluetooth } from '../contexts/BluetoothContext';
 import api from '../lib/api';
+import GlobalPrintService from '../services/GlobalPrintService';
 import OfflineScanningService from '../services/OfflineScanningService';
-import GlobalPrintService from '../services/GlobalPrintService'; // FIXED: Use new service
-import { useBluetooth } from '../contexts/BluetoothContext'; // FIXED: Use global context
 
 const { width, height } = Dimensions.get('window');
 
@@ -88,7 +87,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const [isOnline, setIsOnline] = useState(true);
   const cameraRef = useRef<CameraView>(null);
   
-  // FIXED: Use global Bluetooth context
   const bluetoothContext = useBluetooth();
   
   // Animation values
@@ -96,7 +94,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
   const offlineService = OfflineScanningService.getInstance();
-  const printService = GlobalPrintService.getInstance(); // FIXED: Use new service
+  const printService = GlobalPrintService.getInstance();
 
   useEffect(() => {
     requestCameraPermission();
@@ -257,8 +255,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
         setScanResult(packageData);
         
         // Handle different action flows based on defaultAction and userRole
-        if (defaultAction) {
-          await handleDefaultAction(defaultAction, packageData);
+        if (defaultAction === 'print') {
+          // For print action, automatically print after successful scan
+          await handlePrintAction(packageData.package);
+          setTimeout(() => {
+            setScanned(false);
+            setScanResult(null);
+            onClose();
+          }, 2000);
         } else {
           // Show action modal for user to choose
           setShowActionModal(true);
@@ -301,105 +305,16 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   };
 
-  const handleDefaultAction = async (action: string, packageData: ScanResult) => {
-    const hasAction = packageData.available_actions.some(a => a.action === action);
-    
-    if (!hasAction) {
-      Toast.show({
-        type: 'info',
-        text1: 'Action Not Available',
-        text2: `Cannot ${getActionLabel(action).toLowerCase()} - package is in ${packageData.package.state_display} state`,
-        position: 'top',
-        visibilityTime: 4000,
-      });
-      setScanned(false);
-      return;
-    }
-
-    // Different flows for different actions
-    switch (action) {
-      case 'give_to_receiver':
-        showGiveToReceiverConfirmation(packageData);
-        break;
-      
-      case 'collect_from_sender':
-        showCollectFromSenderOptions(packageData);
-        break;
-      
-      case 'print':
-        await performAction(action);
-        break;
-      
-      default:
-        setShowActionModal(true);
-        break;
-    }
-  };
-
-  const showGiveToReceiverConfirmation = (packageData: ScanResult) => {
-    Alert.alert(
-      'Confirm Package Handover',
-      `Do you want to give this package to the receiver?\n\nPackage: ${packageData.package.code}\nReceiver: ${packageData.package.receiver_name}\nPhone: ${packageData.package.receiver_phone}\nRoute: ${packageData.package.route_description}`,
-      [
-        { 
-          text: 'Cancel', 
-          style: 'cancel',
-          onPress: () => {
-            setScanned(false);
-            setScanResult(null);
-          }
-        },
-        { 
-          text: 'Give to Receiver', 
-          style: 'default',
-          onPress: async () => {
-            await performAction('give_to_receiver');
-          }
-        }
-      ]
-    );
-  };
-
-  const showCollectFromSenderOptions = (packageData: ScanResult) => {
-    Alert.alert(
-      'Package Collection',
-      `Package: ${packageData.package.code}\nSender: ${packageData.package.sender_name}\nRoute: ${packageData.package.route_description}\n\nWhat would you like to do?`,
-      [
-        { 
-          text: 'Cancel', 
-          style: 'cancel',
-          onPress: () => {
-            setScanned(false);
-            setScanResult(null);
-          }
-        },
-        { 
-          text: 'Just Collect', 
-          style: 'default',
-          onPress: async () => {
-            await performAction('collect_from_sender');
-          }
-        },
-        { 
-          text: 'Collect & Print Receipt', 
-          style: 'default',
-          onPress: async () => {
-            await performAction('collect_from_sender');
-            // Print receipt after successful collection
-            setTimeout(async () => {
-              await handlePrintAction(packageData.package);
-            }, 1000);
-          }
-        }
-      ]
-    );
-  };
-
   const processCachedPackage = (cached: any, packageCode: string) => {
     setScanResult(cached);
     
-    if (defaultAction) {
-      handleDefaultAction(defaultAction, cached);
+    if (defaultAction === 'print') {
+      handlePrintAction(cached.package);
+      setTimeout(() => {
+        setScanned(false);
+        setScanResult(null);
+        onClose();
+      }, 2000);
     } else {
       setShowActionModal(true);
     }
@@ -434,11 +349,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setProcessingAction(true);
 
     try {
-      // If it's a print action, handle printing first using global context
-      if (actionType === 'print' && scanResult) {
-        await handlePrintAction(scanResult.package);
-      }
-
       const online = await offlineService.isOnline();
       
       if (!online) {
@@ -569,12 +479,29 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   };
 
-  // FIXED: Use global Bluetooth context for printing
+  const performActionWithPrint = async (actionType: string) => {
+    if (!scanResult) return;
+    
+    setProcessingAction(true);
+    
+    try {
+      // First perform the action
+      await performAction(actionType);
+      
+      // Then print the receipt
+      await handlePrintAction(scanResult.package);
+      
+    } catch (error) {
+      console.error('Action with print failed:', error);
+    } finally {
+      setProcessingAction(false);
+    }
+  };
+
   const handlePrintAction = async (packageData: Package) => {
     try {
       console.log('Printing receipt for package:', packageData.code);
       
-      // FIXED: Use global print service with context
       const result = await printService.printPackage(bluetoothContext, {
         code: packageData.code,
         receiver_name: packageData.receiver_name,
@@ -586,6 +513,14 @@ const QRScanner: React.FC<QRScannerProps> = ({
       if (!result.success) {
         throw new Error(result.message);
       }
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Receipt Printed',
+        text2: `Receipt printed for ${packageData.code}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
       
     } catch (error: any) {
       console.error('Print failed:', error);
@@ -606,19 +541,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
         position: 'top',
         visibilityTime: 4000,
       });
-    }
-  };
-
-  const getActionLabel = (action: string): string => {
-    switch (action) {
-      case 'collect_from_sender': return 'Collect from Sender';
-      case 'collect': return 'Collect from Agent';
-      case 'deliver': return 'Mark as Delivered';
-      case 'give_to_receiver': return 'Give to Receiver';
-      case 'print': return 'Print Receipt';
-      case 'process': return 'Process Package';
-      case 'confirm_receipt': return 'Confirm Receipt';
-      default: return action;
     }
   };
 
@@ -693,6 +615,195 @@ const QRScanner: React.FC<QRScannerProps> = ({
     inputRange: [0, 0.5, 1],
     outputRange: ['#667eea', '#764ba2', '#667eea'],
   });
+
+  const renderActionButtons = () => {
+    if (!scanResult || !defaultAction) return null;
+
+    switch (defaultAction) {
+      case 'collect_from_sender':
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#667eea' }]}
+              onPress={() => performAction('collect_from_sender')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="how-to-reg" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Collect Package</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#FF9500' }]}
+              onPress={() => performActionWithPrint('collect_from_sender')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="print" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Collect and Print</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+      case 'collect':
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#9C27B0' }]}
+              onPress={() => performAction('collect')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="local-shipping" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Collect from Agent</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#FF9500' }]}
+              onPress={() => handlePrintAction(scanResult.package)}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="print" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Print</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+      case 'deliver':
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#34C759' }]}
+              onPress={() => performAction('deliver')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="check-circle" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Deliver Package</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+      case 'give_to_receiver':
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#FF6B35' }]}
+              onPress={() => performAction('give_to_receiver')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="person-pin" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Give to Client</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+      case 'confirm_receipt':
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={[styles.actionButton, { backgroundColor: '#34C759' }]}
+              onPress={() => performAction('confirm_receipt')}
+              disabled={processingAction}
+            >
+              {processingAction ? (
+                <ActivityIndicator color="#fff" />
+              ) : (
+                <>
+                  <MaterialIcons name="done-all" size={20} color="#fff" />
+                  <Text style={styles.actionButtonText}>Confirm Receipt</Text>
+                </>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+
+      default:
+        return (
+          <View style={styles.actionButtons}>
+            <TouchableOpacity
+              style={styles.cancelButton}
+              onPress={() => setShowActionModal(false)}
+              disabled={processingAction}
+            >
+              <Text style={styles.cancelButtonText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+        );
+    }
+  };
 
   if (hasPermission === null) {
     return (
@@ -848,45 +959,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
                 </ScrollView>
               )}
 
-              <View style={styles.actionButtons}>
-                {scanResult?.available_actions.map((action) => (
-                  <TouchableOpacity
-                    key={action.action}
-                    style={[
-                      styles.actionButton,
-                      getActionButtonStyle(action.action),
-                    ]}
-                    onPress={() => performAction(action.action)}
-                    disabled={processingAction}
-                  >
-                    <LinearGradient
-                      colors={getActionGradient(action.action)}
-                      style={styles.actionButtonGradient}
-                    >
-                      {processingAction ? (
-                        <ActivityIndicator color="#fff" />
-                      ) : (
-                        <>
-                          <MaterialIcons 
-                            name={getActionIcon(action.action)} 
-                            size={20} 
-                            color="#fff" 
-                          />
-                          <Text style={styles.actionButtonText}>{action.label}</Text>
-                        </>
-                      )}
-                    </LinearGradient>
-                  </TouchableOpacity>
-                ))}
-                
-                <TouchableOpacity
-                  style={styles.cancelButton}
-                  onPress={() => setShowActionModal(false)}
-                  disabled={processingAction}
-                >
-                  <Text style={styles.cancelButtonText}>Cancel</Text>
-                </TouchableOpacity>
-              </View>
+              {renderActionButtons()}
             </View>
           </View>
         </Modal>
@@ -922,36 +995,6 @@ const getActionLabel = (action: string): string => {
     case 'process': return 'Process Package';
     case 'confirm_receipt': return 'Confirm Receipt';
     default: return action;
-  }
-};
-
-const getActionButtonStyle = (action: string) => {
-  return { borderRadius: 12, overflow: 'hidden' };
-};
-
-const getActionGradient = (action: string): string[] => {
-  switch (action) {
-    case 'collect_from_sender': 
-    case 'collect': return ['#667eea', '#764ba2'];
-    case 'deliver': return ['#34C759', '#30A46C'];
-    case 'give_to_receiver': return ['#FF6B35', '#FF5722'];
-    case 'print': return ['#FF9500', '#FF8C00'];
-    case 'confirm_receipt': return ['#764ba2', '#667eea'];
-    case 'process': return ['#9C27B0', '#673AB7'];
-    default: return ['#667eea', '#764ba2'];
-  }
-};
-
-const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
-  switch (action) {
-    case 'collect_from_sender': return 'how-to-reg';
-    case 'collect': return 'local-shipping';
-    case 'deliver': return 'check-circle';
-    case 'give_to_receiver': return 'person-pin';
-    case 'print': return 'print';
-    case 'confirm_receipt': return 'done-all';
-    case 'process': return 'inventory';
-    default: return 'check';
   }
 };
 
@@ -1201,14 +1244,11 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   actionButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  actionButtonGradient: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 16,
+    borderRadius: 12,
     gap: 8,
   },
   actionButtonText: {
