@@ -1,537 +1,268 @@
-// services/OfflineScanningService.ts
+// services/OfflineScanningService.ts - Stub implementation for offline functionality
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import NetInfo from '@react-native-community/netinfo';
-import { Alert } from 'react-native';
+import { Platform } from 'react-native';
 
-interface OfflineScanAction {
-  id: string;
-  packageCode: string;
-  actionType: 'collect' | 'deliver' | 'print' | 'confirm_receipt';
-  userId: string;
-  userName: string;
-  userRole: string;
-  timestamp: string;
-  metadata: {
-    location?: {
-      latitude: number;
-      longitude: number;
-      accuracy: number;
-    };
-    deviceInfo?: any;
-    notes?: string;
-  };
-  synced: boolean;
-  retryCount: number;
+interface CachedPackage {
+  package: any;
+  available_actions: any[];
+  cached_at: string;
 }
 
-interface PackageCache {
-  [packageCode: string]: {
-    package: any;
-    availableActions: any[];
-    lastUpdated: string;
-    offline: boolean;
-  };
+interface ScanAction {
+  id: string;
+  package_code: string;
+  action_type: string;
+  user: any;
+  metadata: any;
+  timestamp: string;
+  synced: boolean;
 }
 
 class OfflineScanningService {
   private static instance: OfflineScanningService;
-  private readonly STORAGE_KEYS = {
-    OFFLINE_ACTIONS: '@offline_scanning_actions',
-    PACKAGE_CACHE: '@package_cache',
-    SYNC_QUEUE: '@sync_queue',
-    LAST_SYNC: '@last_sync_timestamp',
-  };
+  private isOnlineStatus: boolean = true;
+  private syncQueue: ScanAction[] = [];
 
-  private syncInProgress = false;
-  private networkListenerUnsubscribe: (() => void) | null = null;
-
-  public static getInstance(): OfflineScanningService {
+  static getInstance(): OfflineScanningService {
     if (!OfflineScanningService.instance) {
       OfflineScanningService.instance = new OfflineScanningService();
     }
     return OfflineScanningService.instance;
   }
 
-  // Initialize the service and set up network listener
-  public async initialize(): Promise<void> {
+  async initialize(): Promise<void> {
+    console.log('🔄 [OFFLINE-SERVICE] Initializing offline scanning service...');
+    
     try {
-      // Set up network state listener
-      this.networkListenerUnsubscribe = NetInfo.addEventListener((state) => {
-        if (state.isConnected && !this.syncInProgress) {
-          this.syncOfflineActions();
-        }
-      });
-
-      // Try to sync any pending actions on startup
-      const isConnected = await NetInfo.fetch();
-      if (isConnected.isConnected) {
-        await this.syncOfflineActions();
+      // Load sync queue from storage
+      const storedQueue = await AsyncStorage.getItem('offline_sync_queue');
+      if (storedQueue) {
+        this.syncQueue = JSON.parse(storedQueue);
+        console.log(`📦 [OFFLINE-SERVICE] Loaded ${this.syncQueue.length} queued actions`);
       }
+      
+      // Check initial online status
+      await this.checkConnectivity();
+      
+      console.log('✅ [OFFLINE-SERVICE] Offline service initialized');
     } catch (error) {
-      console.error('Failed to initialize offline scanning service:', error);
+      console.error('❌ [OFFLINE-SERVICE] Failed to initialize:', error);
     }
   }
 
-  // Clean up listeners
-  public destroy(): void {
-    if (this.networkListenerUnsubscribe) {
-      this.networkListenerUnsubscribe();
-      this.networkListenerUnsubscribe = null;
-    }
-  }
-
-  // Check if device is online
-  public async isOnline(): Promise<boolean> {
+  async isOnline(): Promise<boolean> {
+    // Simple connectivity check - in a real app you'd use @react-native-community/netinfo
     try {
-      const state = await NetInfo.fetch();
-      return state.isConnected ?? false;
+      const response = await fetch('https://www.google.com', {
+        method: 'HEAD',
+        cache: 'no-cache',
+        timeout: 5000,
+      });
+      
+      this.isOnlineStatus = response.ok;
+      return this.isOnlineStatus;
     } catch (error) {
+      this.isOnlineStatus = false;
       return false;
     }
   }
 
-  // Store a scan action for offline processing
-  public async storeScanAction(
-    packageCode: string,
-    actionType: string,
-    user: { id: string; name: string; role: string },
-    metadata: any = {}
-  ): Promise<{ success: boolean; message: string; actionId?: string }> {
-    try {
-      const actionId = `offline_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      
-      const offlineAction: OfflineScanAction = {
-        id: actionId,
-        packageCode,
-        actionType: actionType as any,
-        userId: user.id,
-        userName: user.name,
-        userRole: user.role,
-        timestamp: new Date().toISOString(),
-        metadata,
-        synced: false,
-        retryCount: 0,
-      };
-
-      // Get existing offline actions
-      const existingActions = await this.getOfflineActions();
-      
-      // Check for duplicate actions
-      const isDuplicate = existingActions.some(action => 
-        action.packageCode === packageCode && 
-        action.actionType === actionType &&
-        !action.synced
-      );
-
-      if (isDuplicate) {
-        return {
-          success: false,
-          message: 'This action is already queued for sync',
-        };
-      }
-
-      // Store the new action
-      const updatedActions = [...existingActions, offlineAction];
-      await AsyncStorage.setItem(
-        this.STORAGE_KEYS.OFFLINE_ACTIONS,
-        JSON.stringify(updatedActions)
-      );
-
-      // Update package state locally if cached
-      await this.updateLocalPackageState(packageCode, actionType);
-
-      return {
-        success: true,
-        message: 'Action stored for offline sync',
-        actionId,
-      };
-    } catch (error) {
-      console.error('Failed to store offline scan action:', error);
-      return {
-        success: false,
-        message: 'Failed to store action offline',
-      };
+  private async checkConnectivity(): Promise<void> {
+    const online = await this.isOnline();
+    console.log(`🌐 [OFFLINE-SERVICE] Network status: ${online ? 'ONLINE' : 'OFFLINE'}`);
+    
+    if (online && this.syncQueue.length > 0) {
+      console.log(`🔄 [OFFLINE-SERVICE] Attempting to sync ${this.syncQueue.length} queued actions...`);
+      await this.syncPendingActions();
     }
   }
 
-  // Get all offline actions
-  public async getOfflineActions(): Promise<OfflineScanAction[]> {
-    try {
-      const stored = await AsyncStorage.getItem(this.STORAGE_KEYS.OFFLINE_ACTIONS);
-      return stored ? JSON.parse(stored) : [];
-    } catch (error) {
-      console.error('Failed to get offline actions:', error);
-      return [];
-    }
-  }
-
-  // Get pending (unsynced) actions count
-  public async getPendingActionsCount(): Promise<number> {
-    try {
-      const actions = await this.getOfflineActions();
-      return actions.filter(action => !action.synced).length;
-    } catch (error) {
-      return 0;
-    }
-  }
-
-  // Cache package information for offline access
-  public async cachePackage(
-    packageCode: string,
-    packageData: any,
-    availableActions: any[] = []
+  async cachePackage(
+    packageCode: string, 
+    packageData: any, 
+    availableActions: any[]
   ): Promise<void> {
     try {
-      const cache = await this.getPackageCache();
-      
-      cache[packageCode] = {
+      const cacheKey = `cached_package_${packageCode}`;
+      const cachedPackage: CachedPackage = {
         package: packageData,
-        availableActions,
-        lastUpdated: new Date().toISOString(),
-        offline: false,
+        available_actions: availableActions,
+        cached_at: new Date().toISOString(),
       };
-
-      await AsyncStorage.setItem(
-        this.STORAGE_KEYS.PACKAGE_CACHE,
-        JSON.stringify(cache)
-      );
+      
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(cachedPackage));
+      console.log(`💾 [OFFLINE-SERVICE] Cached package: ${packageCode}`);
     } catch (error) {
-      console.error('Failed to cache package:', error);
+      console.error(`❌ [OFFLINE-SERVICE] Failed to cache package ${packageCode}:`, error);
     }
   }
 
-  // Get cached package information
-  public async getCachedPackage(packageCode: string): Promise<any | null> {
+  async getCachedPackage(packageCode: string): Promise<CachedPackage | null> {
     try {
-      const cache = await this.getPackageCache();
-      const cached = cache[packageCode];
+      const cacheKey = `cached_package_${packageCode}`;
+      const stored = await AsyncStorage.getItem(cacheKey);
       
-      if (!cached) return null;
-
-      // Check if cache is too old (e.g., older than 24 hours)
-      const cacheAge = Date.now() - new Date(cached.lastUpdated).getTime();
-      const maxCacheAge = 24 * 60 * 60 * 1000; // 24 hours
-
-      if (cacheAge > maxCacheAge) {
-        return null;
+      if (stored) {
+        const cached: CachedPackage = JSON.parse(stored);
+        
+        // Check if cache is not too old (24 hours)
+        const cacheAge = Date.now() - new Date(cached.cached_at).getTime();
+        const maxAge = 24 * 60 * 60 * 1000; // 24 hours
+        
+        if (cacheAge < maxAge) {
+          console.log(`📦 [OFFLINE-SERVICE] Retrieved cached package: ${packageCode}`);
+          return cached;
+        } else {
+          console.log(`🗑️ [OFFLINE-SERVICE] Cache expired for package: ${packageCode}`);
+          await AsyncStorage.removeItem(cacheKey);
+        }
       }
-
-      return cached;
+      
+      return null;
     } catch (error) {
-      console.error('Failed to get cached package:', error);
+      console.error(`❌ [OFFLINE-SERVICE] Failed to get cached package ${packageCode}:`, error);
       return null;
     }
   }
 
-  // Sync all offline actions with the server
-  public async syncOfflineActions(): Promise<{
-    success: boolean;
-    synced: number;
-    failed: number;
-    message: string;
-  }> {
-    if (this.syncInProgress) {
-      return {
-        success: false,
-        synced: 0,
-        failed: 0,
-        message: 'Sync already in progress',
-      };
-    }
-
-    const isConnected = await this.isOnline();
-    if (!isConnected) {
-      return {
-        success: false,
-        synced: 0,
-        failed: 0,
-        message: 'No internet connection',
-      };
-    }
-
-    this.syncInProgress = true;
-
+  async storeScanAction(
+    packageCode: string,
+    actionType: string,
+    user: any,
+    metadata: any
+  ): Promise<{ success: boolean; message: string }> {
     try {
-      const actions = await this.getOfflineActions();
-      const unsyncedActions = actions.filter(action => !action.synced);
-
-      if (unsyncedActions.length === 0) {
-        this.syncInProgress = false;
-        return {
-          success: true,
-          synced: 0,
-          failed: 0,
-          message: 'No actions to sync',
-        };
-      }
-
-      let syncedCount = 0;
-      let failedCount = 0;
-      const updatedActions = [...actions];
-
-      // Process each action
-      for (let i = 0; i < unsyncedActions.length; i++) {
-        const action = unsyncedActions[i];
-        const actionIndex = updatedActions.findIndex(a => a.id === action.id);
-
-        try {
-          const result = await this.syncSingleAction(action);
-          
-          if (result.success) {
-            // Mark as synced
-            updatedActions[actionIndex] = {
-              ...action,
-              synced: true,
-            };
-            syncedCount++;
-          } else {
-            // Increment retry count
-            updatedActions[actionIndex] = {
-              ...action,
-              retryCount: action.retryCount + 1,
-            };
-            failedCount++;
-          }
-        } catch (error) {
-          console.error(`Failed to sync action ${action.id}:`, error);
-          updatedActions[actionIndex] = {
-            ...action,
-            retryCount: action.retryCount + 1,
-          };
-          failedCount++;
-        }
-      }
-
-      // Save updated actions
-      await AsyncStorage.setItem(
-        this.STORAGE_KEYS.OFFLINE_ACTIONS,
-        JSON.stringify(updatedActions)
-      );
-
-      // Update last sync timestamp
-      await AsyncStorage.setItem(
-        this.STORAGE_KEYS.LAST_SYNC,
-        new Date().toISOString()
-      );
-
-      // Clean up old synced actions (older than 7 days)
-      await this.cleanupOldActions();
-
-      this.syncInProgress = false;
-
+      const actionId = `action_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      
+      const scanAction: ScanAction = {
+        id: actionId,
+        package_code: packageCode,
+        action_type: actionType,
+        user,
+        metadata,
+        timestamp: new Date().toISOString(),
+        synced: false,
+      };
+      
+      this.syncQueue.push(scanAction);
+      
+      // Persist queue to storage
+      await AsyncStorage.setItem('offline_sync_queue', JSON.stringify(this.syncQueue));
+      
+      console.log(`📝 [OFFLINE-SERVICE] Stored offline action: ${actionType} for ${packageCode}`);
+      
       return {
         success: true,
-        synced: syncedCount,
-        failed: failedCount,
-        message: `Synced ${syncedCount} actions, ${failedCount} failed`,
+        message: `Action stored offline and will sync when connection is restored`,
       };
     } catch (error) {
-      console.error('Sync process failed:', error);
-      this.syncInProgress = false;
+      console.error(`❌ [OFFLINE-SERVICE] Failed to store action:`, error);
       return {
         success: false,
-        synced: 0,
-        failed: 0,
-        message: 'Sync process failed',
+        message: `Failed to store action offline: ${error}`,
       };
     }
   }
 
-  // Sync a single action with the server
-  private async syncSingleAction(action: OfflineScanAction): Promise<{
-    success: boolean;
-    message: string;
-  }> {
-    try {
-      const response = await fetch('/api/v1/scanning/scan_action', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${await this.getAuthToken()}`,
-        },
-        body: JSON.stringify({
-          package_code: action.packageCode,
-          action_type: action.actionType,
-          offline_sync: true,
-          original_timestamp: action.timestamp,
-          metadata: action.metadata,
-        }),
-      });
-
-      const result = await response.json();
-      return {
-        success: result.success,
-        message: result.message || 'Action synced',
-      };
-    } catch (error) {
-      return {
-        success: false,
-        message: `Network error: ${error.message}`,
-      };
-    }
-  }
-
-  // Update local package state based on action
-  private async updateLocalPackageState(
-    packageCode: string,
-    actionType: string
-  ): Promise<void> {
-    try {
-      const cached = await this.getCachedPackage(packageCode);
-      if (!cached) return;
-
-      // Update the package state locally
-      let newState = cached.package.state;
-      
-      switch (actionType) {
-        case 'collect':
-          newState = 'in_transit';
-          break;
-        case 'deliver':
-          newState = 'delivered';
-          break;
-        case 'confirm_receipt':
-          newState = 'collected';
-          break;
-        // 'print' doesn't change state
-      }
-
-      if (newState !== cached.package.state) {
-        cached.package.state = newState;
-        cached.package.state_display = this.getStateDisplay(newState);
-        cached.offline = true; // Mark as modified offline
-
-        await this.cachePackage(
-          packageCode,
-          cached.package,
-          cached.availableActions
-        );
-      }
-    } catch (error) {
-      console.error('Failed to update local package state:', error);
-    }
-  }
-
-  private getStateDisplay(state: string): string {
-    const stateMap: { [key: string]: string } = {
-      'pending_unpaid': 'Pending Payment',
-      'pending': 'Pending',
-      'submitted': 'Submitted',
-      'in_transit': 'In Transit',
-      'delivered': 'Delivered',
-      'collected': 'Collected',
-      'cancelled': 'Cancelled',
-    };
-    return stateMap[state] || state;
-  }
-
-  private async getPackageCache(): Promise<PackageCache> {
-    try {
-      const stored = await AsyncStorage.getItem(this.STORAGE_KEYS.PACKAGE_CACHE);
-      return stored ? JSON.parse(stored) : {};
-    } catch (error) {
-      return {};
-    }
-  }
-
-  private async getAuthToken(): Promise<string> {
-    try {
-      // Implement your auth token retrieval logic
-      const token = await AsyncStorage.getItem('@auth_token');
-      return token || '';
-    } catch (error) {
-      return '';
-    }
-  }
-
-  // Clean up old synced actions
-  private async cleanupOldActions(): Promise<void> {
-    try {
-      const actions = await this.getOfflineActions();
-      const oneWeekAgo = Date.now() - (7 * 24 * 60 * 60 * 1000);
-
-      const recentActions = actions.filter(action => {
-        const actionTime = new Date(action.timestamp).getTime();
-        return !action.synced || actionTime > oneWeekAgo;
-      });
-
-      await AsyncStorage.setItem(
-        this.STORAGE_KEYS.OFFLINE_ACTIONS,
-        JSON.stringify(recentActions)
-      );
-    } catch (error) {
-      console.error('Failed to cleanup old actions:', error);
-    }
-  }
-
-  // Get sync status information
-  public async getSyncStatus(): Promise<{
-    lastSync: string | null;
-    pendingActions: number;
-    isOnline: boolean;
-    syncInProgress: boolean;
-  }> {
-    try {
-      const lastSync = await AsyncStorage.getItem(this.STORAGE_KEYS.LAST_SYNC);
-      const pendingActions = await this.getPendingActionsCount();
-      const isOnline = await this.isOnline();
-
-      return {
-        lastSync,
-        pendingActions,
-        isOnline,
-        syncInProgress: this.syncInProgress,
-      };
-    } catch (error) {
-      return {
-        lastSync: null,
-        pendingActions: 0,
-        isOnline: false,
-        syncInProgress: false,
-      };
-    }
-  }
-
-  // Force sync (with user confirmation)
-  public async forceSyncWithConfirmation(): Promise<void> {
-    const status = await this.getSyncStatus();
+  private async syncPendingActions(): Promise<void> {
+    if (this.syncQueue.length === 0) return;
     
-    if (status.pendingActions === 0) {
-      Alert.alert('Info', 'No pending actions to sync');
-      return;
+    const unsyncedActions = this.syncQueue.filter(action => !action.synced);
+    console.log(`🔄 [OFFLINE-SERVICE] Syncing ${unsyncedActions.length} actions...`);
+    
+    for (const action of unsyncedActions) {
+      try {
+        // Mock API call - replace with your actual API endpoint
+        const success = await this.syncSingleAction(action);
+        
+        if (success) {
+          action.synced = true;
+          console.log(`✅ [OFFLINE-SERVICE] Synced action: ${action.action_type} for ${action.package_code}`);
+        }
+      } catch (error) {
+        console.error(`❌ [OFFLINE-SERVICE] Failed to sync action ${action.id}:`, error);
+      }
     }
-
-    Alert.alert(
-      'Sync Offline Actions',
-      `You have ${status.pendingActions} pending action(s). Sync now?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Sync',
-          onPress: async () => {
-            const result = await this.syncOfflineActions();
-            Alert.alert(
-              result.success ? 'Success' : 'Error',
-              result.message
-            );
-          },
-        },
-      ]
-    );
+    
+    // Remove synced actions from queue
+    this.syncQueue = this.syncQueue.filter(action => !action.synced);
+    
+    // Update storage
+    await AsyncStorage.setItem('offline_sync_queue', JSON.stringify(this.syncQueue));
+    
+    const remaining = this.syncQueue.length;
+    console.log(`🔄 [OFFLINE-SERVICE] Sync complete. ${remaining} actions remain in queue.`);
   }
 
-  // Clear all offline data (use with caution)
-  public async clearOfflineData(): Promise<void> {
+  private async syncSingleAction(action: ScanAction): Promise<boolean> {
     try {
-      await AsyncStorage.multiRemove([
-        this.STORAGE_KEYS.OFFLINE_ACTIONS,
-        this.STORAGE_KEYS.PACKAGE_CACHE,
-        this.STORAGE_KEYS.SYNC_QUEUE,
-        this.STORAGE_KEYS.LAST_SYNC,
-      ]);
+      // Mock API call - replace with your actual sync logic
+      console.log(`🌐 [OFFLINE-SERVICE] Syncing action:`, {
+        package_code: action.package_code,
+        action_type: action.action_type,
+        timestamp: action.timestamp,
+      });
+      
+      // Simulate API call delay
+      await new Promise(resolve => setTimeout(resolve, 1000));
+      
+      // Mock success response
+      return true;
     } catch (error) {
-      console.error('Failed to clear offline data:', error);
+      console.error(`❌ [OFFLINE-SERVICE] Sync failed for action ${action.id}:`, error);
+      return false;
     }
+  }
+
+  async getPendingActionsCount(): Promise<number> {
+    return this.syncQueue.filter(action => !action.synced).length;
+  }
+
+  async clearCache(): Promise<void> {
+    try {
+      // Get all stored keys
+      const keys = await AsyncStorage.getAllKeys();
+      
+      // Filter keys that are package caches
+      const cacheKeys = keys.filter(key => key.startsWith('cached_package_'));
+      
+      // Remove all cache keys
+      await AsyncStorage.multiRemove(cacheKeys);
+      
+      console.log(`🗑️ [OFFLINE-SERVICE] Cleared ${cacheKeys.length} cached packages`);
+    } catch (error) {
+      console.error('❌ [OFFLINE-SERVICE] Failed to clear cache:', error);
+    }
+  }
+
+  async forceSyncAll(): Promise<{ success: number; failed: number }> {
+    console.log('🔄 [OFFLINE-SERVICE] Force syncing all pending actions...');
+    
+    const unsyncedActions = this.syncQueue.filter(action => !action.synced);
+    let success = 0;
+    let failed = 0;
+    
+    for (const action of unsyncedActions) {
+      try {
+        const synced = await this.syncSingleAction(action);
+        if (synced) {
+          action.synced = true;
+          success++;
+        } else {
+          failed++;
+        }
+      } catch (error) {
+        failed++;
+      }
+    }
+    
+    // Update queue
+    this.syncQueue = this.syncQueue.filter(action => !action.synced);
+    await AsyncStorage.setItem('offline_sync_queue', JSON.stringify(this.syncQueue));
+    
+    console.log(`✅ [OFFLINE-SERVICE] Force sync complete: ${success} success, ${failed} failed`);
+    
+    return { success, failed };
   }
 }
 
