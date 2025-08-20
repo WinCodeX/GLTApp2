@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - Updated to use global Bluetooth context
+// components/BulkScanner.tsx - Updated with styled confirmation modal
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -11,7 +11,6 @@ import {
   Modal,
   SafeAreaView,
   TextInput,
-  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -20,8 +19,8 @@ import * as SecureStore from 'expo-secure-store';
 import QRScanner from './QRScanner';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
-import GlobalPrintService from '../services/GlobalPrintService'; // FIXED: Use new service
-import { useBluetooth } from '../contexts/BluetoothContext'; // FIXED: Use global context
+import GlobalPrintService from '../services/GlobalPrintService';
+import { useBluetooth } from '../contexts/BluetoothContext';
 
 interface ScannedPackage {
   code: string;
@@ -67,12 +66,18 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   const [isOnline, setIsOnline] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [printingProgress, setPrintingProgress] = useState<string>('');
+  
+  // Styled confirmation modal state
+  const [showConfirmationModal, setShowConfirmationModal] = useState(false);
+  const [confirmationConfig, setConfirmationConfig] = useState({
+    title: '',
+    message: '',
+    onConfirm: () => {},
+  });
 
-  // FIXED: Use global Bluetooth context
   const bluetoothContext = useBluetooth();
-
   const offlineService = OfflineScanningService.getInstance();
-  const printService = GlobalPrintService.getInstance(); // FIXED: Use new service
+  const printService = GlobalPrintService.getInstance();
 
   useEffect(() => {
     if (visible) {
@@ -363,14 +368,13 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       ? '\n\nWarning: No printer connected. Print operations will be queued but not printed.' 
       : '';
 
-    Alert.alert(
-      'Confirm Bulk Action',
-      `${confirmationMessage}${offlineNote}${printerNote}`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Proceed', onPress: performBulkAction, style: 'default' }
-      ]
-    );
+    // Use styled modal instead of Alert.alert
+    setConfirmationConfig({
+      title: 'Confirm Bulk Action',
+      message: `${confirmationMessage}${offlineNote}${printerNote}`,
+      onConfirm: performBulkAction,
+    });
+    setShowConfirmationModal(true);
   };
 
   const getConfirmationMessage = (action: string, count: number): string => {
@@ -395,6 +399,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   };
 
   const performBulkAction = async () => {
+    setShowConfirmationModal(false);
     setProcessing(true);
     setPrintingProgress('');
     
@@ -424,7 +429,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
   };
 
-  // FIXED: Use global Bluetooth context for printing
   const processBulkPrint = async (packages: ScannedPackage[]): Promise<{successCount: number, failCount: number}> => {
     let successCount = 0;
     let failCount = 0;
@@ -452,7 +456,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       try {
         setPrintingProgress(`Printing ${i + 1} of ${packages.length}: ${pkg.code}`);
         
-        // FIXED: Use global print service with context
         const result = await printService.printPackage(bluetoothContext, {
           code: pkg.code,
           receiver_name: pkg.receiver_name,
@@ -710,6 +713,19 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
   };
 
+  const getActionIcon = (action: string): keyof typeof MaterialIcons.glyphMap => {
+    switch (action) {
+      case 'collect_from_sender': return 'how-to-reg';
+      case 'collect': return 'local-shipping';
+      case 'deliver': return 'check-circle';
+      case 'give_to_receiver': return 'person-pin';
+      case 'print': return 'print';
+      case 'process': return 'inventory';
+      case 'confirm_receipt': return 'done-all';
+      default: return 'check';
+    }
+  };
+
   const renderPackageItem = ({ item }: { item: ScannedPackage }) => (
     <View style={[
       styles.packageItem, 
@@ -796,7 +812,6 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               {!isOnline && (
                 <Text style={styles.offlineHeaderIndicator}>OFFLINE MODE</Text>
               )}
-              {/* FIXED: Show printer status for print actions */}
               {actionType === 'print' && (
                 <Text style={styles.printerHeaderIndicator}>
                   {bluetoothContext.isPrintReady 
@@ -903,7 +918,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                     ) : (
                       <>
                         <MaterialIcons 
-                          name={!isOnline ? "cloud-queue" : actionType === 'print' ? "print" : "check-circle"} 
+                          name={!isOnline ? "cloud-queue" : getActionIcon(actionType)} 
                           size={20} 
                           color="#fff" 
                         />
@@ -929,6 +944,7 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
             defaultAction={actionType}
           />
 
+          {/* Manual Entry Modal */}
           <Modal visible={showManualEntry} transparent animationType="fade">
             <View style={styles.modalOverlay}>
               <View style={styles.manualEntryModal}>
@@ -969,6 +985,52 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
                       >
                         <Text style={styles.modalConfirmText}>Add</Text>
                       </LinearGradient>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </View>
+          </Modal>
+
+          {/* Styled Confirmation Modal */}
+          <Modal visible={showConfirmationModal} transparent animationType="fade">
+            <View style={styles.modalOverlay}>
+              <View style={styles.confirmationModal}>
+                <LinearGradient
+                  colors={getActionColor(actionType)}
+                  style={styles.confirmationHeader}
+                >
+                  <MaterialIcons name={getActionIcon(actionType)} size={32} color="#fff" />
+                  <Text style={styles.confirmationTitle}>{confirmationConfig.title}</Text>
+                </LinearGradient>
+                
+                <View style={styles.confirmationContent}>
+                  <Text style={styles.confirmationMessage}>{confirmationConfig.message}</Text>
+                  
+                  <View style={styles.confirmationButtons}>
+                    <TouchableOpacity
+                      style={styles.confirmationButton}
+                      onPress={confirmationConfig.onConfirm}
+                    >
+                      <LinearGradient
+                        colors={getActionColor(actionType)}
+                        style={styles.confirmationButtonGradient}
+                      >
+                        <MaterialIcons name="check" size={18} color="#fff" />
+                        <Text style={styles.confirmationButtonText}>Proceed</Text>
+                      </LinearGradient>
+                    </TouchableOpacity>
+                    
+                    <TouchableOpacity
+                      style={styles.confirmationButton}
+                      onPress={() => setShowConfirmationModal(false)}
+                    >
+                      <View style={[styles.confirmationButtonGradient, styles.cancelConfirmationButton]}>
+                        <MaterialIcons name="close" size={18} color="#a0aec0" />
+                        <Text style={[styles.confirmationButtonText, { color: '#a0aec0' }]}>
+                          Cancel
+                        </Text>
+                      </View>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -1312,6 +1374,66 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
+  },
+  
+  // Styled confirmation modal styles
+  confirmationModal: {
+    backgroundColor: '#1a1a2e',
+    borderRadius: 20,
+    width: '100%',
+    maxWidth: 400,
+    borderWidth: 1,
+    borderColor: '#2d3748',
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+    elevation: 10,
+  },
+  confirmationHeader: {
+    padding: 24,
+    alignItems: 'center',
+    gap: 12,
+  },
+  confirmationTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    textAlign: 'center',
+  },
+  confirmationContent: {
+    padding: 24,
+  },
+  confirmationMessage: {
+    fontSize: 16,
+    color: '#a0aec0',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+    fontWeight: '500',
+  },
+  confirmationButtons: {
+    gap: 12,
+  },
+  confirmationButton: {
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  confirmationButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    gap: 8,
+  },
+  cancelConfirmationButton: {
+    backgroundColor: '#2d3748',
+  },
+  confirmationButtonText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
   },
 });
 
