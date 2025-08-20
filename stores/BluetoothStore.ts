@@ -1,4 +1,4 @@
-// stores/BluetoothStore.ts - Centralized Bluetooth State Management
+// stores/BluetoothStore.ts - Fixed version with better state management
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { PermissionsAndroid, Platform } from 'react-native';
 import { BleManager, State } from 'react-native-ble-plx';
@@ -45,6 +45,10 @@ export interface BluetoothState {
   // Managers
   bleManager: BleManager | null;
   
+  // Internal state
+  _connectionCheckInterval: NodeJS.Timeout | null;
+  _isRefreshing: boolean;
+  
   // Actions
   initialize: () => Promise<void>;
   cleanup: () => Promise<void>;
@@ -69,6 +73,8 @@ export interface BluetoothState {
   loadStoredPrinter: () => Promise<void>;
   saveStoredPrinter: (device: BluetoothDevice) => Promise<void>;
   clearStoredPrinter: () => Promise<void>;
+  startConnectionMonitoring: () => void;
+  stopConnectionMonitoring: () => void;
 }
 
 export const useBluetoothStore = create<BluetoothState>()(
@@ -87,6 +93,8 @@ export const useBluetoothStore = create<BluetoothState>()(
       connectionType: null,
     },
     bleManager: null,
+    _connectionCheckInterval: null,
+    _isRefreshing: false,
 
     // Initialize both Bluetooth systems
     initialize: async () => {
@@ -130,14 +138,22 @@ export const useBluetoothStore = create<BluetoothState>()(
           permissionsGranted: true,
         });
 
-        // Load stored printer
+        // Load stored printer first
         await get().loadStoredPrinter();
+
+        // Start connection monitoring
+        get().startConnectionMonitoring();
 
         // Set up BLE state monitoring
         bleManager.onStateChange((state) => {
           console.log('🔵 [BLE] State changed to:', state);
           set({ bleEnabled: state === State.PoweredOn });
         }, true);
+
+        // Initial connection refresh
+        setTimeout(() => {
+          get().refreshConnections();
+        }, 1000);
 
         console.log('✅ [BLUETOOTH] Initialization complete');
       } catch (error) {
@@ -156,14 +172,17 @@ export const useBluetoothStore = create<BluetoothState>()(
       
       const state = get();
       
+      // Stop connection monitoring
+      get().stopConnectionMonitoring();
+      
       // Stop scanning
       if (state.isScanning) {
         get().stopDeviceScan();
       }
 
-      // Disconnect all devices
-      await get().disconnectAllDevices();
-
+      // Don't disconnect all devices on cleanup - this was causing the issue!
+      // Only disconnect if explicitly requested
+      
       // Destroy BLE manager
       if (state.bleManager) {
         state.bleManager.destroy();
@@ -172,9 +191,8 @@ export const useBluetoothStore = create<BluetoothState>()(
       set({
         isInitialized: false,
         bleManager: null,
-        devices: [],
-        connectedDevices: [],
         isScanning: false,
+        _connectionCheckInterval: null,
       });
     },
 
@@ -413,14 +431,16 @@ export const useBluetoothStore = create<BluetoothState>()(
         }
 
         if (connected) {
-          // Update device state
+          // Update device state immediately
+          const updatedDevice = { ...device, connected: true };
+          
           set(state => ({
             devices: state.devices.map(d => 
-              d.id === device.id ? { ...d, connected: true } : d
+              d.id === device.id ? updatedDevice : d
             ),
             connectedDevices: [
               ...state.connectedDevices.filter(d => d.id !== device.id),
-              { ...device, connected: true }
+              updatedDevice
             ]
           }));
 
@@ -449,7 +469,7 @@ export const useBluetoothStore = create<BluetoothState>()(
           }
         }
 
-        // Update state
+        // Update state immediately
         set(state => ({
           devices: state.devices.map(d => 
             d.id === device.id ? { ...d, connected: false } : d
@@ -492,7 +512,7 @@ export const useBluetoothStore = create<BluetoothState>()(
       console.log('✅ [DISCONNECT] All devices disconnected');
     },
 
-    // Connect printer (specialized)
+    // Connect printer (specialized) - FIXED
     connectPrinter: async (device: BluetoothDevice): Promise<boolean> => {
       console.log('🖨️ [PRINTER] Connecting printer:', device.name);
       
@@ -507,16 +527,21 @@ export const useBluetoothStore = create<BluetoothState>()(
         const connected = await get().connectToDevice(device);
         
         if (connected) {
+          const connectedDevice = { ...device, connected: true };
+          
+          // Update printer connection state immediately and persist
           set({
             printerConnection: {
-              device: { ...device, connected: true },
+              device: connectedDevice,
               isConnected: true,
               lastConnected: new Date(),
               connectionType: device.type,
             }
           });
 
-          await get().saveStoredPrinter(device);
+          // Save to storage immediately
+          await get().saveStoredPrinter(connectedDevice);
+          
           console.log('✅ [PRINTER] Printer connected and saved');
           return true;
         }
@@ -580,70 +605,96 @@ export const useBluetoothStore = create<BluetoothState>()(
       }
     },
 
-    // Refresh connection states
+    // Refresh connection states - IMPROVED
     refreshConnections: async () => {
-      console.log('🔄 [REFRESH] Refreshing connection states...');
-      
       const state = get();
+      
+      // Prevent concurrent refreshes
+      if (state._isRefreshing) {
+        console.log('🔄 [REFRESH] Already refreshing, skipping...');
+        return;
+      }
+      
+      console.log('🔄 [REFRESH] Refreshing connection states...');
+      set({ _isRefreshing: true });
       
       try {
         // Check Classic connections
         if (state.classicEnabled) {
-          const connectedClassic = await RNBluetoothClassic.getConnectedDevices();
-          const connectedAddresses = connectedClassic.map(d => d.address);
-          
-          set(state => ({
-            devices: state.devices.map(device => ({
-              ...device,
-              connected: device.type === 'classic' 
-                ? connectedAddresses.includes(device.address)
-                : device.connected
-            }))
-          }));
+          try {
+            const connectedClassic = await RNBluetoothClassic.getConnectedDevices();
+            const connectedAddresses = connectedClassic.map(d => d.address);
+            
+            set(state => ({
+              devices: state.devices.map(device => ({
+                ...device,
+                connected: device.type === 'classic' 
+                  ? connectedAddresses.includes(device.address)
+                  : device.connected
+              }))
+            }));
+          } catch (error) {
+            console.warn('⚠️ [REFRESH] Failed to check classic connections:', error);
+          }
         }
 
         // Check BLE connections
         if (state.bleEnabled && state.bleManager) {
-          const connectedBLE = await state.bleManager.connectedDevices([]);
-          const connectedBLEIds = connectedBLE.map(d => d.id);
-          
-          set(state => ({
-            devices: state.devices.map(device => ({
-              ...device,
-              connected: device.type === 'ble' 
-                ? connectedBLEIds.includes(device.id)
-                : device.connected
-            }))
-          }));
+          try {
+            const connectedBLE = await state.bleManager.connectedDevices([]);
+            const connectedBLEIds = connectedBLE.map(d => d.id);
+            
+            set(state => ({
+              devices: state.devices.map(device => ({
+                ...device,
+                connected: device.type === 'ble' 
+                  ? connectedBLEIds.includes(device.id)
+                  : device.connected
+              }))
+            }));
+          } catch (error) {
+            console.warn('⚠️ [REFRESH] Failed to check BLE connections:', error);
+          }
         }
 
         // Update connected devices list
-        set(state => ({
-          connectedDevices: state.devices.filter(d => d.connected)
-        }));
+        const currentState = get();
+        const connectedDevices = currentState.devices.filter(d => d.connected);
+        
+        set({ connectedDevices });
 
-        // Check printer connection
-        const printer = state.printerConnection.device;
+        // Check and update printer connection status
+        const printer = currentState.printerConnection.device;
         if (printer) {
-          const updatedDevice = state.devices.find(d => d.id === printer.id);
+          const updatedDevice = currentState.devices.find(d => d.id === printer.id);
           if (updatedDevice) {
-            set({
+            const isStillConnected = updatedDevice.connected;
+            
+            set(state => ({
               printerConnection: {
                 ...state.printerConnection,
                 device: updatedDevice,
-                isConnected: updatedDevice.connected,
+                isConnected: isStillConnected,
               }
-            });
+            }));
+            
+            // If printer disconnected unexpectedly, clear stored data
+            if (!isStillConnected && currentState.printerConnection.isConnected) {
+              console.log('⚠️ [REFRESH] Printer disconnected unexpectedly, clearing storage');
+              await get().clearStoredPrinter();
+            }
           }
         }
 
         console.log('✅ [REFRESH] Connection states refreshed');
       } catch (error) {
         console.error('❌ [REFRESH] Failed to refresh connections:', error);
+      } finally {
+        set({ _isRefreshing: false });
       }
     },
 
-    // Load stored printer
+    // Load stored printer - IMPROVED
     loadStoredPrinter: async () => {
       try {
         const stored = await AsyncStorage.getItem('bluetooth_stored_printer');
@@ -651,6 +702,7 @@ export const useBluetoothStore = create<BluetoothState>()(
           const device: BluetoothDevice = JSON.parse(stored);
           console.log('📱 [STORAGE] Loaded stored printer:', device.name);
           
+          // Set the printer in state but don't assume it's connected
           set({
             printerConnection: {
               device,
@@ -659,6 +711,26 @@ export const useBluetoothStore = create<BluetoothState>()(
               connectionType: device.type,
             }
           });
+          
+          // Try to verify connection after a short delay
+          setTimeout(async () => {
+            await get().refreshConnections();
+            
+            // If still connected, update the connection status
+            const currentState = get();
+            const updatedDevice = currentState.devices.find(d => d.id === device.id);
+            if (updatedDevice?.connected) {
+              set(state => ({
+                printerConnection: {
+                  ...state.printerConnection,
+                  isConnected: true,
+                }
+              }));
+              console.log('✅ [STORAGE] Stored printer is still connected');
+            } else {
+              console.log('ℹ️ [STORAGE] Stored printer not currently connected');
+            }
+          }, 2000);
         }
       } catch (error) {
         console.error('❌ [STORAGE] Failed to load stored printer:', error);
@@ -688,6 +760,35 @@ export const useBluetoothStore = create<BluetoothState>()(
         console.error('❌ [STORAGE] Failed to clear stored printer:', error);
       }
     },
+
+    // NEW: Start connection monitoring
+    startConnectionMonitoring: () => {
+      const state = get();
+      
+      if (state._connectionCheckInterval) {
+        console.log('ℹ️ [MONITOR] Connection monitoring already active');
+        return;
+      }
+      
+      console.log('🔄 [MONITOR] Starting connection monitoring...');
+      
+      const interval = setInterval(async () => {
+        await get().refreshConnections();
+      }, 10000); // Check every 10 seconds
+      
+      set({ _connectionCheckInterval: interval });
+    },
+
+    // NEW: Stop connection monitoring
+    stopConnectionMonitoring: () => {
+      const state = get();
+      
+      if (state._connectionCheckInterval) {
+        console.log('🛑 [MONITOR] Stopping connection monitoring...');
+        clearInterval(state._connectionCheckInterval);
+        set({ _connectionCheckInterval: null });
+      }
+    },
   }))
 );
 
@@ -712,16 +813,30 @@ function detectDeviceType(deviceName: string): 'printer' | 'scanner' | 'unknown'
   return 'unknown';
 }
 
-// Bluetooth store hooks for easier usage
+// Bluetooth store hooks for easier usage - IMPROVED
 export const useBluetoothInitialization = () => {
   const { initialize, cleanup, isInitialized } = useBluetoothStore();
   
   useEffect(() => {
-    initialize();
-    return () => {
-      cleanup();
+    let mounted = true;
+    
+    const initBluetooth = async () => {
+      if (mounted && !isInitialized) {
+        try {
+          await initialize();
+        } catch (error) {
+          console.error('Failed to initialize Bluetooth:', error);
+        }
+      }
     };
-  }, [initialize, cleanup]);
+    
+    initBluetooth();
+    
+    // Don't cleanup on unmount to preserve connections
+    return () => {
+      mounted = false;
+    };
+  }, [initialize, isInitialized]);
   
   return isInitialized;
 };
