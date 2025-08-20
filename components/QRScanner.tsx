@@ -1,4 +1,4 @@
-// components/QRScanner.tsx - FIXED: Removed ToastComponent import and standardized toast usage
+// components/QRScanner.tsx - Updated to use global Bluetooth context
 
 import React, { useState, useEffect, useRef } from 'react';
 import {
@@ -19,11 +19,12 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { CameraView, Camera } from 'expo-camera';
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
-import Toast from 'react-native-toast-message'; // FIXED: Only this import needed
+import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
-import PrintReceiptService from '../services/PrintReceiptService';
+import GlobalPrintService from '../services/GlobalPrintService'; // FIXED: Use new service
+import { useBluetooth } from '../contexts/BluetoothContext'; // FIXED: Use global context
 
 const { width, height } = Dimensions.get('window');
 
@@ -87,12 +88,15 @@ const QRScanner: React.FC<QRScannerProps> = ({
   const [isOnline, setIsOnline] = useState(true);
   const cameraRef = useRef<CameraView>(null);
   
+  // FIXED: Use global Bluetooth context
+  const bluetoothContext = useBluetooth();
+  
   // Animation values
   const cornerAnimation = useRef(new Animated.Value(0)).current;
   const pulseAnimation = useRef(new Animated.Value(1)).current;
 
   const offlineService = OfflineScanningService.getInstance();
-  const printService = PrintReceiptService.getInstance();
+  const printService = GlobalPrintService.getInstance(); // FIXED: Use new service
 
   useEffect(() => {
     requestCameraPermission();
@@ -186,7 +190,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     const packageCode = extractPackageCode(data);
     
     if (!packageCode) {
-      // FIXED: Use 'error' instead of 'warning'
       Toast.show({
         type: 'error',
         text1: 'Invalid QR Code',
@@ -298,12 +301,10 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   };
 
-  // FIXED: Handle different action flows
   const handleDefaultAction = async (action: string, packageData: ScanResult) => {
     const hasAction = packageData.available_actions.some(a => a.action === action);
     
     if (!hasAction) {
-      // FIXED: Use 'info' instead of 'warning'
       Toast.show({
         type: 'info',
         text1: 'Action Not Available',
@@ -318,28 +319,23 @@ const QRScanner: React.FC<QRScannerProps> = ({
     // Different flows for different actions
     switch (action) {
       case 'give_to_receiver':
-        // Show confirmation dialog with package details
         showGiveToReceiverConfirmation(packageData);
         break;
       
       case 'collect_from_sender':
-        // Show simple action options (collect + print receipt)
         showCollectFromSenderOptions(packageData);
         break;
       
       case 'print':
-        // Directly perform print action
         await performAction(action);
         break;
       
       default:
-        // For other actions, show the action modal
         setShowActionModal(true);
         break;
     }
   };
 
-  // FIXED: Give to receiver confirmation with package details
   const showGiveToReceiverConfirmation = (packageData: ScanResult) => {
     Alert.alert(
       'Confirm Package Handover',
@@ -364,7 +360,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
     );
   };
 
-  // FIXED: Collect from sender options (collect + print receipt)
   const showCollectFromSenderOptions = (packageData: ScanResult) => {
     Alert.alert(
       'Package Collection',
@@ -439,7 +434,7 @@ const QRScanner: React.FC<QRScannerProps> = ({
     setProcessingAction(true);
 
     try {
-      // If it's a print action, handle printing first
+      // If it's a print action, handle printing first using global context
       if (actionType === 'print' && scanResult) {
         await handlePrintAction(scanResult.package);
       }
@@ -459,7 +454,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
         );
         
         if (result.success) {
-          // Show success toast BEFORE closing
           Toast.show({
             type: 'success',
             text1: getActionSuccessTitle(actionType),
@@ -503,7 +497,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
       if (response.data.success) {
         Vibration.vibrate([100, 50, 100]);
         
-        // Show success toast BEFORE closing
         Toast.show({
           type: 'success',
           text1: getActionSuccessTitle(actionType),
@@ -546,7 +539,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
         );
         
         if (result.success) {
-          // FIXED: Use 'info' instead of 'warning'
           Toast.show({
             type: 'info',
             text1: 'Saved Offline',
@@ -577,30 +569,34 @@ const QRScanner: React.FC<QRScannerProps> = ({
     }
   };
 
+  // FIXED: Use global Bluetooth context for printing
   const handlePrintAction = async (packageData: Package) => {
     try {
       console.log('Printing receipt for package:', packageData.code);
       
-      await printService.printPackageReceipt(packageData);
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Receipt Printed',
-        text2: `Receipt for ${packageData.code} sent to printer`,
-        position: 'top',
-        visibilityTime: 3000,
+      // FIXED: Use global print service with context
+      const result = await printService.printPackage(bluetoothContext, {
+        code: packageData.code,
+        receiver_name: packageData.receiver_name,
+        route_description: packageData.route_description,
+        sender_name: packageData.sender_name,
+        state_display: packageData.state_display,
       });
+      
+      if (!result.success) {
+        throw new Error(result.message);
+      }
       
     } catch (error: any) {
       console.error('Print failed:', error);
       
       let errorMessage = 'Failed to print receipt';
-      if (error.message.includes('No printer configured')) {
+      if (error.message.includes('Bluetooth not available')) {
+        errorMessage = 'Printing not available in Expo Go. Use development build.';
+      } else if (error.message.includes('No printer connected')) {
         errorMessage = 'No printer connected. Check Bluetooth settings.';
       } else if (error.message.includes('not connected')) {
         errorMessage = 'Printer disconnected. Reconnect and try again.';
-      } else if (error.message.includes('permissions not granted')) {
-        errorMessage = 'Bluetooth permission needed. Grant in app settings.';
       }
       
       Toast.show({
@@ -649,17 +645,6 @@ const QRScanner: React.FC<QRScannerProps> = ({
       case 'process': return `${packageCode} processed successfully`;
       case 'confirm_receipt': return `Receipt for ${packageCode} confirmed`;
       default: return `Action completed for ${packageCode}`;
-    }
-  };
-
-  const getStateTransition = (action: string): string => {
-    switch (action) {
-      case 'collect_from_sender': return 'Pending → Submitted';
-      case 'collect': return 'Submitted → In Transit';
-      case 'deliver': return 'In Transit → Delivered';
-      case 'give_to_receiver': return 'Collected';
-      case 'confirm_receipt': return 'Delivered → Collected';
-      default: return '';
     }
   };
 
