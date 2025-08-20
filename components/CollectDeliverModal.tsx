@@ -62,7 +62,7 @@ export default function CollectDeliverModal({
   const [itemValue, setItemValue] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'cash' | 'card'>('mpesa');
+  const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card'>('mpesa');
   
   const STEP_TITLES = [
     'Collection Details',
@@ -184,17 +184,17 @@ export default function CollectDeliverModal({
   const isStepValid = useCallback((step: number) => {
     switch (step) {
       case 0:
-        return shopName.trim().length > 0 && collectionAddress.trim().length > 0 && collectionLocation;
+        return shopName.trim().length > 0 && collectionAddress.trim().length > 0;
       case 1:
         return itemsToCollect.trim().length > 0 && itemValue.trim().length > 0;
       case 2:
-        return deliveryAddress.trim().length > 0 && deliveryLocation;
+        return deliveryAddress.trim().length > 0;
       case 3:
         return paymentMethod.length > 0;
       default:
         return false;
     }
-  }, [shopName, collectionAddress, collectionLocation, itemsToCollect, itemValue, deliveryAddress, deliveryLocation, paymentMethod]);
+  }, [shopName, collectionAddress, itemsToCollect, itemValue, deliveryAddress, paymentMethod]);
 
   const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isStepValid(currentStep)) {
@@ -236,10 +236,10 @@ export default function CollectDeliverModal({
         delivery_location: deliveryAddress,
         delivery_type: 'doorstep',
         package_description: `COLLECT & DELIVER: ${itemsToCollect}\nValue: KES ${itemValue}\nSpecial Instructions: ${specialInstructions}`,
-        coordinates: {
-          pickup: collectionLocation!,
-          delivery: deliveryLocation!
-        },
+        coordinates: collectionLocation && deliveryLocation ? {
+          pickup: collectionLocation,
+          delivery: deliveryLocation
+        } : undefined,
         collection_details: {
           shop_name: shopName,
           shop_contact: shopContact,
@@ -323,13 +323,13 @@ export default function CollectDeliverModal({
       </View>
 
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🛍️ Collection Point on Map</Text>
+        <Text style={styles.locationLabel}>🛍️ Collection Point on Map (Optional)</Text>
         <TouchableOpacity 
           style={[styles.locationInput, collectionLocation && styles.locationInputSelected]}
           onPress={() => selectLocationOnMap('collection')}
         >
           <Text style={[styles.locationText, collectionLocation && styles.locationTextSelected]}>
-            {collectionLocation?.address || 'Tap to set collection point on map'}
+            {collectionLocation?.address || 'Tap to set collection point on map (optional)'}
           </Text>
           <Feather name="map-pin" size={20} color={collectionLocation ? "#10b981" : "#666"} />
         </TouchableOpacity>
@@ -414,13 +414,13 @@ export default function CollectDeliverModal({
       </View>
 
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🎯 Delivery Location on Map</Text>
+        <Text style={styles.locationLabel}>🎯 Delivery Location on Map (Optional)</Text>
         <TouchableOpacity 
           style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
           onPress={() => selectLocationOnMap('delivery')}
         >
           <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
-            {deliveryLocation?.address || 'Tap to set delivery location on map'}
+            {deliveryLocation?.address || 'Tap to set delivery location on map (optional)'}
           </Text>
           <Feather name="map-pin" size={20} color={deliveryLocation ? "#10b981" : "#666"} />
         </TouchableOpacity>
@@ -516,19 +516,6 @@ export default function CollectDeliverModal({
                   )}
                 </View>
               </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.paymentOption, paymentMethod === 'cash' && styles.selectedPaymentOption]}
-                onPress={() => setPaymentMethod('cash')}
-              >
-                <View style={styles.paymentOptionContent}>
-                  <Feather name="dollar-sign" size={20} color="#10b981" />
-                  <Text style={styles.paymentOptionText}>Cash on Collection</Text>
-                  {paymentMethod === 'cash' && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </View>
-              </TouchableOpacity>
             </View>
           </View>
 
@@ -539,6 +526,7 @@ export default function CollectDeliverModal({
               <Text style={styles.noteItem}>• You'll receive real-time updates via SMS</Text>
               <Text style={styles.noteItem}>• Our rider will verify items before collection</Text>
               <Text style={styles.noteItem}>• Insurance covers loss or damage during transit</Text>
+              <Text style={styles.noteItem}>• Digital payment methods ensure secure transactions</Text>
             </View>
           </View>
         </ScrollView>
