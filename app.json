@@ -55,10 +55,11 @@
           "backgroundColor": "#ffffff"
         }
       ],
-      
       "expo-secure-store",
       "expo-web-browser",
-      "expo-dev-client"
+      "expo-dev-client",
+      "react-native-ble-plx",
+      "react-native-permissions"
     ],
     "experiments": {
       "typedRoutes": true
