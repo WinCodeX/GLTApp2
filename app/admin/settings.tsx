@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Updated with new Bluetooth Store integration
+// app/admin/settings.tsx - Fixed Bluetooth initialization and error handling
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   FlatList,
   ActivityIndicator,
   Alert,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,10 +20,9 @@ import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AdminLayout from '../../components/AdminLayout';
 
-// NEW: Import the new Bluetooth store and print hooks
+// Import the Bluetooth store and print hooks
 import { 
   useBluetoothStore, 
-  useBluetoothInitialization, 
   usePrinterConnection,
   BluetoothDevice 
 } from '../../stores/BluetoothStore';
@@ -37,7 +37,7 @@ interface AppInfo {
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
   
-  // NEW: Use the centralized Bluetooth store
+  // Bluetooth store with all methods
   const {
     isInitialized,
     classicEnabled,
@@ -46,28 +46,29 @@ const SettingsScreen: React.FC = () => {
     isScanning,
     devices,
     connectedDevices,
+    initialize,
+    cleanup,
+    requestPermissions,
     startDeviceScan,
     stopDeviceScan,
     connectToDevice,
     disconnectDevice,
     disconnectAllDevices,
     refreshConnections,
-    requestPermissions,
   } = useBluetoothStore();
 
   const { printer, connect: connectPrinter, disconnect: disconnectPrinter } = usePrinterConnection();
   const { printStatus, refreshPrinterStatus } = usePrintService();
   const { quickTestPrint } = useQuickPrint();
   
-  // Initialize Bluetooth on mount
-  const bluetoothInitialized = useBluetoothInitialization();
-
-  // Local state for UI
+  // Local state for UI and initialization tracking
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
   const [checkingConnection, setCheckingConnection] = useState(false);
+  const [initializationError, setInitializationError] = useState<string | null>(null);
+  const [isInitializing, setIsInitializing] = useState(false);
 
   const appInfo: AppInfo = {
     version: '2.1.0',
@@ -75,16 +76,67 @@ const SettingsScreen: React.FC = () => {
     lastUpdate: 'August 14, 2024',
   };
 
+  // Initialize Bluetooth manually with proper error handling
+  const initializeBluetooth = useCallback(async () => {
+    if (isInitialized || isInitializing) {
+      console.log('📱 [SETTINGS] Bluetooth already initialized or initializing');
+      return;
+    }
+
+    setIsInitializing(true);
+    setInitializationError(null);
+    
+    try {
+      console.log('📱 [SETTINGS] Starting manual Bluetooth initialization...');
+      
+      await initialize();
+      
+      console.log('✅ [SETTINGS] Bluetooth initialization completed successfully');
+      
+      // Refresh printer status after successful initialization
+      setTimeout(() => {
+        refreshPrinterStatus();
+      }, 1000);
+      
+    } catch (error: any) {
+      console.error('❌ [SETTINGS] Bluetooth initialization failed:', error);
+      
+      const errorMessage = error?.message || 'Unknown initialization error';
+      setInitializationError(errorMessage);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Bluetooth Initialization Failed',
+        text2: errorMessage,
+        position: 'top',
+        visibilityTime: 5000,
+      });
+    } finally {
+      setIsInitializing(false);
+    }
+  }, [isInitialized, isInitializing, initialize, refreshPrinterStatus]);
+
+  // Load settings and initialize Bluetooth on mount
   useEffect(() => {
     loadStoredSettings();
+    
+    // Initialize Bluetooth with a small delay to ensure the component is mounted
+    const initTimer = setTimeout(() => {
+      initializeBluetooth();
+    }, 500);
+
+    return () => {
+      clearTimeout(initTimer);
+    };
   }, []);
 
+  // Monitor initialization changes
   useEffect(() => {
-    // Refresh printer status when connections change
-    if (isInitialized) {
+    if (isInitialized && !initializationError) {
+      console.log('✅ [SETTINGS] Bluetooth is now initialized, refreshing printer status');
       refreshPrinterStatus();
     }
-  }, [isInitialized, connectedDevices, refreshPrinterStatus]);
+  }, [isInitialized, initializationError, refreshPrinterStatus]);
 
   const loadStoredSettings = async () => {
     try {
@@ -113,15 +165,43 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // NEW: Enhanced Bluetooth toggle using the store
+  // Enhanced Bluetooth toggle with better error handling
   const handleBluetoothToggle = async (value: boolean) => {
-    if (!permissionsGranted) {
-      const granted = await requestPermissions();
-      if (!granted) {
+    if (!isInitialized && value) {
+      // Try to initialize if not already done
+      await initializeBluetooth();
+      return;
+    }
+
+    if (!permissionsGranted && value) {
+      try {
+        const granted = await requestPermissions();
+        if (!granted) {
+          Alert.alert(
+            'Permissions Required',
+            'Bluetooth permissions are required to use Bluetooth features. Please grant permissions in your device settings.',
+            [
+              { text: 'Cancel', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => {
+                // Could link to app settings here
+                Toast.show({
+                  type: 'info',
+                  text1: 'Open Device Settings',
+                  text2: 'Navigate to App Settings > Permissions > Location/Bluetooth',
+                  position: 'top',
+                  visibilityTime: 5000,
+                });
+              }}
+            ]
+          );
+          return;
+        }
+      } catch (error: any) {
+        console.error('Permission request failed:', error);
         Toast.show({
           type: 'error',
-          text1: 'Permissions Required',
-          text2: 'Bluetooth permissions are required to enable Bluetooth',
+          text1: 'Permission Error',
+          text2: error.message,
           position: 'top',
           visibilityTime: 4000,
         });
@@ -130,57 +210,94 @@ const SettingsScreen: React.FC = () => {
     }
 
     if (value && (!classicEnabled && !bleEnabled)) {
-      Toast.show({
-        type: 'info',
-        text1: 'Enable Bluetooth',
-        text2: 'Please enable Bluetooth in your device settings',
-        position: 'top',
-        visibilityTime: 4000,
-      });
+      Alert.alert(
+        'Enable Bluetooth',
+        'Bluetooth is disabled on your device. Please enable Bluetooth in your device settings to continue.',
+        [
+          { text: 'OK', style: 'default' }
+        ]
+      );
     } else if (!value) {
       // Disconnect all devices when disabling
-      await disconnectAllDevices();
-      Toast.show({
-        type: 'info',
-        text1: 'Bluetooth Disabled',
-        text2: 'All Bluetooth connections have been closed',
-        position: 'top',
-        visibilityTime: 3000,
-      });
+      try {
+        await disconnectAllDevices();
+        Toast.show({
+          type: 'info',
+          text1: 'Bluetooth Disabled',
+          text2: 'All Bluetooth connections have been closed',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      } catch (error: any) {
+        console.error('Failed to disconnect devices:', error);
+      }
     }
   };
 
-  // NEW: Enhanced printer connection using the store
+  // Enhanced printer connection with better checks
   const handlePrinterConnect = async () => {
-    if (!isInitialized) {
+    // Check initialization first
+    if (!isInitialized && !isInitializing) {
+      Alert.alert(
+        'Bluetooth Not Ready',
+        'Bluetooth system is not initialized. Would you like to initialize it now?',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Initialize', onPress: initializeBluetooth }
+        ]
+      );
+      return;
+    }
+
+    if (isInitializing) {
       Toast.show({
         type: 'warning',
-        text1: 'Bluetooth Not Ready',
-        text2: 'Please wait for Bluetooth initialization',
+        text1: 'Please Wait',
+        text2: 'Bluetooth is still initializing...',
         position: 'top',
         visibilityTime: 3000,
       });
+      return;
+    }
+
+    if (initializationError) {
+      Alert.alert(
+        'Bluetooth Error',
+        `Bluetooth initialization failed: ${initializationError}. Would you like to try again?`,
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Retry', onPress: initializeBluetooth }
+        ]
+      );
       return;
     }
 
     if (!classicEnabled && !bleEnabled) {
-      Toast.show({
-        type: 'warning',
-        text1: 'Bluetooth Required',
-        text2: 'Please enable Bluetooth first',
-        position: 'top',
-        visibilityTime: 3000,
-      });
+      Alert.alert(
+        'Bluetooth Required',
+        'Bluetooth is disabled on your device. Please enable Bluetooth in your device settings.',
+        [{ text: 'OK', style: 'default' }]
+      );
       return;
     }
 
     if (!permissionsGranted) {
-      const granted = await requestPermissions();
-      if (!granted) {
+      try {
+        const granted = await requestPermissions();
+        if (!granted) {
+          Alert.alert(
+            'Permissions Required',
+            'Bluetooth permissions are required to scan for devices. Please grant permissions in your device settings.',
+            [{ text: 'OK', style: 'default' }]
+          );
+          return;
+        }
+      } catch (error: any) {
+        console.error('Permission request failed:', error);
         Toast.show({
           type: 'error',
-          text1: 'Permissions Required',
-          text2: 'Bluetooth permissions are required to scan for devices',
+          text1: 'Permission Error',
+          text2: error.message,
           position: 'top',
           visibilityTime: 4000,
         });
@@ -192,7 +309,7 @@ const SettingsScreen: React.FC = () => {
     await scanForDevices();
   };
 
-  // NEW: Enhanced printer disconnection
+  // Enhanced printer disconnection
   const handlePrinterDisconnect = async () => {
     if (!printer.device) {
       Toast.show({
@@ -229,14 +346,19 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // NEW: Use the store's scanning functionality
+  // Enhanced device scanning
   const scanForDevices = async () => {
     if (!permissionsGranted) {
-      await requestPermissions();
-      return;
+      try {
+        await requestPermissions();
+      } catch (error) {
+        console.error('Permission request failed during scan:', error);
+        return;
+      }
     }
 
     try {
+      console.log('🔍 [SETTINGS] Starting device scan...');
       await startDeviceScan();
       
       Toast.show({
@@ -259,7 +381,7 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // NEW: Enhanced device connection using the store
+  // Enhanced device connection
   const connectToDeviceHandler = async (device: BluetoothDevice) => {
     try {
       console.log('🔌 Connecting to device:', device.name, device.type);
@@ -305,7 +427,7 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // NEW: Enhanced device disconnection
+  // Enhanced device disconnection
   const disconnectDeviceHandler = async (device: BluetoothDevice) => {
     try {
       await disconnectDevice(device);
@@ -330,12 +452,11 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // NEW: Enhanced test print using the new service
+  // Enhanced test print
   const testPrinterConnection = async () => {
     try {
       await quickTestPrint();
     } catch (error: any) {
-      // Error handling is done in the hook
       console.error('Test print failed:', error);
     }
   };
@@ -350,7 +471,12 @@ const SettingsScreen: React.FC = () => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            await disconnectAllDevices();
+            try {
+              await disconnectAllDevices();
+              await cleanup();
+            } catch (error) {
+              console.error('Cleanup failed during logout:', error);
+            }
             
             Toast.show({
               type: 'success',
@@ -366,46 +492,68 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  // NEW: Enhanced troubleshooting with store cleanup
+  // Enhanced troubleshooting
   const handleTroubleshoot = async () => {
-    Toast.show({
-      type: 'info',
-      text1: 'Running Diagnostics',
-      text2: 'Checking app performance and connectivity...',
-      position: 'top',
-      visibilityTime: 4000,
-    });
+    Alert.alert(
+      'Troubleshoot Bluetooth',
+      'This will reset all Bluetooth connections and clear cache. Continue?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Troubleshoot',
+          style: 'destructive',
+          onPress: async () => {
+            Toast.show({
+              type: 'info',
+              text1: 'Running Diagnostics',
+              text2: 'Resetting Bluetooth system...',
+              position: 'top',
+              visibilityTime: 4000,
+            });
 
-    try {
-      // Disconnect all devices
-      await disconnectAllDevices();
-      
-      // Clear stored data
-      await AsyncStorage.multiRemove(['connected_printer', 'bluetooth_cache', 'bluetooth_stored_printer']);
-      
-      // Refresh connections
-      await refreshConnections();
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Diagnostics Complete',
-        text2: 'Cache cleared and connections reset',
-        position: 'top',
-        visibilityTime: 4000,
-      });
-    } catch (error: any) {
-      console.error('Troubleshoot failed:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Diagnostics Failed',
-        text2: 'Failed to complete diagnostic checks',
-        position: 'top',
-        visibilityTime: 4000,
-      });
-    }
+            try {
+              // Cleanup current state
+              await disconnectAllDevices();
+              await cleanup();
+              
+              // Clear stored data
+              await AsyncStorage.multiRemove([
+                'connected_printer', 
+                'bluetooth_cache', 
+                'bluetooth_stored_printer'
+              ]);
+              
+              // Reset error state
+              setInitializationError(null);
+              
+              // Reinitialize
+              await initializeBluetooth();
+              
+              Toast.show({
+                type: 'success',
+                text1: 'Diagnostics Complete',
+                text2: 'Bluetooth system has been reset',
+                position: 'top',
+                visibilityTime: 4000,
+              });
+            } catch (error: any) {
+              console.error('Troubleshoot failed:', error);
+              
+              Toast.show({
+                type: 'error',
+                text1: 'Diagnostics Failed',
+                text2: 'Failed to complete diagnostic checks',
+                position: 'top',
+                visibilityTime: 4000,
+              });
+            }
+          }
+        }
+      ]
+    );
   };
 
+  // Save settings when they change
   useEffect(() => {
     saveSettings();
   }, [notifications, autoSync, darkMode]);
@@ -435,19 +583,79 @@ const SettingsScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // NEW: Enhanced printer connection display
+  // Enhanced refresh function
+  const refreshConnectionStatus = async () => {
+    if (!isInitialized && !isInitializing) {
+      await initializeBluetooth();
+      return;
+    }
+    
+    if (isInitializing) {
+      Toast.show({
+        type: 'info',
+        text1: 'Please Wait',
+        text2: 'Bluetooth is still initializing...',
+        position: 'top',
+        visibilityTime: 2000,
+      });
+      return;
+    }
+    
+    setCheckingConnection(true);
+    
+    try {
+      console.log('🔄 Manual refresh of connection status...');
+      
+      await refreshConnections();
+      await refreshPrinterStatus();
+      
+      Toast.show({
+        type: 'info',
+        text1: 'Status Refreshed',
+        text2: 'Connection status updated',
+        position: 'top',
+        visibilityTime: 2000,
+      });
+    } catch (error: any) {
+      console.error('Failed to refresh connection status:', error);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Refresh Failed',
+        text2: 'Could not refresh connection status',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    } finally {
+      setCheckingConnection(false);
+    }
+  };
+
+  // Enhanced printer connection display
   const renderPrinterConnectionSetting = () => {
     const hasValidConnection = printer.isConnected && printer.device;
     
     let statusText = 'No printer connected';
-    if (hasValidConnection) {
-      statusText = `Connected to ${printer.device.name} (${printer.device.type.toUpperCase()})`;
-    } else if (!isInitialized) {
+    let statusColor = '#a0aec0';
+    
+    if (initializationError) {
+      statusText = `Error: ${initializationError}`;
+      statusColor = '#FF6B6B';
+    } else if (isInitializing) {
       statusText = 'Initializing Bluetooth...';
-    } else if (!classicEnabled && !bleEnabled) {
-      statusText = 'Bluetooth disabled';
+      statusColor = '#FF9500';
+    } else if (!isInitialized) {
+      statusText = 'Bluetooth not initialized';
+      statusColor = '#FF6B6B';
     } else if (!permissionsGranted) {
       statusText = 'Permissions required';
+      statusColor = '#FF9500';
+    } else if (!classicEnabled && !bleEnabled) {
+      statusText = 'Bluetooth disabled';
+      statusColor = '#FF6B6B';
+    } else if (hasValidConnection) {
+      statusText = `Connected to ${printer.device.name} (${printer.device.type.toUpperCase()})`;
+      statusColor = '#34C759';
     }
     
     return renderSettingItem(
@@ -489,18 +697,27 @@ const SettingsScreen: React.FC = () => {
             </TouchableOpacity>
           </>
         ) : (
-          // When no printer is connected, show Connect button
+          // When no printer is connected, show Connect or Initialize button
           <TouchableOpacity
             style={styles.connectButton}
-            onPress={handlePrinterConnect}
-            disabled={!isInitialized || (!classicEnabled && !bleEnabled) || checkingConnection}
+            onPress={!isInitialized && !isInitializing ? initializeBluetooth : handlePrinterConnect}
+            disabled={isInitializing || checkingConnection}
           >
             <LinearGradient
-              colors={(!isInitialized || (!classicEnabled && !bleEnabled)) ? ['#718096', '#a0aec0'] : ['#667eea', '#764ba2']}
+              colors={
+                initializationError ? ['#FF6B6B', '#FF5252'] :
+                isInitializing ? ['#FF9500', '#FF8C00'] :
+                (!isInitialized || (!classicEnabled && !bleEnabled)) ? ['#718096', '#a0aec0'] : 
+                ['#667eea', '#764ba2']
+              }
               style={styles.connectButtonGradient}
             >
               <Text style={styles.connectButtonText}>
-                {!isInitialized ? 'Loading...' : checkingConnection ? 'Checking...' : 'Connect'}
+                {initializationError ? 'Retry' :
+                 isInitializing ? 'Initializing...' :
+                 !isInitialized ? 'Initialize' :
+                 checkingConnection ? 'Checking...' : 
+                 'Connect'}
               </Text>
             </LinearGradient>
           </TouchableOpacity>
@@ -509,41 +726,7 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  // NEW: Enhanced refresh function
-  const refreshConnectionStatus = async () => {
-    if (!isInitialized) return;
-    
-    setCheckingConnection(true);
-    
-    try {
-      console.log('🔄 Manual refresh of connection status...');
-      
-      await refreshConnections();
-      await refreshPrinterStatus();
-      
-      Toast.show({
-        type: 'info',
-        text1: 'Status Refreshed',
-        text2: 'Connection status updated',
-        position: 'top',
-        visibilityTime: 2000,
-      });
-    } catch (error: any) {
-      console.error('Failed to refresh connection status:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Refresh Failed',
-        text2: 'Could not refresh connection status',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    } finally {
-      setCheckingConnection(false);
-    }
-  };
-
-  // NEW: Enhanced device item rendering
+  // Enhanced device item rendering
   const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => (
     <TouchableOpacity
       style={styles.deviceItem}
@@ -591,31 +774,39 @@ const SettingsScreen: React.FC = () => {
       <View style={styles.section}>
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Bluetooth System</Text>
-          {isInitialized && (
+          {isInitialized && !initializationError && (
             <TouchableOpacity
               style={styles.refreshButton}
               onPress={refreshConnectionStatus}
-              disabled={checkingConnection}
+              disabled={checkingConnection || isInitializing}
             >
               <MaterialIcons 
                 name="refresh" 
                 size={20} 
-                color={checkingConnection ? '#718096' : '#667eea'} 
+                color={(checkingConnection || isInitializing) ? '#718096' : '#667eea'} 
               />
             </TouchableOpacity>
           )}
         </View>
 
-        {/* NEW: System status display */}
+        {/* Enhanced system status display */}
         {renderSettingItem(
           'bluetooth',
           'Bluetooth Status',
-          !isInitialized ? 'Initializing...' :
+          initializationError ? `Error: ${initializationError}` :
+          isInitializing ? 'Initializing system...' :
+          !isInitialized ? 'Not initialized - Tap to initialize' :
           !permissionsGranted ? 'Permissions required' :
           (classicEnabled || bleEnabled) ? `Classic: ${classicEnabled ? 'ON' : 'OFF'} • BLE: ${bleEnabled ? 'ON' : 'OFF'}` :
           'Bluetooth disabled',
           <View style={styles.bluetoothStatus}>
-            {isInitialized && (
+            {initializationError ? (
+              <View style={[styles.statusBadge, { backgroundColor: '#FF6B6B' }]}>
+                <Text style={styles.statusBadgeText}>Error</Text>
+              </View>
+            ) : isInitializing ? (
+              <ActivityIndicator size="small" color="#FF9500" />
+            ) : isInitialized ? (
               <>
                 {classicEnabled && (
                   <View style={[styles.statusBadge, { backgroundColor: '#34C759' }]}>
@@ -633,13 +824,17 @@ const SettingsScreen: React.FC = () => {
                   </View>
                 )}
               </>
+            ) : (
+              <View style={[styles.statusBadge, { backgroundColor: '#718096' }]}>
+                <Text style={styles.statusBadgeText}>Not Ready</Text>
+              </View>
             )}
           </View>,
-          () => handleBluetoothToggle(!classicEnabled && !bleEnabled)
+          !isInitialized && !isInitializing && !initializationError ? initializeBluetooth : undefined
         )}
 
-        {/* NEW: Connection summary */}
-        {isInitialized && (
+        {/* Connection summary */}
+        {isInitialized && !initializationError && (
           renderSettingItem(
             'devices',
             'Connected Devices',
@@ -767,8 +962,8 @@ const SettingsScreen: React.FC = () => {
 
         {renderSettingItem(
           'refresh',
-          'Troubleshoot App',
-          'Run diagnostics and clear cache',
+          'Troubleshoot Bluetooth',
+          'Reset Bluetooth system and clear cache',
           <TouchableOpacity
             style={styles.troubleshootButton}
             onPress={handleTroubleshoot}
@@ -777,7 +972,7 @@ const SettingsScreen: React.FC = () => {
               colors={['#667eea', '#764ba2']}
               style={styles.troubleshootButtonGradient}
             >
-              <Text style={styles.troubleshootButtonText}>Run</Text>
+              <Text style={styles.troubleshootButtonText}>Reset</Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -959,10 +1154,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // NEW: Enhanced status display
+  // Enhanced status display
   bluetoothStatus: {
     flexDirection: 'row',
     gap: 8,
+    alignItems: 'center',
   },
   statusBadge: {
     paddingHorizontal: 8,
