@@ -1,4 +1,4 @@
-// components/BulkScanner.tsx - FIXED: Clean toast usage with existing toastConfig
+// components/BulkScanner.tsx - Updated to use global Bluetooth context
 
 import React, { useState, useEffect } from 'react';
 import {
@@ -20,7 +20,8 @@ import * as SecureStore from 'expo-secure-store';
 import QRScanner from './QRScanner';
 import api from '../lib/api';
 import OfflineScanningService from '../services/OfflineScanningService';
-import PrintReceiptService from '../services/PrintReceiptService';
+import GlobalPrintService from '../services/GlobalPrintService'; // FIXED: Use new service
+import { useBluetooth } from '../contexts/BluetoothContext'; // FIXED: Use global context
 
 interface ScannedPackage {
   code: string;
@@ -67,8 +68,11 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [printingProgress, setPrintingProgress] = useState<string>('');
 
+  // FIXED: Use global Bluetooth context
+  const bluetoothContext = useBluetooth();
+
   const offlineService = OfflineScanningService.getInstance();
-  const printService = PrintReceiptService.getInstance();
+  const printService = GlobalPrintService.getInstance(); // FIXED: Use new service
 
   useEffect(() => {
     if (visible) {
@@ -355,10 +359,13 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
 
     const confirmationMessage = getConfirmationMessage(actionType, validPackages.length);
     const offlineNote = !isOnline ? '\n\nNote: You are offline. Actions will be queued for sync.' : '';
+    const printerNote = actionType === 'print' && !bluetoothContext.isPrintReady 
+      ? '\n\nWarning: No printer connected. Print operations will be queued but not printed.' 
+      : '';
 
     Alert.alert(
       'Confirm Bulk Action',
-      `${confirmationMessage}${offlineNote}`,
+      `${confirmationMessage}${offlineNote}${printerNote}`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Proceed', onPress: performBulkAction, style: 'default' }
@@ -417,9 +424,27 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
     }
   };
 
+  // FIXED: Use global Bluetooth context for printing
   const processBulkPrint = async (packages: ScannedPackage[]): Promise<{successCount: number, failCount: number}> => {
     let successCount = 0;
     let failCount = 0;
+    
+    // Check if printing is available before starting
+    const availability = await printService.isPrintingAvailable(bluetoothContext);
+    if (!availability.available) {
+      console.warn('Printing not available:', availability.reason);
+      
+      // Set all packages as failed to print
+      packages.forEach(pkg => {
+        setScannedPackages(prev => prev.map(p => 
+          p.code === pkg.code 
+            ? { ...p, error: `Print not available: ${availability.reason}` } 
+            : p
+        ));
+      });
+      
+      return { successCount: 0, failCount: packages.length };
+    }
     
     for (let i = 0; i < packages.length; i++) {
       const pkg = packages[i];
@@ -427,22 +452,28 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
       try {
         setPrintingProgress(`Printing ${i + 1} of ${packages.length}: ${pkg.code}`);
         
-        await printService.printPackageReceipt({
+        // FIXED: Use global print service with context
+        const result = await printService.printPackage(bluetoothContext, {
           code: pkg.code,
           receiver_name: pkg.receiver_name,
           route_description: pkg.route_description,
           sender_name: pkg.sender_name,
         });
         
-        successCount++;
+        if (result.success) {
+          successCount++;
+          
+          setScannedPackages(prev => prev.map(p => 
+            p.code === pkg.code ? { ...p, printed: true } : p
+          ));
+        } else {
+          throw new Error(result.message);
+        }
         
-        setScannedPackages(prev => prev.map(p => 
-          p.code === pkg.code ? { ...p, printed: true } : p
-        ));
-        
+        // Small delay between prints
         await new Promise(resolve => setTimeout(resolve, 500));
         
-      } catch (error) {
+      } catch (error: any) {
         console.error(`Failed to print ${pkg.code}:`, error);
         failCount++;
         
@@ -765,6 +796,15 @@ const BulkScanner: React.FC<BulkScannerProps> = ({
               {!isOnline && (
                 <Text style={styles.offlineHeaderIndicator}>OFFLINE MODE</Text>
               )}
+              {/* FIXED: Show printer status for print actions */}
+              {actionType === 'print' && (
+                <Text style={styles.printerHeaderIndicator}>
+                  {bluetoothContext.isPrintReady 
+                    ? `Printer: ${bluetoothContext.connectedPrinter?.name}` 
+                    : 'No Printer Connected'
+                  }
+                </Text>
+              )}
             </View>
             <View style={styles.headerButton} />
           </LinearGradient>
@@ -970,6 +1010,12 @@ const styles = StyleSheet.create({
     color: '#FFB000',
     fontSize: 12,
     fontWeight: '600',
+    marginTop: 2,
+  },
+  printerHeaderIndicator: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 11,
+    fontWeight: '500',
     marginTop: 2,
   },
   content: {
