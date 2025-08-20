@@ -1,4 +1,4 @@
-// app/admin/ScanningScreen.tsx - Simplified version using direct hook
+// app/admin/ScanningScreen.tsx - Updated to use global Bluetooth context
 import { MaterialIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -20,7 +20,7 @@ import AdminLayout from '../../components/AdminLayout';
 import BulkScanner from '../../components/BulkScanner';
 import QRScanner from '../../components/QRScanner';
 import api from '../../lib/api';
-import useBluetooth from '../../hooks/useBluetooth';
+import { useBluetooth } from '../../contexts/BluetoothContext';
 
 const { width } = Dimensions.get('window');
 
@@ -51,8 +51,15 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   const [loading, setLoading] = useState(true);
   const [currentUserRole, setCurrentUserRole] = useState<string>(userRole);
 
-  // Use simple Bluetooth hook
-  const { connectedPrinter, isPrintReady, testPrint } = useBluetooth();
+  // Use global Bluetooth context
+  const { 
+    connectedPrinter, 
+    isPrintReady, 
+    testPrint, 
+    printText, 
+    printReceipt,
+    isBluetoothAvailable 
+  } = useBluetooth();
 
   useEffect(() => {
     loadUserRole();
@@ -118,6 +125,21 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
 
   const handleQuickScan = async (actionType: string) => {
     if (actionType === 'print') {
+      if (!isBluetoothAvailable) {
+        Alert.alert(
+          'Bluetooth Not Available',
+          'Bluetooth is not available in this environment (Expo Go). Printing features require a development build.',
+          [
+            { text: 'Continue Anyway', onPress: () => {
+              setSelectedAction(actionType);
+              setShowQRScanner(true);
+            }},
+            { text: 'Cancel', style: 'cancel' }
+          ]
+        );
+        return;
+      }
+      
       if (!isPrintReady) {
         Alert.alert(
           'Printer Not Ready',
@@ -127,6 +149,13 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
             { 
               text: 'Go to Settings', 
               onPress: () => router.push('/admin/settings')
+            },
+            { 
+              text: 'Continue Without Printer', 
+              onPress: () => {
+                setSelectedAction(actionType);
+                setShowQRScanner(true);
+              }
             }
           ]
         );
@@ -140,6 +169,21 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
 
   const handleBulkScan = async (actionType: string) => {
     if (actionType === 'print') {
+      if (!isBluetoothAvailable) {
+        Alert.alert(
+          'Bluetooth Not Available',
+          'Bluetooth is not available in this environment (Expo Go). Printing features require a development build.',
+          [
+            { text: 'Continue Anyway', onPress: () => {
+              setSelectedAction(actionType);
+              setShowBulkScanner(true);
+            }},
+            { text: 'Cancel', style: 'cancel' }
+          ]
+        );
+        return;
+      }
+      
       if (!isPrintReady) {
         Alert.alert(
           'Printer Required for Bulk Print',
@@ -149,6 +193,13 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
             { 
               text: 'Go to Settings', 
               onPress: () => router.push('/admin/settings')
+            },
+            { 
+              text: 'Continue Without Printer', 
+              onPress: () => {
+                setSelectedAction(actionType);
+                setShowBulkScanner(true);
+              }
             }
           ]
         );
@@ -165,21 +216,27 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
     console.log('✅ Scan successful:', result);
     
     // Auto-print if this was a print action
-    if (selectedAction === 'print' && isPrintReady) {
-      try {
+    if (selectedAction === 'print') {
+      if (isPrintReady && isBluetoothAvailable) {
         Alert.alert(
           'Print Receipt',
           `Print receipt for package ${result.package_code || result.code || 'UNKNOWN'}?`,
           [
             { text: 'Cancel', style: 'cancel' },
             {
-              text: 'Print',
+              text: 'Print Receipt',
               onPress: async () => {
                 try {
-                  await testPrint(); // For now, just do a test print
+                  await printReceipt({
+                    packageCode: result.package_code || result.code,
+                    customerName: result.customer_name || 'N/A',
+                    status: result.status || 'Processed',
+                    location: result.location || 'Current Location',
+                    timestamp: new Date().toISOString()
+                  });
                   Toast.show({
                     type: 'success',
-                    text1: 'Print Successful',
+                    text1: 'Receipt Printed',
                     text2: `Receipt printed for ${result.package_code || result.code}`,
                     position: 'top',
                     visibilityTime: 3000,
@@ -194,11 +251,41 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
                   });
                 }
               }
+            },
+            {
+              text: 'Test Print',
+              onPress: async () => {
+                try {
+                  await testPrint();
+                  Toast.show({
+                    type: 'success',
+                    text1: 'Test Print Sent',
+                    text2: `Test sent to ${connectedPrinter?.name}`,
+                    position: 'top',
+                    visibilityTime: 3000,
+                  });
+                } catch (error: any) {
+                  Toast.show({
+                    type: 'error',
+                    text1: 'Test Print Failed',
+                    text2: error.message,
+                    position: 'top',
+                    visibilityTime: 3000,
+                  });
+                }
+              }
             }
           ]
         );
-      } catch (error) {
-        console.error('Print after scan failed:', error);
+      } else {
+        // No printer available, just show success
+        Toast.show({
+          type: 'info',
+          text1: 'Scan Successful',
+          text2: `Package ${result.package_code || result.code} processed (no printer available)`,
+          position: 'top',
+          visibilityTime: 3000,
+        });
       }
     }
   };
@@ -406,6 +493,17 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
   };
 
   const handleTestPrinter = async () => {
+    if (!isPrintReady) {
+      Toast.show({
+        type: 'warning',
+        text1: 'No Printer Connected',
+        text2: 'Please connect a printer in Settings first',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      return;
+    }
+
     try {
       await testPrint();
       Toast.show({
@@ -443,11 +541,48 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
             {getRoleDisplayName()} • {getRoleWelcomeMessage()}
           </Text>
         </View>
-        {/* Simple status indicator */}
+        {/* Enhanced status indicators */}
         <View style={styles.statusIndicators}>
-          <View style={[styles.statusDot, { backgroundColor: isPrintReady ? '#34C759' : '#FF6B6B' }]} />
+          <View style={styles.statusRow}>
+            <MaterialIcons 
+              name="bluetooth" 
+              size={16} 
+              color={isBluetoothAvailable ? '#34C759' : '#FF6B6B'} 
+            />
+            <View style={[
+              styles.statusDot, 
+              { backgroundColor: isBluetoothAvailable ? '#34C759' : '#FF6B6B' }
+            ]} />
+          </View>
+          <View style={styles.statusRow}>
+            <MaterialIcons 
+              name="print" 
+              size={16} 
+              color={isPrintReady ? '#34C759' : '#FF6B6B'} 
+            />
+            <View style={[
+              styles.statusDot, 
+              { backgroundColor: isPrintReady ? '#34C759' : '#FF6B6B' }
+            ]} />
+          </View>
         </View>
       </View>
+      
+      {/* Connected printer info */}
+      {connectedPrinter && (
+        <View style={styles.printerStatusCard}>
+          <MaterialIcons name="print" size={20} color="#fff" />
+          <Text style={styles.printerStatusText}>
+            Connected: {connectedPrinter.name}
+          </Text>
+          <TouchableOpacity
+            style={styles.quickTestButton}
+            onPress={handleTestPrinter}
+          >
+            <Text style={styles.quickTestText}>Test</Text>
+          </TouchableOpacity>
+        </View>
+      )}
     </LinearGradient>
   );
 
@@ -508,40 +643,41 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
       <View style={styles.actionContent}>
         <Text style={styles.actionDescription}>{action.description}</Text>
         
-        {/* Show printer warning when needed */}
-        {action.requiresPrinter && !isPrintReady && (
-          <View style={styles.printerWarning}>
-            <MaterialIcons name="warning" size={16} color="#FF9500" />
-            <Text style={styles.printerWarningText}>
-              No printer connected. Connect in Settings first.
-            </Text>
-          </View>
-        )}
-        
-        {/* Show printer status when available */}
-        {action.requiresPrinter && isPrintReady && (
-          <View style={styles.printerReady}>
-            <MaterialIcons name="check-circle" size={16} color="#34C759" />
-            <Text style={styles.printerReadyText}>
-              Ready: {connectedPrinter?.name}
-            </Text>
+        {/* Show printer warning/status when needed */}
+        {action.requiresPrinter && (
+          <View style={styles.printerStatusContainer}>
+            {!isBluetoothAvailable ? (
+              <View style={styles.printerWarning}>
+                <MaterialIcons name="warning" size={16} color="#FF9500" />
+                <Text style={styles.printerWarningText}>
+                  Bluetooth not available (Expo Go). Use development build for printing.
+                </Text>
+              </View>
+            ) : !isPrintReady ? (
+              <View style={styles.printerWarning}>
+                <MaterialIcons name="warning" size={16} color="#FF9500" />
+                <Text style={styles.printerWarningText}>
+                  No printer connected. Connect in Settings first.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.printerReady}>
+                <MaterialIcons name="check-circle" size={16} color="#34C759" />
+                <Text style={styles.printerReadyText}>
+                  Ready: {connectedPrinter?.name}
+                </Text>
+              </View>
+            )}
           </View>
         )}
         
         <View style={styles.actionButtons}>
           <TouchableOpacity
-            style={[
-              styles.actionButton, 
-              { backgroundColor: action.color },
-              (action.requiresPrinter && !isPrintReady) && styles.disabledButton
-            ]}
+            style={[styles.actionButton, { backgroundColor: action.color }]}
             onPress={() => handleQuickScan(action.id)}
-            disabled={action.requiresPrinter && !isPrintReady}
           >
             <MaterialIcons name="qr-code-scanner" size={18} color="#fff" />
-            <Text style={styles.actionButtonText}>
-              {(action.requiresPrinter && !isPrintReady) ? 'Printer Required' : 'Quick Scan'}
-            </Text>
+            <Text style={styles.actionButtonText}>Quick Scan</Text>
           </TouchableOpacity>
           
           {action.allowBulk && (
@@ -549,11 +685,9 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
               style={[
                 styles.actionButton, 
                 styles.bulkScanButton, 
-                { borderColor: action.color },
-                (action.requiresPrinter && !isPrintReady) && styles.disabledButton
+                { borderColor: action.color }
               ]}
               onPress={() => handleBulkScan(action.id)}
-              disabled={action.requiresPrinter && !isPrintReady}
             >
               <MaterialIcons name="view-list" size={18} color={action.color} />
               <Text style={[styles.actionButtonText, { color: action.color }]}>
@@ -563,19 +697,13 @@ const ScanningScreen: React.FC<ScanningScreenProps> = ({
           )}
         </View>
         
-        {action.requiresPrinter && (
+        {action.requiresPrinter && isPrintReady && (
           <TouchableOpacity
             style={styles.printerTestButton}
-            onPress={isPrintReady ? handleTestPrinter : () => router.push('/admin/settings')}
+            onPress={handleTestPrinter}
           >
-            <MaterialIcons 
-              name={isPrintReady ? "print" : "settings"} 
-              size={16} 
-              color="#667eea" 
-            />
-            <Text style={styles.printerTestText}>
-              {isPrintReady ? 'Test Printer' : 'Setup Printer'}
-            </Text>
+            <MaterialIcons name="print" size={16} color="#667eea" />
+            <Text style={styles.printerTestText}>Test Printer</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -692,7 +820,7 @@ const styles = StyleSheet.create({
     shadowRadius: 16,
     elevation: 8,
   },
-  welcomeHeader: { flexDirection: 'row', alignItems: 'center' },
+  welcomeHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 16 },
   welcomeIconContainer: {
     width: 48,
     height: 48,
@@ -715,20 +843,51 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Simple status indicator
+  // Enhanced status indicators
   statusIndicators: {
     flexDirection: 'column',
     gap: 8,
   },
+  statusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
   statusDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 6,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
+  },
+  
+  printerStatusCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 12,
+    padding: 12,
+    gap: 12,
+  },
+  printerStatusText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  quickTestButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  quickTestText: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '700',
   },
   
   statsSection: {
@@ -802,13 +961,15 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
+  printerStatusContainer: {
+    marginBottom: 16,
+  },
   printerWarning: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(255, 149, 0, 0.1)',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 16,
     gap: 8,
   },
   printerWarningText: {
@@ -824,7 +985,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(52, 199, 89, 0.1)',
     borderRadius: 8,
     padding: 12,
-    marginBottom: 16,
     gap: 8,
   },
   printerReadyText: {
@@ -848,7 +1008,6 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
     borderWidth: 2,
   },
-  disabledButton: { opacity: 0.5 },
   actionButtonText: {
     fontSize: 15,
     fontWeight: '700',
