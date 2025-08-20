@@ -5,6 +5,7 @@ import { BleManager, State } from 'react-native-ble-plx';
 import RNBluetoothClassic, { BluetoothDevice as RNClassicDevice } from 'react-native-bluetooth-classic';
 import { create } from 'zustand';
 import { subscribeWithSelector } from 'zustand/middleware';
+import { useEffect } from 'react';
 
 export interface BluetoothDevice {
   id: string;
@@ -715,7 +716,7 @@ function detectDeviceType(deviceName: string): 'printer' | 'scanner' | 'unknown'
 export const useBluetoothInitialization = () => {
   const { initialize, cleanup, isInitialized } = useBluetoothStore();
   
-  React.useEffect(() => {
+  useEffect(() => {
     initialize();
     return () => {
       cleanup();
