@@ -1,5 +1,5 @@
-// app/admin/settings.tsx - Fixed to preserve connections
-import React, { useState, useEffect, useCallback } from 'react';
+// app/admin/settings.tsx - Simplified version using direct hook
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,11 +7,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Switch,
-  Modal,
-  FlatList,
-  ActivityIndicator,
   Alert,
-  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { MaterialIcons } from '@expo/vector-icons';
@@ -19,15 +15,8 @@ import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AdminLayout from '../../components/AdminLayout';
-import { useFocusEffect } from '@react-navigation/native';
-
-// Import the Bluetooth store and print hooks
-import { 
-  useBluetoothStore, 
-  usePrinterConnection,
-  BluetoothDevice 
-} from '../../stores/BluetoothStore';
-import { usePrintService, useQuickPrint } from '../../hooks/usePrintService';
+import DeviceModal from '../../components/DeviceModal';
+import useBluetooth, { BluetoothDevice } from '../../hooks/useBluetooth';
 
 interface AppInfo {
   version: string;
@@ -38,118 +27,35 @@ interface AppInfo {
 const SettingsScreen: React.FC = () => {
   const router = useRouter();
   
-  // Bluetooth store with all methods
+  // Use simple Bluetooth hook
   const {
-    isInitialized,
-    classicEnabled,
-    bleEnabled,
-    permissionsGranted,
-    isScanning,
-    devices,
-    connectedDevices,
-    initialize,
     requestPermissions,
-    startDeviceScan,
-    stopDeviceScan,
+    scanForDevices,
     connectToDevice,
-    disconnectDevice,
-    refreshConnections,
-  } = useBluetoothStore();
-
-  const { printer, connect: connectPrinter, disconnect: disconnectPrinter } = usePrinterConnection();
-  const { printStatus, refreshPrinterStatus } = usePrintService();
-  const { quickTestPrint } = useQuickPrint();
+    disconnectFromDevice,
+    testPrint,
+    connectedPrinter,
+    allDevices,
+    isScanning,
+    isPrintReady,
+  } = useBluetooth();
   
-  // Local state for UI and initialization tracking
+  // Local state for UI
   const [showDeviceModal, setShowDeviceModal] = useState(false);
   const [notifications, setNotifications] = useState(true);
   const [autoSync, setAutoSync] = useState(true);
   const [darkMode, setDarkMode] = useState(true);
-  const [checkingConnection, setCheckingConnection] = useState(false);
-  const [initializationError, setInitializationError] = useState<string | null>(null);
-  const [isInitializing, setIsInitializing] = useState(false);
 
   const appInfo: AppInfo = {
     version: '2.1.0',
-    buildNumber: '2024.08.14',
-    lastUpdate: 'August 14, 2024',
+    buildNumber: '2024.08.20',
+    lastUpdate: 'August 20, 2024',
   };
 
-  // Initialize Bluetooth manually with proper error handling
-  const initializeBluetooth = useCallback(async () => {
-    if (isInitialized || isInitializing) {
-      console.log('📱 [SETTINGS] Bluetooth already initialized or initializing');
-      return;
-    }
-
-    setIsInitializing(true);
-    setInitializationError(null);
-    
-    try {
-      console.log('📱 [SETTINGS] Starting manual Bluetooth initialization...');
-      
-      await initialize();
-      
-      console.log('✅ [SETTINGS] Bluetooth initialization completed successfully');
-      
-      // Refresh printer status after successful initialization
-      setTimeout(() => {
-        refreshPrinterStatus();
-      }, 1000);
-      
-    } catch (error: any) {
-      console.error('❌ [SETTINGS] Bluetooth initialization failed:', error);
-      
-      const errorMessage = error?.message || 'Unknown initialization error';
-      setInitializationError(errorMessage);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Bluetooth Initialization Failed',
-        text2: errorMessage,
-        position: 'top',
-        visibilityTime: 5000,
-      });
-    } finally {
-      setIsInitializing(false);
-    }
-  }, [isInitialized, isInitializing, initialize, refreshPrinterStatus]);
-
-  // Load settings and initialize Bluetooth on mount
+  // Load settings on mount
   useEffect(() => {
     loadStoredSettings();
-    
-    // Initialize Bluetooth with a small delay to ensure the component is mounted
-    const initTimer = setTimeout(() => {
-      initializeBluetooth();
-    }, 500);
-
-    return () => {
-      clearTimeout(initTimer);
-      // REMOVED: Don't cleanup Bluetooth on unmount!
-      // This was causing the disconnection issue
-    };
-  }, [initializeBluetooth]);
-
-  // Use focus effect instead of useEffect for refreshing when screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      console.log('📱 [SETTINGS] Screen focused, refreshing status...');
-      
-      if (isInitialized && !initializationError) {
-        refreshPrinterStatus();
-        refreshConnections();
-      }
-    }, [isInitialized, initializationError, refreshPrinterStatus, refreshConnections])
-  );
-
-  // Monitor initialization changes
-  useEffect(() => {
-    if (isInitialized && !initializationError) {
-      console.log('✅ [SETTINGS] Bluetooth is now initialized, refreshing printer status');
-      refreshPrinterStatus();
-    }
-  }, [isInitialized, initializationError, refreshPrinterStatus]);
+  }, []);
 
   const loadStoredSettings = async () => {
     try {
@@ -178,148 +84,22 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // Enhanced Bluetooth toggle with better error handling
-  const handleBluetoothToggle = async (value: boolean) => {
-    if (!isInitialized && value) {
-      // Try to initialize if not already done
-      await initializeBluetooth();
-      return;
-    }
-
-    if (!permissionsGranted && value) {
-      try {
-        const granted = await requestPermissions();
-        if (!granted) {
-          Alert.alert(
-            'Permissions Required',
-            'Bluetooth permissions are required to use Bluetooth features. Please grant permissions in your device settings.',
-            [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Open Settings', onPress: () => {
-                Toast.show({
-                  type: 'info',
-                  text1: 'Open Device Settings',
-                  text2: 'Navigate to App Settings > Permissions > Location/Bluetooth',
-                  position: 'top',
-                  visibilityTime: 5000,
-                });
-              }}
-            ]
-          );
-          return;
-        }
-      } catch (error: any) {
-        console.error('Permission request failed:', error);
-        Toast.show({
-          type: 'error',
-          text1: 'Permission Error',
-          text2: error.message,
-          position: 'top',
-          visibilityTime: 4000,
-        });
-        return;
-      }
-    }
-
-    if (value && (!classicEnabled && !bleEnabled)) {
-      Alert.alert(
-        'Enable Bluetooth',
-        'Bluetooth is disabled on your device. Please enable Bluetooth in your device settings to continue.',
-        [
-          { text: 'OK', style: 'default' }
-        ]
-      );
-    } else if (!value) {
-      // CHANGED: Don't disconnect all devices when disabling in settings
-      // This preserves the printer connection
-      Toast.show({
-        type: 'info',
-        text1: 'Bluetooth Settings',
-        text2: 'Bluetooth features disabled in app settings',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    }
-  };
-
-  // Enhanced printer connection with better checks
   const handlePrinterConnect = async () => {
-    // Check initialization first
-    if (!isInitialized && !isInitializing) {
+    const hasPermissions = await requestPermissions();
+    if (hasPermissions) {
+      setShowDeviceModal(true);
+      scanForDevices();
+    } else {
       Alert.alert(
-        'Bluetooth Not Ready',
-        'Bluetooth system is not initialized. Would you like to initialize it now?',
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Initialize', onPress: initializeBluetooth }
-        ]
-      );
-      return;
-    }
-
-    if (isInitializing) {
-      Toast.show({
-        type: 'warning',
-        text1: 'Please Wait',
-        text2: 'Bluetooth is still initializing...',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-      return;
-    }
-
-    if (initializationError) {
-      Alert.alert(
-        'Bluetooth Error',
-        `Bluetooth initialization failed: ${initializationError}. Would you like to try again?`,
-        [
-          { text: 'Cancel', style: 'cancel' },
-          { text: 'Retry', onPress: initializeBluetooth }
-        ]
-      );
-      return;
-    }
-
-    if (!classicEnabled && !bleEnabled) {
-      Alert.alert(
-        'Bluetooth Required',
-        'Bluetooth is disabled on your device. Please enable Bluetooth in your device settings.',
+        'Permissions Required',
+        'Bluetooth permissions are required to scan for devices. Please grant permissions in your device settings.',
         [{ text: 'OK', style: 'default' }]
       );
-      return;
     }
-
-    if (!permissionsGranted) {
-      try {
-        const granted = await requestPermissions();
-        if (!granted) {
-          Alert.alert(
-            'Permissions Required',
-            'Bluetooth permissions are required to scan for devices. Please grant permissions in your device settings.',
-            [{ text: 'OK', style: 'default' }]
-          );
-          return;
-        }
-      } catch (error: any) {
-        console.error('Permission request failed:', error);
-        Toast.show({
-          type: 'error',
-          text1: 'Permission Error',
-          text2: error.message,
-          position: 'top',
-          visibilityTime: 4000,
-        });
-        return;
-      }
-    }
-
-    setShowDeviceModal(true);
-    await scanForDevices();
   };
 
-  // Enhanced printer disconnection
   const handlePrinterDisconnect = async () => {
-    if (!printer.device) {
+    if (!connectedPrinter) {
       Toast.show({
         type: 'warning',
         text1: 'No Printer Connected',
@@ -331,9 +111,7 @@ const SettingsScreen: React.FC = () => {
     }
 
     try {
-      console.log('🔌 Disconnecting printer:', printer.device.name);
-      await disconnectPrinter();
-      
+      await disconnectFromDevice();
       Toast.show({
         type: 'success',
         text1: 'Printer Disconnected',
@@ -342,8 +120,6 @@ const SettingsScreen: React.FC = () => {
         visibilityTime: 3000,
       });
     } catch (error: any) {
-      console.error('Failed to disconnect printer:', error);
-      
       Toast.show({
         type: 'error',
         text1: 'Disconnect Failed',
@@ -354,46 +130,8 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // Enhanced device scanning
-  const scanForDevices = async () => {
-    if (!permissionsGranted) {
-      try {
-        await requestPermissions();
-      } catch (error) {
-        console.error('Permission request failed during scan:', error);
-        return;
-      }
-    }
-
-    try {
-      console.log('🔍 [SETTINGS] Starting device scan...');
-      await startDeviceScan();
-      
-      Toast.show({
-        type: 'info',
-        text1: 'Scanning Complete',
-        text2: `Found ${devices.length} devices`,
-        position: 'top',
-        visibilityTime: 2000,
-      });
-    } catch (error: any) {
-      console.error('Failed to scan for devices:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Scan Failed',
-        text2: error.message,
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    }
-  };
-
-  // Enhanced device connection
   const connectToDeviceHandler = async (device: BluetoothDevice) => {
     try {
-      console.log('🔌 Connecting to device:', device.name, device.type);
-      
       Toast.show({
         type: 'info',
         text1: 'Connecting...',
@@ -402,29 +140,17 @@ const SettingsScreen: React.FC = () => {
         visibilityTime: 2000,
       });
 
-      const connected = await connectToDevice(device);
-      
-      if (connected) {
-        // If it's a printer, also set it as the active printer
-        if (device.deviceType === 'printer') {
-          await connectPrinter(device);
-        }
+      await connectToDevice(device);
+      setShowDeviceModal(false);
 
-        setShowDeviceModal(false);
-
-        Toast.show({
-          type: 'success',
-          text1: 'Device Connected',
-          text2: `Successfully connected to ${device.name}`,
-          position: 'top',
-          visibilityTime: 3000,
-        });
-      } else {
-        throw new Error('Connection failed');
-      }
+      Toast.show({
+        type: 'success',
+        text1: 'Device Connected',
+        text2: `Successfully connected to ${device.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
     } catch (error: any) {
-      console.error('Failed to connect to device:', error);
-      
       Toast.show({
         type: 'error',
         text1: 'Connection Failed',
@@ -435,37 +161,24 @@ const SettingsScreen: React.FC = () => {
     }
   };
 
-  // Enhanced device disconnection
-  const disconnectDeviceHandler = async (device: BluetoothDevice) => {
-    try {
-      await disconnectDevice(device);
-
-      Toast.show({
-        type: 'info',
-        text1: 'Device Disconnected',
-        text2: `Disconnected from ${device.name}`,
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    } catch (error: any) {
-      console.error('Failed to disconnect device:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Disconnection Failed',
-        text2: `Failed to disconnect from ${device.name}`,
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    }
-  };
-
-  // Enhanced test print
   const testPrinterConnection = async () => {
     try {
-      await quickTestPrint();
+      await testPrint();
+      Toast.show({
+        type: 'success',
+        text1: 'Test Print Successful',
+        text2: `Test sent to ${connectedPrinter?.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
     } catch (error: any) {
-      console.error('Test print failed:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Test Print Failed',
+        text2: error.message,
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
@@ -478,8 +191,7 @@ const SettingsScreen: React.FC = () => {
         {
           text: 'Logout',
           style: 'destructive',
-          onPress: async () => {
-            // CHANGED: Don't cleanup/disconnect on logout unless explicitly requested
+          onPress: () => {
             Toast.show({
               type: 'success',
               text1: 'Logged Out',
@@ -494,61 +206,45 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  // Enhanced troubleshooting
   const handleTroubleshoot = async () => {
     Alert.alert(
       'Troubleshoot Bluetooth',
-      'This will reset all Bluetooth connections and clear cache. Continue?',
+      'This will disconnect the current printer and clear cache. Continue?',
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Troubleshoot',
+          text: 'Reset',
           style: 'destructive',
           onPress: async () => {
             Toast.show({
               type: 'info',
-              text1: 'Running Diagnostics',
-              text2: 'Resetting Bluetooth system...',
+              text1: 'Resetting',
+              text2: 'Clearing Bluetooth cache...',
               position: 'top',
-              visibilityTime: 4000,
+              visibilityTime: 3000,
             });
 
             try {
-              // This is the only time we actually cleanup connections
-              const { cleanup, disconnectAllDevices } = useBluetoothStore.getState();
-              
-              await disconnectAllDevices();
-              await cleanup();
-              
-              // Clear stored data
+              await disconnectFromDevice();
               await AsyncStorage.multiRemove([
                 'connected_printer', 
-                'bluetooth_cache', 
-                'bluetooth_stored_printer'
+                'bluetooth_cache'
               ]);
-              
-              // Reset error state
-              setInitializationError(null);
-              
-              // Reinitialize
-              await initializeBluetooth();
               
               Toast.show({
                 type: 'success',
-                text1: 'Diagnostics Complete',
-                text2: 'Bluetooth system has been reset',
+                text1: 'Reset Complete',
+                text2: 'Bluetooth has been reset',
                 position: 'top',
-                visibilityTime: 4000,
+                visibilityTime: 3000,
               });
             } catch (error: any) {
-              console.error('Troubleshoot failed:', error);
-              
               Toast.show({
                 type: 'error',
-                text1: 'Diagnostics Failed',
-                text2: 'Failed to complete diagnostic checks',
+                text1: 'Reset Failed',
+                text2: 'Failed to complete reset',
                 position: 'top',
-                visibilityTime: 4000,
+                visibilityTime: 3000,
               });
             }
           }
@@ -587,142 +283,56 @@ const SettingsScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
-  // Enhanced refresh function
-  const refreshConnectionStatus = async () => {
-    if (!isInitialized && !isInitializing) {
-      await initializeBluetooth();
-      return;
-    }
-    
-    if (isInitializing) {
-      Toast.show({
-        type: 'info',
-        text1: 'Please Wait',
-        text2: 'Bluetooth is still initializing...',
-        position: 'top',
-        visibilityTime: 2000,
-      });
-      return;
-    }
-    
-    setCheckingConnection(true);
-    
-    try {
-      console.log('🔄 Manual refresh of connection status...');
-      
-      await refreshConnections();
-      await refreshPrinterStatus();
-      
-      Toast.show({
-        type: 'info',
-        text1: 'Status Refreshed',
-        text2: 'Connection status updated',
-        position: 'top',
-        visibilityTime: 2000,
-      });
-    } catch (error: any) {
-      console.error('Failed to refresh connection status:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Refresh Failed',
-        text2: 'Could not refresh connection status',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-    } finally {
-      setCheckingConnection(false);
-    }
-  };
-
-  // Enhanced printer connection display
   const renderPrinterConnectionSetting = () => {
-    const hasValidConnection = printer.isConnected && printer.device;
+    const statusText = connectedPrinter 
+      ? `Connected to ${connectedPrinter.name} (${connectedPrinter.type.toUpperCase()})`
+      : 'No printer connected';
     
-    let statusText = 'No printer connected';
-    let statusColor = '#a0aec0';
-    
-    if (initializationError) {
-      statusText = `Error: ${initializationError}`;
-      statusColor = '#FF6B6B';
-    } else if (isInitializing) {
-      statusText = 'Initializing Bluetooth...';
-      statusColor = '#FF9500';
-    } else if (!isInitialized) {
-      statusText = 'Bluetooth not initialized';
-      statusColor = '#FF6B6B';
-    } else if (!permissionsGranted) {
-      statusText = 'Permissions required';
-      statusColor = '#FF9500';
-    } else if (!classicEnabled && !bleEnabled) {
-      statusText = 'Bluetooth disabled';
-      statusColor = '#FF6B6B';
-    } else if (hasValidConnection) {
-      statusText = `Connected to ${printer.device.name} (${printer.device.type.toUpperCase()})`;
-      statusColor = '#34C759';
-    }
+    const statusColor = connectedPrinter ? '#34C759' : '#a0aec0';
     
     return renderSettingItem(
       'print',
       'Printer Connection',
       statusText,
       <View style={styles.printerActions}>
-        {hasValidConnection ? (
+        {connectedPrinter ? (
           // When printer is connected, show Test and Disconnect buttons
           <>
             <TouchableOpacity
               style={styles.testButton}
               onPress={testPrinterConnection}
-              disabled={checkingConnection || printStatus.isPrinting}
             >
               <LinearGradient
                 colors={['#34C759', '#30A46C']}
                 style={styles.testButtonGradient}
               >
-                <Text style={styles.testButtonText}>
-                  {printStatus.isPrinting ? 'Printing...' : 'Test'}
-                </Text>
+                <Text style={styles.testButtonText}>Test</Text>
               </LinearGradient>
             </TouchableOpacity>
             
             <TouchableOpacity
               style={styles.disconnectButton}
               onPress={handlePrinterDisconnect}
-              disabled={checkingConnection || printStatus.isPrinting}
             >
               <LinearGradient
                 colors={['#FF6B6B', '#FF5252']}
                 style={styles.disconnectButtonGradient}
               >
-                <Text style={styles.disconnectButtonText}>
-                  Disconnect
-                </Text>
+                <Text style={styles.disconnectButtonText}>Disconnect</Text>
               </LinearGradient>
             </TouchableOpacity>
           </>
         ) : (
-          // When no printer is connected, show Connect or Initialize button
+          // When no printer is connected, show Connect button
           <TouchableOpacity
             style={styles.connectButton}
-            onPress={!isInitialized && !isInitializing ? initializeBluetooth : handlePrinterConnect}
-            disabled={isInitializing || checkingConnection}
+            onPress={handlePrinterConnect}
           >
             <LinearGradient
-              colors={
-                initializationError ? ['#FF6B6B', '#FF5252'] :
-                isInitializing ? ['#FF9500', '#FF8C00'] :
-                (!isInitialized || (!classicEnabled && !bleEnabled)) ? ['#718096', '#a0aec0'] : 
-                ['#667eea', '#764ba2']
-              }
+              colors={['#667eea', '#764ba2']}
               style={styles.connectButtonGradient}
             >
-              <Text style={styles.connectButtonText}>
-                {initializationError ? 'Retry' :
-                 isInitializing ? 'Initializing...' :
-                 !isInitialized ? 'Initialize' :
-                 checkingConnection ? 'Checking...' : 
-                 'Connect'}
-              </Text>
+              <Text style={styles.connectButtonText}>Connect</Text>
             </LinearGradient>
           </TouchableOpacity>
         )}
@@ -730,124 +340,43 @@ const SettingsScreen: React.FC = () => {
     );
   };
 
-  // Enhanced device item rendering
   const renderDeviceItem = ({ item }: { item: BluetoothDevice }) => (
     <TouchableOpacity
       style={styles.deviceItem}
-      onPress={() => item.connected ? disconnectDeviceHandler(item) : connectToDeviceHandler(item)}
+      onPress={() => connectToDeviceHandler(item)}
     >
       <View style={styles.deviceInfo}>
         <MaterialIcons
           name={
             item.deviceType === 'printer' ? 'print' : 
             item.deviceType === 'scanner' ? 'qr-code-scanner' : 
-            item.type === 'ble' ? 'bluetooth' : 'bluetooth-connected'
+            'bluetooth'
           }
           size={24}
-          color={item.connected ? '#34C759' : '#a0aec0'}
+          color="#a0aec0"
         />
         <View style={styles.deviceText}>
           <Text style={styles.deviceName}>{item.name}</Text>
           <Text style={styles.deviceStatus}>
-            {item.connected ? 'Connected' : 
-             item.bondState === 'bonded' ? 'Paired' : 'Available'} • 
             {item.type.toUpperCase()} • {item.deviceType}
           </Text>
           <Text style={styles.deviceAddress}>{item.address}</Text>
           {item.rssi && (
             <Text style={styles.deviceRssi}>Signal: {item.rssi} dBm</Text>
           )}
-          {item.services && item.services.length > 0 && (
-            <Text style={styles.deviceServices}>
-              Services: {item.services.length}
-            </Text>
-          )}
         </View>
       </View>
-      <View style={[styles.deviceStatusBadge, { backgroundColor: item.connected ? '#34C759' : '#718096' }]}>
-        <Text style={styles.deviceStatusText}>
-          {item.connected ? 'Connected' : 'Connect'}
-        </Text>
+      <View style={styles.deviceStatusBadge}>
+        <Text style={styles.deviceStatusText}>Connect</Text>
       </View>
     </TouchableOpacity>
   );
 
   const renderContent = () => (
     <ScrollView style={styles.container} contentContainerStyle={styles.scrollContent}>
-      {/* Bluetooth Section */}
+      {/* Printer Section */}
       <View style={styles.section}>
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Bluetooth System</Text>
-          {isInitialized && !initializationError && (
-            <TouchableOpacity
-              style={styles.refreshButton}
-              onPress={refreshConnectionStatus}
-              disabled={checkingConnection || isInitializing}
-            >
-              <MaterialIcons 
-                name="refresh" 
-                size={20} 
-                color={(checkingConnection || isInitializing) ? '#718096' : '#667eea'} 
-              />
-            </TouchableOpacity>
-          )}
-        </View>
-
-        {/* Enhanced system status display */}
-        {renderSettingItem(
-          'bluetooth',
-          'Bluetooth Status',
-          initializationError ? `Error: ${initializationError}` :
-          isInitializing ? 'Initializing system...' :
-          !isInitialized ? 'Not initialized - Tap to initialize' :
-          !permissionsGranted ? 'Permissions required' :
-          (classicEnabled || bleEnabled) ? `Classic: ${classicEnabled ? 'ON' : 'OFF'} • BLE: ${bleEnabled ? 'ON' : 'OFF'}` :
-          'Bluetooth disabled',
-          <View style={styles.bluetoothStatus}>
-            {initializationError ? (
-              <View style={[styles.statusBadge, { backgroundColor: '#FF6B6B' }]}>
-                <Text style={styles.statusBadgeText}>Error</Text>
-              </View>
-            ) : isInitializing ? (
-              <ActivityIndicator size="small" color="#FF9500" />
-            ) : isInitialized ? (
-              <>
-                {classicEnabled && (
-                  <View style={[styles.statusBadge, { backgroundColor: '#34C759' }]}>
-                    <Text style={styles.statusBadgeText}>Classic</Text>
-                  </View>
-                )}
-                {bleEnabled && (
-                  <View style={[styles.statusBadge, { backgroundColor: '#667eea' }]}>
-                    <Text style={styles.statusBadgeText}>BLE</Text>
-                  </View>
-                )}
-                {!classicEnabled && !bleEnabled && (
-                  <View style={[styles.statusBadge, { backgroundColor: '#FF6B6B' }]}>
-                    <Text style={styles.statusBadgeText}>Disabled</Text>
-                  </View>
-                )}
-              </>
-            ) : (
-              <View style={[styles.statusBadge, { backgroundColor: '#718096' }]}>
-                <Text style={styles.statusBadgeText}>Not Ready</Text>
-              </View>
-            )}
-          </View>,
-          !isInitialized && !isInitializing && !initializationError ? initializeBluetooth : undefined
-        )}
-
-        {/* Connection summary */}
-        {isInitialized && !initializationError && (
-          renderSettingItem(
-            'devices',
-            'Connected Devices',
-            `${connectedDevices.length} device${connectedDevices.length !== 1 ? 's' : ''} connected`,
-            <Text style={styles.deviceCountText}>{connectedDevices.length}</Text>
-          )
-        )}
-
-        {/* Enhanced printer connection setting */}
+        <Text style={styles.sectionTitle}>Printer</Text>
         {renderPrinterConnectionSetting()}
       </View>
 
@@ -914,14 +443,6 @@ const SettingsScreen: React.FC = () => {
           <MaterialIcons name="chevron-right" size={20} color="#a0aec0" />,
           () => router.push('/admin/security-settings')
         )}
-
-        {renderSettingItem(
-          'backup',
-          'Backup & Restore',
-          'Data backup and recovery options',
-          <MaterialIcons name="chevron-right" size={20} color="#a0aec0" />,
-          () => router.push('/admin/backup-settings')
-        )}
       </View>
 
       {/* Account Section */}
@@ -967,7 +488,7 @@ const SettingsScreen: React.FC = () => {
         {renderSettingItem(
           'refresh',
           'Troubleshoot Bluetooth',
-          'Reset Bluetooth system and clear cache',
+          'Reset Bluetooth connections and clear cache',
           <TouchableOpacity
             style={styles.troubleshootButton}
             onPress={handleTroubleshoot}
@@ -980,97 +501,17 @@ const SettingsScreen: React.FC = () => {
             </LinearGradient>
           </TouchableOpacity>
         )}
-
-        {renderSettingItem(
-          'help',
-          'Help & Support',
-          'Get help and contact support',
-          <MaterialIcons name="chevron-right" size={20} color="#a0aec0" />,
-          () => router.push('/admin/help-support')
-        )}
       </View>
 
       {/* Device Modal */}
-      <Modal
+      <DeviceModal
         visible={showDeviceModal}
-        transparent
-        animationType="slide"
-        onRequestClose={() => setShowDeviceModal(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.deviceModal}>
-            <LinearGradient
-              colors={['#667eea', '#764ba2']}
-              style={styles.modalHeader}
-            >
-              <Text style={styles.modalTitle}>Available Devices</Text>
-              <TouchableOpacity
-                onPress={() => setShowDeviceModal(false)}
-                style={styles.modalCloseButton}
-              >
-                <MaterialIcons name="close" size={24} color="#fff" />
-              </TouchableOpacity>
-            </LinearGradient>
-
-            <View style={styles.modalContent}>
-              {!permissionsGranted && (
-                <View style={styles.permissionWarning}>
-                  <MaterialIcons name="warning" size={24} color="#FF9500" />
-                  <Text style={styles.permissionWarningText}>
-                    Bluetooth permissions required to scan for devices
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.permissionButton}
-                    onPress={requestPermissions}
-                  >
-                    <Text style={styles.permissionButtonText}>Grant Permissions</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              {isScanning ? (
-                <View style={styles.scanningContainer}>
-                  <ActivityIndicator size="large" color="#667eea" />
-                  <Text style={styles.scanningText}>Scanning for devices...</Text>
-                </View>
-              ) : (
-                <FlatList
-                  data={devices}
-                  keyExtractor={(item) => item.id}
-                  renderItem={renderDeviceItem}
-                  style={styles.deviceList}
-                  showsVerticalScrollIndicator={false}
-                  ListEmptyComponent={
-                    <View style={styles.emptyDeviceList}>
-                      <MaterialIcons name="bluetooth-disabled" size={48} color="#a0aec0" />
-                      <Text style={styles.emptyDeviceText}>No devices found</Text>
-                      <Text style={styles.emptyDeviceSubtext}>
-                        Make sure your devices are discoverable and try scanning again
-                      </Text>
-                    </View>
-                  }
-                />
-              )}
-
-              <TouchableOpacity
-                style={styles.rescanButton}
-                onPress={scanForDevices}
-                disabled={isScanning || !permissionsGranted}
-              >
-                <LinearGradient
-                  colors={['#667eea', '#764ba2']}
-                  style={styles.rescanButtonGradient}
-                >
-                  <MaterialIcons name="refresh" size={20} color="#fff" />
-                  <Text style={styles.rescanButtonText}>
-                    {isScanning ? 'Scanning...' : 'Rescan'}
-                  </Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
+        devices={allDevices}
+        isScanning={isScanning}
+        connectToDevice={connectToDeviceHandler}
+        closeModal={() => setShowDeviceModal(false)}
+        onRescan={scanForDevices}
+      />
     </ScrollView>
   );
 
@@ -1092,24 +533,12 @@ const styles = StyleSheet.create({
   section: {
     marginBottom: 32,
   },
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-    paddingHorizontal: 4,
-  },
   sectionTitle: {
     fontSize: 20,
     fontWeight: '700',
     color: '#fff',
-  },
-  refreshButton: {
-    padding: 8,
-    borderRadius: 8,
-    backgroundColor: '#16213e',
-    borderWidth: 1,
-    borderColor: '#2d3748',
+    marginBottom: 16,
+    paddingHorizontal: 4,
   },
   settingItem: {
     backgroundColor: '#1a1a2e',
@@ -1156,28 +585,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#a0aec0',
     fontWeight: '500',
-  },
-  
-  // Enhanced status display
-  bluetoothStatus: {
-    flexDirection: 'row',
-    gap: 8,
-    alignItems: 'center',
-  },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  statusBadgeText: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  deviceCountText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#667eea',
   },
   
   printerActions: {
@@ -1259,173 +666,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: '#667eea',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'flex-end',
-  },
-  deviceModal: {
-    backgroundColor: '#1a1a2e',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    maxHeight: '70%',
-    borderWidth: 1,
-    borderTopColor: '#2d3748',
-    borderLeftColor: '#2d3748',
-    borderRightColor: '#2d3748',
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-  },
-  modalTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  modalCloseButton: {
-    padding: 4,
-  },
-  modalContent: {
-    padding: 20,
-  },
-  permissionWarning: {
-    backgroundColor: '#2d1810',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 16,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#FF9500',
-  },
-  permissionWarningText: {
-    fontSize: 14,
-    color: '#FF9500',
-    textAlign: 'center',
-    marginVertical: 12,
-    fontWeight: '500',
-  },
-  permissionButton: {
-    backgroundColor: '#FF9500',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
-  },
-  permissionButtonText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  scanningContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  scanningText: {
-    fontSize: 16,
-    color: '#a0aec0',
-    marginTop: 16,
-    fontWeight: '500',
-  },
-  deviceList: {
-    maxHeight: 300,
-  },
-  deviceItem: {
-    backgroundColor: '#16213e',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderWidth: 1,
-    borderColor: '#2d3748',
-  },
-  deviceInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  deviceText: {
-    marginLeft: 12,
-    flex: 1,
-  },
-  deviceName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  deviceStatus: {
-    fontSize: 12,
-    color: '#a0aec0',
-    fontWeight: '500',
-  },
-  deviceAddress: {
-    fontSize: 11,
-    color: '#718096',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  deviceRssi: {
-    fontSize: 11,
-    color: '#718096',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  deviceServices: {
-    fontSize: 11,
-    color: '#667eea',
-    fontWeight: '500',
-    marginTop: 2,
-  },
-  deviceStatusBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-  },
-  deviceStatusText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#fff',
-  },
-  emptyDeviceList: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  emptyDeviceText: {
-    fontSize: 16,
-    color: '#a0aec0',
-    fontWeight: '600',
-    marginTop: 16,
-  },
-  emptyDeviceSubtext: {
-    fontSize: 14,
-    color: '#718096',
-    textAlign: 'center',
-    marginTop: 8,
-    lineHeight: 20,
-  },
-  rescanButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 16,
-  },
-  rescanButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 14,
-    gap: 8,
-  },
-  rescanButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
   },
 });
 
