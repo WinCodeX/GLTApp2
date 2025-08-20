@@ -1,4 +1,4 @@
-// services/EnhancedPrintService.ts - Integrated with Bluetooth Store
+// services/EnhancedPrintService.ts - Fixed to properly integrate with Bluetooth Store
 import RNBluetoothClassic from 'react-native-bluetooth-classic';
 import Toast from 'react-native-toast-message';
 import { BluetoothDevice, useBluetoothStore } from '../stores/BluetoothStore';
@@ -35,7 +35,6 @@ export interface PrintResult {
 
 class EnhancedPrintService {
   private static instance: EnhancedPrintService;
-  private store = useBluetoothStore.getState();
 
   static getInstance(): EnhancedPrintService {
     if (!EnhancedPrintService.instance) {
@@ -45,23 +44,34 @@ class EnhancedPrintService {
   }
 
   constructor() {
-    // Subscribe to store changes
+    // Subscribe to store changes for printer connection
     useBluetoothStore.subscribe(
       (state) => state.printerConnection,
       (printerConnection) => {
-        console.log('🖨️ [PRINT-SERVICE] Printer connection changed:', printerConnection.isConnected);
+        console.log('🖨️ [PRINT-SERVICE] Printer connection changed:', {
+          isConnected: printerConnection.isConnected,
+          deviceName: printerConnection.device?.name,
+          deviceType: printerConnection.device?.type
+        });
       }
     );
   }
 
   /**
-   * Check if printing is available
+   * Get the current store state - FIXED to always get fresh state
+   */
+  private getBluetoothState() {
+    return useBluetoothStore.getState();
+  }
+
+  /**
+   * Check if printing is available - IMPROVED error reporting
    */
   async isPrintingAvailable(): Promise<{ available: boolean; reason?: string }> {
     console.log('🔍 [PRINT-SERVICE] Checking printing availability...');
     
     try {
-      const state = useBluetoothStore.getState();
+      const state = this.getBluetoothState();
       
       // Check if Bluetooth is initialized
       if (!state.isInitialized) {
@@ -90,6 +100,7 @@ class EnhancedPrintService {
       if (printer.type === 'classic') {
         try {
           actuallyConnected = await RNBluetoothClassic.isDeviceConnected(printer.address);
+          console.log('🔍 [PRINT-SERVICE] Classic printer connection verified:', actuallyConnected);
         } catch (error) {
           console.warn('⚠️ [PRINT-SERVICE] Failed to verify classic connection:', error);
           return { available: false, reason: 'Cannot verify printer connection' };
@@ -101,30 +112,34 @@ class EnhancedPrintService {
           try {
             const connectedDevices = await bleManager.connectedDevices([]);
             actuallyConnected = connectedDevices.some(d => d.id === printer.id);
+            console.log('🔍 [PRINT-SERVICE] BLE printer connection verified:', actuallyConnected);
           } catch (error) {
             console.warn('⚠️ [PRINT-SERVICE] Failed to verify BLE connection:', error);
             return { available: false, reason: 'Cannot verify BLE printer connection' };
           }
+        } else {
+          return { available: false, reason: 'BLE manager not available' };
         }
       }
       
       if (!actuallyConnected) {
         // Update store to reflect disconnection
-        await useBluetoothStore.getState().refreshConnections();
+        console.warn('⚠️ [PRINT-SERVICE] Printer not actually connected, refreshing store...');
+        await state.refreshConnections();
         return { available: false, reason: 'Printer disconnected' };
       }
       
       console.log('✅ [PRINT-SERVICE] Printing is available');
       return { available: true };
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ [PRINT-SERVICE] Error checking availability:', error);
       return { available: false, reason: `System error: ${error.message}` };
     }
   }
 
   /**
-   * Print package receipt/label
+   * Print package receipt/label - IMPROVED with better error handling
    */
   async printPackage(
     packageData: PackageData, 
@@ -133,13 +148,13 @@ class EnhancedPrintService {
     console.log('🖨️ [PRINT-SERVICE] Starting print job for:', packageData.code);
     
     try {
-      // Check availability first
+      // Check availability first with fresh state
       const availability = await this.isPrintingAvailable();
       if (!availability.available) {
         throw new Error(availability.reason || 'Printing not available');
       }
 
-      const state = useBluetoothStore.getState();
+      const state = this.getBluetoothState();
       const printer = state.printerConnection.device!;
       
       console.log('📄 [PRINT-SERVICE] Formatting print data...');
@@ -195,7 +210,7 @@ class EnhancedPrintService {
   }
 
   /**
-   * Print via Bluetooth Classic
+   * Print via Bluetooth Classic - IMPROVED with better timeout handling
    */
   private async printViaClassic(
     printer: BluetoothDevice, 
@@ -205,6 +220,12 @@ class EnhancedPrintService {
     console.log('🔵 [CLASSIC] Printing via Bluetooth Classic...');
     
     try {
+      // Verify connection before printing
+      const isConnected = await RNBluetoothClassic.isDeviceConnected(printer.address);
+      if (!isConnected) {
+        throw new Error('Printer disconnected before print');
+      }
+
       // Send data with timeout
       await this.sendDataWithTimeout(
         () => RNBluetoothClassic.writeToDevice(printer.address, printData),
@@ -216,6 +237,13 @@ class EnhancedPrintService {
         for (let i = 1; i < options.copies; i++) {
           console.log(`🔵 [CLASSIC] Printing copy ${i + 1}...`);
           await new Promise(resolve => setTimeout(resolve, 1000)); // Wait between copies
+          
+          // Verify connection again before each copy
+          const stillConnected = await RNBluetoothClassic.isDeviceConnected(printer.address);
+          if (!stillConnected) {
+            throw new Error(`Printer disconnected before copy ${i + 1}`);
+          }
+          
           await this.sendDataWithTimeout(
             () => RNBluetoothClassic.writeToDevice(printer.address, printData),
             30000
@@ -224,7 +252,7 @@ class EnhancedPrintService {
       }
       
       console.log('✅ [CLASSIC] Classic print completed');
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ [CLASSIC] Classic print failed:', error);
       throw new Error(`Classic Bluetooth print failed: ${error.message}`);
     }
@@ -240,7 +268,7 @@ class EnhancedPrintService {
   ): Promise<void> {
     console.log('🔵 [BLE] Printing via BLE...');
     
-    const state = useBluetoothStore.getState();
+    const state = this.getBluetoothState();
     const bleManager = state.bleManager;
     
     if (!bleManager) {
@@ -267,7 +295,7 @@ class EnhancedPrintService {
       
       throw new Error('BLE printing requires printer-specific implementation');
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ [BLE] BLE print failed:', error);
       throw new Error(`BLE print failed: ${error.message}`);
     }
@@ -551,7 +579,7 @@ class EnhancedPrintService {
   }
 
   /**
-   * Bulk print multiple packages
+   * Bulk print multiple packages - IMPROVED with better error handling
    */
   async bulkPrint(
     packages: PackageData[], 
@@ -561,7 +589,7 @@ class EnhancedPrintService {
     
     const results: PrintResult[] = [];
     
-    // Check availability once
+    // Check availability once at the start
     const availability = await this.isPrintingAvailable();
     if (!availability.available) {
       const error = new Error(availability.reason || 'Printing not available');
@@ -578,6 +606,12 @@ class EnhancedPrintService {
       console.log(`📦 [BULK] Printing ${i + 1}/${packages.length}: ${pkg.code}`);
       
       try {
+        // Check availability before each print to ensure printer is still connected
+        const stillAvailable = await this.isPrintingAvailable();
+        if (!stillAvailable.available) {
+          throw new Error(stillAvailable.reason || 'Printer disconnected during bulk print');
+        }
+        
         const result = await this.printPackage(pkg, options);
         results.push(result);
         
@@ -586,11 +620,26 @@ class EnhancedPrintService {
           await new Promise(resolve => setTimeout(resolve, 2000));
         }
       } catch (error: any) {
+        console.error(`❌ [BULK] Failed to print ${pkg.code}:`, error);
         results.push({
           success: false,
           message: `Failed to print ${pkg.code}: ${error.message}`,
           errorCode: 'BULK_PRINT_ERROR',
         });
+        
+        // If it's a connection error, stop the bulk print
+        if (error.message.includes('disconnected') || error.message.includes('not available')) {
+          console.warn('⚠️ [BULK] Connection lost, stopping bulk print');
+          // Add failed results for remaining packages
+          for (let j = i + 1; j < packages.length; j++) {
+            results.push({
+              success: false,
+              message: `Bulk print stopped due to connection loss`,
+              errorCode: 'CONNECTION_LOST',
+            });
+          }
+          break;
+        }
       }
     }
     
@@ -610,7 +659,7 @@ class EnhancedPrintService {
   }
 
   /**
-   * Send data with timeout wrapper
+   * Send data with timeout wrapper - IMPROVED error handling
    */
   private async sendDataWithTimeout<T>(
     operation: () => Promise<T>, 
@@ -618,7 +667,7 @@ class EnhancedPrintService {
   ): Promise<T> {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
-        reject(new Error(`Operation timed out after ${timeoutMs}ms`));
+        reject(new Error(`Operation timed out after ${timeoutMs}ms - printer may be busy or disconnected`));
       }, timeoutMs);
 
       operation()
@@ -634,13 +683,13 @@ class EnhancedPrintService {
   }
 
   /**
-   * Get detailed error message
+   * Get detailed error message - IMPROVED error descriptions
    */
   private getDetailedErrorMessage(error: any): string {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth system not initialized')) {
-      return 'Bluetooth not ready. Restart app and try again.';
+      return 'Bluetooth not ready. Go to Settings → Initialize Bluetooth.';
     }
     if (message.includes('permissions not granted')) {
       return 'Bluetooth permission denied. Enable in Settings → App permissions.';
@@ -652,7 +701,7 @@ class EnhancedPrintService {
       return 'Connect a printer in Settings → Bluetooth first.';
     }
     if (message.includes('Printer disconnected')) {
-      return 'Printer connection lost. Turn on printer and reconnect.';
+      return 'Printer connection lost. Turn on printer and reconnect in Settings.';
     }
     if (message.includes('timed out')) {
       return 'Print job timed out. Printer may be busy - wait and retry.';
@@ -662,6 +711,12 @@ class EnhancedPrintService {
     }
     if (message.includes('BLE printing requires')) {
       return 'BLE printer support coming soon. Use Bluetooth Classic printer.';
+    }
+    if (message.includes('Cannot verify')) {
+      return 'Cannot verify printer connection. Check printer is on and paired.';
+    }
+    if (message.includes('Connection lost')) {
+      return 'Printer disconnected during operation. Reconnect and try again.';
     }
     
     return `Print error: ${message}`;
