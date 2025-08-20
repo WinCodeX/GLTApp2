@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
   View,
@@ -15,6 +15,7 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -44,6 +45,8 @@ export default function CollectDeliverModal({
 }: CollectDeliverModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
@@ -68,6 +71,38 @@ export default function CollectDeliverModal({
     'Payment & Confirmation'
   ];
 
+  // Keyboard handling
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
+      }
+    );
+
+    return () => {
+      keyboardDidHideListener?.remove();
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
+
+  // Calculate modal height based on keyboard state
+  const modalHeight = useMemo(() => {
+    if (isKeyboardVisible) {
+      const maxHeightWithKeyboard = SCREEN_HEIGHT - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
+      return Math.min(maxHeightWithKeyboard, SCREEN_HEIGHT * 0.85);
+    }
+    return SCREEN_HEIGHT * 0.90;
+  }, [isKeyboardVisible, keyboardHeight]);
+
   useEffect(() => {
     if (visible) {
       resetForm();
@@ -80,7 +115,7 @@ export default function CollectDeliverModal({
     }
   }, [visible]);
 
-  const resetForm = () => {
+  const resetForm = useCallback(() => {
     setCurrentStep(0);
     setCollectionLocation(null);
     setDeliveryLocation(initialLocation);
@@ -93,9 +128,10 @@ export default function CollectDeliverModal({
     setSpecialInstructions('');
     setPaymentMethod('mpesa');
     setIsSubmitting(false);
-  };
+  }, [initialLocation]);
 
-  const closeModal = () => {
+  const closeModal = useCallback(() => {
+    Keyboard.dismiss();
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
       duration: 250,
@@ -103,7 +139,7 @@ export default function CollectDeliverModal({
     }).start(() => {
       onClose();
     });
-  };
+  }, [slideAnim, onClose]);
 
   const selectLocationOnMap = async (type: 'collection' | 'delivery') => {
     // In a real app, this would open a map picker
@@ -145,7 +181,7 @@ export default function CollectDeliverModal({
     );
   };
 
-  const isStepValid = (step: number) => {
+  const isStepValid = useCallback((step: number) => {
     switch (step) {
       case 0:
         return shopName.trim().length > 0 && collectionAddress.trim().length > 0 && collectionLocation;
@@ -158,19 +194,19 @@ export default function CollectDeliverModal({
       default:
         return false;
     }
-  };
+  }, [shopName, collectionAddress, collectionLocation, itemsToCollect, itemValue, deliveryAddress, deliveryLocation, paymentMethod]);
 
-  const nextStep = () => {
+  const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isStepValid(currentStep)) {
       setCurrentStep(prev => prev + 1);
     }
-  };
+  }, [currentStep, isStepValid]);
 
-  const prevStep = () => {
+  const prevStep = useCallback(() => {
     if (currentStep > 0) {
       setCurrentStep(prev => prev - 1);
     }
-  };
+  }, [currentStep]);
 
   const calculateCosts = () => {
     const collectionFee = 200;
@@ -222,7 +258,7 @@ export default function CollectDeliverModal({
     }
   };
 
-  const renderProgressBar = () => (
+  const renderProgressBar = useCallback(() => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
         <View 
@@ -236,9 +272,9 @@ export default function CollectDeliverModal({
         Step {currentStep + 1} of {STEP_TITLES.length}
       </Text>
     </View>
-  );
+  ), [currentStep]);
 
-  const renderHeader = () => (
+  const renderHeader = useCallback(() => (
     <View style={styles.header}>
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
@@ -246,7 +282,7 @@ export default function CollectDeliverModal({
       <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
       <View style={styles.placeholder} />
     </View>
-  );
+  ), [closeModal, currentStep]);
 
   const renderCollectionDetails = () => (
     <View style={styles.stepContent}>
@@ -588,7 +624,10 @@ export default function CollectDeliverModal({
             <Animated.View
               style={[
                 styles.modalContainer,
-                { transform: [{ translateY: slideAnim }] }
+                { 
+                  transform: [{ translateY: slideAnim }],
+                  height: modalHeight
+                }
               ]}
             >
               <LinearGradient
@@ -632,7 +671,6 @@ const styles = StyleSheet.create({
   },
   modalContainer: {
     width: SCREEN_WIDTH,
-    height: SCREEN_HEIGHT * 0.90,
   },
   modalContent: {
     flex: 1,
