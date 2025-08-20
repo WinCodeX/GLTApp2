@@ -1,8 +1,6 @@
-// services/GlobalPrintService.ts - Updated to work with global Bluetooth context
-import Toast from 'react-native-toast-message';
+// services/GlobalPrintService.ts - Updated with GLT Logistics receipt format
 
-// Import the global context hook (this will be used from components)
-// We can't use the hook directly in a service, so we'll pass the context as a parameter
+import Toast from 'react-native-toast-message';
 
 export interface PackageData {
   code: string;
@@ -11,11 +9,14 @@ export interface PackageData {
   sender_name?: string;
   state_display?: string;
   pickup_location?: string;
-  delivery_address?: string;
+  delivery_location?: string; // Updated from delivery_address
   weight?: string;
   dimensions?: string;
   special_instructions?: string;
   tracking_url?: string;
+  payment_status?: 'paid' | 'not_paid' | 'pending'; // Added payment status
+  delivery_type?: 'office' | 'home' | 'pickup_point'; // Added delivery type
+  agent_name?: string; // For office deliveries
 }
 
 export interface PrintOptions {
@@ -34,7 +35,6 @@ export interface PrintResult {
   errorCode?: string;
 }
 
-// Define the Bluetooth context interface we expect
 export interface BluetoothContextType {
   connectedPrinter: any | null;
   isPrintReady: boolean;
@@ -55,40 +55,149 @@ class GlobalPrintService {
   }
 
   /**
+   * Generate GLT Logistics receipt format
+   */
+  private generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): string {
+    const {
+      code,
+      receiver_name,
+      route_description,
+      delivery_location,
+      payment_status = 'not_paid',
+      delivery_type = 'home',
+      agent_name
+    } = packageData;
+
+    // Get current date and time
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB');
+    const timeStr = now.toLocaleTimeString('en-GB', { hour12: false });
+
+    // Determine delivery info
+    const isOfficeDelivery = delivery_type === 'office';
+    const deliveryInfo = isOfficeDelivery && agent_name 
+      ? `OFFICE DELIVERY - Agent: ${agent_name}`
+      : '';
+
+    // Payment status formatting
+    const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
+    const paymentIcon = payment_status === 'paid' ? '✓' : '✗';
+
+    // Create ASCII art GLT logo
+    const gltLogo = `
+   ██████╗ ██╗  ████████╗
+  ██╔════╝ ██║  ╚══██╔══╝
+  ██║  ███╗██║     ██║   
+  ██║   ██║██║     ██║   
+  ╚██████╔╝███████╗██║   
+   ╚═════╝ ╚══════╝╚═╝   
+    LOGISTICS
+`;
+
+    // QR code placeholder (will be actual QR in real implementation)
+    const qrCodeBox = `
+  ████████████████
+  ██            ██
+  ██  ██████  ████
+  ██  ██████  ████
+  ██  ██████  ████
+  ██            ██
+  ████████████████
+      ${code}
+`;
+
+    const receipt = `
+${options.includeLogo !== false ? gltLogo : ''}
+================================
+        GLT LOGISTICS
+      Fast & Reliable
+================================
+
+${isOfficeDelivery ? `🏢 ${deliveryInfo}` : ''}
+
+📞 Customer Service: 0725 057 210
+📧 support@gltlogistics.co.ke
+🌐 www.gltlogistics.co.ke
+
+If package is lost, please contact
+us immediately with this receipt.
+
+================================
+
+📦 DELIVERY FOR: ${receiver_name.toUpperCase()}
+📱 ${packageData.receiver_phone || 'N/A'}
+
+📍 TO: ${delivery_location || route_description}
+
+--------------------------------
+
+${qrCodeBox}    ${paymentIcon} PAYMENT STATUS:
+                   ${paymentText}
+                   
+                   Package Code:
+                   ${code}
+                   
+                   Date: ${dateStr}
+                   Time: ${timeStr}
+
+${packageData.weight ? `📏 Weight: ${packageData.weight}` : ''}
+${packageData.dimensions ? `📐 Size: ${packageData.dimensions}` : ''}
+${packageData.special_instructions ? `📝 Note: ${packageData.special_instructions}` : ''}
+
+================================
+
+Thank you for choosing GLT Logistics!
+Your package will be delivered safely.
+
+Track your package at:
+www.gltlogistics.co.ke/track
+
+================================
+
+      Designed by Infinity.Co
+        www.infinity.co.ke
+
+--------------------------------
+Receipt printed: ${dateStr} ${timeStr}
+Printer: Thermal Receipt Printer
+`;
+
+    return receipt;
+  }
+
+  /**
    * Check if printing is available using the global context
    */
   async isPrintingAvailable(bluetoothContext: BluetoothContextType): Promise<{ available: boolean; reason?: string }> {
-    console.log('🔍 [GLOBAL-PRINT] Checking printing availability...');
+    console.log('🔍 [GLT-PRINT] Checking printing availability...');
     
     try {
-      // Check if Bluetooth is available
       if (!bluetoothContext.isBluetoothAvailable) {
         return { available: false, reason: 'Bluetooth not available in this environment (Expo Go)' };
       }
       
-      // Check if printer is ready
       if (!bluetoothContext.isPrintReady || !bluetoothContext.connectedPrinter) {
         return { available: false, reason: 'No printer connected' };
       }
       
-      console.log('✅ [GLOBAL-PRINT] Printing is available');
+      console.log('✅ [GLT-PRINT] Printing is available');
       return { available: true };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Error checking availability:', error);
+      console.error('❌ [GLT-PRINT] Error checking availability:', error);
       return { available: false, reason: `System error: ${error.message}` };
     }
   }
 
   /**
-   * Print package receipt/label using global context
+   * Print GLT Logistics package receipt using global context
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLOBAL-PRINT] Starting print job for:', packageData.code);
+    console.log('🖨️ [GLT-PRINT] Starting GLT print job for:', packageData.code);
     
     try {
       // Check availability first
@@ -98,54 +207,42 @@ class GlobalPrintService {
       }
 
       const printer = bluetoothContext.connectedPrinter;
-      
-      console.log('📄 [GLOBAL-PRINT] Using global context to print...');
       const printTime = new Date();
       
-      // Use the context's printReceipt method
-      await bluetoothContext.printReceipt({
-        packageCode: packageData.code,
-        customerName: packageData.receiver_name,
-        route: packageData.route_description,
-        senderName: packageData.sender_name,
-        status: packageData.state_display,
-        deliveryAddress: packageData.delivery_address,
-        weight: packageData.weight,
-        dimensions: packageData.dimensions,
-        specialInstructions: packageData.special_instructions,
-        trackingUrl: packageData.tracking_url,
-        printType: options.printType || 'receipt',
-        includeLogo: options.includeLogo !== false,
-        includeQR: options.includeQR !== false,
-      });
+      console.log('📄 [GLT-PRINT] Generating GLT receipt format...');
       
-      console.log('✅ [GLOBAL-PRINT] Print completed successfully');
+      // Generate the receipt content
+      const receiptText = this.generateGLTReceipt(packageData, options);
+      
+      // Use the context's printText method for the receipt
+      await bluetoothContext.printText(receiptText);
+      
+      console.log('✅ [GLT-PRINT] GLT receipt printed successfully');
       
       // Show success toast
       Toast.show({
         type: 'success',
-        text1: 'Print Successful',
-        text2: `${packageData.code} printed to ${printer.name}`,
+        text1: '📦 GLT Receipt Printed',
+        text2: `Package ${packageData.code} receipt sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `Successfully printed ${packageData.code}`,
+        message: `GLT receipt printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Print failed:', error);
+      console.error('❌ [GLT-PRINT] Print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
-      // Show error toast
       Toast.show({
         type: 'error',
-        text1: 'Print Failed',
+        text1: '❌ GLT Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -154,19 +251,18 @@ class GlobalPrintService {
       return {
         success: false,
         message: errorMessage,
-        errorCode: error.code || 'PRINT_ERROR',
+        errorCode: error.code || 'GLT_PRINT_ERROR',
       };
     }
   }
 
   /**
-   * Test print functionality using global context
+   * Print GLT test receipt
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLOBAL-PRINT] Running test print...');
+    console.log('🧪 [GLT-PRINT] Running GLT test print...');
     
     try {
-      // Check availability first
       const availability = await this.isPrintingAvailable(bluetoothContext);
       if (!availability.available) {
         throw new Error(availability.reason || 'Printing not available');
@@ -175,36 +271,49 @@ class GlobalPrintService {
       const printer = bluetoothContext.connectedPrinter;
       const printTime = new Date();
       
-      // Use the context's testPrint method
-      await bluetoothContext.testPrint();
+      // Create test package data
+      const testPackageData: PackageData = {
+        code: 'PKG-TEST-' + Date.now().toString().slice(-6),
+        receiver_name: 'Test Customer',
+        receiver_phone: '0712 345 678',
+        route_description: 'Test Route',
+        delivery_location: 'Test Location, Nairobi',
+        payment_status: 'paid',
+        delivery_type: 'home',
+        weight: '2kg',
+        dimensions: '30x20x15 cm',
+        special_instructions: 'Handle with care - Test package'
+      };
       
-      console.log('✅ [GLOBAL-PRINT] Test print completed successfully');
+      // Generate and print test receipt
+      const testReceipt = this.generateGLTReceipt(testPackageData, options);
+      await bluetoothContext.printText(testReceipt);
       
-      // Show success toast
+      console.log('✅ [GLT-PRINT] Test receipt printed successfully');
+      
       Toast.show({
         type: 'success',
-        text1: 'Test Print Successful',
-        text2: `Test sent to ${printer.name}`,
+        text1: '🧪 GLT Test Print Successful',
+        text2: `Test receipt sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `Test print successful`,
+        message: `GLT test print successful`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Test print failed:', error);
+      console.error('❌ [GLT-PRINT] Test print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
-      // Show error toast
       Toast.show({
         type: 'error',
-        text1: 'Test Print Failed',
+        text1: '❌ GLT Test Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -213,7 +322,7 @@ class GlobalPrintService {
       return {
         success: false,
         message: errorMessage,
-        errorCode: error.code || 'TEST_PRINT_ERROR',
+        errorCode: error.code || 'GLT_TEST_ERROR',
       };
     }
   }
@@ -225,10 +334,9 @@ class GlobalPrintService {
     bluetoothContext: BluetoothContextType,
     text: string
   ): Promise<PrintResult> {
-    console.log('📝 [GLOBAL-PRINT] Printing text...');
+    console.log('📝 [GLT-PRINT] Printing custom text...');
     
     try {
-      // Check availability first
       const availability = await this.isPrintingAvailable(bluetoothContext);
       if (!availability.available) {
         throw new Error(availability.reason || 'Printing not available');
@@ -237,16 +345,14 @@ class GlobalPrintService {
       const printer = bluetoothContext.connectedPrinter;
       const printTime = new Date();
       
-      // Use the context's printText method
       await bluetoothContext.printText(text);
       
-      console.log('✅ [GLOBAL-PRINT] Text print completed successfully');
+      console.log('✅ [GLT-PRINT] Custom text printed successfully');
       
-      // Show success toast
       Toast.show({
         type: 'success',
-        text1: 'Text Printed',
-        text2: `Text sent to ${printer.name}`,
+        text1: '📝 Text Printed',
+        text2: `Custom text sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
@@ -259,14 +365,13 @@ class GlobalPrintService {
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Text print failed:', error);
+      console.error('❌ [GLT-PRINT] Text print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
-      // Show error toast
       Toast.show({
         type: 'error',
-        text1: 'Text Print Failed',
+        text1: '❌ Text Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -275,41 +380,39 @@ class GlobalPrintService {
       return {
         success: false,
         message: errorMessage,
-        errorCode: error.code || 'TEXT_PRINT_ERROR',
+        errorCode: error.code || 'GLT_TEXT_ERROR',
       };
     }
   }
 
   /**
-   * Bulk print multiple packages using global context
+   * Bulk print multiple GLT packages
    */
   async bulkPrint(
     bluetoothContext: BluetoothContextType,
     packages: PackageData[], 
     options: PrintOptions = {}
   ): Promise<PrintResult[]> {
-    console.log('📦 [GLOBAL-PRINT] Starting bulk print for', packages.length, 'packages');
+    console.log('📦 [GLT-BULK] Starting bulk GLT print for', packages.length, 'packages');
     
     const results: PrintResult[] = [];
     
-    // Check availability once at the start
     const availability = await this.isPrintingAvailable(bluetoothContext);
     if (!availability.available) {
       const error = new Error(availability.reason || 'Printing not available');
       return packages.map(pkg => ({
         success: false,
-        message: `Bulk print failed: ${error.message}`,
-        errorCode: 'PRINT_UNAVAILABLE',
+        message: `GLT bulk print failed: ${error.message}`,
+        errorCode: 'GLT_PRINT_UNAVAILABLE',
       }));
     }
     
-    // Print each package with delay to prevent overload
+    // Print each package with delay
     for (let i = 0; i < packages.length; i++) {
       const pkg = packages[i];
-      console.log(`📦 [BULK] Printing ${i + 1}/${packages.length}: ${pkg.code}`);
+      console.log(`📦 [GLT-BULK] Printing ${i + 1}/${packages.length}: ${pkg.code}`);
       
       try {
-        // Check availability before each print to ensure printer is still connected
         const stillAvailable = await this.isPrintingAvailable(bluetoothContext);
         if (!stillAvailable.available) {
           throw new Error(stillAvailable.reason || 'Printer disconnected during bulk print');
@@ -320,25 +423,24 @@ class GlobalPrintService {
         
         // Add delay between prints to prevent printer overload
         if (i < packages.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 2000));
+          console.log('⏱️ [GLT-BULK] Waiting 3 seconds before next print...');
+          await new Promise(resolve => setTimeout(resolve, 3000));
         }
       } catch (error: any) {
-        console.error(`❌ [BULK] Failed to print ${pkg.code}:`, error);
+        console.error(`❌ [GLT-BULK] Failed to print ${pkg.code}:`, error);
         results.push({
           success: false,
-          message: `Failed to print ${pkg.code}: ${error.message}`,
-          errorCode: 'BULK_PRINT_ERROR',
+          message: `Failed to print GLT receipt for ${pkg.code}: ${error.message}`,
+          errorCode: 'GLT_BULK_ERROR',
         });
         
-        // If it's a connection error, stop the bulk print
         if (error.message.includes('disconnected') || error.message.includes('not available')) {
-          console.warn('⚠️ [BULK] Connection lost, stopping bulk print');
-          // Add failed results for remaining packages
+          console.warn('⚠️ [GLT-BULK] Connection lost, stopping bulk print');
           for (let j = i + 1; j < packages.length; j++) {
             results.push({
               success: false,
-              message: `Bulk print stopped due to connection loss`,
-              errorCode: 'CONNECTION_LOST',
+              message: `GLT bulk print stopped due to connection loss`,
+              errorCode: 'GLT_CONNECTION_LOST',
             });
           }
           break;
@@ -347,13 +449,12 @@ class GlobalPrintService {
     }
     
     const successCount = results.filter(r => r.success).length;
-    console.log(`✅ [BULK] Bulk print completed: ${successCount}/${packages.length} successful`);
+    console.log(`✅ [GLT-BULK] GLT bulk print completed: ${successCount}/${packages.length} successful`);
     
-    // Show summary toast
     Toast.show({
       type: successCount === packages.length ? 'success' : successCount > 0 ? 'info' : 'error',
-      text1: 'Bulk Print Complete',
-      text2: `${successCount}/${packages.length} packages printed successfully`,
+      text1: '📦 GLT Bulk Print Complete',
+      text2: `${successCount}/${packages.length} GLT receipts printed successfully`,
       position: 'top',
       visibilityTime: 4000,
     });
@@ -362,34 +463,54 @@ class GlobalPrintService {
   }
 
   /**
-   * Get detailed error message
+   * Print office delivery receipt with agent information
+   */
+  async printOfficeDelivery(
+    bluetoothContext: BluetoothContextType,
+    packageData: PackageData,
+    agentName: string,
+    options: PrintOptions = {}
+  ): Promise<PrintResult> {
+    console.log('🏢 [GLT-OFFICE] Printing office delivery receipt for:', packageData.code);
+    
+    const officePackageData: PackageData = {
+      ...packageData,
+      delivery_type: 'office',
+      agent_name: agentName,
+    };
+    
+    return await this.printPackage(bluetoothContext, officePackageData, options);
+  }
+
+  /**
+   * Get detailed error message with GLT branding
    */
   private getDetailedErrorMessage(error: any): string {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth not available')) {
-      return 'Bluetooth not available. Use development build for printing.';
+      return 'GLT Print: Bluetooth not available. Use development build.';
     }
     if (message.includes('not available in this environment')) {
-      return 'Printing not available in Expo Go. Use development build.';
+      return 'GLT Print: Not available in Expo Go. Use development build.';
     }
     if (message.includes('No printer connected')) {
-      return 'Connect a printer in Settings → Bluetooth first.';
+      return 'GLT Print: Connect printer in Settings → Bluetooth first.';
     }
     if (message.includes('Printer disconnected')) {
-      return 'Printer connection lost. Turn on printer and reconnect in Settings.';
+      return 'GLT Print: Connection lost. Turn on printer and reconnect.';
     }
     if (message.includes('timed out')) {
-      return 'Print job timed out. Printer may be busy - wait and retry.';
+      return 'GLT Print: Timeout. Printer may be busy - retry in a moment.';
     }
     if (message.includes('Device not found')) {
-      return 'Printer not found. Check if printer is on and paired.';
+      return 'GLT Print: Printer not found. Check if printer is on and paired.';
     }
     if (message.includes('Connection lost')) {
-      return 'Printer disconnected during operation. Reconnect and try again.';
+      return 'GLT Print: Connection lost during operation. Reconnect and retry.';
     }
     
-    return `Print error: ${message}`;
+    return `GLT Print Error: ${message}`;
   }
 
   /**
@@ -397,13 +518,31 @@ class GlobalPrintService {
    */
   async printPackageReceipt(packageData: PackageData, bluetoothContext?: BluetoothContextType): Promise<void> {
     if (!bluetoothContext) {
-      throw new Error('Bluetooth context is required. Please pass the context from your component.');
+      throw new Error('GLT Print: Bluetooth context is required. Please pass the context from your component.');
     }
     
     const result = await this.printPackage(bluetoothContext, packageData);
     if (!result.success) {
       throw new Error(result.message);
     }
+  }
+
+  /**
+   * Helper method to validate package data for GLT printing
+   */
+  validatePackageData(packageData: PackageData): { valid: boolean; errors: string[] } {
+    const errors: string[] = [];
+    
+    if (!packageData.code) errors.push('Package code is required');
+    if (!packageData.receiver_name) errors.push('Receiver name is required');
+    if (!packageData.delivery_location && !packageData.route_description) {
+      errors.push('Delivery location or route description is required');
+    }
+    
+    return {
+      valid: errors.length === 0,
+      errors
+    };
   }
 }
 
