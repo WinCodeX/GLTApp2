@@ -1,4 +1,4 @@
-// app/admin/settings.tsx - Fixed Bluetooth initialization and error handling
+// app/admin/settings.tsx - Fixed to preserve connections
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -19,6 +19,7 @@ import { useRouter } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import AdminLayout from '../../components/AdminLayout';
+import { useFocusEffect } from '@react-navigation/native';
 
 // Import the Bluetooth store and print hooks
 import { 
@@ -47,13 +48,11 @@ const SettingsScreen: React.FC = () => {
     devices,
     connectedDevices,
     initialize,
-    cleanup,
     requestPermissions,
     startDeviceScan,
     stopDeviceScan,
     connectToDevice,
     disconnectDevice,
-    disconnectAllDevices,
     refreshConnections,
   } = useBluetoothStore();
 
@@ -127,8 +126,22 @@ const SettingsScreen: React.FC = () => {
 
     return () => {
       clearTimeout(initTimer);
+      // REMOVED: Don't cleanup Bluetooth on unmount!
+      // This was causing the disconnection issue
     };
-  }, []);
+  }, [initializeBluetooth]);
+
+  // Use focus effect instead of useEffect for refreshing when screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      console.log('📱 [SETTINGS] Screen focused, refreshing status...');
+      
+      if (isInitialized && !initializationError) {
+        refreshPrinterStatus();
+        refreshConnections();
+      }
+    }, [isInitialized, initializationError, refreshPrinterStatus, refreshConnections])
+  );
 
   // Monitor initialization changes
   useEffect(() => {
@@ -183,7 +196,6 @@ const SettingsScreen: React.FC = () => {
             [
               { text: 'Cancel', style: 'cancel' },
               { text: 'Open Settings', onPress: () => {
-                // Could link to app settings here
                 Toast.show({
                   type: 'info',
                   text1: 'Open Device Settings',
@@ -218,19 +230,15 @@ const SettingsScreen: React.FC = () => {
         ]
       );
     } else if (!value) {
-      // Disconnect all devices when disabling
-      try {
-        await disconnectAllDevices();
-        Toast.show({
-          type: 'info',
-          text1: 'Bluetooth Disabled',
-          text2: 'All Bluetooth connections have been closed',
-          position: 'top',
-          visibilityTime: 3000,
-        });
-      } catch (error: any) {
-        console.error('Failed to disconnect devices:', error);
-      }
+      // CHANGED: Don't disconnect all devices when disabling in settings
+      // This preserves the printer connection
+      Toast.show({
+        type: 'info',
+        text1: 'Bluetooth Settings',
+        text2: 'Bluetooth features disabled in app settings',
+        position: 'top',
+        visibilityTime: 3000,
+      });
     }
   };
 
@@ -471,13 +479,7 @@ const SettingsScreen: React.FC = () => {
           text: 'Logout',
           style: 'destructive',
           onPress: async () => {
-            try {
-              await disconnectAllDevices();
-              await cleanup();
-            } catch (error) {
-              console.error('Cleanup failed during logout:', error);
-            }
-            
+            // CHANGED: Don't cleanup/disconnect on logout unless explicitly requested
             Toast.show({
               type: 'success',
               text1: 'Logged Out',
@@ -512,7 +514,9 @@ const SettingsScreen: React.FC = () => {
             });
 
             try {
-              // Cleanup current state
+              // This is the only time we actually cleanup connections
+              const { cleanup, disconnectAllDevices } = useBluetoothStore.getState();
+              
               await disconnectAllDevices();
               await cleanup();
               
