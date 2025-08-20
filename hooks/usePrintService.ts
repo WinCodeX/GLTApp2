@@ -377,9 +377,9 @@ export const PrintPresets = {
 };
 
 /**
- * Context for print triggers (optional - for global state)
+ * Context types and hooks (without JSX components)
  */
-import React, { createContext, useContext, ReactNode } from 'react';
+import { createContext, useContext } from 'react';
 
 interface PrintContextType {
   printFromAnywhere: (packageData: PackageData, options?: PrintOptions) => Promise<void>;
@@ -387,9 +387,12 @@ interface PrintContextType {
   isPrintingAvailable: boolean;
 }
 
-const PrintContext = createContext<PrintContextType | undefined>(undefined);
+export const PrintContext = createContext<PrintContextType | undefined>(undefined);
 
-export const PrintProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+/**
+ * Hook to create print context value
+ */
+export const usePrintContextValue = (): PrintContextType => {
   const { printPackage, testPrint, printStatus } = usePrintService();
 
   const printFromAnywhere = useCallback(async (
@@ -434,17 +437,11 @@ export const PrintProvider: React.FC<{ children: ReactNode }> = ({ children }) =
     }
   }, [testPrint]);
 
-  const value: PrintContextType = {
+  return {
     printFromAnywhere,
     testPrintFromAnywhere,
     isPrintingAvailable: printStatus.isAvailable,
   };
-
-  return (
-    <PrintContext.Provider value={value}>
-      {children}
-    </PrintContext.Provider>
-  );
 };
 
 export const usePrintContext = (): PrintContextType => {
