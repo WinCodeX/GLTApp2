@@ -582,6 +582,7 @@ export default function CollectDeliverModal({
         <KeyboardAvoidingView 
           style={styles.keyboardContainer}
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <View style={styles.overlay}>
             <Animated.View
@@ -640,7 +641,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
-  // Header
+  // Header - Fixed padding for proper status bar handling
   header: {
     flexDirection: 'row',
     alignItems: 'center',
