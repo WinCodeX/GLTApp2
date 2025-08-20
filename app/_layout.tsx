@@ -13,6 +13,7 @@ import Toast from 'react-native-toast-message';
 import { toastConfig } from '@/lib/toastConfig';
 
 import { UserProvider } from '@/context/UserContext';
+import { BluetoothProvider } from '@/contexts/BluetoothContext'; // ✅ Add BluetoothProvider
 import NetworkBanner from '@/components/NetworkBanner';
 import colors from '@/theme/colors';
 
@@ -36,12 +37,15 @@ export default function Layout() {
         <PaperProvider>
           <ThemeProvider value={CustomDarkTheme}>
             <UserProvider>
-              {/* Main app content - includes DrawerLayout and other routes */}
-              <Slot />
-              
-              {/* Network status banner - positioned below header */}
-              {/* Uses pointerEvents: 'box-none' so touches pass through to content below */}
-              <NetworkBanner headerHeight={60} />
+              {/* ✅ Wrap app content with BluetoothProvider for global Bluetooth state */}
+              <BluetoothProvider>
+                {/* Main app content - includes DrawerLayout and other routes */}
+                <Slot />
+                
+                {/* Network status banner - positioned below header */}
+                {/* Uses pointerEvents: 'box-none' so touches pass through to content below */}
+                <NetworkBanner headerHeight={60} />
+              </BluetoothProvider>
             </UserProvider>
           </ThemeProvider>
         </PaperProvider>
