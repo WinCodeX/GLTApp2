@@ -1,4 +1,4 @@
-// services/GlobalPrintService.ts - Fixed with large bold text and clean layout
+// services/GlobalPrintService.ts - Simplified clean receipt format
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -65,7 +65,7 @@ class GlobalPrintService {
   private static instance: GlobalPrintService;
 
   constructor() {
-    // Large bold text thermal printer service
+    // Simplified thermal printer service
   }
 
   static getInstance(): GlobalPrintService {
@@ -76,7 +76,7 @@ class GlobalPrintService {
   }
 
   /**
-   * ESC/POS Commands for large, bold formatting
+   * ESC/POS Commands for normal formatting
    */
   private readonly ESC = '\x1B';
   private readonly GS = '\x1D';
@@ -87,8 +87,6 @@ class GlobalPrintService {
   private readonly CENTER = this.ESC + 'a' + '\x01';
   private readonly LEFT = this.ESC + 'a' + '\x00';
   private readonly DOUBLE_HEIGHT = this.GS + '!' + '\x11';
-  private readonly DOUBLE_WIDTH = this.GS + '!' + '\x20';
-  private readonly QUAD_SIZE = this.GS + '!' + '\x33'; // Double width + double height
   private readonly NORMAL_SIZE = this.GS + '!' + '\x00';
 
   /**
@@ -136,7 +134,7 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate QR code section - CLEAN without any labels
+   * Generate clean QR code section without any labels
    */
   private async generateQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
     console.log('📱 [GLOBAL-QR] Generating clean QR code');
@@ -172,7 +170,7 @@ class GlobalPrintService {
 
       const qrCommands = this.generateThermalQRCommands(qrData, options);
       
-      // QR code without any labels
+      // Clean QR code without any labels
       return '\n\n' + this.CENTER + qrCommands + '\n\n' + this.LEFT;
       
     } catch (error) {
@@ -188,9 +186,9 @@ class GlobalPrintService {
     console.log('🖨️ [GLOBAL-QR-CMD] Generating thermal QR commands');
     
     try {
-      let qrSize = 10; // Large default size
-      if (options.labelSize === 'small') qrSize = 8;
-      if (options.labelSize === 'large') qrSize = 12;
+      let qrSize = 8; // Normal size for 6-inch receipts
+      if (options.labelSize === 'small') qrSize = 6;
+      if (options.labelSize === 'large') qrSize = 10;
       
       // ESC/POS QR Code commands for thermal printers
       const modelCommand = this.GS + '(k\x04\x00\x31\x41\x32\x00';
@@ -235,34 +233,17 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate GLT receipt with LARGE BOLD TEXT and NO LINES
+   * Generate simplified GLT receipt
    */
   private async generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
       code,
       receiver_name,
       route_description,
-      delivery_location,
-      payment_status = 'not_paid',
-      agent_name,
-      receiver_phone
+      delivery_location
     } = packageData;
 
-    const now = new Date();
-    const dateStr = now.toLocaleDateString('en-GB', {
-      day: '2-digit',
-      month: '2-digit', 
-      year: 'numeric'
-    });
-    const timeStr = now.toLocaleTimeString('en-GB', { 
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false 
-    });
-
     const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
-    const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
     // Generate clean QR code section
     let qrCodeSection = '';
@@ -278,74 +259,32 @@ class GlobalPrintService {
       qrCodeSection = '\n\n';
     }
 
-    // RECEIPT WITH LARGE BOLD TEXT AND NO SEPARATOR LINES
+    // SIMPLIFIED RECEIPT - Company header, package code, QR, delivery info, thank you, designed by
     const receipt = 
-      '\n\n' +
-      this.CENTER + this.BOLD_ON + this.QUAD_SIZE +
+      '\n' +
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
       'GLT LOGISTICS\n' +
-      this.DOUBLE_HEIGHT + 'Fast & Reliable\n' +
-      this.NORMAL_SIZE + this.BOLD_OFF + 
+      this.NORMAL_SIZE + 'Fast & Reliable\n' +
+      this.BOLD_OFF + this.LEFT +
       
-      '\n' + this.BOLD_ON + this.DOUBLE_WIDTH + 
-      'Customer Service:\n' +
-      '0725 057 210\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF +
-      'support@gltlogistics.co.ke\n' +
-      'www.gltlogistics.co.ke\n\n' +
-      
-      this.BOLD_ON + 'If package is lost, please contact\n' +
-      'us immediately with this receipt.\n' +
-      this.BOLD_OFF + 
-      
-      '\n\n' + this.CENTER + this.BOLD_ON + this.QUAD_SIZE + 
+      '\n\n' + this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + 
       code + '\n' + 
       this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
       
       qrCodeSection +
       
-      '\n' + this.BOLD_ON + this.DOUBLE_HEIGHT + 'DELIVERY FOR:\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF + 
-      this.BOLD_ON + this.DOUBLE_WIDTH + receiver_name.toUpperCase() + '\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF +
+      this.BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + 
+      'TO: ' + cleanLocation + '\n' + 
+      this.BOLD_OFF +
       
-      (receiver_phone ? 
-        this.BOLD_ON + 'PHONE: ' + receiver_phone + '\n' + this.BOLD_OFF : '') +
-      
-      '\n' + this.BOLD_ON + this.DOUBLE_HEIGHT + 'TO:\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF +
-      this.BOLD_ON + this.DOUBLE_WIDTH + cleanLocation + '\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF +
-      
-      (agent_name ? 
-        '\n' + this.BOLD_ON + 'AGENT: ' + agent_name + '\n' + this.BOLD_OFF : '') +
-      
-      '\n\n' + this.BOLD_ON + this.DOUBLE_HEIGHT + 'PAYMENT STATUS:\n' + 
-      this.QUAD_SIZE + paymentText + '\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF +
-      
-      '\n' + this.BOLD_ON + 'DATE: ' + dateStr + '\n' + 
-      'TIME: ' + timeStr + '\n' + this.BOLD_OFF +
-      
-      (packageData.weight ? 
-        this.BOLD_ON + 'WEIGHT: ' + packageData.weight + '\n' + this.BOLD_OFF : '') +
-      (packageData.dimensions ? 
-        this.BOLD_ON + 'DIMENSIONS: ' + packageData.dimensions + '\n' + this.BOLD_OFF : '') +
-      (packageData.special_instructions ? 
-        '\n' + this.BOLD_ON + 'INSTRUCTIONS:\n' + this.BOLD_OFF + 
-        packageData.special_instructions + '\n' : '') +
-      
-      '\n\n' + this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + 
-      'Thank you for choosing\n' +
-      'GLT Logistics!\n' +
-      this.NORMAL_SIZE +
-      'Your package will be\n' +
-      'delivered safely.\n' +
-      this.BOLD_OFF + 
+      '\n' + this.CENTER + this.BOLD_ON + 
+      'Thank you for choosing GLT Logistics!\n' +
+      'Your package will be delivered safely.\n' +
+      this.BOLD_OFF +
       
       '\n' + 'Designed by Infinity.Co\n' +
       'www.infinity.co.ke\n\n' +
-      
-      this.LEFT + 'Receipt printed: ' + dateStr + ' ' + timeStr + '\n\n\n';
+      this.LEFT;
 
     return receipt;
   }
@@ -366,14 +305,14 @@ class GlobalPrintService {
   }
 
   /**
-   * Print GLT package with LARGE BOLD formatting
+   * Print simplified GLT package receipt
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLOBAL-PRINT] Starting LARGE BOLD GLT print');
+    console.log('🖨️ [GLOBAL-PRINT] Starting simplified GLT print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -393,7 +332,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '📦 LARGE BOLD Receipt Printed',
+        text1: '📦 Simplified Receipt Printed',
         text2: `Package ${packageData.code} sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -401,19 +340,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `LARGE BOLD GLT receipt printed for ${packageData.code}`,
+        message: `Simplified GLT receipt printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] LARGE BOLD print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Simplified print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ LARGE BOLD Print Failed',
+        text1: '❌ Simplified Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -428,10 +367,10 @@ class GlobalPrintService {
   }
 
   /**
-   * Test print with LARGE BOLD formatting
+   * Test print with simplified formatting
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLOBAL-PRINT] Running LARGE BOLD test print');
+    console.log('🧪 [GLOBAL-PRINT] Running simplified test print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -443,16 +382,13 @@ class GlobalPrintService {
       const printTime = new Date();
       
       const testPackageData: PackageData = {
-        code: 'LARGE-GLOBAL-' + Date.now().toString().slice(-6),
-        receiver_name: 'LARGE BOLD Test User',
+        code: 'SIMPLE-GLOBAL-' + Date.now().toString().slice(-6),
+        receiver_name: 'Test User',
         receiver_phone: '0712 345 678',
-        route_description: 'LARGE BOLD → Global Service Test',
+        route_description: 'Simple Format → Global Service Test',
         delivery_location: 'Test Location',
         payment_status: 'not_paid',
-        delivery_type: 'home',
-        weight: '2kg',
-        dimensions: '30x20x15 cm',
-        special_instructions: 'Testing Global Service with LARGE BOLD formatting'
+        delivery_type: 'home'
       };
       
       const testReceipt = await this.generateGLTReceipt(testPackageData, {
@@ -463,7 +399,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '🧪 LARGE BOLD Test Print Successful',
+        text1: '🧪 Simplified Test Print Successful',
         text2: `Test receipt sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -471,19 +407,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `LARGE BOLD GLT test print successful`,
+        message: `Simplified GLT test print successful`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] LARGE BOLD test print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Simplified test print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ LARGE BOLD Test Failed',
+        text1: '❌ Simplified Test Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -534,16 +470,16 @@ class GlobalPrintService {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth not available')) {
-      return 'LARGE BOLD Print: Bluetooth not available.';
+      return 'Simplified Print: Bluetooth not available.';
     }
     if (message.includes('No printer connected')) {
-      return 'LARGE BOLD Print: Connect printer first.';
+      return 'Simplified Print: Connect printer first.';
     }
     if (message.includes('timed out')) {
-      return 'LARGE BOLD Print: Timeout. Retry in a moment.';
+      return 'Simplified Print: Timeout. Retry in a moment.';
     }
     
-    return `LARGE BOLD Print Error: ${message}`;
+    return `Simplified Print Error: ${message}`;
   }
 }
 
