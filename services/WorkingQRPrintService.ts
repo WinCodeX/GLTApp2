@@ -1,4 +1,4 @@
-// services/WorkingQRPrintService.ts - Fixed with text-safe enhanced QR generation
+// services/WorkingQRPrintService.ts - Simplified for text-based thermal printers
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -61,141 +61,143 @@ const DOUBLE_HEIGHT = GS + '!' + '\x11';
 const NORMAL_SIZE = GS + '!' + '\x00';
 
 /**
- * Generate enhanced native QR code with optimal parameters - TEXT SAFE
+ * Generate proper ESC/POS QR commands for thermal printers
  */
-function generateEnhancedQRCode(qrCodeData: string, options: PrintOptions = {}): string {
-  console.log('✨ [ENHANCED-QR] Generating enhanced QR code for:', qrCodeData);
+function generateThermalQRCommands(qrData: string, options: PrintOptions = {}): string {
+  console.log('🖨️ [THERMAL-QR] Generating ESC/POS QR commands for:', qrData.substring(0, 50) + '...');
   
   try {
-    // Enhanced parameters for better visual quality
-    let qrSize = 10; // Larger size for smoother appearance
-    if (options.labelSize === 'small') qrSize = 8;
-    if (options.labelSize === 'large') qrSize = 12;
+    // Determine QR size based on options
+    let qrSize = 8; // Default module size
+    if (options.labelSize === 'small') qrSize = 6;
+    if (options.labelSize === 'large') qrSize = 10;
     
-    // QR Code model 2 (most compatible)
-    const modelCommand = GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
+    // ESC/POS QR Code commands sequence
+    console.log('📐 [THERMAL-QR] Using QR module size:', qrSize);
     
-    // Enhanced size for better visual quality
-    const sizeCommand = GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
+    // Step 1: Set QR Code model (Model 2 is standard)
+    const modelCommand = GS + '(k\x04\x00\x31\x41\x32\x00';
     
-    // High error correction for maximum redundancy
-    const errorCommand = GS + '(k' + '\x03\x00' + '\x31\x45' + '\x32'; // Level H (highest)
+    // Step 2: Set module size
+    const sizeCommand = GS + '(k\x03\x00\x31\x43' + String.fromCharCode(qrSize);
     
-    // Store the QR data
-    const dataLength = qrCodeData.length + 3;
-    const lowByte = dataLength & 0xFF;
-    const highByte = (dataLength >> 8) & 0xFF;
-    const storeCommand = GS + '(k' + String.fromCharCode(lowByte) + String.fromCharCode(highByte) + '\x31\x50\x30' + qrCodeData;
+    // Step 3: Set error correction level (L = 7%, M = 15%, Q = 25%, H = 30%)
+    const errorCommand = GS + '(k\x03\x00\x31\x45\x31'; // Level L for better readability
     
-    // Print the QR code
-    const printCommand = GS + '(k' + '\x03\x00' + '\x31\x51\x30';
+    // Step 4: Store QR data
+    const dataLength = qrData.length + 3;
+    const storeLowByte = dataLength & 0xFF;
+    const storeHighByte = (dataLength >> 8) & 0xFF;
+    const storeCommand = GS + '(k' + 
+      String.fromCharCode(storeLowByte) + 
+      String.fromCharCode(storeHighByte) + 
+      '\x31\x50\x30' + qrData;
     
-    // Enhanced formatting with extra spacing for premium appearance
-    const qrCommands = 
+    // Step 5: Print QR code
+    const printCommand = GS + '(k\x03\x00\x31\x51\x30';
+    
+    // Combine all commands
+    const fullCommand = modelCommand + sizeCommand + errorCommand + storeCommand + printCommand;
+    
+    console.log('✅ [THERMAL-QR] ESC/POS QR commands generated successfully');
+    console.log('📊 [THERMAL-QR] Command length:', fullCommand.length, 'bytes');
+    
+    return fullCommand;
+    
+  } catch (error) {
+    console.error('❌ [THERMAL-QR] Failed to generate QR commands:', error);
+    throw new Error(`QR command generation failed: ${error}`);
+  }
+}
+
+/**
+ * Get QR data from backend or use fallback
+ */
+async function getQRDataForPackage(packageCode: string): Promise<string> {
+  console.log('🔍 [QR-DATA] Fetching QR data for package:', packageCode);
+  
+  try {
+    // Try to get QR data from backend
+    const qrResponse = await getPackageQRCode(packageCode);
+    
+    if (qrResponse.success) {
+      // Check for tracking URL first
+      if (qrResponse.data.tracking_url) {
+        console.log('✅ [QR-DATA] Using backend tracking URL');
+        return qrResponse.data.tracking_url;
+      }
+      
+      // Check for QR code data
+      if (qrResponse.data.qr_code_data) {
+        console.log('✅ [QR-DATA] Using backend QR data');
+        return qrResponse.data.qr_code_data;
+      }
+      
+      // Check for any URL in the response
+      if (qrResponse.data.url) {
+        console.log('✅ [QR-DATA] Using backend URL');
+        return qrResponse.data.url;
+      }
+    }
+    
+    console.warn('⚠️ [QR-DATA] Backend response incomplete, using fallback');
+    
+  } catch (error) {
+    console.warn('⚠️ [QR-DATA] Backend request failed:', error);
+  }
+  
+  // Fallback to standard tracking URL
+  const fallbackUrl = `https://gltlogistics.co.ke/track/${packageCode}`;
+  console.log('🔄 [QR-DATA] Using fallback URL:', fallbackUrl);
+  return fallbackUrl;
+}
+
+/**
+ * Generate QR code section for thermal printer
+ */
+async function generateQRSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
+  console.log('📱 [QR-SECTION] Generating QR section for:', packageCode);
+  
+  try {
+    // Get QR data (from backend or fallback)
+    const qrData = await getQRDataForPackage(packageCode);
+    
+    // Generate thermal printer QR commands
+    const qrCommands = generateThermalQRCommands(qrData, options);
+    
+    // Create complete QR section
+    const qrSection = 
       '\n' +
       CENTER +
       '- QR Code for Tracking -\n' +
-      '\n' + // Extra spacing for premium feel
-      modelCommand +
-      sizeCommand +
-      errorCommand +
-      storeCommand +
-      printCommand +
+      qrCommands +
       '\n' +
-      '\n' + // Extra spacing for premium feel
       'Scan to track your package\n' +
       '\n' +
       LEFT;
     
-    console.log('✅ [ENHANCED-QR] Enhanced QR code generated successfully');
-    return qrCommands;
+    console.log('✅ [QR-SECTION] QR section generated successfully');
+    return qrSection;
     
   } catch (error) {
-    console.error('❌ [ENHANCED-QR] Failed to generate enhanced QR code:', error);
-    return generateFallbackQRCode(qrCodeData, options);
+    console.error('❌ [QR-SECTION] QR section generation failed:', error);
+    // Return text-only fallback
+    return generateTextQRFallback(packageCode);
   }
 }
 
 /**
- * Fallback QR code generation - guaranteed to work
+ * Generate text-only QR fallback
  */
-function generateFallbackQRCode(qrCodeData: string, options: PrintOptions = {}): string {
-  console.log('⚠️ [FALLBACK-QR] Using fallback QR generation');
+function generateTextQRFallback(packageCode: string): string {
+  console.log('🔤 [TEXT-FALLBACK] Generating text-only QR fallback');
   
-  const qrSize = 6; // Smaller, more reliable size
-  
-  const modelCommand = GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
-  const sizeCommand = GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
-  const errorCommand = GS + '(k' + '\x03\x00' + '\x31\x45' + '\x30'; // Error correction L
-  
-  const dataLength = qrCodeData.length + 3;
-  const storeCommand = GS + '(k' + 
-    String.fromCharCode(dataLength & 0xFF) + 
-    String.fromCharCode((dataLength >> 8) & 0xFF) + 
-    '\x31\x50\x30' + qrCodeData;
-  
-  const printCommand = GS + '(k' + '\x03\x00' + '\x31\x51\x30';
-  
-  return '\n' + CENTER + '- QR Code for Tracking -\n' +
-         modelCommand + sizeCommand + errorCommand + storeCommand + printCommand +
-         '\n' + 'Scan to track your package\n' + '\n' + LEFT;
-}
-
-/**
- * Generate minimal QR code - absolute fallback
- */
-function generateMinimalQRCode(qrCodeData: string): string {
-  console.log('⚠️ [MINIMAL-QR] Using minimal QR code');
-  
-  const qrSize = 5; // Very small but reliable
-  
-  const commands = 
-    GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00' + // Model 2
-    GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize) + // Size
-    GS + '(k' + '\x03\x00' + '\x31\x45' + '\x30' + // Error correction L
-    GS + '(k' + String.fromCharCode((qrCodeData.length + 3) & 0xFF) + '\x00' + '\x31\x50\x30' + qrCodeData + // Data
-    GS + '(k' + '\x03\x00' + '\x31\x51\x30'; // Print
-  
-  return CENTER + '\n' + commands + '\n\n' + LEFT;
-}
-
-/**
- * Generate working QR section with backend integration
- */
-async function generateWorkingQRSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
-  console.log('🎯 [WORKING-QR] Generating working QR section for:', packageCode);
-  
-  try {
-    // Get tracking URL from backend
-    const qrResponse = await getPackageQRCode(packageCode);
-    let trackingUrl = `https://gltlogistics.co.ke/track/${packageCode}`;
-    
-    if (qrResponse.success && qrResponse.data.tracking_url) {
-      trackingUrl = qrResponse.data.tracking_url;
-      console.log('✅ [WORKING-QR] Using backend tracking URL:', trackingUrl);
-    } else {
-      console.log('⚠️ [WORKING-QR] Using fallback tracking URL:', trackingUrl);
-    }
-    
-    // Try enhanced QR first, then fallback approaches
-    try {
-      return generateEnhancedQRCode(trackingUrl, options);
-    } catch (error) {
-      console.warn('Enhanced QR failed, trying fallback...');
-      try {
-        return generateFallbackQRCode(trackingUrl, options);
-      } catch (error2) {
-        console.warn('Fallback QR failed, trying minimal...');
-        return generateMinimalQRCode(trackingUrl);
-      }
-    }
-    
-  } catch (error) {
-    console.error('❌ [WORKING-QR] Failed to generate QR section:', error);
-    // Ultimate text fallback
-    return '\n' + CENTER + '- Visit gltlogistics.co.ke to track -\n' + 
-           'Package: ' + packageCode + '\n' + LEFT + '\n';
-  }
+  return '\n' + CENTER + 
+         '- Package Tracking -\n' +
+         'Package: ' + packageCode + '\n' +
+         'Track at: gltlogistics.co.ke\n' +
+         'Or call: 0725 057 210\n' +
+         '\n' + LEFT;
 }
 
 /**
@@ -226,9 +228,11 @@ function cleanDeliveryLocation(routeDescription: string, deliveryLocation?: stri
 }
 
 /**
- * Generate GLT receipt with WORKING QR code
+ * Generate complete GLT receipt with working QR
  */
-async function generateGLTReceiptWithWorkingQR(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
+async function generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
+  console.log('📄 [RECEIPT] Generating GLT receipt for:', packageData.code);
+  
   const {
     code,
     receiver_name,
@@ -255,17 +259,16 @@ async function generateGLTReceiptWithWorkingQR(packageData: PackageData, options
   const cleanLocation = cleanDeliveryLocation(route_description, delivery_location);
   const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-  // Generate WORKING QR section
-  let qrCodeSection = '';
-  try {
-    if (options.includeQR !== false) {
-      console.log('🎯 [GLT-PRINT] Generating working QR for package:', code);
-      qrCodeSection = await generateWorkingQRSection(code, options);
+  // Generate QR section
+  let qrSection = '';
+  if (options.includeQR !== false) {
+    try {
+      console.log('📱 [RECEIPT] Adding QR section...');
+      qrSection = await generateQRSection(code, options);
+    } catch (error) {
+      console.error('❌ [RECEIPT] QR section failed:', error);
+      qrSection = generateTextQRFallback(code);
     }
-  } catch (error) {
-    console.error('❌ [GLT-PRINT] QR generation failed:', error);
-    qrCodeSection = '\n' + CENTER + '- Visit gltlogistics.co.ke to track -\n' + 
-                   'Package: ' + code + '\n' + LEFT + '\n';
   }
 
   const receipt = 
@@ -282,7 +285,7 @@ async function generateGLTReceiptWithWorkingQR(packageData: PackageData, options
     '================================\n' +
     CENTER + BOLD_ON + DOUBLE_HEIGHT + code + '\n' + NORMAL_SIZE + BOLD_OFF + LEFT +
     '================================\n' +
-    qrCodeSection +
+    qrSection +
     '================================\n' +
     BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + BOLD_OFF +
     (receiver_phone ? BOLD_ON + 'Phone: ' + receiver_phone + '\n' + BOLD_OFF : '') +
@@ -306,6 +309,7 @@ async function generateGLTReceiptWithWorkingQR(packageData: PackageData, options
     '--------------------------------\n' +
     LEFT + 'Receipt printed: ' + dateStr + ' ' + timeStr + '\n';
 
+  console.log('✅ [RECEIPT] GLT receipt generated successfully');
   return receipt;
 }
 
@@ -313,7 +317,7 @@ async function generateGLTReceiptWithWorkingQR(packageData: PackageData, options
  * Check if printing is available
  */
 async function isPrintingAvailable(bluetoothContext: BluetoothContextType): Promise<{ available: boolean; reason?: string }> {
-  console.log('🔍 [WORKING-PRINT] Checking printing availability...');
+  console.log('🔍 [PRINT-CHECK] Checking printing availability...');
   
   try {
     if (!bluetoothContext.isBluetoothAvailable) {
@@ -324,24 +328,24 @@ async function isPrintingAvailable(bluetoothContext: BluetoothContextType): Prom
       return { available: false, reason: 'No printer connected' };
     }
     
-    console.log('✅ [WORKING-PRINT] Printing is available');
+    console.log('✅ [PRINT-CHECK] Printing is available');
     return { available: true };
     
   } catch (error: any) {
-    console.error('❌ [WORKING-PRINT] Error checking availability:', error);
+    console.error('❌ [PRINT-CHECK] Error checking availability:', error);
     return { available: false, reason: `System error: ${error.message}` };
   }
 }
 
 /**
- * Print GLT package with WORKING QR code - MAIN EXPORT FUNCTION
+ * MAIN EXPORT: Print GLT package with working QR code
  */
 export async function printPackageWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   packageData: PackageData,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
-  console.log('🖨️ [WORKING-PRINT] Starting reliable GLT print for:', packageData.code);
+  console.log('🖨️ [PRINT-MAIN] Starting GLT print with working QR for:', packageData.code);
   
   try {
     const availability = await isPrintingAvailable(bluetoothContext);
@@ -352,18 +356,18 @@ export async function printPackageWithWorkingQR(
     const printer = bluetoothContext.connectedPrinter;
     const printTime = new Date();
     
-    console.log('📄 [WORKING-PRINT] Generating GLT receipt with working QR...');
+    console.log('📄 [PRINT-MAIN] Generating receipt...');
+    const receiptText = await generateGLTReceipt(packageData, options);
     
-    const receiptText = await generateGLTReceiptWithWorkingQR(packageData, options);
-    
+    console.log('🖨️ [PRINT-MAIN] Sending to printer...');
     await bluetoothContext.printText(receiptText);
     
-    console.log('✅ [WORKING-PRINT] GLT receipt with working QR printed successfully');
+    console.log('✅ [PRINT-MAIN] Print completed successfully');
     
     Toast.show({
       type: 'success',
       text1: '📦 GLT Receipt Printed',
-      text2: `Package ${packageData.code} with enhanced QR sent to ${printer.name}`,
+      text2: `Package ${packageData.code} with QR code sent to ${printer.name}`,
       position: 'top',
       visibilityTime: 3000,
     });
@@ -376,58 +380,61 @@ export async function printPackageWithWorkingQR(
     };
     
   } catch (error: any) {
-    console.error('❌ [WORKING-PRINT] Print failed:', error);
+    console.error('❌ [PRINT-MAIN] Print failed:', error);
+    
+    const errorMessage = getDetailedErrorMessage(error);
     
     Toast.show({
       type: 'error',
       text1: '❌ GLT Print Failed',
-      text2: error.message,
+      text2: errorMessage,
       position: 'top',
       visibilityTime: 5000,
     });
     
     return {
       success: false,
-      message: error.message,
-      errorCode: error.code || 'WORKING_PRINT_ERROR',
+      message: errorMessage,
+      errorCode: error.code || 'PRINT_ERROR',
     };
   }
 }
 
 /**
- * Test print with WORKING QR code
+ * Test print with working QR
  */
 export async function testPrintWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
-  console.log('🧪 [WORKING-PRINT] Running test print with working QR...');
+  console.log('🧪 [TEST-PRINT] Running test print with working QR...');
   
   const testPackageData: PackageData = {
-    code: 'NRB-' + Date.now().toString().slice(-6) + '-MCH',
-    receiver_name: 'Glen',
+    code: 'TEST-' + Date.now().toString().slice(-6) + '-QR',
+    receiver_name: 'Test Receiver',
     receiver_phone: '0712 345 678',
-    route_description: 'CBD → Athi River',
-    delivery_location: 'Athi River',
+    route_description: 'Test Route → Test Destination',
+    delivery_location: 'Test Location',
     payment_status: 'not_paid',
     delivery_type: 'home',
-    weight: '2kg',
-    dimensions: '30x20x15 cm',
-    special_instructions: 'Handle with care - Test package'
+    weight: '1kg',
+    dimensions: '20x15x10 cm',
+    special_instructions: 'Test QR code functionality',
+    agent_name: 'Test Agent'
   };
   
   return printPackageWithWorkingQR(bluetoothContext, testPackageData, options);
 }
 
 /**
- * Print just the working QR for testing
+ * Test QR generation only
  */
-export async function printJustWorkingQR(
+export async function testQRGeneration(
   bluetoothContext: BluetoothContextType,
-  packageCode: string = 'TEST-' + Date.now().toString().slice(-6),
+  packageCode: string = 'QR-TEST-' + Date.now().toString().slice(-6),
   options: PrintOptions = {}
 ): Promise<PrintResult> {
-  console.log('🔲 [QR-TEST] Testing working QR printing only...');
+  console.log('🔲 [QR-TEST] Testing QR generation for:', packageCode);
   
   try {
     const availability = await isPrintingAvailable(bluetoothContext);
@@ -438,65 +445,101 @@ export async function printJustWorkingQR(
     const printer = bluetoothContext.connectedPrinter;
     const printTime = new Date();
     
-    // Generate just the working QR section
-    const qrSection = await generateWorkingQRSection(packageCode, options);
+    // Generate QR section only
+    const qrSection = await generateQRSection(packageCode, options);
     
-    const qrOnlyText = 
+    const qrTestText = 
       '\n\n' +
       CENTER +
-      BOLD_ON + 'WORKING QR TEST\n' + BOLD_OFF +
+      BOLD_ON + 'QR CODE TEST\n' + BOLD_OFF +
       'Package: ' + packageCode + '\n' +
       qrSection +
+      'Test completed: ' + new Date().toLocaleTimeString() + '\n' +
       '\n\n' +
       LEFT;
     
-    await bluetoothContext.printText(qrOnlyText);
+    await bluetoothContext.printText(qrTestText);
     
-    console.log('✅ [QR-TEST] Working QR test printed successfully');
+    console.log('✅ [QR-TEST] QR test printed successfully');
     
     Toast.show({
       type: 'success',
-      text1: '🔲 Working QR Test Printed',
-      text2: `Enhanced QR sent to ${printer.name}`,
+      text1: '🔲 QR Test Printed',
+      text2: `QR code test sent to ${printer.name}`,
       position: 'top',
       visibilityTime: 3000,
     });
     
     return {
       success: true,
-      message: `Working QR test printed successfully`,
+      message: `QR test printed successfully for ${packageCode}`,
       printTime,
       printerUsed: printer.name,
     };
     
   } catch (error: any) {
-    console.error('❌ [QR-TEST] Working QR test failed:', error);
+    console.error('❌ [QR-TEST] QR test failed:', error);
+    
+    const errorMessage = getDetailedErrorMessage(error);
     
     Toast.show({
       type: 'error',
-      text1: '❌ Working QR Test Failed',
-      text2: error.message,
+      text1: '❌ QR Test Failed',
+      text2: errorMessage,
       position: 'top',
       visibilityTime: 5000,
     });
     
     return {
       success: false,
-      message: error.message,
+      message: errorMessage,
       errorCode: error.code || 'QR_TEST_ERROR',
     };
   }
 }
 
 /**
- * Enhanced QR test with multiple fallback levels
+ * Get detailed error message
  */
-export async function testEnhancedQROnly(
+function getDetailedErrorMessage(error: any): string {
+  const message = error.message || error.toString();
+  
+  if (message.includes('Bluetooth not available')) {
+    return 'Bluetooth not available. Use development build.';
+  }
+  if (message.includes('not available in this environment')) {
+    return 'Not available in Expo Go. Use development build.';
+  }
+  if (message.includes('No printer connected')) {
+    return 'Connect printer in Settings → Bluetooth first.';
+  }
+  if (message.includes('Printer disconnected')) {
+    return 'Connection lost. Turn on printer and reconnect.';
+  }
+  if (message.includes('timed out')) {
+    return 'Timeout. Printer may be busy - retry in a moment.';
+  }
+  if (message.includes('Device not found')) {
+    return 'Printer not found. Check if printer is on and paired.';
+  }
+  if (message.includes('Connection lost')) {
+    return 'Connection lost during operation. Reconnect and retry.';
+  }
+  if (message.includes('QR command generation failed')) {
+    return 'QR generation failed. Using text fallback.';
+  }
+  
+  return `Print Error: ${message}`;
+}
+
+/**
+ * Debug function to print raw QR commands for testing
+ */
+export async function debugPrintQRCommands(
   bluetoothContext: BluetoothContextType,
-  testUrl: string = 'https://gltlogistics.co.ke/track/TEST-123',
-  options: PrintOptions = {}
+  qrData: string = 'https://gltlogistics.co.ke/track/TEST-123'
 ): Promise<PrintResult> {
-  console.log('🧪 [ENHANCED-QR-TEST] Testing enhanced QR generation...');
+  console.log('🔧 [DEBUG-QR] Debugging raw QR commands...');
   
   try {
     const availability = await isPrintingAvailable(bluetoothContext);
@@ -506,82 +549,38 @@ export async function testEnhancedQROnly(
 
     const printer = bluetoothContext.connectedPrinter;
     
-    // Test all QR generation methods
-    const testResults: string[] = [];
+    // Generate QR commands
+    const qrCommands = generateThermalQRCommands(qrData, { labelSize: 'medium' });
     
-    // Test 1: Enhanced QR
-    try {
-      const enhancedQR = generateEnhancedQRCode(testUrl, options);
-      testResults.push('✅ Enhanced QR: Generated successfully');
-    } catch (error) {
-      testResults.push('❌ Enhanced QR: Failed');
-    }
-    
-    // Test 2: Fallback QR
-    try {
-      const fallbackQR = generateFallbackQRCode(testUrl, options);
-      testResults.push('✅ Fallback QR: Generated successfully');
-    } catch (error) {
-      testResults.push('❌ Fallback QR: Failed');
-    }
-    
-    // Test 3: Minimal QR
-    try {
-      const minimalQR = generateMinimalQRCode(testUrl);
-      testResults.push('✅ Minimal QR: Generated successfully');
-    } catch (error) {
-      testResults.push('❌ Minimal QR: Failed');
-    }
-    
-    // Print test results and working QR
-    const testOutput = 
-      '\n\n' +
+    const debugText = 
+      '\n' +
       CENTER +
-      BOLD_ON + 'QR GENERATION TEST\n' + BOLD_OFF +
-      'Test URL: ' + testUrl + '\n' +
-      '================================\n' +
-      LEFT +
-      testResults.join('\n') + '\n' +
-      '================================\n' +
-      await generateWorkingQRSection('TEST-123', options) +
-      '================================\n' +
-      CENTER + 'Test completed successfully\n' + LEFT +
-      '\n\n';
+      BOLD_ON + 'QR DEBUG TEST\n' + BOLD_OFF +
+      'Data: ' + qrData.substring(0, 30) + '...\n' +
+      '--- QR SHOULD APPEAR BELOW ---\n' +
+      qrCommands +
+      '\n--- QR SHOULD APPEAR ABOVE ---\n' +
+      'Debug time: ' + new Date().toLocaleTimeString() + '\n' +
+      '\n' +
+      LEFT;
     
-    await bluetoothContext.printText(testOutput);
+    await bluetoothContext.printText(debugText);
     
-    console.log('✅ [ENHANCED-QR-TEST] QR generation test completed');
-    
-    Toast.show({
-      type: 'success',
-      text1: '🧪 QR Test Complete',
-      text2: `QR generation test sent to ${printer.name}`,
-      position: 'top',
-      visibilityTime: 3000,
-    });
+    console.log('✅ [DEBUG-QR] Debug QR printed');
     
     return {
       success: true,
-      message: `QR generation test completed successfully`,
+      message: 'Debug QR commands sent to printer',
       printTime: new Date(),
       printerUsed: printer.name,
     };
     
   } catch (error: any) {
-    console.error('❌ [ENHANCED-QR-TEST] Test failed:', error);
-    
-    Toast.show({
-      type: 'error',
-      text1: '❌ QR Test Failed',
-      text2: error.message,
-      position: 'top',
-      visibilityTime: 5000,
-    });
-    
+    console.error('❌ [DEBUG-QR] Debug failed:', error);
     return {
       success: false,
       message: error.message,
-      errorCode: error.code || 'QR_TEST_ERROR',
+      errorCode: 'DEBUG_ERROR',
     };
   }
 }
