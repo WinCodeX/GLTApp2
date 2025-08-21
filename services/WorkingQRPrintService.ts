@@ -1,4 +1,4 @@
-// services/WorkingQRPrintService.ts - Fixed with large bold text and clean layout
+// services/WorkingQRPrintService.ts - Simplified clean receipt format
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -61,7 +61,7 @@ export interface ThermalQRResponse {
 }
 
 /**
- * ESC/POS Commands for large, bold formatting
+ * ESC/POS Commands for normal formatting
  */
 const ESC = '\x1B';
 const GS = '\x1D';
@@ -72,8 +72,6 @@ const BOLD_OFF = ESC + 'E' + '\x00';
 const CENTER = ESC + 'a' + '\x01';
 const LEFT = ESC + 'a' + '\x00';
 const DOUBLE_HEIGHT = GS + '!' + '\x11';
-const DOUBLE_WIDTH = GS + '!' + '\x20';
-const QUAD_SIZE = GS + '!' + '\x33'; // Double width + double height
 const NORMAL_SIZE = GS + '!' + '\x00';
 
 /**
@@ -127,9 +125,9 @@ function generateThermalQRCommands(qrData: string, options: PrintOptions = {}): 
   console.log('🖨️ [THERMAL-QR] Generating QR commands');
   
   try {
-    let qrSize = 10; // Large default size
-    if (options.labelSize === 'small') qrSize = 8;
-    if (options.labelSize === 'large') qrSize = 12;
+    let qrSize = 8; // Normal size for 6-inch receipts
+    if (options.labelSize === 'small') qrSize = 6;
+    if (options.labelSize === 'large') qrSize = 10;
     
     // ESC/POS QR Code commands
     const modelCommand = GS + '(k\x04\x00\x31\x41\x32\x00';
@@ -192,7 +190,7 @@ async function getQRDataForPackage(packageCode: string, options: PrintOptions = 
 }
 
 /**
- * Generate QR section - CLEAN without any labels
+ * Generate clean QR section without any labels
  */
 async function generateQRSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
   console.log('📱 [QR-SECTION] Generating clean QR section');
@@ -201,7 +199,7 @@ async function generateQRSection(packageCode: string, options: PrintOptions = {}
     const qrData = await getQRDataForPackage(packageCode, options);
     const qrCommands = generateThermalQRCommands(qrData, options);
     
-    // QR code without any labels
+    // Clean QR code without any labels
     return '\n\n' + CENTER + qrCommands + '\n\n' + LEFT;
     
   } catch (error) {
@@ -230,113 +228,54 @@ function cleanDeliveryLocation(routeDescription: string, deliveryLocation?: stri
 }
 
 /**
- * Generate GLT receipt with LARGE BOLD TEXT and NO LINES
+ * Generate simplified GLT receipt
  */
 async function generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
-  console.log('📄 [RECEIPT] Generating LARGE BOLD GLT receipt');
+  console.log('📄 [RECEIPT] Generating simplified GLT receipt');
   
   const {
     code,
     receiver_name,
     route_description,
-    delivery_location,
-    payment_status = 'not_paid',
-    agent_name,
-    receiver_phone
+    delivery_location
   } = packageData;
 
-  const now = new Date();
-  const dateStr = now.toLocaleDateString('en-GB', {
-    day: '2-digit',
-    month: '2-digit', 
-    year: 'numeric'
-  });
-  const timeStr = now.toLocaleTimeString('en-GB', { 
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false 
-  });
-
   const cleanLocation = cleanDeliveryLocation(route_description, delivery_location);
-  const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-  // Get QR section without labels
+  // Get clean QR section
   let qrSection = '';
   if (options.includeQR !== false) {
     qrSection = await generateQRSection(code, options);
   }
 
-  // RECEIPT WITH LARGE BOLD TEXT AND NO SEPARATOR LINES
+  // SIMPLIFIED RECEIPT - Company header, package code, QR, delivery info, thank you, designed by
   const receipt = 
-    '\n\n' +
-    CENTER + BOLD_ON + QUAD_SIZE +
+    '\n' +
+    CENTER + BOLD_ON + DOUBLE_HEIGHT +
     'GLT LOGISTICS\n' +
-    DOUBLE_HEIGHT + 'Fast & Reliable\n' +
-    NORMAL_SIZE + BOLD_OFF + 
+    NORMAL_SIZE + 'Fast & Reliable\n' +
+    BOLD_OFF + LEFT +
     
-    '\n' + BOLD_ON + DOUBLE_WIDTH + 
-    'Customer Service:\n' +
-    '0725 057 210\n' + 
-    NORMAL_SIZE + BOLD_OFF +
-    'support@gltlogistics.co.ke\n' +
-    'www.gltlogistics.co.ke\n\n' +
-    
-    BOLD_ON + 'If package is lost, please contact\n' +
-    'us immediately with this receipt.\n' +
-    BOLD_OFF + 
-    
-    '\n\n' + CENTER + BOLD_ON + QUAD_SIZE + 
+    '\n\n' + CENTER + BOLD_ON + DOUBLE_HEIGHT + 
     code + '\n' + 
     NORMAL_SIZE + BOLD_OFF + LEFT +
     
     qrSection +
     
-    '\n' + BOLD_ON + DOUBLE_HEIGHT + 'DELIVERY FOR:\n' + 
-    NORMAL_SIZE + BOLD_OFF + 
-    BOLD_ON + DOUBLE_WIDTH + receiver_name.toUpperCase() + '\n' + 
-    NORMAL_SIZE + BOLD_OFF +
+    BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + 
+    'TO: ' + cleanLocation + '\n' + 
+    BOLD_OFF +
     
-    (receiver_phone ? 
-      BOLD_ON + 'PHONE: ' + receiver_phone + '\n' + BOLD_OFF : '') +
-    
-    '\n' + BOLD_ON + DOUBLE_HEIGHT + 'TO:\n' + 
-    NORMAL_SIZE + BOLD_OFF +
-    BOLD_ON + DOUBLE_WIDTH + cleanLocation + '\n' + 
-    NORMAL_SIZE + BOLD_OFF +
-    
-    (agent_name ? 
-      '\n' + BOLD_ON + 'AGENT: ' + agent_name + '\n' + BOLD_OFF : '') +
-    
-    '\n\n' + BOLD_ON + DOUBLE_HEIGHT + 'PAYMENT STATUS:\n' + 
-    QUAD_SIZE + paymentText + '\n' + 
-    NORMAL_SIZE + BOLD_OFF +
-    
-    '\n' + BOLD_ON + 'DATE: ' + dateStr + '\n' + 
-    'TIME: ' + timeStr + '\n' + BOLD_OFF +
-    
-    (packageData.weight ? 
-      BOLD_ON + 'WEIGHT: ' + packageData.weight + '\n' + BOLD_OFF : '') +
-    (packageData.dimensions ? 
-      BOLD_ON + 'DIMENSIONS: ' + packageData.dimensions + '\n' + BOLD_OFF : '') +
-    (packageData.special_instructions ? 
-      '\n' + BOLD_ON + 'INSTRUCTIONS:\n' + BOLD_OFF + 
-      packageData.special_instructions + '\n' : '') +
-    
-    '\n\n' + CENTER + BOLD_ON + DOUBLE_HEIGHT + 
-    'Thank you for choosing\n' +
-    'GLT Logistics!\n' +
-    NORMAL_SIZE +
-    'Your package will be\n' +
-    'delivered safely.\n' +
-    BOLD_OFF + 
+    '\n' + CENTER + BOLD_ON + 
+    'Thank you for choosing GLT Logistics!\n' +
+    'Your package will be delivered safely.\n' +
+    BOLD_OFF +
     
     '\n' + 'Designed by Infinity.Co\n' +
     'www.infinity.co.ke\n\n' +
-    
-    LEFT + 'Receipt printed: ' + dateStr + ' ' + timeStr + '\n\n\n';
+    LEFT;
 
-  console.log('✅ [RECEIPT] LARGE BOLD GLT receipt generated');
+  console.log('✅ [RECEIPT] Simplified GLT receipt generated');
   return receipt;
 }
 
@@ -356,14 +295,14 @@ async function isPrintingAvailable(bluetoothContext: BluetoothContextType): Prom
 }
 
 /**
- * MAIN EXPORT: Print GLT package with LARGE BOLD formatting
+ * MAIN EXPORT: Print simplified GLT package receipt
  */
 export async function printPackageWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   packageData: PackageData,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
-  console.log('🖨️ [PRINT-MAIN] Starting LARGE BOLD GLT print');
+  console.log('🖨️ [PRINT-MAIN] Starting simplified GLT print');
   
   try {
     const availability = await isPrintingAvailable(bluetoothContext);
@@ -383,7 +322,7 @@ export async function printPackageWithWorkingQR(
     
     Toast.show({
       type: 'success',
-      text1: '📦 LARGE BOLD Receipt Printed',
+      text1: '📦 Simplified Receipt Printed',
       text2: `Package ${packageData.code} sent to ${printer.name}`,
       position: 'top',
       visibilityTime: 3000,
@@ -391,19 +330,19 @@ export async function printPackageWithWorkingQR(
     
     return {
       success: true,
-      message: `LARGE BOLD GLT receipt printed for ${packageData.code}`,
+      message: `Simplified GLT receipt printed for ${packageData.code}`,
       printTime,
       printerUsed: printer.name,
     };
     
   } catch (error: any) {
-    console.error('❌ [PRINT-MAIN] LARGE BOLD print failed:', error);
+    console.error('❌ [PRINT-MAIN] Simplified print failed:', error);
     
     const errorMessage = getDetailedErrorMessage(error);
     
     Toast.show({
       type: 'error',
-      text1: '❌ LARGE BOLD Print Failed',
+      text1: '❌ Simplified Print Failed',
       text2: errorMessage,
       position: 'top',
       visibilityTime: 5000,
@@ -418,24 +357,20 @@ export async function printPackageWithWorkingQR(
 }
 
 /**
- * Test print with LARGE BOLD formatting
+ * Test print with simplified formatting
  */
 export async function testPrintWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
   const testPackageData: PackageData = {
-    code: 'LARGE-BOLD-' + Date.now().toString().slice(-6),
-    receiver_name: 'LARGE BOLD Test User',
+    code: 'SIMPLE-' + Date.now().toString().slice(-6),
+    receiver_name: 'Test User',
     receiver_phone: '0712 345 678',
-    route_description: 'LARGE BOLD Format → Test',
+    route_description: 'Simple Format → Test Destination',
     delivery_location: 'Test Location',
     payment_status: 'not_paid',
-    delivery_type: 'home',
-    weight: '1kg',
-    dimensions: '20x15x10 cm',
-    special_instructions: 'Testing LARGE BOLD formatting',
-    agent_name: 'LARGE BOLD Agent'
+    delivery_type: 'home'
   };
   
   return printPackageWithWorkingQR(bluetoothContext, testPackageData, options);
@@ -458,9 +393,8 @@ export async function testQRGeneration(
     const qrSection = await generateQRSection(packageCode, options);
     
     const qrTestText = 
-      '\n\n' + CENTER +
-      BOLD_ON + DOUBLE_HEIGHT + 'QR CODE TEST\n' + 
-      NORMAL_SIZE + BOLD_OFF +
+      '\n' + CENTER +
+      BOLD_ON + 'QR CODE TEST\n' + BOLD_OFF +
       'Package: ' + packageCode + '\n' +
       qrSection +
       'Test completed: ' + new Date().toLocaleTimeString() + '\n\n' +
@@ -550,8 +484,7 @@ export async function debugPrintQRCommands(
     
     const debugText = 
       '\n' + CENTER +
-      BOLD_ON + DOUBLE_HEIGHT + 'QR DEBUG TEST\n' + 
-      NORMAL_SIZE + BOLD_OFF +
+      BOLD_ON + 'QR DEBUG TEST\n' + BOLD_OFF +
       'Data: ' + qrData.substring(0, 30) + '...\n' +
       qrCommands +
       '\nDebug time: ' + new Date().toLocaleTimeString() + '\n\n' +
