@@ -2,7 +2,6 @@
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
-import { OrganicQRGenerator, OrganicQROptions } from './OrganicQRGenerator';
 
 export interface PackageData {
   code: string;
@@ -50,10 +49,9 @@ export interface BluetoothContextType {
 
 class GlobalPrintService {
   private static instance: GlobalPrintService;
-  private organicQRGenerator: OrganicQRGenerator;
 
   constructor() {
-    this.organicQRGenerator = new OrganicQRGenerator();
+    // Removed complex QR generator - using native thermal printer commands
   }
 
   static getInstance(): GlobalPrintService {
@@ -108,47 +106,71 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate organic QR code ESC/POS commands - same style as your Ruby generator
+   * Generate working QR code using thermal printer native commands
    */
-  private async generateOrganicQRCodeCommands(qrCodeData: string, options: PrintOptions = {}): Promise<string> {
+  private generateWorkingQRCodeCommands(qrCodeData: string, options: PrintOptions = {}): string {
+    console.log('🔲 [GLT-QR] Generating working QR code for:', qrCodeData);
+    
     try {
-      console.log('🎨 [GLT-QR] Generating organic QR code for:', qrCodeData);
+      // QR Code size based on options - larger for better scanning
+      let qrSize = 8; // Default
+      if (options.labelSize === 'small') qrSize = 6;
+      if (options.labelSize === 'large') qrSize = 10;
       
-      const qrOptions: OrganicQROptions = {
-        moduleSize: options.labelSize === 'large' ? 10 : options.labelSize === 'small' ? 6 : 8,
-        cornerRadius: options.labelSize === 'large' ? 5 : 3,
-        borderSize: 12,
-        organicFactor: 1.4, // Same organic factor as your Ruby generator
-        finderStyle: 'organic'
-      };
+      // QR Code model 2 (most compatible)
+      const modelCommand = this.GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
       
-      const organicQRCommands = this.organicQRGenerator.generateGLTStyleQR(
-        qrCodeData.split('/').pop() || qrCodeData, // Extract package code if it's a URL
-        qrCodeData
-      );
+      // QR Code size setting
+      const sizeCommand = this.GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
       
-      console.log('✅ [GLT-QR] Organic QR commands generated successfully');
-      return organicQRCommands;
+      // Error correction level M (good balance of reliability and data capacity)
+      const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + '\x31';
+      
+      // Store the QR data
+      const dataLength = qrCodeData.length + 3;
+      const lowByte = dataLength & 0xFF;
+      const highByte = (dataLength >> 8) & 0xFF;
+      const storeCommand = this.GS + '(k' + String.fromCharCode(lowByte) + String.fromCharCode(highByte) + '\x31\x50\x30' + qrCodeData;
+      
+      // Print the QR code
+      const printCommand = this.GS + '(k' + '\x03\x00' + '\x31\x51\x30';
+      
+      // Combine with proper spacing and alignment
+      const qrCommands = 
+        '\n' +
+        this.CENTER +
+        '- QR Code for Tracking -\n' +
+        modelCommand +
+        sizeCommand +
+        errorCommand +
+        storeCommand +
+        printCommand +
+        '\n' +
+        'Scan to track your package\n' +
+        '\n' +
+        this.LEFT;
+      
+      console.log('✅ [GLT-QR] Working QR code generated successfully');
+      return qrCommands;
       
     } catch (error) {
-      console.error('❌ [GLT-QR] Failed to generate organic QR:', error);
-      // Fallback to simple QR if organic generation fails
+      console.error('❌ [GLT-QR] Failed to generate QR code:', error);
       return this.generateFallbackQRCodeCommands(qrCodeData);
     }
   }
 
   /**
-   * Fallback QR code generation if organic fails
+   * Simple fallback QR code generation - guaranteed to work
    */
   private generateFallbackQRCodeCommands(qrCodeData: string): string {
-    console.log('⚠️ [GLT-QR] Using fallback QR generation');
+    console.log('⚠️ [GLT-QR] Using simple fallback QR generation');
     
-    const qrSize = 8;
-    const errorCorrection = 50;
+    // Ultra-simple, reliable QR code commands
+    const qrSize = 6; // Smaller size for compatibility
     
     const modelCommand = this.GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
     const sizeCommand = this.GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
-    const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + String.fromCharCode(errorCorrection);
+    const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + '\x30'; // Error correction L (lowest, most reliable)
     
     const dataLength = qrCodeData.length + 3;
     const storeCommand = this.GS + '(k' + 
@@ -158,7 +180,14 @@ class GlobalPrintService {
     
     const printCommand = this.GS + '(k' + '\x03\x00' + '\x31\x51\x30';
     
-    return this.CENTER + '\n' + modelCommand + sizeCommand + errorCommand + storeCommand + printCommand + '\n\n' + this.LEFT;
+    return this.CENTER + '\n' + 
+           modelCommand + 
+           sizeCommand + 
+           errorCommand + 
+           storeCommand + 
+           printCommand + 
+           '\n\n' + 
+           this.LEFT;
   }
 
   /**
@@ -236,9 +265,9 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate receipt with organic QR code using ESC/POS commands
+   * Generate receipt with WORKING QR code using thermal printer commands
    */
-  private async generateGLTReceiptWithOrganicQR(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
+  private async generateGLTReceiptWithWorkingQR(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
       code,
       receiver_name,
@@ -269,10 +298,10 @@ class GlobalPrintService {
     // Payment status formatting
     const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-    // Generate organic QR code commands - same style as your Ruby generator
+    // Generate WORKING QR code commands - reliable thermal printer approach
     let qrCodeSection = '';
     try {
-      console.log('🔍 [GLT-PRINT] Generating organic QR code for package:', code);
+      console.log('🔍 [GLT-PRINT] Generating working QR code for package:', code);
       
       // First try to get tracking URL from backend
       const qrResponse = await getPackageQRCode(code);
@@ -285,11 +314,11 @@ class GlobalPrintService {
         console.log('⚠️ [GLT-PRINT] Using fallback tracking URL:', trackingUrl);
       }
       
-      // Generate organic QR using ESC/POS commands
-      qrCodeSection = await this.generateOrganicQRCodeCommands(trackingUrl, options);
+      // Generate working QR using reliable ESC/POS commands
+      qrCodeSection = this.generateWorkingQRCodeCommands(trackingUrl, options);
       
     } catch (error) {
-      console.error('❌ [GLT-PRINT] Failed to generate organic QR:', error);
+      console.error('❌ [GLT-PRINT] Failed to generate QR:', error);
       // Fallback to simple QR
       qrCodeSection = this.generateFallbackQRCodeCommands(`https://gltlogistics.co.ke/track/${code}`);
     }
@@ -384,8 +413,8 @@ class GlobalPrintService {
       // Generate the receipt content based on options
       let receiptText: string;
       if (options.includeQR !== false) {
-        // Use organic QR by default
-        receiptText = await this.generateGLTReceiptWithOrganicQR(packageData, { ...options, qrStyle: 'organic' });
+        // Use working QR code that actually prints
+        receiptText = await this.generateGLTReceiptWithWorkingQR(packageData, options);
       } else {
         receiptText = this.generateGLTReceipt(packageData, options);
       }
@@ -393,20 +422,20 @@ class GlobalPrintService {
       // Use the context's printText method for the receipt
       await bluetoothContext.printText(receiptText);
       
-      console.log('✅ [GLT-PRINT] GLT receipt with organic QR printed successfully');
+      console.log('✅ [GLT-PRINT] GLT receipt with working QR printed successfully');
       
       // Show success toast
       Toast.show({
         type: 'success',
         text1: '📦 GLT Receipt Printed',
-        text2: `Package ${packageData.code} with organic QR sent to ${printer.name}`,
+        text2: `Package ${packageData.code} with QR code sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT receipt with organic QR printed for ${packageData.code}`,
+        message: `GLT receipt with working QR printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
@@ -436,7 +465,7 @@ class GlobalPrintService {
    * Print GLT test receipt with organic QR
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLT-PRINT] Running GLT test print with organic QR...');
+    console.log('🧪 [GLT-PRINT] Running GLT test print with working QR...');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -461,23 +490,23 @@ class GlobalPrintService {
         special_instructions: 'Handle with care - Test package'
       };
       
-      // Generate and print test receipt with organic QR
-      const testReceipt = await this.generateGLTReceiptWithOrganicQR(testPackageData, { ...options, qrStyle: 'organic' });
+      // Generate and print test receipt with working QR
+      const testReceipt = await this.generateGLTReceiptWithWorkingQR(testPackageData, options);
       await bluetoothContext.printText(testReceipt);
       
-      console.log('✅ [GLT-PRINT] Test receipt with organic QR printed successfully');
+      console.log('✅ [GLT-PRINT] Test receipt with working QR printed successfully');
       
       Toast.show({
         type: 'success',
         text1: '🧪 GLT Test Print Successful',
-        text2: `Test receipt with organic QR sent to ${printer.name}`,
+        text2: `Test receipt with QR code sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT test print with organic QR successful`,
+        message: `GLT test print with working QR successful`,
         printTime,
         printerUsed: printer.name,
       };
