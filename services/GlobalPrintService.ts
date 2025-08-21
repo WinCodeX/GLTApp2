@@ -1,4 +1,4 @@
-// services/GlobalPrintService.ts - Fixed for text-based thermal printers
+// services/GlobalPrintService.ts - Updated to use backend thermal QR generation
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -28,6 +28,7 @@ export interface PrintOptions {
   labelSize?: 'small' | 'medium' | 'large';
   printType?: 'receipt' | 'label' | 'invoice';
   qrStyle?: 'organic' | 'standard';
+  useBackendThermalQR?: boolean; // NEW: Use backend thermal QR
 }
 
 export interface PrintResult {
@@ -47,11 +48,24 @@ export interface BluetoothContextType {
   printReceipt: (data: any) => Promise<void>;
 }
 
+export interface ThermalQRResponse {
+  success: boolean;
+  data: {
+    qr_data: string;
+    tracking_url: string;
+    thermal_qr_base64?: string;
+    package_code: string;
+    qr_type: string;
+    thermal_optimized?: boolean;
+  };
+  error?: string;
+}
+
 class GlobalPrintService {
   private static instance: GlobalPrintService;
 
   constructor() {
-    // Text-based thermal printer service
+    // Enhanced text-based thermal printer service with backend QR support
   }
 
   static getInstance(): GlobalPrintService {
@@ -76,30 +90,133 @@ class GlobalPrintService {
   private readonly NORMAL_SIZE = this.GS + '!' + '\x00';
 
   /**
-   * Generate QR code section using thermal printer ESC/POS commands
+   * Get thermal QR from backend (NEW)
    */
-  private async generateQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
-    console.log('📱 [QR-GEN] Generating QR code for thermal printer:', packageCode);
+  private async getThermalQRFromBackend(packageCode: string): Promise<ThermalQRResponse> {
+    console.log('🖨️ [GLOBAL-BACKEND] Requesting thermal QR for:', packageCode);
     
     try {
-      // Try to get QR data from backend first
-      let qrData = `https://gltlogistics.co.ke/track/${packageCode}`;
-      
-      try {
-        const qrResponse = await getPackageQRCode(packageCode);
-        if (qrResponse.success && qrResponse.data.tracking_url) {
-          qrData = qrResponse.data.tracking_url;
-          console.log('✅ [QR-GEN] Using backend tracking URL:', qrData);
-        } else if (qrResponse.success && qrResponse.data.qr_code_data) {
-          qrData = qrResponse.data.qr_code_data;
-          console.log('✅ [QR-GEN] Using backend QR data:', qrData);
-        }
-      } catch (backendError) {
-        console.warn('⚠️ [QR-GEN] Backend QR failed, using fallback URL');
+      const response = await fetch(`${process.env.EXPO_PUBLIC_API_URL}/api/packages/${packageCode}/thermal_qr_code`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
 
-      // Generate thermal printer QR code using ESC/POS commands
-      const qrCommands = this.generateThermalQRCommands(qrData, options);
+      const data = await response.json() as ThermalQRResponse;
+      
+      if (data.success) {
+        console.log('✅ [GLOBAL-BACKEND] Thermal QR received from backend');
+        console.log('📊 [GLOBAL-BACKEND] QR type:', data.data.qr_type);
+        return data;
+      } else {
+        throw new Error(data.error || 'Backend thermal QR generation failed');
+      }
+      
+    } catch (error) {
+      console.error('❌ [GLOBAL-BACKEND] Backend request failed:', error);
+      
+      // Return fallback response
+      return {
+        success: false,
+        data: {
+          qr_data: `https://gltlogistics.co.ke/track/${packageCode}`,
+          tracking_url: `https://gltlogistics.co.ke/track/${packageCode}`,
+          package_code: packageCode,
+          qr_type: 'fallback_text'
+        },
+        error: error instanceof Error ? error.message : 'Unknown error'
+      };
+    }
+  }
+
+  /**
+   * Convert thermal QR bitmap (placeholder for future enhancement)
+   */
+  private convertThermalQRToBitmap(base64Data: string): string {
+    console.log('🎨 [GLOBAL-BITMAP] Converting thermal QR to bitmap...');
+    
+    try {
+      // Placeholder for actual bitmap conversion
+      // The backend thermal QR is already optimized for thermal printing
+      console.log('⚠️ [GLOBAL-BITMAP] Bitmap conversion not implemented yet - using ESC/POS fallback');
+      return ''; // Return empty string to trigger ESC/POS fallback
+      
+    } catch (error) {
+      console.error('❌ [GLOBAL-BITMAP] Bitmap conversion failed:', error);
+      return '';
+    }
+  }
+
+  /**
+   * Generate QR code section using enhanced thermal printer support (UPDATED)
+   */
+  private async generateQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
+    console.log('📱 [GLOBAL-QR] Generating enhanced QR code for thermal printer:', packageCode);
+    
+    try {
+      let qrData = `https://gltlogistics.co.ke/track/${packageCode}`;
+      let qrCommands = '';
+      
+      // NEW: Try backend thermal QR first
+      if (options.useBackendThermalQR !== false) {
+        console.log('🖨️ [GLOBAL-QR] Attempting backend thermal QR...');
+        
+        try {
+          const thermalQR = await this.getThermalQRFromBackend(packageCode);
+          
+          if (thermalQR.success && thermalQR.data.thermal_qr_base64) {
+            console.log('🎨 [GLOBAL-QR] Got thermal QR image from backend');
+            
+            // Try to convert backend thermal QR to bitmap
+            const bitmapCommands = this.convertThermalQRToBitmap(thermalQR.data.thermal_qr_base64);
+            
+            if (bitmapCommands) {
+              qrCommands = bitmapCommands;
+              console.log('✅ [GLOBAL-QR] Using backend thermal QR bitmap');
+            } else {
+              console.log('🔄 [GLOBAL-QR] Bitmap conversion not ready, using ESC/POS with backend data');
+              qrData = thermalQR.data.qr_data;
+              qrCommands = this.generateThermalQRCommands(qrData, options);
+            }
+          } else if (thermalQR.success && thermalQR.data.qr_data) {
+            console.log('📱 [GLOBAL-QR] Using backend thermal QR data with ESC/POS');
+            qrData = thermalQR.data.qr_data;
+            qrCommands = this.generateThermalQRCommands(qrData, options);
+          } else {
+            throw new Error('Backend thermal QR not available');
+          }
+        } catch (thermalError) {
+          console.warn('⚠️ [GLOBAL-QR] Backend thermal QR failed, using standard method:', thermalError);
+          // Fall through to standard method
+        }
+      }
+      
+      // Fallback: Try original backend QR data
+      if (!qrCommands) {
+        console.log('🔄 [GLOBAL-QR] Trying original backend QR data...');
+        
+        try {
+          const qrResponse = await getPackageQRCode(packageCode);
+          if (qrResponse.success && qrResponse.data.tracking_url) {
+            qrData = qrResponse.data.tracking_url;
+            console.log('✅ [GLOBAL-QR] Using backend organic QR tracking URL:', qrData);
+          } else if (qrResponse.success && qrResponse.data.qr_code_data) {
+            qrData = qrResponse.data.qr_code_data;
+            console.log('✅ [GLOBAL-QR] Using backend organic QR data:', qrData);
+          }
+        } catch (backendError) {
+          console.warn('⚠️ [GLOBAL-QR] Backend organic QR failed, using fallback URL');
+        }
+
+        // Generate thermal printer QR code using ESC/POS commands
+        qrCommands = this.generateThermalQRCommands(qrData, options);
+      }
       
       const qrSection = 
         '\n' +
@@ -111,11 +228,11 @@ class GlobalPrintService {
         '\n' +
         this.LEFT;
       
-      console.log('✅ [QR-GEN] QR section generated successfully');
+      console.log('✅ [GLOBAL-QR] Enhanced QR section generated successfully');
       return qrSection;
       
     } catch (error) {
-      console.error('❌ [QR-GEN] Failed to generate QR:', error);
+      console.error('❌ [GLOBAL-QR] Failed to generate enhanced QR:', error);
       return this.generateFallbackQRSection(packageCode);
     }
   }
@@ -124,7 +241,7 @@ class GlobalPrintService {
    * Generate thermal printer QR commands using ESC/POS
    */
   private generateThermalQRCommands(qrData: string, options: PrintOptions = {}): string {
-    console.log('🖨️ [QR-CMD] Generating thermal QR commands for:', qrData);
+    console.log('🖨️ [GLOBAL-QR-CMD] Generating thermal QR commands for:', qrData);
     
     try {
       // Determine QR size based on label size
@@ -152,11 +269,11 @@ class GlobalPrintService {
       // Combine all commands
       const fullQRCommand = modelCommand + sizeCommand + errorCommand + storeCommand + printCommand;
       
-      console.log('✅ [QR-CMD] Thermal QR commands generated');
+      console.log('✅ [GLOBAL-QR-CMD] Thermal QR commands generated');
       return fullQRCommand;
       
     } catch (error) {
-      console.error('❌ [QR-CMD] Failed to generate QR commands:', error);
+      console.error('❌ [GLOBAL-QR-CMD] Failed to generate QR commands:', error);
       throw error;
     }
   }
@@ -165,7 +282,7 @@ class GlobalPrintService {
    * Generate fallback QR section if main generation fails
    */
   private generateFallbackQRSection(packageCode: string): string {
-    console.log('⚠️ [QR-FALLBACK] Using fallback QR section');
+    console.log('⚠️ [GLOBAL-QR-FALLBACK] Using fallback QR section');
     
     const fallbackUrl = `https://gltlogistics.co.ke/track/${packageCode}`;
     const qrCommands = this.generateThermalQRCommands(fallbackUrl, { labelSize: 'medium' });
@@ -179,7 +296,7 @@ class GlobalPrintService {
    * Generate ASCII QR fallback (for extreme cases)
    */
   private generateASCIIQRFallback(packageCode: string): string {
-    console.log('🔤 [ASCII-QR] Generating ASCII QR fallback');
+    console.log('🔤 [GLOBAL-ASCII-QR] Generating ASCII QR fallback');
     
     // Create a simple ASCII representation
     const asciiQR = this.generateASCIIQRPattern(packageCode);
@@ -307,7 +424,7 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate GLT receipt with working QR code
+   * Generate GLT receipt with enhanced thermal QR (UPDATED)
    */
   private async generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
@@ -336,15 +453,18 @@ class GlobalPrintService {
     const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
     const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-    // Generate QR code section
+    // Generate enhanced QR code section
     let qrCodeSection = '';
     try {
       if (options.includeQR !== false) {
-        console.log('📱 [GLT-PRINT] Generating QR for package:', code);
-        qrCodeSection = await this.generateQRCodeSection(code, options);
+        console.log('📱 [GLOBAL-PRINT] Generating enhanced QR for package:', code);
+        qrCodeSection = await this.generateQRCodeSection(code, {
+          ...options,
+          useBackendThermalQR: true // Enable backend thermal QR by default
+        });
       }
     } catch (error) {
-      console.error('❌ [GLT-PRINT] QR generation failed, using ASCII fallback:', error);
+      console.error('❌ [GLOBAL-PRINT] Enhanced QR generation failed, using ASCII fallback:', error);
       qrCodeSection = this.generateASCIIQRFallback(code);
     }
 
@@ -393,7 +513,7 @@ class GlobalPrintService {
    * Check if printing is available
    */
   async isPrintingAvailable(bluetoothContext: BluetoothContextType): Promise<{ available: boolean; reason?: string }> {
-    console.log('🔍 [GLT-PRINT] Checking printing availability...');
+    console.log('🔍 [GLOBAL-PRINT] Checking printing availability...');
     
     try {
       if (!bluetoothContext.isBluetoothAvailable) {
@@ -404,24 +524,24 @@ class GlobalPrintService {
         return { available: false, reason: 'No printer connected' };
       }
       
-      console.log('✅ [GLT-PRINT] Printing is available');
+      console.log('✅ [GLOBAL-PRINT] Printing is available');
       return { available: true };
       
     } catch (error: any) {
-      console.error('❌ [GLT-PRINT] Error checking availability:', error);
+      console.error('❌ [GLOBAL-PRINT] Error checking availability:', error);
       return { available: false, reason: `System error: ${error.message}` };
     }
   }
 
   /**
-   * Print GLT package with working QR code
+   * Print GLT package with enhanced thermal QR (UPDATED)
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLT-PRINT] Starting GLT print for:', packageData.code);
+    console.log('🖨️ [GLOBAL-PRINT] Starting enhanced GLT print for:', packageData.code);
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -432,37 +552,40 @@ class GlobalPrintService {
       const printer = bluetoothContext.connectedPrinter;
       const printTime = new Date();
       
-      console.log('📄 [GLT-PRINT] Generating GLT receipt...');
+      console.log('📄 [GLOBAL-PRINT] Generating enhanced GLT receipt...');
       
-      const receiptText = await this.generateGLTReceipt(packageData, options);
+      const receiptText = await this.generateGLTReceipt(packageData, {
+        ...options,
+        useBackendThermalQR: true // Enable backend thermal QR by default
+      });
       
       await bluetoothContext.printText(receiptText);
       
-      console.log('✅ [GLT-PRINT] GLT receipt printed successfully');
+      console.log('✅ [GLOBAL-PRINT] Enhanced GLT receipt printed successfully');
       
       Toast.show({
         type: 'success',
-        text1: '📦 GLT Receipt Printed',
-        text2: `Package ${packageData.code} sent to ${printer.name}`,
+        text1: '📦 Enhanced GLT Receipt Printed',
+        text2: `Package ${packageData.code} with backend thermal QR sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT receipt printed for ${packageData.code}`,
+        message: `Enhanced GLT receipt with backend thermal QR printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLT-PRINT] Print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Enhanced print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ GLT Print Failed',
+        text1: '❌ Enhanced GLT Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -477,10 +600,10 @@ class GlobalPrintService {
   }
 
   /**
-   * Test print
+   * Test print with enhanced thermal QR (UPDATED)
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLT-PRINT] Running test print...');
+    console.log('🧪 [GLOBAL-PRINT] Running enhanced test print...');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -492,46 +615,49 @@ class GlobalPrintService {
       const printTime = new Date();
       
       const testPackageData: PackageData = {
-        code: 'NRB-' + Date.now().toString().slice(-6) + '-MCH',
-        receiver_name: 'Glen',
+        code: 'GLOBAL-' + Date.now().toString().slice(-6) + '-MCH',
+        receiver_name: 'Enhanced Test User',
         receiver_phone: '0712 345 678',
-        route_description: 'CBD → Athi River',
-        delivery_location: 'Athi River',
+        route_description: 'Backend Thermal QR → Global Service Test',
+        delivery_location: 'Test Location',
         payment_status: 'not_paid',
         delivery_type: 'home',
         weight: '2kg',
         dimensions: '30x20x15 cm',
-        special_instructions: 'Handle with care - Test package'
+        special_instructions: 'Testing Global Service with enhanced thermal QR'
       };
       
-      const testReceipt = await this.generateGLTReceipt(testPackageData, options);
+      const testReceipt = await this.generateGLTReceipt(testPackageData, {
+        ...options,
+        useBackendThermalQR: true
+      });
       await bluetoothContext.printText(testReceipt);
       
-      console.log('✅ [GLT-PRINT] Test receipt printed successfully');
+      console.log('✅ [GLOBAL-PRINT] Enhanced test receipt printed successfully');
       
       Toast.show({
         type: 'success',
-        text1: '🧪 GLT Test Print Successful',
-        text2: `Test receipt sent to ${printer.name}`,
+        text1: '🧪 Enhanced GLT Test Print Successful',
+        text2: `Test receipt with backend thermal QR sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT test print successful`,
+        message: `Enhanced GLT test print with backend thermal QR successful`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLT-PRINT] Test print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Enhanced test print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ GLT Test Failed',
+        text1: '❌ Enhanced GLT Test Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -546,34 +672,74 @@ class GlobalPrintService {
   }
 
   /**
+   * Debug backend thermal QR connection (NEW)
+   */
+  async debugBackendThermalQR(packageCode: string): Promise<{ success: boolean; data: any }> {
+    console.log('🔧 [GLOBAL-DEBUG] Testing backend thermal QR connection for:', packageCode);
+    
+    try {
+      const thermalQR = await this.getThermalQRFromBackend(packageCode);
+      
+      const debugInfo = {
+        success: thermalQR.success,
+        qrType: thermalQR.data.qr_type,
+        hasImage: !!thermalQR.data.thermal_qr_base64,
+        qrDataLength: thermalQR.data.qr_data?.length || 0,
+        thermalOptimized: thermalQR.data.thermal_optimized || false,
+        error: thermalQR.error,
+        packageCode: thermalQR.data.package_code
+      };
+      
+      console.log('📊 [GLOBAL-DEBUG] Backend response:', debugInfo);
+      
+      return {
+        success: true,
+        data: {
+          backendResponse: debugInfo,
+          hasBackendThermalQR: !!thermalQR.data.thermal_qr_base64,
+          qrDataPreview: thermalQR.data.qr_data?.substring(0, 50) + '...',
+          debugTime: new Date().toISOString()
+        }
+      };
+      
+    } catch (error) {
+      console.error('❌ [GLOBAL-DEBUG] Backend debug failed:', error);
+      return {
+        success: false,
+        data: { error: error instanceof Error ? error.message : 'Unknown error' }
+      };
+    }
+  }
+
+  /**
    * Get detailed error message
    */
   private getDetailedErrorMessage(error: any): string {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth not available')) {
-      return 'GLT Print: Bluetooth not available. Use development build.';
+      return 'Enhanced GLT Print: Bluetooth not available. Use development build.';
     }
     if (message.includes('not available in this environment')) {
-      return 'GLT Print: Not available in Expo Go. Use development build.';
+      return 'Enhanced GLT Print: Not available in Expo Go. Use development build.';
     }
     if (message.includes('No printer connected')) {
-      return 'GLT Print: Connect printer in Settings → Bluetooth first.';
+      return 'Enhanced GLT Print: Connect printer in Settings → Bluetooth first.';
     }
     if (message.includes('Printer disconnected')) {
-      return 'GLT Print: Connection lost. Turn on printer and reconnect.';
+      return 'Enhanced GLT Print: Connection lost. Turn on printer and reconnect.';
     }
     if (message.includes('timed out')) {
-      return 'GLT Print: Timeout. Printer may be busy - retry in a moment.';
+      return 'Enhanced GLT Print: Timeout. Printer may be busy - retry in a moment.';
     }
     if (message.includes('Device not found')) {
-      return 'GLT Print: Printer not found. Check if printer is on and paired.';
+      return 'Enhanced GLT Print: Printer not found. Check if printer is on and paired.';
     }
     if (message.includes('Connection lost')) {
-      return 'GLT Print: Connection lost during operation. Reconnect and retry.';
+      return 'Enhanced GLT Print: Connection lost during operation. Reconnect and retry.';
     }
     
-    return `GLT Print Error: ${message}`;
+    return `Enhanced GLT Print Error: ${message}`;
   }
 }
 
