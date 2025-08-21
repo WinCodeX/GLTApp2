@@ -13,6 +13,7 @@ const CHANGELOG_CONTENT = [
 'And Chatlist for frequent chats',
   'New UI polish',
   'Some Bug fixes',
+'Printing features'
 ];
 
 type Props = {
