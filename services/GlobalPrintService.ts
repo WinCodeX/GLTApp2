@@ -539,3 +539,7 @@ class GlobalPrintService {
     return `GLT Print Error: ${message}`;
   }
 }
+
+// Export both the class and a default instance
+export { GlobalPrintService };
+export default GlobalPrintService;
