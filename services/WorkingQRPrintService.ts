@@ -1,4 +1,4 @@
-// services/WorkingQRPrintService.ts - Simplified clean receipt format
+// services/WorkingQRPrintService.ts - Two-column layout with QR on right
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -61,7 +61,7 @@ export interface ThermalQRResponse {
 }
 
 /**
- * ESC/POS Commands for normal formatting
+ * ESC/POS Commands for formatting
  */
 const ESC = '\x1B';
 const GS = '\x1D';
@@ -125,7 +125,7 @@ function generateThermalQRCommands(qrData: string, options: PrintOptions = {}): 
   console.log('🖨️ [THERMAL-QR] Generating QR commands');
   
   try {
-    let qrSize = 8; // Normal size for 6-inch receipts
+    let qrSize = 8; // Normal size for layout
     if (options.labelSize === 'small') qrSize = 6;
     if (options.labelSize === 'large') qrSize = 10;
     
@@ -190,25 +190,6 @@ async function getQRDataForPackage(packageCode: string, options: PrintOptions = 
 }
 
 /**
- * Generate clean QR section without any labels
- */
-async function generateQRSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
-  console.log('📱 [QR-SECTION] Generating clean QR section');
-  
-  try {
-    const qrData = await getQRDataForPackage(packageCode, options);
-    const qrCommands = generateThermalQRCommands(qrData, options);
-    
-    // Clean QR code without any labels
-    return '\n\n' + CENTER + qrCommands + '\n\n' + LEFT;
-    
-  } catch (error) {
-    console.error('❌ [QR-SECTION] QR generation failed:', error);
-    return '\n\n';
-  }
-}
-
-/**
  * Clean delivery location
  */
 function cleanDeliveryLocation(routeDescription: string, deliveryLocation?: string): string {
@@ -228,10 +209,10 @@ function cleanDeliveryLocation(routeDescription: string, deliveryLocation?: stri
 }
 
 /**
- * Generate simplified GLT receipt
+ * Generate two-column layout GLT receipt
  */
 async function generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
-  console.log('📄 [RECEIPT] Generating simplified GLT receipt');
+  console.log('📄 [RECEIPT] Generating two-column GLT receipt');
   
   const {
     code,
@@ -242,40 +223,47 @@ async function generateGLTReceipt(packageData: PackageData, options: PrintOption
 
   const cleanLocation = cleanDeliveryLocation(route_description, delivery_location);
 
-  // Get clean QR section
-  let qrSection = '';
+  // Get QR commands for positioning
+  let qrCommands = '';
   if (options.includeQR !== false) {
-    qrSection = await generateQRSection(code, options);
+    try {
+      const qrData = await getQRDataForPackage(code, options);
+      qrCommands = generateThermalQRCommands(qrData, options);
+    } catch (error) {
+      console.error('❌ [RECEIPT] QR generation failed:', error);
+    }
   }
 
-  // SIMPLIFIED RECEIPT - Company header, package code, QR, delivery info, thank you, designed by
+  // TWO-COLUMN LAYOUT RECEIPT
   const receipt = 
+    // Header - centered
     '\n' +
     CENTER + BOLD_ON + DOUBLE_HEIGHT +
     'GLT LOGISTICS\n' +
     NORMAL_SIZE + 'Fast & Reliable\n' +
     BOLD_OFF + LEFT +
     
-    '\n\n' + CENTER + BOLD_ON + DOUBLE_HEIGHT + 
-    code + '\n' + 
-    NORMAL_SIZE + BOLD_OFF + LEFT +
+    // Two-column section: Left column (CODE, DELIVERY FOR, TO) + Right column (QR)
+    '\n' + BOLD_ON + 'CODE:' + BOLD_OFF + '       ' + CENTER + qrCommands + LEFT + '\n' +
+    code + '\n' +
+    '\n' + BOLD_ON + 'DELIVERY FOR:\n' + BOLD_OFF +
+    receiver_name.toUpperCase() + '\n' +
+    '\n' + BOLD_ON + 'TO:\n' + BOLD_OFF +
+    cleanLocation + '\n' +
     
-    qrSection +
-    
-    BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + 
-    'TO: ' + cleanLocation + '\n' + 
-    BOLD_OFF +
-    
+    // Full-width sections
     '\n' + CENTER + BOLD_ON + 
-    'Thank you for choosing GLT Logistics!\n' +
-    'Your package will be delivered safely.\n' +
+    'Thank you for choosing\n' +
+    'GLT Logistics!\n' +
+    'Your package will be\n' +
+    'delivered safely.\n' +
     BOLD_OFF +
     
     '\n' + 'Designed by Infinity.Co\n' +
     'www.infinity.co.ke\n\n' +
     LEFT;
 
-  console.log('✅ [RECEIPT] Simplified GLT receipt generated');
+  console.log('✅ [RECEIPT] Two-column GLT receipt generated');
   return receipt;
 }
 
@@ -295,14 +283,14 @@ async function isPrintingAvailable(bluetoothContext: BluetoothContextType): Prom
 }
 
 /**
- * MAIN EXPORT: Print simplified GLT package receipt
+ * MAIN EXPORT: Print two-column GLT package receipt
  */
 export async function printPackageWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   packageData: PackageData,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
-  console.log('🖨️ [PRINT-MAIN] Starting simplified GLT print');
+  console.log('🖨️ [PRINT-MAIN] Starting two-column GLT print');
   
   try {
     const availability = await isPrintingAvailable(bluetoothContext);
@@ -322,7 +310,7 @@ export async function printPackageWithWorkingQR(
     
     Toast.show({
       type: 'success',
-      text1: '📦 Simplified Receipt Printed',
+      text1: '📦 Two-Column Receipt Printed',
       text2: `Package ${packageData.code} sent to ${printer.name}`,
       position: 'top',
       visibilityTime: 3000,
@@ -330,19 +318,19 @@ export async function printPackageWithWorkingQR(
     
     return {
       success: true,
-      message: `Simplified GLT receipt printed for ${packageData.code}`,
+      message: `Two-column GLT receipt printed for ${packageData.code}`,
       printTime,
       printerUsed: printer.name,
     };
     
   } catch (error: any) {
-    console.error('❌ [PRINT-MAIN] Simplified print failed:', error);
+    console.error('❌ [PRINT-MAIN] Two-column print failed:', error);
     
     const errorMessage = getDetailedErrorMessage(error);
     
     Toast.show({
       type: 'error',
-      text1: '❌ Simplified Print Failed',
+      text1: '❌ Two-Column Print Failed',
       text2: errorMessage,
       position: 'top',
       visibilityTime: 5000,
@@ -357,17 +345,17 @@ export async function printPackageWithWorkingQR(
 }
 
 /**
- * Test print with simplified formatting
+ * Test print with two-column formatting
  */
 export async function testPrintWithWorkingQR(
   bluetoothContext: BluetoothContextType,
   options: PrintOptions = {}
 ): Promise<PrintResult> {
   const testPackageData: PackageData = {
-    code: 'SIMPLE-' + Date.now().toString().slice(-6),
+    code: 'LAYOUT-' + Date.now().toString().slice(-6),
     receiver_name: 'Test User',
     receiver_phone: '0712 345 678',
-    route_description: 'Simple Format → Test Destination',
+    route_description: 'Two-Column Layout → Test Destination',
     delivery_location: 'Test Location',
     payment_status: 'not_paid',
     delivery_type: 'home'
@@ -390,13 +378,14 @@ export async function testQRGeneration(
       throw new Error(availability.reason || 'Printing not available');
     }
 
-    const qrSection = await generateQRSection(packageCode, options);
+    const qrData = await getQRDataForPackage(packageCode, options);
+    const qrCommands = generateThermalQRCommands(qrData, options);
     
     const qrTestText = 
       '\n' + CENTER +
       BOLD_ON + 'QR CODE TEST\n' + BOLD_OFF +
       'Package: ' + packageCode + '\n' +
-      qrSection +
+      qrCommands + '\n' +
       'Test completed: ' + new Date().toLocaleTimeString() + '\n\n' +
       LEFT;
     
