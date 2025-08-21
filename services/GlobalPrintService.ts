@@ -1,4 +1,4 @@
-// services/GlobalPrintService.ts - Simplified clean receipt format
+// services/GlobalPrintService.ts - Two-column layout with QR on right
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -65,7 +65,7 @@ class GlobalPrintService {
   private static instance: GlobalPrintService;
 
   constructor() {
-    // Simplified thermal printer service
+    // Two-column layout thermal printer service
   }
 
   static getInstance(): GlobalPrintService {
@@ -76,7 +76,7 @@ class GlobalPrintService {
   }
 
   /**
-   * ESC/POS Commands for normal formatting
+   * ESC/POS Commands for formatting
    */
   private readonly ESC = '\x1B';
   private readonly GS = '\x1D';
@@ -134,59 +134,13 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate clean QR code section without any labels
-   */
-  private async generateQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
-    console.log('📱 [GLOBAL-QR] Generating clean QR code');
-    
-    try {
-      let qrData = `https://gltlogistics.co.ke/track/${packageCode}`;
-      
-      // Try backend thermal QR first
-      if (options.useBackendThermalQR !== false) {
-        try {
-          const thermalQR = await this.getThermalQRFromBackend(packageCode);
-          if (thermalQR.success && thermalQR.data.qr_data) {
-            qrData = thermalQR.data.qr_data;
-          }
-        } catch (thermalError) {
-          console.warn('⚠️ [GLOBAL-QR] Backend thermal QR failed, using standard method');
-        }
-      }
-      
-      // Fallback: Try original backend QR data
-      if (!qrData || qrData === `https://gltlogistics.co.ke/track/${packageCode}`) {
-        try {
-          const qrResponse = await getPackageQRCode(packageCode);
-          if (qrResponse.success && qrResponse.data.tracking_url) {
-            qrData = qrResponse.data.tracking_url;
-          } else if (qrResponse.success && qrResponse.data.qr_code_data) {
-            qrData = qrResponse.data.qr_code_data;
-          }
-        } catch (backendError) {
-          console.warn('⚠️ [GLOBAL-QR] Backend organic QR failed, using fallback URL');
-        }
-      }
-
-      const qrCommands = this.generateThermalQRCommands(qrData, options);
-      
-      // Clean QR code without any labels
-      return '\n\n' + this.CENTER + qrCommands + '\n\n' + this.LEFT;
-      
-    } catch (error) {
-      console.error('❌ [GLOBAL-QR] Failed to generate clean QR:', error);
-      return '\n\n';
-    }
-  }
-
-  /**
    * Generate thermal printer QR commands
    */
   private generateThermalQRCommands(qrData: string, options: PrintOptions = {}): string {
     console.log('🖨️ [GLOBAL-QR-CMD] Generating thermal QR commands');
     
     try {
-      let qrSize = 8; // Normal size for 6-inch receipts
+      let qrSize = 8; // Normal size for layout
       if (options.labelSize === 'small') qrSize = 6;
       if (options.labelSize === 'large') qrSize = 10;
       
@@ -214,6 +168,40 @@ class GlobalPrintService {
   }
 
   /**
+   * Get QR data from backend
+   */
+  private async getQRDataForPackage(packageCode: string, options: PrintOptions = {}): Promise<string> {
+    console.log('🔍 [GLOBAL-QR] Fetching QR data for package:', packageCode);
+    
+    try {
+      // Try backend thermal QR first
+      if (options.useBackendThermalQR !== false) {
+        try {
+          const thermalQR = await this.getThermalQRFromBackend(packageCode);
+          if (thermalQR.success && thermalQR.data.qr_data) {
+            return thermalQR.data.qr_data;
+          }
+        } catch (thermalError) {
+          console.warn('⚠️ [GLOBAL-QR] Backend thermal QR failed, using standard method');
+        }
+      }
+      
+      // Fallback: Try original backend QR data
+      const qrResponse = await getPackageQRCode(packageCode);
+      if (qrResponse.success && qrResponse.data.tracking_url) {
+        return qrResponse.data.tracking_url;
+      } else if (qrResponse.success && qrResponse.data.qr_code_data) {
+        return qrResponse.data.qr_code_data;
+      }
+      
+    } catch (backendError) {
+      console.warn('⚠️ [GLOBAL-QR] Backend organic QR failed, using fallback URL');
+    }
+
+    return `https://gltlogistics.co.ke/track/${packageCode}`;
+  }
+
+  /**
    * Clean delivery location
    */
   private cleanDeliveryLocation(routeDescription: string, deliveryLocation?: string): string {
@@ -233,7 +221,7 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate simplified GLT receipt
+   * Generate two-column layout GLT receipt
    */
   private async generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
@@ -245,41 +233,40 @@ class GlobalPrintService {
 
     const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
 
-    // Generate clean QR code section
-    let qrCodeSection = '';
-    try {
-      if (options.includeQR !== false) {
-        qrCodeSection = await this.generateQRCodeSection(code, {
-          ...options,
-          useBackendThermalQR: true
-        });
+    // Get QR commands for positioning
+    let qrCommands = '';
+    if (options.includeQR !== false) {
+      try {
+        const qrData = await this.getQRDataForPackage(code, options);
+        qrCommands = this.generateThermalQRCommands(qrData, options);
+      } catch (error) {
+        console.error('❌ [GLOBAL-PRINT] QR generation failed:', error);
       }
-    } catch (error) {
-      console.error('❌ [GLOBAL-PRINT] Clean QR generation failed:', error);
-      qrCodeSection = '\n\n';
     }
 
-    // SIMPLIFIED RECEIPT - Company header, package code, QR, delivery info, thank you, designed by
+    // TWO-COLUMN LAYOUT RECEIPT
     const receipt = 
+      // Header - centered
       '\n' +
       this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
       'GLT LOGISTICS\n' +
       this.NORMAL_SIZE + 'Fast & Reliable\n' +
       this.BOLD_OFF + this.LEFT +
       
-      '\n\n' + this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + 
-      code + '\n' + 
-      this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
+      // Two-column section: Left column (CODE, DELIVERY FOR, TO) + Right column (QR)
+      '\n' + this.BOLD_ON + 'CODE:' + this.BOLD_OFF + '       ' + this.CENTER + qrCommands + this.LEFT + '\n' +
+      code + '\n' +
+      '\n' + this.BOLD_ON + 'DELIVERY FOR:\n' + this.BOLD_OFF +
+      receiver_name.toUpperCase() + '\n' +
+      '\n' + this.BOLD_ON + 'TO:\n' + this.BOLD_OFF +
+      cleanLocation + '\n' +
       
-      qrCodeSection +
-      
-      this.BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + 
-      'TO: ' + cleanLocation + '\n' + 
-      this.BOLD_OFF +
-      
+      // Full-width sections
       '\n' + this.CENTER + this.BOLD_ON + 
-      'Thank you for choosing GLT Logistics!\n' +
-      'Your package will be delivered safely.\n' +
+      'Thank you for choosing\n' +
+      'GLT Logistics!\n' +
+      'Your package will be\n' +
+      'delivered safely.\n' +
       this.BOLD_OFF +
       
       '\n' + 'Designed by Infinity.Co\n' +
@@ -305,14 +292,14 @@ class GlobalPrintService {
   }
 
   /**
-   * Print simplified GLT package receipt
+   * Print two-column GLT package receipt
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLOBAL-PRINT] Starting simplified GLT print');
+    console.log('🖨️ [GLOBAL-PRINT] Starting two-column GLT print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -332,7 +319,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '📦 Simplified Receipt Printed',
+        text1: '📦 Two-Column Receipt Printed',
         text2: `Package ${packageData.code} sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -340,19 +327,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `Simplified GLT receipt printed for ${packageData.code}`,
+        message: `Two-column GLT receipt printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Simplified print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Two-column print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ Simplified Print Failed',
+        text1: '❌ Two-Column Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -367,10 +354,10 @@ class GlobalPrintService {
   }
 
   /**
-   * Test print with simplified formatting
+   * Test print with two-column formatting
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLOBAL-PRINT] Running simplified test print');
+    console.log('🧪 [GLOBAL-PRINT] Running two-column test print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -382,10 +369,10 @@ class GlobalPrintService {
       const printTime = new Date();
       
       const testPackageData: PackageData = {
-        code: 'SIMPLE-GLOBAL-' + Date.now().toString().slice(-6),
+        code: 'LAYOUT-GLOBAL-' + Date.now().toString().slice(-6),
         receiver_name: 'Test User',
         receiver_phone: '0712 345 678',
-        route_description: 'Simple Format → Global Service Test',
+        route_description: 'Two-Column Layout → Global Service Test',
         delivery_location: 'Test Location',
         payment_status: 'not_paid',
         delivery_type: 'home'
@@ -399,7 +386,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '🧪 Simplified Test Print Successful',
+        text1: '🧪 Two-Column Test Print Successful',
         text2: `Test receipt sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -407,19 +394,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `Simplified GLT test print successful`,
+        message: `Two-column GLT test print successful`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Simplified test print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Two-column test print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ Simplified Test Failed',
+        text1: '❌ Two-Column Test Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -470,16 +457,16 @@ class GlobalPrintService {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth not available')) {
-      return 'Simplified Print: Bluetooth not available.';
+      return 'Two-Column Print: Bluetooth not available.';
     }
     if (message.includes('No printer connected')) {
-      return 'Simplified Print: Connect printer first.';
+      return 'Two-Column Print: Connect printer first.';
     }
     if (message.includes('timed out')) {
-      return 'Simplified Print: Timeout. Retry in a moment.';
+      return 'Two-Column Print: Timeout. Retry in a moment.';
     }
     
-    return `Simplified Print Error: ${message}`;
+    return `Two-Column Print Error: ${message}`;
   }
 }
 
