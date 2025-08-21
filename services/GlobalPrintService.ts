@@ -1,4 +1,4 @@
-// services/GlobalPrintService.ts - Two-column layout with QR on right
+// services/GlobalPrintService.ts - Wireframe layout with thermal printer optimization
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -65,7 +65,7 @@ class GlobalPrintService {
   private static instance: GlobalPrintService;
 
   constructor() {
-    // Two-column layout thermal printer service
+    // Wireframe layout thermal printer service
   }
 
   static getInstance(): GlobalPrintService {
@@ -86,6 +86,7 @@ class GlobalPrintService {
   private readonly BOLD_OFF = this.ESC + 'E' + '\x00';
   private readonly CENTER = this.ESC + 'a' + '\x01';
   private readonly LEFT = this.ESC + 'a' + '\x00';
+  private readonly RIGHT = this.ESC + 'a' + '\x02';
   private readonly DOUBLE_HEIGHT = this.GS + '!' + '\x11';
   private readonly NORMAL_SIZE = this.GS + '!' + '\x00';
 
@@ -140,7 +141,7 @@ class GlobalPrintService {
     console.log('🖨️ [GLOBAL-QR-CMD] Generating thermal QR commands');
     
     try {
-      let qrSize = 8; // Normal size for layout
+      let qrSize = 8; // Optimal size for side layout
       if (options.labelSize === 'small') qrSize = 6;
       if (options.labelSize === 'large') qrSize = 10;
       
@@ -221,7 +222,7 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate two-column layout GLT receipt
+   * Generate wireframe layout GLT receipt - thermal printer optimized
    */
   private async generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
@@ -244,24 +245,31 @@ class GlobalPrintService {
       }
     }
 
-    // TWO-COLUMN LAYOUT RECEIPT
+    // WIREFRAME LAYOUT - THERMAL PRINTER OPTIMIZED
     const receipt = 
-      // Header - centered
+      // Header - centered (Company name)
       '\n' +
       this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
       'GLT LOGISTICS\n' +
       this.NORMAL_SIZE + 'Fast & Reliable\n' +
       this.BOLD_OFF + this.LEFT +
       
-      // Two-column section: Left column (CODE, DELIVERY FOR, TO) + Right column (QR)
-      '\n' + this.BOLD_ON + 'CODE:' + this.BOLD_OFF + '       ' + this.CENTER + qrCommands + this.LEFT + '\n' +
+      // Package Code - bold and centered (like second image)
+      '\n' + this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
       code + '\n' +
-      '\n' + this.BOLD_ON + 'DELIVERY FOR:\n' + this.BOLD_OFF +
+      this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
+      
+      // Left column content (delivery details)
+      '\n' + this.LEFT +
+      this.BOLD_ON + 'DELIVERY FOR:\n' + this.BOLD_OFF +
       receiver_name.toUpperCase() + '\n' +
       '\n' + this.BOLD_ON + 'TO:\n' + this.BOLD_OFF +
       cleanLocation + '\n' +
       
-      // Full-width sections
+      // QR CODE section - positioned like right column
+      '\n' + this.RIGHT + qrCommands + this.LEFT + '\n' +
+      
+      // Full-width sections at bottom
       '\n' + this.CENTER + this.BOLD_ON + 
       'Thank you for choosing\n' +
       'GLT Logistics!\n' +
@@ -292,14 +300,14 @@ class GlobalPrintService {
   }
 
   /**
-   * Print two-column GLT package receipt
+   * Print wireframe layout GLT package receipt
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLOBAL-PRINT] Starting two-column GLT print');
+    console.log('🖨️ [GLOBAL-PRINT] Starting wireframe layout GLT print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -319,7 +327,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '📦 Two-Column Receipt Printed',
+        text1: '📦 Wireframe Receipt Printed',
         text2: `Package ${packageData.code} sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -327,19 +335,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `Two-column GLT receipt printed for ${packageData.code}`,
+        message: `Wireframe layout GLT receipt printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Two-column print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Wireframe print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ Two-Column Print Failed',
+        text1: '❌ Wireframe Print Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -354,10 +362,10 @@ class GlobalPrintService {
   }
 
   /**
-   * Test print with two-column formatting
+   * Test print with wireframe formatting
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLOBAL-PRINT] Running two-column test print');
+    console.log('🧪 [GLOBAL-PRINT] Running wireframe test print');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -369,10 +377,10 @@ class GlobalPrintService {
       const printTime = new Date();
       
       const testPackageData: PackageData = {
-        code: 'LAYOUT-GLOBAL-' + Date.now().toString().slice(-6),
+        code: 'WIREFRAME-GLOBAL-' + Date.now().toString().slice(-6),
         receiver_name: 'Test User',
         receiver_phone: '0712 345 678',
-        route_description: 'Two-Column Layout → Global Service Test',
+        route_description: 'Wireframe Layout → Global Service Test',
         delivery_location: 'Test Location',
         payment_status: 'not_paid',
         delivery_type: 'home'
@@ -386,7 +394,7 @@ class GlobalPrintService {
       
       Toast.show({
         type: 'success',
-        text1: '🧪 Two-Column Test Print Successful',
+        text1: '🧪 Wireframe Test Print Successful',
         text2: `Test receipt sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
@@ -394,19 +402,19 @@ class GlobalPrintService {
       
       return {
         success: true,
-        message: `Two-column GLT test print successful`,
+        message: `Wireframe layout GLT test print successful`,
         printTime,
         printerUsed: printer.name,
       };
       
     } catch (error: any) {
-      console.error('❌ [GLOBAL-PRINT] Two-column test print failed:', error);
+      console.error('❌ [GLOBAL-PRINT] Wireframe test print failed:', error);
       
       const errorMessage = this.getDetailedErrorMessage(error);
       
       Toast.show({
         type: 'error',
-        text1: '❌ Two-Column Test Failed',
+        text1: '❌ Wireframe Test Failed',
         text2: errorMessage,
         position: 'top',
         visibilityTime: 5000,
@@ -457,16 +465,16 @@ class GlobalPrintService {
     const message = error.message || error.toString();
     
     if (message.includes('Bluetooth not available')) {
-      return 'Two-Column Print: Bluetooth not available.';
+      return 'Wireframe Print: Bluetooth not available.';
     }
     if (message.includes('No printer connected')) {
-      return 'Two-Column Print: Connect printer first.';
+      return 'Wireframe Print: Connect printer first.';
     }
     if (message.includes('timed out')) {
-      return 'Two-Column Print: Timeout. Retry in a moment.';
+      return 'Wireframe Print: Timeout. Retry in a moment.';
     }
     
-    return `Two-Column Print Error: ${message}`;
+    return `Wireframe Print Error: ${message}`;
   }
 }
 
