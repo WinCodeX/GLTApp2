@@ -53,6 +53,7 @@
     "react-native-ble-plx": "^3.5.0",
     "react-native-bluetooth-classic": "^1.73.0-rc.14",
     "react-native-gesture-handler": "~2.24.0",
+    "react-native-image-resizer": "^1.4.5",
     "react-native-paper": "^5.14.5",
     "react-native-permissions": "^5.4.2",
     "react-native-reanimated": "~3.17.4",
