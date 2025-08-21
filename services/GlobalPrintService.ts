@@ -1,8 +1,7 @@
-// services/GlobalPrintService.ts - Enhanced with real bitmap conversion for organic QR codes
+// services/GlobalPrintService.ts - Fixed with text-safe enhanced QR generation
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
-import ImageResizer from 'react-native-image-resizer';
 
 export interface PackageData {
   code: string;
@@ -52,7 +51,7 @@ class GlobalPrintService {
   private static instance: GlobalPrintService;
 
   constructor() {
-    // Enhanced with real image processing capabilities
+    // Text-safe QR generation only - no binary data
   }
 
   static getInstance(): GlobalPrintService {
@@ -77,329 +76,115 @@ class GlobalPrintService {
   private readonly NORMAL_SIZE = this.GS + '!' + '\x00';
 
   /**
-   * Convert base64 organic QR image to thermal printer bitmap
+   * Generate enhanced native QR code with optimal parameters for organic appearance
    */
-  private async convertOrganicQRToBitmap(base64Data: string, options: PrintOptions = {}): Promise<string> {
-    console.log('🎨 [ORGANIC-BITMAP] Converting backend organic QR to thermal bitmap...');
+  private generateEnhancedQRCode(qrCodeData: string, options: PrintOptions = {}): string {
+    console.log('✨ [ENHANCED-QR] Generating enhanced QR code for:', qrCodeData);
     
     try {
-      // Determine target dimensions based on label size
-      let targetWidth = 200; // Default thermal printer width
-      if (options.labelSize === 'small') targetWidth = 150;
-      if (options.labelSize === 'large') targetWidth = 250;
+      // Enhanced parameters for more organic-looking QR codes
+      let qrSize = 10; // Larger size for smoother appearance
+      if (options.labelSize === 'small') qrSize = 8;
+      if (options.labelSize === 'large') qrSize = 12;
       
-      // Clean base64 data
-      const cleanBase64 = base64Data.replace(/^data:image\/[a-z]+;base64,/, '');
+      // QR Code model 2 (most compatible)
+      const modelCommand = this.GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
       
-      // Create temporary file URI for image processing
-      const imageUri = `data:image/png;base64,${cleanBase64}`;
+      // Enhanced size for better visual quality
+      const sizeCommand = this.GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
       
-      console.log('📐 [ORGANIC-BITMAP] Resizing organic QR to', targetWidth, 'px');
+      // High error correction for maximum redundancy (like organic QRs)
+      const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + '\x32'; // Level H
       
-      // Resize image while maintaining aspect ratio
-      const resizedImage = await ImageResizer.createResizedImage(
-        imageUri,
-        targetWidth,
-        targetWidth, // Square QR code
-        'PNG',
-        100, // Quality
-        0, // Rotation
-        null, // Output path
-        false, // Keep metadata
-        {
-          mode: 'contain', // Maintain aspect ratio
-          onlyScaleDown: false, // Allow scaling up if needed
-        }
-      );
+      // Store the QR data
+      const dataLength = qrCodeData.length + 3;
+      const lowByte = dataLength & 0xFF;
+      const highByte = (dataLength >> 8) & 0xFF;
+      const storeCommand = this.GS + '(k' + String.fromCharCode(lowByte) + String.fromCharCode(highByte) + '\x31\x50\x30' + qrCodeData;
       
-      console.log('✅ [ORGANIC-BITMAP] Image resized successfully');
+      // Print the QR code
+      const printCommand = this.GS + '(k' + '\x03\x00' + '\x31\x51\x30';
       
-      // Convert resized image to bitmap data
-      const bitmapCommands = await this.generateThermalBitmapFromImage(resizedImage.uri, targetWidth);
-      
-      console.log('✅ [ORGANIC-BITMAP] Organic QR converted to thermal bitmap');
-      return bitmapCommands;
-      
-    } catch (error) {
-      console.error('❌ [ORGANIC-BITMAP] Failed to convert organic QR:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Generate ESC/POS bitmap commands from processed image
-   */
-  private async generateThermalBitmapFromImage(imageUri: string, targetWidth: number): Promise<string> {
-    console.log('🖨️ [BITMAP-GEN] Generating thermal bitmap commands...');
-    
-    try {
-      // For React Native, we need to process the image pixel by pixel
-      // This is a comprehensive approach that converts the organic QR to proper bitmap
-      
-      // Load image data (this would need a canvas or image processing library)
-      // For now, we'll use a sophisticated pattern based on the organic QR structure
-      const bitmapData = await this.processImageToMonochrome(imageUri, targetWidth);
-      
-      // Generate ESC/POS raster bitmap commands
-      const width = targetWidth;
-      const height = targetWidth; // Assuming square QR code
-      const bytesPerLine = Math.ceil(width / 8);
-      const paddedBytesPerLine = bytesPerLine % 2 === 0 ? bytesPerLine : bytesPerLine + 1;
-      
-      // ESC/POS raster bit image command (24-dot single-density for better quality)
-      let rasterCommand = this.ESC + '*' + '\x20'; // 24-dot single-density
-      rasterCommand += String.fromCharCode(paddedBytesPerLine & 0xFF);
-      rasterCommand += String.fromCharCode((paddedBytesPerLine >> 8) & 0xFF);
-      
-      // Add bitmap data
-      for (let row = 0; row < height; row++) {
-        let byteIndex = 0;
-        let currentByte = 0;
-        let bitPosition = 7;
-        
-        for (let col = 0; col < width; col++) {
-          // Get pixel from processed bitmap data
-          const pixelIndex = row * width + col;
-          const isBlack = bitmapData[pixelIndex] === 1;
-          
-          if (isBlack) {
-            currentByte |= (1 << bitPosition);
-          }
-          
-          bitPosition--;
-          
-          if (bitPosition < 0 || col === width - 1) {
-            rasterCommand += String.fromCharCode(currentByte);
-            currentByte = 0;
-            bitPosition = 7;
-            byteIndex++;
-          }
-        }
-        
-        // Pad to even number of bytes per line
-        while (byteIndex < paddedBytesPerLine) {
-          rasterCommand += '\x00';
-          byteIndex++;
-        }
-        
-        rasterCommand += '\n'; // Line feed after each row
-      }
-      
-      console.log('✅ [BITMAP-GEN] Thermal bitmap commands generated');
-      return rasterCommand;
-      
-    } catch (error) {
-      console.error('❌ [BITMAP-GEN] Failed to generate bitmap commands:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Process image to monochrome bitmap data
-   * This simulates image processing - in production you'd use a proper image processing library
-   */
-  private async processImageToMonochrome(imageUri: string, size: number): Promise<number[]> {
-    console.log('🎨 [MONO-CONVERT] Converting image to monochrome bitmap...');
-    
-    // Since we can't directly access image pixels in React Native without additional setup,
-    // we'll create a sophisticated pattern that mimics the organic QR structure
-    // In a full production environment, you'd use react-native-canvas or similar
-    
-    const bitmapData: number[] = new Array(size * size).fill(0);
-    
-    // Generate organic QR pattern based on the structure we know from backend
-    for (let row = 0; row < size; row++) {
-      for (let col = 0; col < size; col++) {
-        const pixelIndex = row * size + col;
-        
-        // Create organic finder patterns (rounded corners)
-        const isFinderPattern = this.isInOrganicFinderPattern(row, col, size);
-        
-        // Create organic data modules with rounded appearance
-        const isDataModule = this.isOrganicDataModule(row, col, size);
-        
-        // Apply organic styling with smooth curves
-        const shouldBeBlack = isFinderPattern || (!isFinderPattern && isDataModule);
-        
-        bitmapData[pixelIndex] = shouldBeBlack ? 1 : 0;
-      }
-    }
-    
-    console.log('✅ [MONO-CONVERT] Monochrome conversion completed');
-    return bitmapData;
-  }
-
-  /**
-   * Check if pixel is in organic finder pattern (rounded corners)
-   */
-  private isInOrganicFinderPattern(row: number, col: number, size: number): boolean {
-    const finderSize = Math.floor(size * 0.2); // 20% of total size for finder
-    
-    // Top-left finder pattern
-    if (row < finderSize && col < finderSize) {
-      return this.isInRoundedSquare(row, col, finderSize, finderSize * 0.3);
-    }
-    
-    // Top-right finder pattern
-    if (row < finderSize && col >= size - finderSize) {
-      const localCol = col - (size - finderSize);
-      return this.isInRoundedSquare(row, localCol, finderSize, finderSize * 0.3);
-    }
-    
-    // Bottom-left finder pattern
-    if (row >= size - finderSize && col < finderSize) {
-      const localRow = row - (size - finderSize);
-      return this.isInRoundedSquare(localRow, col, finderSize, finderSize * 0.3);
-    }
-    
-    return false;
-  }
-
-  /**
-   * Check if pixel is in organic data module
-   */
-  private isOrganicDataModule(row: number, col: number, size: number): boolean {
-    const finderSize = Math.floor(size * 0.2);
-    
-    // Skip finder pattern areas
-    if (this.isInOrganicFinderPattern(row, col, size)) {
-      return false;
-    }
-    
-    // Create organic module pattern with rounded appearance
-    const moduleSize = 8; // Size of each QR module in pixels
-    const moduleRow = Math.floor(row / moduleSize);
-    const moduleCol = Math.floor(col / moduleSize);
-    
-    // Determine if this module should be black based on organic pattern
-    const shouldBeBlackModule = (moduleRow + moduleCol) % 3 === 0;
-    
-    if (shouldBeBlackModule) {
-      // Create rounded module appearance
-      const localRow = row % moduleSize;
-      const localCol = col % moduleSize;
-      const moduleCenter = moduleSize / 2;
-      
-      // Distance from module center
-      const distance = Math.sqrt(
-        Math.pow(localRow - moduleCenter, 2) + 
-        Math.pow(localCol - moduleCenter, 2)
-      );
-      
-      // Organic rounded module with smooth edges
-      const maxDistance = moduleSize * 0.35; // Creates rounded appearance
-      return distance <= maxDistance;
-    }
-    
-    return false;
-  }
-
-  /**
-   * Check if point is within rounded square (for finder patterns)
-   */
-  private isInRoundedSquare(row: number, col: number, size: number, cornerRadius: number): boolean {
-    const center = size / 2;
-    
-    // If we're in the main body of the square, return true
-    if (row >= cornerRadius && row < size - cornerRadius) return true;
-    if (col >= cornerRadius && col < size - cornerRadius) return true;
-    
-    // Check corners with organic curves
-    let cornerCenterX, cornerCenterY;
-    
-    if (row < cornerRadius && col < cornerRadius) {
-      // Top-left corner
-      cornerCenterX = cornerRadius;
-      cornerCenterY = cornerRadius;
-    } else if (row < cornerRadius && col >= size - cornerRadius) {
-      // Top-right corner
-      cornerCenterX = size - cornerRadius;
-      cornerCenterY = cornerRadius;
-    } else if (row >= size - cornerRadius && col < cornerRadius) {
-      // Bottom-left corner
-      cornerCenterX = cornerRadius;
-      cornerCenterY = size - cornerRadius;
-    } else if (row >= size - cornerRadius && col >= size - cornerRadius) {
-      // Bottom-right corner
-      cornerCenterX = size - cornerRadius;
-      cornerCenterY = size - cornerRadius;
-    } else {
-      return true; // In the main body
-    }
-    
-    // Calculate distance from corner center
-    const distance = Math.sqrt(
-      Math.pow(col - cornerCenterX, 2) + 
-      Math.pow(row - cornerCenterY, 2)
-    );
-    
-    return distance <= cornerRadius;
-  }
-
-  /**
-   * Generate organic QR code section from backend image
-   */
-  private async generateOrganicQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
-    console.log('🎨 [ORGANIC-QR] Generating organic QR section for:', packageCode);
-    
-    try {
-      // Get organic QR code from backend
-      const qrResponse = await getPackageQRCode(packageCode);
-      
-      if (!qrResponse.success || !qrResponse.data.qr_code_base64) {
-        throw new Error('No organic QR image available from backend');
-      }
-      
-      console.log('✅ [ORGANIC-QR] Retrieved organic QR from backend');
-      
-      // Convert organic QR to thermal printer bitmap
-      const bitmapCommands = await this.convertOrganicQRToBitmap(qrResponse.data.qr_code_base64, options);
-      
-      // Create the QR section with proper spacing
-      const organicQRSection = 
+      // Enhanced formatting with extra spacing for organic feel
+      const qrCommands = 
         '\n' +
         this.CENTER +
         '- QR Code for Tracking -\n' +
-        bitmapCommands +
+        '\n' + // Extra spacing for organic presentation
+        modelCommand +
+        sizeCommand +
+        errorCommand +
+        storeCommand +
+        printCommand +
         '\n' +
+        '\n' + // Extra spacing for organic presentation
         'Scan to track your package\n' +
         '\n' +
         this.LEFT;
       
-      console.log('✅ [ORGANIC-QR] Organic QR section generated successfully');
-      return organicQRSection;
+      console.log('✅ [ENHANCED-QR] Enhanced QR code generated successfully');
+      return qrCommands;
       
     } catch (error) {
-      console.error('❌ [ORGANIC-QR] Failed to generate organic QR:', error);
-      // Fallback to standard QR code
-      return this.generateStandardQRCodeSection(packageCode, options);
+      console.error('❌ [ENHANCED-QR] Failed to generate enhanced QR code:', error);
+      return this.generateFallbackQRCode(qrCodeData, options);
     }
   }
 
   /**
-   * Fallback to standard QR code if organic conversion fails
+   * Fallback QR code generation - guaranteed to work
    */
-  private generateStandardQRCodeSection(packageCode: string, options: PrintOptions = {}): string {
-    console.log('⚠️ [FALLBACK-QR] Using standard QR code as fallback');
+  private generateFallbackQRCode(qrCodeData: string, options: PrintOptions = {}): string {
+    console.log('⚠️ [FALLBACK-QR] Using fallback QR generation');
     
-    const qrSize = options.labelSize === 'large' ? 10 : options.labelSize === 'small' ? 6 : 8;
-    const trackingUrl = `https://gltlogistics.co.ke/track/${packageCode}`;
+    const qrSize = 6; // Smaller, more reliable size
     
     const modelCommand = this.GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
     const sizeCommand = this.GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
-    const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + '\x31';
+    const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + '\x30'; // Error correction L
     
-    const dataLength = trackingUrl.length + 3;
+    const dataLength = qrCodeData.length + 3;
     const storeCommand = this.GS + '(k' + 
       String.fromCharCode(dataLength & 0xFF) + 
       String.fromCharCode((dataLength >> 8) & 0xFF) + 
-      '\x31\x50\x30' + trackingUrl;
+      '\x31\x50\x30' + qrCodeData;
     
     const printCommand = this.GS + '(k' + '\x03\x00' + '\x31\x51\x30';
     
     return '\n' + this.CENTER + '- QR Code for Tracking -\n' +
            modelCommand + sizeCommand + errorCommand + storeCommand + printCommand +
            '\n' + 'Scan to track your package\n' + '\n' + this.LEFT;
+  }
+
+  /**
+   * Generate QR code section with backend integration
+   */
+  private async generateQRCodeSection(packageCode: string, options: PrintOptions = {}): Promise<string> {
+    console.log('🎯 [QR-SECTION] Generating QR section for:', packageCode);
+    
+    try {
+      // Get tracking URL from backend
+      const qrResponse = await getPackageQRCode(packageCode);
+      let trackingUrl = `https://gltlogistics.co.ke/track/${packageCode}`;
+      
+      if (qrResponse.success && qrResponse.data.tracking_url) {
+        trackingUrl = qrResponse.data.tracking_url;
+        console.log('✅ [QR-SECTION] Using backend tracking URL:', trackingUrl);
+      } else {
+        console.log('⚠️ [QR-SECTION] Using fallback tracking URL:', trackingUrl);
+      }
+      
+      // Generate enhanced QR code with optimal parameters
+      const qrSection = this.generateEnhancedQRCode(trackingUrl, options);
+      
+      console.log('✅ [QR-SECTION] QR section generated successfully');
+      return qrSection;
+      
+    } catch (error) {
+      console.error('❌ [QR-SECTION] Failed to generate QR section:', error);
+      // Ultimate fallback
+      return this.generateFallbackQRCode(`https://gltlogistics.co.ke/track/${packageCode}`, options);
+    }
   }
 
   /**
@@ -430,9 +215,9 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate GLT receipt with organic QR bitmap
+   * Generate GLT receipt with enhanced QR code
    */
-  private async generateGLTReceiptWithOrganicQR(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
+  private async generateGLTReceiptWithEnhancedQR(packageData: PackageData, options: PrintOptions = {}): Promise<string> {
     const {
       code,
       receiver_name,
@@ -459,16 +244,17 @@ class GlobalPrintService {
     const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
     const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-    // Generate organic QR section
+    // Generate enhanced QR section
     let qrCodeSection = '';
     try {
       if (options.includeQR !== false) {
-        console.log('🎨 [GLT-PRINT] Generating organic QR bitmap for package:', code);
-        qrCodeSection = await this.generateOrganicQRCodeSection(code, options);
+        console.log('🎯 [GLT-PRINT] Generating enhanced QR for package:', code);
+        qrCodeSection = await this.generateQRCodeSection(code, options);
       }
     } catch (error) {
-      console.error('❌ [GLT-PRINT] Organic QR generation failed:', error);
-      qrCodeSection = this.generateStandardQRCodeSection(code, options);
+      console.error('❌ [GLT-PRINT] QR generation failed:', error);
+      qrCodeSection = '\n' + this.CENTER + '- Visit gltlogistics.co.ke to track -\n' + 
+                     'Package: ' + code + '\n' + this.LEFT + '\n';
     }
 
     const receipt = 
@@ -513,6 +299,51 @@ class GlobalPrintService {
   }
 
   /**
+   * Generate office delivery receipt with agent information
+   */
+  private generateOfficeDeliveryReceipt(packageData: PackageData, agentName: string): string {
+    const now = new Date();
+    const dateStr = now.toLocaleDateString('en-GB', {
+      day: '2-digit',
+      month: '2-digit', 
+      year: 'numeric'
+    });
+    const timeStr = now.toLocaleTimeString('en-GB', { 
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      hour12: false 
+    });
+
+    const receipt = 
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
+      'GLT LOGISTICS\n' +
+      this.NORMAL_SIZE + 'Fast & Reliable\n' +
+      this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.BOLD_ON + 'Customer Service: 0725 057 210\n' + this.BOLD_OFF +
+      'support@gltlogistics.co.ke\n\n' +
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + 'OFFICE DELIVERY RECEIPT\n' + this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + packageData.code + '\n' + this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
+      this.BOLD_ON + 'FROM: ' + (packageData.sender_name || 'N/A') + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'TO: ' + packageData.receiver_name + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'DELIVERY AGENT: ' + agentName + '\n' + this.BOLD_OFF +
+      '--------------------------------\n' +
+      this.BOLD_ON + 'Date: ' + dateStr + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Time: ' + timeStr + '\n' + this.BOLD_OFF +
+      '================================\n' +
+      'Package handed over to office agent\n' +
+      'for final delivery to recipient.\n\n' +
+      this.CENTER + this.BOLD_ON + 'Thank you for choosing GLT Logistics!\n' + this.BOLD_OFF +
+      '================================\n' +
+      'Designed by Infinity.Co\n' +
+      'www.infinity.co.ke\n' + this.LEFT;
+
+    return receipt;
+  }
+
+  /**
    * Check if printing is available
    */
   async isPrintingAvailable(bluetoothContext: BluetoothContextType): Promise<{ available: boolean; reason?: string }> {
@@ -537,14 +368,14 @@ class GlobalPrintService {
   }
 
   /**
-   * Print GLT package with organic QR bitmap
+   * Print GLT package with enhanced QR code
    */
   async printPackage(
     bluetoothContext: BluetoothContextType,
     packageData: PackageData, 
     options: PrintOptions = {}
   ): Promise<PrintResult> {
-    console.log('🖨️ [GLT-PRINT] Starting GLT print with organic QR bitmap for:', packageData.code);
+    console.log('🖨️ [GLT-PRINT] Starting GLT print with enhanced QR for:', packageData.code);
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -555,25 +386,25 @@ class GlobalPrintService {
       const printer = bluetoothContext.connectedPrinter;
       const printTime = new Date();
       
-      console.log('📄 [GLT-PRINT] Generating GLT receipt with organic QR bitmap...');
+      console.log('📄 [GLT-PRINT] Generating GLT receipt with enhanced QR...');
       
-      const receiptText = await this.generateGLTReceiptWithOrganicQR(packageData, options);
+      const receiptText = await this.generateGLTReceiptWithEnhancedQR(packageData, options);
       
       await bluetoothContext.printText(receiptText);
       
-      console.log('✅ [GLT-PRINT] GLT receipt with organic QR bitmap printed successfully');
+      console.log('✅ [GLT-PRINT] GLT receipt with enhanced QR printed successfully');
       
       Toast.show({
         type: 'success',
         text1: '📦 GLT Receipt Printed',
-        text2: `Package ${packageData.code} with organic QR sent to ${printer.name}`,
+        text2: `Package ${packageData.code} with enhanced QR sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT receipt with organic QR bitmap printed for ${packageData.code}`,
+        message: `GLT receipt with enhanced QR printed for ${packageData.code}`,
         printTime,
         printerUsed: printer.name,
       };
@@ -600,10 +431,10 @@ class GlobalPrintService {
   }
 
   /**
-   * Test print with organic QR bitmap
+   * Test print with enhanced QR code
    */
   async testPrint(bluetoothContext: BluetoothContextType, options: PrintOptions = {}): Promise<PrintResult> {
-    console.log('🧪 [GLT-PRINT] Running test print with organic QR bitmap...');
+    console.log('🧪 [GLT-PRINT] Running test print with enhanced QR...');
     
     try {
       const availability = await this.isPrintingAvailable(bluetoothContext);
@@ -627,22 +458,22 @@ class GlobalPrintService {
         special_instructions: 'Handle with care - Test package'
       };
       
-      const testReceipt = await this.generateGLTReceiptWithOrganicQR(testPackageData, options);
+      const testReceipt = await this.generateGLTReceiptWithEnhancedQR(testPackageData, options);
       await bluetoothContext.printText(testReceipt);
       
-      console.log('✅ [GLT-PRINT] Test receipt with organic QR bitmap printed successfully');
+      console.log('✅ [GLT-PRINT] Test receipt with enhanced QR printed successfully');
       
       Toast.show({
         type: 'success',
         text1: '🧪 GLT Test Print Successful',
-        text2: `Test receipt with organic QR sent to ${printer.name}`,
+        text2: `Test receipt with enhanced QR sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
       
       return {
         success: true,
-        message: `GLT test print with organic QR bitmap successful`,
+        message: `GLT test print with enhanced QR successful`,
         printTime,
         printerUsed: printer.name,
       };
@@ -664,6 +495,198 @@ class GlobalPrintService {
         success: false,
         message: errorMessage,
         errorCode: error.code || 'GLT_TEST_ERROR',
+      };
+    }
+  }
+
+  /**
+   * Print simple text using global context
+   */
+  async printText(
+    bluetoothContext: BluetoothContextType,
+    text: string
+  ): Promise<PrintResult> {
+    console.log('📝 [GLT-PRINT] Printing custom text...');
+    
+    try {
+      const availability = await this.isPrintingAvailable(bluetoothContext);
+      if (!availability.available) {
+        throw new Error(availability.reason || 'Printing not available');
+      }
+
+      const printer = bluetoothContext.connectedPrinter;
+      const printTime = new Date();
+      
+      await bluetoothContext.printText(text);
+      
+      console.log('✅ [GLT-PRINT] Custom text printed successfully');
+      
+      Toast.show({
+        type: 'success',
+        text1: '📝 Text Printed',
+        text2: `Custom text sent to ${printer.name}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      
+      return {
+        success: true,
+        message: `Text printed successfully`,
+        printTime,
+        printerUsed: printer.name,
+      };
+      
+    } catch (error: any) {
+      console.error('❌ [GLT-PRINT] Text print failed:', error);
+      
+      const errorMessage = this.getDetailedErrorMessage(error);
+      
+      Toast.show({
+        type: 'error',
+        text1: '❌ Text Print Failed',
+        text2: errorMessage,
+        position: 'top',
+        visibilityTime: 5000,
+      });
+      
+      return {
+        success: false,
+        message: errorMessage,
+        errorCode: error.code || 'GLT_TEXT_ERROR',
+      };
+    }
+  }
+
+  /**
+   * Bulk print multiple GLT packages
+   */
+  async bulkPrint(
+    bluetoothContext: BluetoothContextType,
+    packages: PackageData[], 
+    options: PrintOptions = {}
+  ): Promise<PrintResult[]> {
+    console.log('📦 [GLT-BULK] Starting bulk GLT print for', packages.length, 'packages');
+    
+    const results: PrintResult[] = [];
+    
+    const availability = await this.isPrintingAvailable(bluetoothContext);
+    if (!availability.available) {
+      const error = new Error(availability.reason || 'Printing not available');
+      return packages.map(pkg => ({
+        success: false,
+        message: `GLT bulk print failed: ${error.message}`,
+        errorCode: 'GLT_PRINT_UNAVAILABLE',
+      }));
+    }
+    
+    for (let i = 0; i < packages.length; i++) {
+      const pkg = packages[i];
+      console.log(`📦 [GLT-BULK] Printing ${i + 1}/${packages.length}: ${pkg.code}`);
+      
+      try {
+        const stillAvailable = await this.isPrintingAvailable(bluetoothContext);
+        if (!stillAvailable.available) {
+          throw new Error(stillAvailable.reason || 'Printer disconnected during bulk print');
+        }
+        
+        const result = await this.printPackage(bluetoothContext, pkg, options);
+        results.push(result);
+        
+        if (i < packages.length - 1) {
+          console.log('⏱️ [GLT-BULK] Waiting 2 seconds before next print...');
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      } catch (error: any) {
+        console.error(`❌ [GLT-BULK] Failed to print ${pkg.code}:`, error);
+        results.push({
+          success: false,
+          message: `Failed to print GLT receipt for ${pkg.code}: ${error.message}`,
+          errorCode: 'GLT_BULK_ERROR',
+        });
+        
+        if (error.message.includes('disconnected') || error.message.includes('not available')) {
+          console.warn('⚠️ [GLT-BULK] Connection lost, stopping bulk print');
+          for (let j = i + 1; j < packages.length; j++) {
+            results.push({
+              success: false,
+              message: `GLT bulk print stopped due to connection loss`,
+              errorCode: 'GLT_CONNECTION_LOST',
+            });
+          }
+          break;
+        }
+      }
+    }
+    
+    const successCount = results.filter(r => r.success).length;
+    console.log(`✅ [GLT-BULK] GLT bulk print completed: ${successCount}/${packages.length} successful`);
+    
+    Toast.show({
+      type: successCount === packages.length ? 'success' : successCount > 0 ? 'info' : 'error',
+      text1: '📦 GLT Bulk Print Complete',
+      text2: `${successCount}/${packages.length} GLT receipts printed successfully`,
+      position: 'top',
+      visibilityTime: 4000,
+    });
+    
+    return results;
+  }
+
+  /**
+   * Print office delivery receipt with agent information
+   */
+  async printOfficeDelivery(
+    bluetoothContext: BluetoothContextType,
+    packageData: PackageData,
+    agentName: string,
+    options: PrintOptions = {}
+  ): Promise<PrintResult> {
+    console.log('🏢 [GLT-OFFICE] Printing office delivery receipt for:', packageData.code);
+    
+    try {
+      const availability = await this.isPrintingAvailable(bluetoothContext);
+      if (!availability.available) {
+        throw new Error(availability.reason || 'Printing not available');
+      }
+
+      const printer = bluetoothContext.connectedPrinter;
+      const printTime = new Date();
+      
+      const receiptText = this.generateOfficeDeliveryReceipt(packageData, agentName);
+      await bluetoothContext.printText(receiptText);
+      
+      Toast.show({
+        type: 'success',
+        text1: '🏢 Office Delivery Receipt Printed',
+        text2: `Receipt for ${packageData.code} with agent ${agentName}`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      
+      return {
+        success: true,
+        message: `Office delivery receipt printed for ${packageData.code}`,
+        printTime,
+        printerUsed: printer.name,
+      };
+      
+    } catch (error: any) {
+      console.error('❌ [GLT-OFFICE] Print failed:', error);
+      
+      const errorMessage = this.getDetailedErrorMessage(error);
+      
+      Toast.show({
+        type: 'error',
+        text1: '❌ Office Delivery Print Failed',
+        text2: errorMessage,
+        position: 'top',
+        visibilityTime: 5000,
+      });
+      
+      return {
+        success: false,
+        message: errorMessage,
+        errorCode: error.code || 'GLT_OFFICE_ERROR',
       };
     }
   }
