@@ -1,4 +1,4 @@
-// services/GlobalPrintService.ts - Fixed with actual QR code fetching from backend
+// services/GlobalPrintService.ts - Fixed with actual QR code printing and bold formatting
 
 import Toast from 'react-native-toast-message';
 import { getPackageQRCode } from '../lib/helpers/packageHelpers';
@@ -57,7 +57,81 @@ class GlobalPrintService {
   }
 
   /**
-   * Generate clean GLT Logistics receipt format for thermal printers
+   * ESC/POS Commands for formatting
+   */
+  private readonly ESC = '\x1B';
+  private readonly GS = '\x1D';
+  
+  // Text formatting commands
+  private readonly BOLD_ON = this.ESC + 'E' + '\x01';
+  private readonly BOLD_OFF = this.ESC + 'E' + '\x00';
+  private readonly CENTER = this.ESC + 'a' + '\x01';
+  private readonly LEFT = this.ESC + 'a' + '\x00';
+  private readonly DOUBLE_HEIGHT = this.GS + '!' + '\x11';
+  private readonly NORMAL_SIZE = this.GS + '!' + '\x00';
+
+  /**
+   * Clean and format delivery location
+   */
+  private cleanDeliveryLocation(routeDescription: string, deliveryLocation?: string): string {
+    const location = deliveryLocation || routeDescription;
+    
+    // Remove unreadable characters and clean up the format
+    let cleaned = location
+      .replace(/[^\w\s\-,]/g, ' ') // Remove special characters except word chars, spaces, hyphens, commas
+      .replace(/\s+/g, ' ') // Replace multiple spaces with single space
+      .trim();
+    
+    // Extract destination (after "to", "→", or similar indicators)
+    const toMatch = cleaned.match(/(?:to|→|->)\s*(.+?)$/i);
+    if (toMatch) {
+      cleaned = toMatch[1].trim();
+    }
+    
+    // If it contains "CBD" and another location, show only the destination
+    if (cleaned.toLowerCase().includes('cbd') && cleaned.includes(' ')) {
+      const parts = cleaned.split(/\s+/);
+      const nonCbdParts = parts.filter(part => !part.toLowerCase().includes('cbd'));
+      if (nonCbdParts.length > 0) {
+        cleaned = nonCbdParts.join(' ');
+      }
+    }
+    
+    return cleaned.toUpperCase();
+  }
+
+  /**
+   * Generate actual QR code ESC/POS commands
+   */
+  private generateQRCodeCommands(qrCodeData: string): string {
+    // ESC/POS QR Code commands for most thermal printers
+    const qrSize = 6; // QR code module size (1-16)
+    const errorCorrection = 48; // Error correction level (48=L, 49=M, 50=Q, 51=H)
+    
+    // QR Code model selection (Model 2)
+    const modelCommand = this.GS + '(k' + '\x04\x00' + '\x31\x41' + '\x32\x00';
+    
+    // QR Code size setting
+    const sizeCommand = this.GS + '(k' + '\x03\x00' + '\x31\x43' + String.fromCharCode(qrSize);
+    
+    // Error correction level
+    const errorCommand = this.GS + '(k' + '\x03\x00' + '\x31\x45' + String.fromCharCode(errorCorrection);
+    
+    // Store QR code data
+    const dataLength = qrCodeData.length + 3;
+    const storeCommand = this.GS + '(k' + 
+      String.fromCharCode(dataLength & 0xFF) + 
+      String.fromCharCode((dataLength >> 8) & 0xFF) + 
+      '\x31\x50\x30' + qrCodeData;
+    
+    // Print QR code
+    const printCommand = this.GS + '(k' + '\x03\x00' + '\x31\x51\x30';
+    
+    return this.CENTER + modelCommand + sizeCommand + errorCommand + storeCommand + printCommand + '\n' + this.LEFT;
+  }
+
+  /**
+   * Generate clean GLT Logistics receipt format for thermal printers with bold fonts
    */
   private generateGLTReceipt(packageData: PackageData, options: PrintOptions = {}): string {
     const {
@@ -66,7 +140,6 @@ class GlobalPrintService {
       route_description,
       delivery_location,
       payment_status = 'not_paid',
-      delivery_type = 'home',
       agent_name,
       receiver_phone
     } = packageData;
@@ -85,59 +158,48 @@ class GlobalPrintService {
       hour12: false 
     });
 
+    // Clean delivery location
+    const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
+
     // Payment status formatting
     const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
-    // Create the receipt with proper thermal printer formatting
-    const receipt = `
-================================
-        GLT LOGISTICS
-      Fast & Reliable
-================================
-
-Customer Service: 0725 057 210
-support@gltlogistics.co.ke
-www.gltlogistics.co.ke
-
-If package is lost, please contact
-us immediately with this receipt.
-
-================================
-
-Package Code:
-${code}
-
-DELIVERY FOR: ${receiver_name.toUpperCase()}
-${receiver_phone ? `Phone: ${receiver_phone}` : ''}
-
-TO: ${delivery_location || route_description}
-
-${agent_name ? `Agent: ${agent_name}` : ''}
-
---------------------------------
-
-Payment Status: ${paymentText}
-
-Date: ${dateStr}
-Time: ${timeStr}
-
-${packageData.weight ? `Weight: ${packageData.weight}` : ''}
-${packageData.dimensions ? `Dimensions: ${packageData.dimensions}` : ''}
-${packageData.special_instructions ? `Instructions: ${packageData.special_instructions}` : ''}
-
-================================
-
-Thank you for choosing GLT Logistics!
-Your package will be delivered safely.
-
-================================
-
-      Designed by Infinity.Co
-        www.infinity.co.ke
-
---------------------------------
-Receipt printed: ${dateStr} ${timeStr}
-`;
+    // Create the receipt with proper thermal printer formatting and bold fonts
+    const receipt = 
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
+      'GLT LOGISTICS\n' +
+      this.NORMAL_SIZE + 'Fast & Reliable\n' +
+      this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.BOLD_ON + 'Customer Service: 0725 057 210\n' + this.BOLD_OFF +
+      'support@gltlogistics.co.ke\n' +
+      'www.gltlogistics.co.ke\n\n' +
+      'If package is lost, please contact\n' +
+      'us immediately with this receipt.\n' +
+      '================================\n' +
+      this.BOLD_ON + this.DOUBLE_HEIGHT + 'Code: ' + code + '\n' + this.NORMAL_SIZE + this.BOLD_OFF +
+      '================================\n' +
+      this.BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + this.BOLD_OFF +
+      (receiver_phone ? this.BOLD_ON + 'Phone: ' + receiver_phone + '\n' + this.BOLD_OFF : '') +
+      this.BOLD_ON + 'TO: ' + cleanLocation + '\n' + this.BOLD_OFF +
+      (agent_name ? this.BOLD_ON + 'Agent: ' + agent_name + '\n' + this.BOLD_OFF : '') +
+      '--------------------------------\n' +
+      this.BOLD_ON + 'Payment Status: ' + paymentText + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Date: ' + dateStr + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Time: ' + timeStr + '\n' + this.BOLD_OFF +
+      (packageData.weight ? this.BOLD_ON + 'Weight: ' + packageData.weight + '\n' + this.BOLD_OFF : '') +
+      (packageData.dimensions ? this.BOLD_ON + 'Dimensions: ' + packageData.dimensions + '\n' + this.BOLD_OFF : '') +
+      (packageData.special_instructions ? 'Instructions: ' + packageData.special_instructions + '\n' : '') +
+      '================================\n' +
+      this.CENTER + this.BOLD_ON + 
+      'Thank you for choosing GLT Logistics!\n' +
+      'Your package will be delivered safely.\n' +
+      this.BOLD_OFF +
+      '================================\n' +
+      'Designed by Infinity.Co\n' +
+      'www.infinity.co.ke\n' +
+      '--------------------------------\n' +
+      this.LEFT + 'Receipt printed: ' + dateStr + ' ' + timeStr + '\n';
 
     return receipt;
   }
@@ -152,7 +214,6 @@ Receipt printed: ${dateStr} ${timeStr}
       route_description,
       delivery_location,
       payment_status = 'not_paid',
-      delivery_type = 'home',
       agent_name,
       receiver_phone
     } = packageData;
@@ -171,6 +232,9 @@ Receipt printed: ${dateStr} ${timeStr}
       hour12: false 
     });
 
+    // Clean delivery location
+    const cleanLocation = this.cleanDeliveryLocation(route_description, delivery_location);
+
     // Payment status formatting
     const paymentText = payment_status === 'paid' ? 'PAID' : 'NOT PAID';
 
@@ -180,140 +244,60 @@ Receipt printed: ${dateStr} ${timeStr}
       console.log('🔍 [GLT-PRINT] Fetching QR code for package:', code);
       const qrResponse = await getPackageQRCode(code);
       
-      if (qrResponse.success && qrResponse.data.qr_code_base64) {
-        // Generate QR code commands for thermal printer
-        qrCodeSection = this.generateQRCodeCommands(
-          qrResponse.data.qr_code_base64, 
-          qrResponse.data.tracking_url
-        );
-        console.log('✅ [GLT-PRINT] QR code fetched successfully');
+      if (qrResponse.success && qrResponse.data.tracking_url) {
+        // Use tracking URL as QR code data (most common approach)
+        qrCodeSection = this.generateQRCodeCommands(qrResponse.data.tracking_url);
+        console.log('✅ [GLT-PRINT] QR code generated for tracking URL');
       } else {
-        // Fallback to tracking URL if QR code not available
-        qrCodeSection = this.generateQRCodeFallback(
-          code, 
-          qrResponse.data.tracking_url
-        );
-        console.log('⚠️ [GLT-PRINT] QR code not available, using fallback');
+        // Fallback - generate QR for package code
+        qrCodeSection = this.generateQRCodeCommands(`https://gltlogistics.co.ke/track/${code}`);
+        console.log('⚠️ [GLT-PRINT] Using fallback QR code');
       }
     } catch (error) {
       console.error('❌ [GLT-PRINT] Failed to fetch QR code:', error);
-      // Use basic fallback
-      qrCodeSection = this.generateQRCodeFallback(code);
+      // Generate QR for basic tracking URL
+      qrCodeSection = this.generateQRCodeCommands(`https://gltlogistics.co.ke/track/${code}`);
     }
 
-    const receipt = `
-================================
-        GLT LOGISTICS
-      Fast & Reliable
-================================
-
-Customer Service: 0725 057 210
-support@gltlogistics.co.ke
-www.gltlogistics.co.ke
-
-If package is lost, please contact
-us immediately with this receipt.
-
-================================
-
-Package Code:
-${code}
-
-${qrCodeSection}
-
-DELIVERY FOR: ${receiver_name.toUpperCase()}
-${receiver_phone ? `Phone: ${receiver_phone}` : ''}
-
-TO: ${delivery_location || route_description}
-
-${agent_name ? `Agent: ${agent_name}` : ''}
-
---------------------------------
-
-Payment Status: ${paymentText}
-
-Date: ${dateStr}
-Time: ${timeStr}
-
-${packageData.weight ? `Weight: ${packageData.weight}` : ''}
-${packageData.dimensions ? `Dimensions: ${packageData.dimensions}` : ''}
-${packageData.special_instructions ? `Instructions: ${packageData.special_instructions}` : ''}
-
-================================
-
-Thank you for choosing GLT Logistics!
-Your package will be delivered safely.
-
-================================
-
-      Designed by Infinity.Co
-        www.infinity.co.ke
-
---------------------------------
-Receipt printed: ${dateStr} ${timeStr}
-`;
+    const receipt = 
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
+      'GLT LOGISTICS\n' +
+      this.NORMAL_SIZE + 'Fast & Reliable\n' +
+      this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.BOLD_ON + 'Customer Service: 0725 057 210\n' + this.BOLD_OFF +
+      'support@gltlogistics.co.ke\n' +
+      'www.gltlogistics.co.ke\n\n' +
+      'If package is lost, please contact\n' +
+      'us immediately with this receipt.\n' +
+      '================================\n' +
+      this.BOLD_ON + this.DOUBLE_HEIGHT + 'Code: ' + code + '\n' + this.NORMAL_SIZE + this.BOLD_OFF +
+      '================================\n' +
+      qrCodeSection + '\n' +
+      '================================\n' +
+      this.BOLD_ON + 'DELIVERY FOR: ' + receiver_name.toUpperCase() + '\n' + this.BOLD_OFF +
+      (receiver_phone ? this.BOLD_ON + 'Phone: ' + receiver_phone + '\n' + this.BOLD_OFF : '') +
+      this.BOLD_ON + 'TO: ' + cleanLocation + '\n' + this.BOLD_OFF +
+      (agent_name ? this.BOLD_ON + 'Agent: ' + agent_name + '\n' + this.BOLD_OFF : '') +
+      '--------------------------------\n' +
+      this.BOLD_ON + 'Payment Status: ' + paymentText + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Date: ' + dateStr + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Time: ' + timeStr + '\n' + this.BOLD_OFF +
+      (packageData.weight ? this.BOLD_ON + 'Weight: ' + packageData.weight + '\n' + this.BOLD_OFF : '') +
+      (packageData.dimensions ? this.BOLD_ON + 'Dimensions: ' + packageData.dimensions + '\n' + this.BOLD_OFF : '') +
+      (packageData.special_instructions ? 'Instructions: ' + packageData.special_instructions + '\n' : '') +
+      '================================\n' +
+      this.CENTER + this.BOLD_ON + 
+      'Thank you for choosing GLT Logistics!\n' +
+      'Your package will be delivered safely.\n' +
+      this.BOLD_OFF +
+      '================================\n' +
+      'Designed by Infinity.Co\n' +
+      'www.infinity.co.ke\n' +
+      '--------------------------------\n' +
+      this.LEFT + 'Receipt printed: ' + dateStr + ' ' + timeStr + '\n';
 
     return receipt;
-  }
-
-  /**
-   * Generate actual QR code ESC/POS commands for thermal printers
-   */
-  private generateQRCodeCommands(qrCodeBase64: string, trackingUrl: string): string {
-    // For thermal printers that support QR codes via ESC/POS commands
-    // This is a basic implementation - adjust based on your specific printer model
-    
-    try {
-      // ESC/POS QR Code commands (example for common thermal printers)
-      // These would be the actual printer commands, but since we're printing as text,
-      // we'll include them as comments and use a visual representation
-      
-      const qrCommands = `
---------------------------------
-        SCAN QR CODE
---------------------------------
-
-[QR CODE PRINTED HERE]
-
-Track at:
-${trackingUrl}
-
---------------------------------
-`;
-      
-      // For actual ESC/POS implementation, you would use:
-      // const qrSize = 6; // QR code size
-      // const qrCommand = `\x1D(k\x04\x001A${String.fromCharCode(qrSize)}\x00`;
-      // const qrData = `\x1D(k${String.fromCharCode(qrCodeBase64.length + 3)}\x001C\x03`;
-      // const qrPrint = `\x1D(k\x03\x001Q0`;
-      // return qrCommand + qrData + qrCodeBase64 + qrPrint;
-      
-      return qrCommands;
-      
-    } catch (error) {
-      console.error('Failed to generate QR code commands:', error);
-      return this.generateQRCodeFallback('', trackingUrl);
-    }
-  }
-
-  /**
-   * Generate QR code fallback when actual QR code is not available
-   */
-  private generateQRCodeFallback(packageCode: string, trackingUrl?: string): string {
-    const fallbackUrl = trackingUrl || `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`;
-    
-    return `
---------------------------------
-    PACKAGE TRACKING
---------------------------------
-
-Visit website to track:
-${fallbackUrl}
-
-Or search for: ${packageCode}
-
---------------------------------
-`;
   }
 
   /**
@@ -333,42 +317,30 @@ Or search for: ${packageCode}
       hour12: false 
     });
 
-    const receipt = `
-================================
-        GLT LOGISTICS
-      Fast & Reliable
-================================
-
-Customer Service: 0725 057 210
-support@gltlogistics.co.ke
-
-OFFICE DELIVERY RECEIPT
-
-Package Code: ${packageData.code}
-
-FROM: ${packageData.sender_name || 'N/A'}
-TO: ${packageData.receiver_name}
-ROUTE: ${packageData.route_description}
-
-DELIVERY AGENT: ${agentName}
-OFFICE DELIVERY
-
-Date: ${dateStr}
-Time: ${timeStr}
-
-================================
-
-Package handed over to office agent
-for final delivery to recipient.
-
-Thank you for choosing GLT Logistics!
-
-================================
-
-      Designed by Infinity.Co
-        www.infinity.co.ke
-
-`;
+    const receipt = 
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT +
+      'GLT LOGISTICS\n' +
+      this.NORMAL_SIZE + 'Fast & Reliable\n' +
+      this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.BOLD_ON + 'Customer Service: 0725 057 210\n' + this.BOLD_OFF +
+      'support@gltlogistics.co.ke\n\n' +
+      this.CENTER + this.BOLD_ON + this.DOUBLE_HEIGHT + 'OFFICE DELIVERY RECEIPT\n' + this.NORMAL_SIZE + this.BOLD_OFF + this.LEFT +
+      '================================\n' +
+      this.BOLD_ON + 'Code: ' + packageData.code + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'FROM: ' + (packageData.sender_name || 'N/A') + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'TO: ' + packageData.receiver_name + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'DELIVERY AGENT: ' + agentName + '\n' + this.BOLD_OFF +
+      '--------------------------------\n' +
+      this.BOLD_ON + 'Date: ' + dateStr + '\n' + this.BOLD_OFF +
+      this.BOLD_ON + 'Time: ' + timeStr + '\n' + this.BOLD_OFF +
+      '================================\n' +
+      'Package handed over to office agent\n' +
+      'for final delivery to recipient.\n\n' +
+      this.CENTER + this.BOLD_ON + 'Thank you for choosing GLT Logistics!\n' + this.BOLD_OFF +
+      '================================\n' +
+      'Designed by Infinity.Co\n' +
+      'www.infinity.co.ke\n' + this.LEFT;
 
     return receipt;
   }
@@ -489,8 +461,8 @@ Thank you for choosing GLT Logistics!
         code: 'PKG-TEST-' + Date.now().toString().slice(-6),
         receiver_name: 'Test Customer',
         receiver_phone: '0712 345 678',
-        route_description: 'Test Route',
-        delivery_location: 'Test Location, Nairobi',
+        route_description: 'CBD → Athi River',
+        delivery_location: 'Athi River',
         payment_status: 'paid',
         delivery_type: 'home',
         weight: '2kg',
@@ -498,8 +470,8 @@ Thank you for choosing GLT Logistics!
         special_instructions: 'Handle with care - Test package'
       };
       
-      // Generate and print test receipt (without QR for test)
-      const testReceipt = this.generateGLTReceipt(testPackageData, options);
+      // Generate and print test receipt (with QR for test)
+      const testReceipt = await this.generateGLTReceiptWithQR(testPackageData, options);
       await bluetoothContext.printText(testReceipt);
       
       console.log('✅ [GLT-PRINT] Test receipt printed successfully');
@@ -507,7 +479,7 @@ Thank you for choosing GLT Logistics!
       Toast.show({
         type: 'success',
         text1: '🧪 GLT Test Print Successful',
-        text2: `Test receipt sent to ${printer.name}`,
+        text2: `Test receipt with QR sent to ${printer.name}`,
         position: 'top',
         visibilityTime: 3000,
       });
@@ -826,7 +798,7 @@ Thank you for choosing GLT Logistics!
   async hasQRCode(packageCode: string): Promise<boolean> {
     try {
       const qrResponse = await getPackageQRCode(packageCode);
-      return qrResponse.success && !!qrResponse.data.qr_code_base64;
+      return qrResponse.success && (!!qrResponse.data.qr_code_base64 || !!qrResponse.data.tracking_url);
     } catch (error) {
       console.warn('Could not check QR code availability:', error);
       return false;
