@@ -95,7 +95,7 @@ android {
 
     namespace 'com.lvl0_x.gltapp2'
     defaultConfig {
-        applicationId 'com.lvl0_x.gltapp2'
+        applicationId 'com.lvl0_x.gltapp2'  // ✅ Consistent across all builds for OAuth compatibility
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1
@@ -115,6 +115,13 @@ android {
         
         // ADDED: Enable multidex for better Bluetooth compatibility
         multiDexEnabled true
+        
+        // ✅ ADDED: OAuth redirect scheme configuration for Google Auth
+        manifestPlaceholders = [
+            appAuthRedirectScheme: 'com.lvl0_x.gltapp2',
+            oauthRedirectHost: 'oauth',
+            oauthRedirectScheme: 'https'
+        ]
     }
     
     signingConfigs {
@@ -129,11 +136,21 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            applicationIdSuffix ".debug"  // Different ID for debug builds
+            // ✅ REMOVED: applicationIdSuffix ".debug" - This was breaking OAuth!
+            // ✅ FIXED: Package name now stays consistent with Google Console registration
+            
+            // 🎯 Debug identification through app name and version instead
             resValue "string", "app_name", "${appName} (Debug)"
+            versionNameSuffix "-debug-${buildTimestamp}"  // ✅ Version suffix instead of package suffix
             
             // Debug-specific build config
             buildConfigField "boolean", "IS_DEBUG", "true"
+            buildConfigField "String", "BUILD_TYPE", '"debug"'
+            
+            // ✅ ADDED: Debug-specific OAuth environment flag
+            manifestPlaceholders += [
+                oauthEnvironment: 'development'
+            ]
         }
         release {
             // Caution! In production, you need to generate your own keystore file.
@@ -146,6 +163,12 @@ android {
             
             // Release-specific build config
             buildConfigField "boolean", "IS_DEBUG", "false"
+            buildConfigField "String", "BUILD_TYPE", '"release"'
+            
+            // ✅ ADDED: Production OAuth environment flag
+            manifestPlaceholders += [
+                oauthEnvironment: 'production'
+            ]
         }
     }
     
@@ -155,7 +178,7 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     
-    // Custom APK naming configuration
+    // ✅ ENHANCED: Custom APK naming configuration (now shows debug vs release clearly)
     applicationVariants.all { variant ->
         variant.outputs.all {
             def buildType = variant.buildType.name
@@ -164,15 +187,16 @@ android {
             
             // Create custom APK name based on build type
             if (buildType == "release") {
-                // Release APK: GLT-1.2.0-3.apk
+                // Release APK: GLT-1.3.2-3.apk
                 outputFileName = "${appName}-${versionName}-${versionCode}.apk"
             } else if (buildType == "debug") {
-                // Debug APK: GLT-1.2.0-3-debug-20250814-1430.apk
-                outputFileName = "${appName}-${versionName}-${versionCode}-debug-${buildTimestamp}.apk"
+                // Debug APK: GLT-1.3.2-debug-20250822-1430-3.apk
+                outputFileName = "${appName}-${versionName}-debug-${buildTimestamp}-${versionCode}.apk"
             }
             
             // Log the output file name for verification
             println "Generated APK name: ${outputFileName}"
+            println "Package name (OAuth): com.lvl0_x.gltapp2"  // ✅ Consistent logging
         }
     }
     
@@ -238,3 +262,14 @@ dependencies {
     // ADDED: Multidex support for better compatibility
     implementation 'androidx.multidex:multidex:2.0.1'
 }
+
+/*
+ * ✅ OAUTH COMPATIBILITY SUMMARY:
+ * - Package name consistent: com.lvl0_x.gltapp2 (matches Google Console)
+ * - Debug builds NO LONGER use .debug suffix
+ * - Debug identification through version name suffix instead
+ * - Manifest placeholders added for OAuth configuration
+ * - Build type accessible in code for environment-specific logic
+ * 
+ * 🎯 RESULT: Google OAuth will now work correctly!
+ */
