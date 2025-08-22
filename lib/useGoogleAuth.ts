@@ -1,8 +1,7 @@
 import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import Constants from 'expo-constants';
-import { makeRedirectUri } from 'expo-auth-session';
 import { Platform } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -11,87 +10,51 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
   const processingRef = useRef(false);
   const authAttemptRef = useRef(0);
 
-  // 🔧 SECURITY FIX: Platform-aware redirect URI strategy
-  const redirectUri = useMemo(() => {
-    console.log('🔍 === OAUTH SECURITY CONFIG ===');
-    console.log('📱 Platform:', Platform.OS);
-    console.log('🏗️ App ownership:', Constants.appOwnership);
-    console.log('📦 Package:', Constants.expoConfig?.android?.package);
+  // ✅ CORRECTED: Use Android client configuration properly
+  const [request, response, promptAsync] = Google.useAuthRequest({
+    // ✅ Use ONLY Android client ID for Android
+    androidClientId: Constants.expoConfig?.extra?.androidClientId,
     
-    // 🔒 SECURITY: Use development build native scheme when possible
-    if (Constants.appOwnership === 'standalone' || Constants.appOwnership === 'expo') {
-      // For development/standalone builds, use native scheme
-      const nativeUri = makeRedirectUri({ 
-        useProxy: false,
-        scheme: 'com.lvl0_x.gltapp2'
-      });
-      console.log('🔗 Using native redirect URI:', nativeUri);
-      return nativeUri;
-    } else {
-      // Fallback to proxy only if necessary
-      const proxyUri = makeRedirectUri({ useProxy: true });
-      console.log('🔗 Using proxy redirect URI:', proxyUri);
-      return proxyUri;
-    }
-  }, []);
+    // ✅ Include scopes with 'openid'
+    scopes: ['profile', 'email', 'openid'],
+    
+    // ✅ Use authorization code flow (more secure)
+    responseType: 'code',
+    
+    // ✅ Let Expo handle redirect URI automatically for Android
+    // Don't specify redirectUri - Android uses package name + SHA-1
+    
+    // ✅ Additional security parameters
+    additionalParameters: {
+      prompt: 'select_account',
+    },
+  });
 
-  // 🔧 SECURITY FIX: Platform-specific client ID selection
-  const getClientConfig = () => {
-    const config = {
-      scopes: ['profile', 'email', 'openid'], // ✅ Added missing 'openid'
-      responseType: 'code', // ✅ Use authorization code flow (more secure)
-      redirectUri,
-      useProxy: Constants.appOwnership === 'expo', // ✅ Only use proxy in Expo Go
-      additionalParameters: {
-        prompt: 'select_account', // Force account selection
-        access_type: 'offline', // Allow token refresh
-      },
-    };
-
-    // 🔒 Platform-specific client ID (more secure)
-    if (Platform.OS === 'android') {
-      return {
-        ...config,
-        androidClientId: Constants.expoConfig?.extra?.androidClientId,
-        // Don't include other platform client IDs for security
-      };
-    } else if (Platform.OS === 'ios') {
-      return {
-        ...config,
-        iosClientId: Constants.expoConfig?.extra?.iosClientId,
-      };
-    } else {
-      return {
-        ...config,
-        webClientId: Constants.expoConfig?.extra?.webClientId,
-        expoClientId: Constants.expoConfig?.extra?.expoClientId,
-      };
-    }
-  };
-
-  const [request, response, promptAsync] = Google.useAuthRequest(getClientConfig());
-
-  // 🔍 Enhanced security logging
+  // 🔍 Debug the Android OAuth configuration
   useEffect(() => {
     if (request) {
-      console.log('🔒 === OAUTH REQUEST SECURITY AUDIT ===');
-      console.log('🆔 Client ID:', request.clientId?.substring(0, 20) + '...');
-      console.log('🔗 Redirect URI:', request.redirectUri);
+      console.log('🔍 === ANDROID OAUTH DEBUG ===');
+      console.log('📱 Platform:', Platform.OS);
+      console.log('🏗️ App ownership:', Constants.appOwnership);
+      console.log('🆔 Android Client ID:', Constants.expoConfig?.extra?.androidClientId?.substring(0, 20) + '...');
+      console.log('🔗 Generated Redirect URI:', request.redirectUri);
       console.log('🎯 Scopes:', request.scopes);
       console.log('🔄 Response type:', request.responseType);
-      console.log('🌐 Request URL:', request.url?.substring(0, 100) + '...');
+      console.log('🌐 OAuth URL:', request.url?.substring(0, 100) + '...');
       
-      // ✅ Security validation
-      const isSecure = request.url?.startsWith('https://') && 
-                      (request.redirectUri?.startsWith('https://') || 
-                       request.redirectUri?.startsWith('com.lvl0_x.gltapp2://'));
+      // ✅ Validate Android OAuth setup
+      const hasAndroidClient = !!Constants.expoConfig?.extra?.androidClientId;
+      const hasCorrectScopes = request.scopes?.includes('openid');
+      const usesCodeFlow = request.responseType === 'code';
       
-      console.log(isSecure ? '✅ Security: PASSED' : '❌ Security: FAILED');
+      console.log('✅ Android Client ID present:', hasAndroidClient);
+      console.log('✅ Correct scopes (includes openid):', hasCorrectScopes);
+      console.log('✅ Uses code flow:', usesCodeFlow);
       
-      if (!isSecure) {
-        console.warn('⚠️ INSECURE OAUTH CONFIGURATION DETECTED');
-        console.warn('   - URL should use HTTPS');
-        console.warn('   - Redirect URI should use HTTPS or custom scheme');
+      if (hasAndroidClient && hasCorrectScopes && usesCodeFlow) {
+        console.log('🎯 OAuth Configuration: CORRECT');
+      } else {
+        console.log('❌ OAuth Configuration: NEEDS FIXING');
       }
     }
   }, [request]);
@@ -111,15 +74,16 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
       processingRef.current = true;
       
       const { authentication } = response;
-      
-      // 🔧 Handle both token and code flows
       if (authentication?.accessToken) {
-        console.log('✅ Access token received (implicit flow)');
+        console.log('✅ Access token received, fetching user info...');
         fetchUserInfo(authentication.accessToken);
       } else if (response.params?.code) {
-        console.log('✅ Authorization code received (code flow)');
-        // For code flow, you'd typically exchange this on your backend
-        exchangeCodeForToken(response.params.code);
+        console.log('✅ Authorization code received');
+        // For production, exchange this code on your backend
+        console.log('🔑 Auth code:', response.params.code.substring(0, 20) + '...');
+        // For now, we need the access token flow, so this might not work immediately
+        console.log('⚠️ Code flow requires backend token exchange');
+        processingRef.current = false;
       } else {
         console.log('❌ No access token or code in successful response');
         console.log('Response params:', response.params);
@@ -128,53 +92,18 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
     } else if (response.type === 'error') {
       console.error('❌ Google Auth Error:', response.error);
       console.error('Error params:', response.params);
-      console.error('Error details:', response);
+      
+      // ✅ Enhanced error debugging
+      if (response.params?.error_description) {
+        console.error('Error description:', response.params.error_description);
+      }
+      
       processingRef.current = false;
     } else {
       console.log(`📱 Google Auth ${response.type}`);
       processingRef.current = false;
     }
   }, [response]);
-
-  // 🔧 Handle authorization code exchange (more secure)
-  const exchangeCodeForToken = async (code: string) => {
-    try {
-      console.log('🔑 Exchanging authorization code for tokens...');
-      
-      // ⚠️ SECURITY NOTE: In production, this should be done on your backend
-      // This is a simplified example for development
-      
-      const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/x-www-form-urlencoded',
-        },
-        body: new URLSearchParams({
-          client_id: Constants.expoConfig?.extra?.androidClientId || '',
-          client_secret: '', // ⚠️ Should be handled on backend
-          code,
-          grant_type: 'authorization_code',
-          redirect_uri: redirectUri,
-        }),
-      });
-
-      if (!tokenResponse.ok) {
-        throw new Error(`Token exchange failed: ${tokenResponse.status}`);
-      }
-
-      const tokens = await tokenResponse.json();
-      
-      if (tokens.access_token) {
-        fetchUserInfo(tokens.access_token);
-      } else {
-        throw new Error('No access token in response');
-      }
-      
-    } catch (error) {
-      console.error('❌ Code exchange error:', error);
-      processingRef.current = false;
-    }
-  };
 
   const fetchUserInfo = async (token: string) => {
     try {
@@ -204,15 +133,13 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
 
   const enhancedPromptAsync = async () => {
     try {
-      console.log('🚀 === STARTING SECURE OAUTH FLOW ===');
-      console.log('🔗 Redirect URI:', redirectUri);
-      console.log('🏗️ App type:', Constants.appOwnership);
-      console.log('🔒 Using proxy:', Constants.appOwnership === 'expo');
+      console.log('🚀 === STARTING ANDROID OAUTH FLOW ===');
+      console.log('🔑 Using Android Client ID:', !!Constants.expoConfig?.extra?.androidClientId);
+      console.log('📱 Platform check:', Platform.OS === 'android' ? 'CORRECT' : 'WRONG PLATFORM');
       
-      // ⚠️ Security warning for Expo Go
-      if (Constants.appOwnership === 'expo') {
-        console.warn('⚠️ WARNING: Using Expo Go - OAuth may be unreliable');
-        console.warn('💡 Recommendation: Use development build (expo run:android)');
+      // ⚠️ Platform validation
+      if (Platform.OS !== 'android') {
+        console.warn('⚠️ WARNING: This is Android OAuth but platform is', Platform.OS);
       }
       
       processingRef.current = false;
@@ -235,10 +162,6 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
 
   return { 
     promptAsync: enhancedPromptAsync, 
-    request,
-    redirectUri,
-    isSecure: request?.url?.startsWith('https://') && 
-              (request?.redirectUri?.startsWith('https://') || 
-               request?.redirectUri?.startsWith('com.lvl0_x.gltapp2://'))
+    request
   };
 }
