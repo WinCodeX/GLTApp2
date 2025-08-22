@@ -2,112 +2,95 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Google from 'expo-auth-session/providers/google';
 import { useEffect, useRef } from 'react';
 import Constants from 'expo-constants';
-import { Platform } from 'react-native';
+import { makeRedirectUri } from 'expo-auth-session';
 
 WebBrowser.maybeCompleteAuthSession();
 
 export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
   const processingRef = useRef(false);
-  const authAttemptRef = useRef(0);
 
-  // ✅ CORRECTED: Use Android client configuration properly
+  // 🔧 FORCE HTTPS PROXY - Don't let it use custom schemes
+  const redirectUri = makeRedirectUri({ 
+    useProxy: true,  // ✅ Force proxy usage
+    preferLocalhost: false  // ✅ Don't use localhost
+  });
+
+  console.log('🔗 Forced redirect URI:', redirectUri);
+  console.log('🎯 Should be: https://auth.expo.io/@lvl0_x/gltapp2');
+
   const [request, response, promptAsync] = Google.useAuthRequest({
-    // ✅ Use ONLY Android client ID for Android
-    androidClientId: Constants.expoConfig?.extra?.androidClientId,
+    // 🔧 Use Web client ID explicitly  
+    expoClientId: Constants.expoConfig?.extra?.expoClientId,
+    webClientId: Constants.expoConfig?.extra?.webClientId,
     
-    // ✅ Include scopes with 'openid'
     scopes: ['profile', 'email', 'openid'],
+    responseType: 'token',
     
-    // ✅ Use authorization code flow (more secure)
-    responseType: 'code',
+    // 🔧 FORCE the correct redirect URI
+    redirectUri: 'https://auth.expo.io/@lvl0_x/gltapp2',
     
-    // ✅ Let Expo handle redirect URI automatically for Android
-    // Don't specify redirectUri - Android uses package name + SHA-1
+    // 🔧 FORCE proxy usage
+    useProxy: true,
     
-    // ✅ Additional security parameters
     additionalParameters: {
       prompt: 'select_account',
     },
   });
 
-  // 🔍 Debug the Android OAuth configuration
+  // 🔍 Debug what's actually being sent
   useEffect(() => {
     if (request) {
-      console.log('🔍 === ANDROID OAUTH DEBUG ===');
-      console.log('📱 Platform:', Platform.OS);
-      console.log('🏗️ App ownership:', Constants.appOwnership);
-      console.log('🆔 Android Client ID:', Constants.expoConfig?.extra?.androidClientId?.substring(0, 20) + '...');
-      console.log('🔗 Generated Redirect URI:', request.redirectUri);
-      console.log('🎯 Scopes:', request.scopes);
-      console.log('🔄 Response type:', request.responseType);
-      console.log('🌐 OAuth URL:', request.url?.substring(0, 100) + '...');
+      console.log('🚀 === OAUTH REQUEST DEBUG ===');
+      console.log('🔗 Redirect URI in request:', request.redirectUri);
+      console.log('🆔 Client ID:', request.clientId?.substring(0, 20) + '...');
+      console.log('🌐 Full OAuth URL:', request.url);
       
-      // ✅ Validate Android OAuth setup
-      const hasAndroidClient = !!Constants.expoConfig?.extra?.androidClientId;
-      const hasCorrectScopes = request.scopes?.includes('openid');
-      const usesCodeFlow = request.responseType === 'code';
-      
-      console.log('✅ Android Client ID present:', hasAndroidClient);
-      console.log('✅ Correct scopes (includes openid):', hasCorrectScopes);
-      console.log('✅ Uses code flow:', usesCodeFlow);
-      
-      if (hasAndroidClient && hasCorrectScopes && usesCodeFlow) {
-        console.log('🎯 OAuth Configuration: CORRECT');
+      // ✅ Validate HTTPS usage
+      if (request.redirectUri?.startsWith('https://auth.expo.io')) {
+        console.log('✅ Using HTTPS proxy - CORRECT');
       } else {
-        console.log('❌ OAuth Configuration: NEEDS FIXING');
+        console.log('❌ NOT using HTTPS proxy - PROBLEM');
+        console.log('❌ Actual redirect URI:', request.redirectUri);
       }
     }
   }, [request]);
 
   useEffect(() => {
-    if (!response) return;
+    if (!response || processingRef.current) return;
 
-    const currentAttempt = ++authAttemptRef.current;
-    console.log(`🔄 Auth response #${currentAttempt}:`, response.type);
-
-    if (processingRef.current) {
-      console.log('⚠️ Already processing auth response, skipping...');
-      return;
-    }
+    console.log('📋 OAuth response type:', response.type);
 
     if (response.type === 'success') {
       processingRef.current = true;
       
       const { authentication } = response;
       if (authentication?.accessToken) {
-        console.log('✅ Access token received, fetching user info...');
+        console.log('✅ Access token received via HTTPS proxy');
         fetchUserInfo(authentication.accessToken);
-      } else if (response.params?.code) {
-        console.log('✅ Authorization code received');
-        // For production, exchange this code on your backend
-        console.log('🔑 Auth code:', response.params.code.substring(0, 20) + '...');
-        // For now, we need the access token flow, so this might not work immediately
-        console.log('⚠️ Code flow requires backend token exchange');
-        processingRef.current = false;
       } else {
-        console.log('❌ No access token or code in successful response');
+        console.log('❌ No access token in response');
         console.log('Response params:', response.params);
         processingRef.current = false;
       }
     } else if (response.type === 'error') {
-      console.error('❌ Google Auth Error:', response.error);
-      console.error('Error params:', response.params);
+      console.error('❌ OAuth Error:', response.error);
+      console.error('❌ Error params:', response.params);
       
-      // ✅ Enhanced error debugging
+      // 🔍 Enhanced error debugging
       if (response.params?.error_description) {
-        console.error('Error description:', response.params.error_description);
+        console.error('❌ Error description:', response.params.error_description);
       }
       
       processingRef.current = false;
     } else {
-      console.log(`📱 Google Auth ${response.type}`);
+      console.log(`📱 OAuth ${response.type}`);
       processingRef.current = false;
     }
   }, [response]);
 
   const fetchUserInfo = async (token: string) => {
     try {
-      console.log('🌐 Fetching user info from Google...');
+      console.log('🌐 Fetching user info securely...');
       
       const res = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: { Authorization: `Bearer ${token}` },
@@ -118,28 +101,26 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
       }
       
       const user = await res.json();
-      console.log('👤 Google user info received:', user.email);
+      console.log('👤 User authenticated:', user.email);
       
       await onAuthSuccess(user);
-      
     } catch (err) {
-      console.error('❌ Failed to fetch Google profile:', err);
+      console.error('❌ Failed to fetch user profile:', err);
     } finally {
-      setTimeout(() => {
-        processingRef.current = false;
-      }, 2000);
+      processingRef.current = false;
     }
   };
 
   const enhancedPromptAsync = async () => {
     try {
-      console.log('🚀 === STARTING ANDROID OAUTH FLOW ===');
-      console.log('🔑 Using Android Client ID:', !!Constants.expoConfig?.extra?.androidClientId);
-      console.log('📱 Platform check:', Platform.OS === 'android' ? 'CORRECT' : 'WRONG PLATFORM');
+      console.log('🚀 === STARTING HTTPS OAUTH FLOW ===');
+      console.log('🔗 Redirect URI check:', request?.redirectUri);
       
-      // ⚠️ Platform validation
-      if (Platform.OS !== 'android') {
-        console.warn('⚠️ WARNING: This is Android OAuth but platform is', Platform.OS);
+      // ⚠️ Pre-flight validation
+      if (!request?.redirectUri?.startsWith('https://auth.expo.io')) {
+        console.warn('⚠️ WARNING: Not using HTTPS proxy!');
+        console.warn('   Expected: https://auth.expo.io/@lvl0_x/gltapp2');
+        console.warn('   Actual:', request?.redirectUri);
       }
       
       processingRef.current = false;
@@ -147,14 +128,9 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
       const result = await promptAsync();
       console.log('📋 OAuth result:', result?.type);
       
-      if (result?.type === 'error') {
-        console.error('❌ OAuth error details:', result.error);
-        console.error('❌ OAuth error params:', result.params);
-      }
-      
       return result;
     } catch (error) {
-      console.error('❌ Prompt error:', error);
+      console.error('❌ OAuth prompt error:', error);
       processingRef.current = false;
       throw error;
     }
@@ -162,6 +138,7 @@ export function useGoogleAuth(onAuthSuccess: (user: any) => void) {
 
   return { 
     promptAsync: enhancedPromptAsync, 
-    request
+    request,
+    redirectUri: request?.redirectUri
   };
 }
