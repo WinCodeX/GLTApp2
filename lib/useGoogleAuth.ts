@@ -1,7 +1,8 @@
-// lib/useGoogleAuth.ts - Rewritten for Rails Web OAuth
+// lib/useGoogleAuth.ts - Rewritten for Rails Web OAuth (Expo-Crypto Secure)
 import * as WebBrowser from 'expo-web-browser';
 import { useCallback, useRef } from 'react';
 import * as SecureStore from 'expo-secure-store';
+import * as Crypto from 'expo-crypto';
 import Toast from 'react-native-toast-message';
 import { getCurrentApiBaseUrl } from '@/lib/api';
 
@@ -27,7 +28,7 @@ export function useGoogleAuth(onAuthSuccess: (user: AuthSuccessUser, isNewUser?:
   const processingRef = useRef(false);
 
   // ==========================================
-  // 🌐 WEB OAUTH WITH RAILS BACKEND
+  // 🌐 WEB OAUTH WITH RAILS JWT BACKEND
   // ==========================================
 
   const signInWithGoogle = useCallback(async () => {
@@ -46,9 +47,10 @@ export function useGoogleAuth(onAuthSuccess: (user: AuthSuccessUser, isNewUser?:
       console.log('🔗 Using base URL:', baseUrl);
       
       // Create a unique state parameter for security
-      const state = generateSecureState();
+      const state = await generateSecureState();
       
       // Construct the OAuth URL to your Rails server
+      // This goes to the initialization endpoint that sets up state
       const oauthUrl = `${baseUrl}/api/v1/auth/google_oauth2/init?state=${state}&mobile=true`;
       console.log('🚀 Opening OAuth URL:', oauthUrl);
       
@@ -101,14 +103,13 @@ export function useGoogleAuth(onAuthSuccess: (user: AuthSuccessUser, isNewUser?:
   }, [onAuthSuccess]);
 
   // ==========================================
-  // 🔧 HELPER FUNCTIONS
+  // 🔧 HELPER FUNCTIONS (REACT NATIVE COMPATIBLE)
   // ==========================================
 
-  const generateSecureState = (): string => {
-    // Generate a secure random state parameter
-    const array = new Uint8Array(32);
-    crypto.getRandomValues(array);
-    return Array.from(array, byte => byte.toString(16).padStart(2, '0')).join('');
+  const generateSecureState = async (): Promise<string> => {
+    // Cryptographically secure random state generation using Expo-Crypto
+    const randomBytes = await Crypto.getRandomBytesAsync(32);
+    return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
   };
 
   const handleOAuthSuccess = async (
