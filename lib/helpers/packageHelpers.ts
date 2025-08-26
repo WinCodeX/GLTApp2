@@ -420,39 +420,3 @@ export const generatePackageReference = (): string => {
   const random = Math.random().toString(36).substr(2, 5);
   return `PKG-${timestamp}-${random}`.toUpperCase();
 };
-
-
-
-export default {
-  // NEW MAIN FUNCTIONS
-  getPackageFormData,
-  validatePackageFormData,
-  createPackage,
-  getPackagePricing,
-  getLocations,
-  
-  // EXISTING FUNCTIONS
-  getAreas,
-  getAgents,
-  getAgentsForArea,
-  searchAreas,
-  searchAgents,
-  clearCache,
-  getAreaById,
-  getAgentById,
-  isValidPackageState,
-  getStateDisplay,
-  getStateColor,
-  canEditPackage,
-  getNextValidStates,
-  formatRouteDescription,
-  refreshData,
-  
-  // Package-specific functions
-  getPackages,
-  getPackagesByState,
-  searchPackages,
-  getPackageDetails,
-  getPackageQRCode,
-  STATE_MAPPING
-};
