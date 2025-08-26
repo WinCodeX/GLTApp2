@@ -806,90 +806,7 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 /**
  * ADDED: Create a new package
  */
-export const createPackage = async (packageData: PackageData): Promise<any> => {
-  try {
-    console.log('📦 Creating package with data:', packageData);
-    
-    // Validate required fields
-    if (!packageData.origin_agent_id) {
-      throw new Error('Origin agent is required');
-    }
-    
-    if (!packageData.receiver_name?.trim()) {
-      throw new Error('Receiver name is required');
-    }
-    
-    if (!packageData.receiver_phone?.trim()) {
-      throw new Error('Receiver phone is required');
-    }
-    
-    if (!packageData.delivery_type) {
-      throw new Error('Delivery type is required');
-    }
-    
-    // Validate delivery-specific requirements
-    if (packageData.delivery_type === 'agent' && !packageData.destination_agent_id) {
-      throw new Error('Destination agent is required for agent delivery');
-    }
-    
-    if ((packageData.delivery_type === 'doorstep' || packageData.delivery_type === 'fragile') && !packageData.delivery_location?.trim()) {
-      throw new Error('Delivery location is required for doorstep/fragile delivery');
-    }
-    
-    // Prepare API payload
-    const payload = {
-      package: {
-        sender_name: packageData.sender_name || 'Current User',
-        sender_phone: packageData.sender_phone || '+254700000000',
-        receiver_name: packageData.receiver_name.trim(),
-        receiver_phone: packageData.receiver_phone.trim(),
-        origin_agent_id: packageData.origin_agent_id,
-        destination_agent_id: packageData.destination_agent_id || null,
-        destination_area_id: packageData.destination_area_id || null,
-        delivery_type: packageData.delivery_type,
-        delivery_location: packageData.delivery_location?.trim() || null
-      }
-    };
-    
-    console.log('🚀 Sending package creation request:', payload);
-    
-    const response = await api.post('/api/v1/packages', payload, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 20000
-    });
-    
-    console.log('✅ Package creation response:', response.data);
-    
-    if (response.data.success !== false) {
-      const packageResponse = response.data.data || response.data;
-      
-      return {
-        id: packageResponse.id,
-        tracking_code: packageResponse.code || packageResponse.tracking_code,
-        message: response.data.message || 'Package created successfully'
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to create package');
-    }
-    
-  } catch (error: any) {
-    console.error('❌ Package creation failed:', error);
-    
-    if (error.response?.data?.message) {
-      throw new Error(error.response.data.message);
-    } else if (error.response?.data?.errors) {
-      const errors = Object.values(error.response.data.errors).flat();
-      throw new Error(errors.join(', '));
-    } else if (error.message) {
-      throw new Error(error.message);
-    } else {
-      throw new Error('Failed to create package - please try again');
-    }
-  }
-};
+
 
 /**
  * ADDED: Get package pricing estimation
@@ -1699,7 +1616,6 @@ export default {
   // NEW MAIN FUNCTIONS
   getPackageFormData,
   validatePackageFormData,
-  createPackage,
   getPackagePricing,
   getLocations,
   
