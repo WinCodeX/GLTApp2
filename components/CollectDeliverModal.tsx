@@ -1,4 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+// components/CollectDeliverModal.tsx - Updated to create package in pending_unpaid state
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -15,44 +16,48 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  FlatList,
   Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import * as Location from 'expo-location';
-import { type PackageData } from '../lib/helpers/packageHelpers';
+import { 
+  getPackageFormData,
+  createPackage,
+  type PackageData,
+  type Agent,
+  type Area 
+} from '../lib/helpers/packageHelpers';
+import Toast from 'react-native-toast-message';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
-
-interface LocationData {
-  latitude: number;
-  longitude: number;
-  address?: string;
-}
 
 interface CollectDeliverModalProps {
   visible: boolean;
   onClose: () => void;
-  onSubmit: (packageData: PackageData) => Promise<void>;
-  currentLocation: LocationData | null;
+  onPackageCreated: (packageId: string, cost: number) => void; // Changed: Redirect to payment
 }
 
 export default function CollectDeliverModal({
   visible,
   onClose,
-  onSubmit,
-  currentLocation: initialLocation
+  onPackageCreated,
 }: CollectDeliverModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [isLoadingData, setIsLoadingData] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
-  // Location states
-  const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
-  const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(initialLocation);
+  // Form data
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  
+  // Selected agents/areas
+  const [selectedOriginAgent, setSelectedOriginAgent] = useState<Agent | null>(null);
+  const [selectedDestinationArea, setSelectedDestinationArea] = useState<Area | null>(null);
   
   // Form states
   const [shopName, setShopName] = useState('');
@@ -60,16 +65,39 @@ export default function CollectDeliverModal({
   const [collectionAddress, setCollectionAddress] = useState('');
   const [itemsToCollect, setItemsToCollect] = useState('');
   const [itemValue, setItemValue] = useState('');
+  const [receiverName, setReceiverName] = useState('');
+  const [receiverPhone, setReceiverPhone] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card'>('mpesa');
+  const [estimatedCost, setEstimatedCost] = useState<number | null>(null);
   
   const STEP_TITLES = [
     'Collection Details',
-    'Item Information',
+    'Item Information', 
     'Delivery Setup',
-    'Payment & Confirmation'
+    'Confirm & Pay'
   ];
+
+  // Load form data
+  const loadFormData = useCallback(async () => {
+    setIsLoadingData(true);
+    try {
+      const formData = await getPackageFormData();
+      setAgents(formData.agents);
+      setAreas(formData.areas);
+    } catch (error: any) {
+      console.error('❌ Failed to load form data:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to Load Data',
+        text2: error.message || 'Could not load agents and areas',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+    } finally {
+      setIsLoadingData(false);
+    }
+  }, []);
 
   // Keyboard handling
   useEffect(() => {
@@ -94,171 +122,178 @@ export default function CollectDeliverModal({
     };
   }, []);
 
-  // Calculate modal height based on keyboard state
-  const modalHeight = useMemo(() => {
-    if (isKeyboardVisible) {
-      const maxHeightWithKeyboard = SCREEN_HEIGHT - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
-      return Math.min(maxHeightWithKeyboard, SCREEN_HEIGHT * 0.85);
-    }
-    return SCREEN_HEIGHT * 0.90;
-  }, [isKeyboardVisible, keyboardHeight]);
-
+  // Animation effects
   useEffect(() => {
     if (visible) {
-      resetForm();
-      
-      Animated.timing(slideAnim, {
+      loadFormData();
+      Animated.spring(slideAnim, {
         toValue: 0,
-        duration: 300,
+        useNativeDriver: true,
+        tension: 100,
+        friction: 8,
+      }).start();
+    } else {
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]);
+  }, [visible, slideAnim, loadFormData]);
 
-  const resetForm = useCallback(() => {
-    setCurrentStep(0);
-    setCollectionLocation(null);
-    setDeliveryLocation(initialLocation);
-    setShopName('');
-    setShopContact('');
-    setCollectionAddress('');
-    setItemsToCollect('');
-    setItemValue('');
-    setDeliveryAddress('');
-    setSpecialInstructions('');
-    setPaymentMethod('mpesa');
-    setIsSubmitting(false);
-  }, [initialLocation]);
+  // Calculate pricing based on collection service
+  useEffect(() => {
+    if (selectedOriginAgent && selectedDestinationArea && itemValue) {
+      calculateCollectionPrice();
+    }
+  }, [selectedOriginAgent, selectedDestinationArea, itemValue]);
 
-  const closeModal = useCallback(() => {
-    Keyboard.dismiss();
+  const calculateCollectionPrice = () => {
+    if (!selectedOriginAgent || !selectedDestinationArea) return;
+
+    const originArea = selectedOriginAgent.area;
+    if (!originArea) return;
+
+    const isIntraArea = originArea.id === selectedDestinationArea.id;
+    const isIntraLocation = originArea.location_id === selectedDestinationArea.location_id;
+
+    let baseCost = 0;
+    
+    // Collection service base pricing
+    if (isIntraArea) {
+      baseCost = 400; // Same area collection + delivery
+    } else if (isIntraLocation) {
+      baseCost = 500; // Same location, different areas
+    } else {
+      baseCost = 650; // Different locations
+    }
+
+    // Add value-based fee for high-value items
+    const value = parseFloat(itemValue) || 0;
+    if (value > 10000) {
+      baseCost += 150; // High-value item surcharge
+    } else if (value > 5000) {
+      baseCost += 100; // Medium-value item surcharge
+    }
+
+    setEstimatedCost(baseCost);
+  };
+
+  const closeModal = () => {
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
+      resetForm();
       onClose();
     });
-  }, [slideAnim, onClose]);
-
-  const selectLocationOnMap = async (type: 'collection' | 'delivery') => {
-    // In a real app, this would open a map picker
-    Alert.alert(
-      'Select Location',
-      `This would open a map to select ${type} location. For demo purposes, we'll use current location.`,
-      [
-        {
-          text: 'Cancel',
-          style: 'cancel'
-        },
-        {
-          text: 'Use Current Location',
-          onPress: async () => {
-            try {
-              const location = await Location.getCurrentPositionAsync({});
-              const address = await Location.reverseGeocodeAsync({
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-              });
-              
-              const locationData = {
-                latitude: location.coords.latitude,
-                longitude: location.coords.longitude,
-                address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Selected Location'
-              };
-              
-              if (type === 'collection') {
-                setCollectionLocation(locationData);
-              } else {
-                setDeliveryLocation(locationData);
-              }
-            } catch (error) {
-              Alert.alert('Error', 'Failed to get location');
-            }
-          }
-        }
-      ]
-    );
   };
 
-  const isStepValid = useCallback((step: number) => {
+  const resetForm = () => {
+    setCurrentStep(0);
+    setSelectedOriginAgent(null);
+    setSelectedDestinationArea(null);
+    setShopName('');
+    setShopContact('');
+    setCollectionAddress('');
+    setItemsToCollect('');
+    setItemValue('');
+    setReceiverName('');
+    setReceiverPhone('');
+    setDeliveryAddress('');
+    setSpecialInstructions('');
+    setEstimatedCost(null);
+  };
+
+  const isStepValid = (step: number) => {
     switch (step) {
       case 0:
-        return shopName.trim().length > 0 && collectionAddress.trim().length > 0;
+        return selectedOriginAgent && shopName.trim() && shopContact.trim() && collectionAddress.trim();
       case 1:
-        return itemsToCollect.trim().length > 0 && itemValue.trim().length > 0;
+        return itemsToCollect.trim() && itemValue.trim() && parseFloat(itemValue) > 0;
       case 2:
-        return deliveryAddress.trim().length > 0;
+        return selectedDestinationArea && receiverName.trim() && receiverPhone.trim() && deliveryAddress.trim();
       case 3:
-        return paymentMethod.length > 0;
+        return true;
       default:
         return false;
     }
-  }, [shopName, collectionAddress, itemsToCollect, itemValue, deliveryAddress, paymentMethod]);
+  };
 
-  const nextStep = useCallback(() => {
+  const nextStep = () => {
     if (currentStep < STEP_TITLES.length - 1 && isStepValid(currentStep)) {
       setCurrentStep(prev => prev + 1);
     }
-  }, [currentStep, isStepValid]);
+  };
 
-  const prevStep = useCallback(() => {
+  const prevStep = () => {
     if (currentStep > 0) {
       setCurrentStep(prev => prev - 1);
     }
-  }, [currentStep]);
-
-  const calculateCosts = () => {
-    const collectionFee = 200;
-    const deliveryFee = 250;
-    const itemValueNum = parseFloat(itemValue) || 0;
-    const insuranceFee = Math.max(50, itemValueNum * 0.02); // 2% or minimum 50
-    const serviceFee = 100;
-    
-    return {
-      collection: collectionFee,
-      delivery: deliveryFee,
-      insurance: Math.round(insuranceFee),
-      service: serviceFee,
-      total: collectionFee + deliveryFee + Math.round(insuranceFee) + serviceFee
-    };
   };
 
   const handleSubmit = async () => {
-    if (!isStepValid(currentStep)) return;
+    if (!isStepValid(currentStep) || !selectedOriginAgent || !selectedDestinationArea) return;
 
     setIsSubmitting(true);
     try {
+      console.log('📦 Creating collection package...');
+      
       const packageData: PackageData = {
-        receiver_name: 'Self', // Collecting for self
-        receiver_phone: '+254700000000', // Would come from user context
-        pickup_location: `${shopName} - ${collectionAddress}`,
-        delivery_location: deliveryAddress,
-        delivery_type: 'doorstep',
-        package_description: `COLLECT & DELIVER: ${itemsToCollect}\nValue: KES ${itemValue}\nSpecial Instructions: ${specialInstructions}`,
-        coordinates: collectionLocation && deliveryLocation ? {
-          pickup: collectionLocation,
-          delivery: deliveryLocation
-        } : undefined,
-        collection_details: {
-          shop_name: shopName,
-          shop_contact: shopContact,
-          items_to_collect: itemsToCollect,
-          estimated_value: itemValue,
-          payment_method: paymentMethod
-        }
+        sender_name: 'Current User', // Will be set by backend from user info
+        sender_phone: '+254700000000', // Will be set by backend from user info
+        receiver_name: receiverName.trim(),
+        receiver_phone: receiverPhone.trim(),
+        origin_agent_id: selectedOriginAgent.id,
+        destination_agent_id: '', // Collection is pickup + doorstep delivery
+        origin_area_id: selectedOriginAgent.area?.id || '',
+        destination_area_id: selectedDestinationArea.id,
+        delivery_type: 'collection',
+        delivery_location: deliveryAddress.trim(),
+        // Collection-specific fields
+        shop_name: shopName.trim(),
+        shop_contact: shopContact.trim(),
+        collection_address: collectionAddress.trim(),
+        items_to_collect: itemsToCollect.trim(),
+        item_value: parseFloat(itemValue),
+        special_instructions: specialInstructions.trim(),
       };
 
-      await onSubmit(packageData);
+      console.log('🚀 Submitting collection package data:', packageData);
+
+      const response = await createPackage(packageData);
+      
+      console.log('✅ Collection package created successfully:', response);
+      
       closeModal();
-    } catch (error) {
-      console.error('Error submitting collect & deliver request:', error);
+      
+      // Redirect to payment with package details
+      onPackageCreated(response.id, estimatedCost || 500);
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Collection Service Created! 📦',
+        text2: `Package ${response.tracking_code} created. Redirecting to payment...`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
+      
+    } catch (error: any) {
+      console.error('❌ Error creating collection package:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Package Creation Failed',
+        text2: error.message || 'Failed to create package. Please try again.',
+        position: 'top',
+        visibilityTime: 4000,
+      });
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const renderProgressBar = useCallback(() => (
+  const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
         <View 
@@ -272,9 +307,9 @@ export default function CollectDeliverModal({
         Step {currentStep + 1} of {STEP_TITLES.length}
       </Text>
     </View>
-  ), [currentStep]);
+  );
 
-  const renderHeader = useCallback(() => (
+  const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
@@ -282,19 +317,67 @@ export default function CollectDeliverModal({
       <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
       <View style={styles.placeholder} />
     </View>
-  ), [closeModal, currentStep]);
+  );
 
-  const renderCollectionDetails = () => (
+  const renderCollectionDetailsStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📦 Collection Setup</Text>
+      <Text style={styles.stepTitle}>📍 Collection Setup</Text>
       <Text style={styles.stepSubtitle}>
-        Where should we collect your items from?
+        Tell us where to collect your items from
       </Text>
       
+      <View style={styles.collectionInfo}>
+        <Feather name="package" size={20} color="#10b981" />
+        <View style={styles.collectionInfoText}>
+          <Text style={styles.collectionInfoTitle}>Collection & Delivery Service</Text>
+          <Text style={styles.collectionInfoDescription}>
+            We'll pick up your items from the specified location and deliver them safely. 
+            Payment required in advance.
+          </Text>
+        </View>
+      </View>
+
       <View style={styles.formContainer}>
+        {/* Agent Selection */}
+        <Text style={styles.fieldLabel}>Select Collection Agent:</Text>
+        {isLoadingData ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#10b981" />
+            <Text style={styles.loadingText}>Loading agents...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={agents}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[
+                  styles.agentItem,
+                  selectedOriginAgent?.id === item.id && styles.selectedAgentItem
+                ]}
+                onPress={() => setSelectedOriginAgent(item)}
+              >
+                <View style={styles.agentInfo}>
+                  <Text style={styles.agentName}>{item.name}</Text>
+                  <Text style={styles.agentLocation}>
+                    {item.area?.name}, {item.area?.location?.name}
+                  </Text>
+                  <Text style={styles.agentPhone}>{item.phone}</Text>
+                </View>
+                {selectedOriginAgent?.id === item.id && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            )}
+            style={styles.agentsList}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+        
+        {/* Shop Details */}
         <TextInput
           style={styles.input}
-          placeholder="Shop/Store Name"
+          placeholder="Shop/Business Name"
           placeholderTextColor="#888"
           value={shopName}
           onChangeText={setShopName}
@@ -303,7 +386,7 @@ export default function CollectDeliverModal({
         
         <TextInput
           style={styles.input}
-          placeholder="Shop Contact Number (optional)"
+          placeholder="Shop Contact Number"
           placeholderTextColor="#888"
           value={shopContact}
           onChangeText={setShopContact}
@@ -312,54 +395,32 @@ export default function CollectDeliverModal({
         
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Collection address, building details, floor, etc."
+          placeholder="Collection Address (detailed location)"
           placeholderTextColor="#888"
           value={collectionAddress}
           onChangeText={setCollectionAddress}
           multiline
-          numberOfLines={3}
           textAlignVertical="top"
         />
-      </View>
-
-      <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🛍️ Collection Point on Map (Optional)</Text>
-        <TouchableOpacity 
-          style={[styles.locationInput, collectionLocation && styles.locationInputSelected]}
-          onPress={() => selectLocationOnMap('collection')}
-        >
-          <Text style={[styles.locationText, collectionLocation && styles.locationTextSelected]}>
-            {collectionLocation?.address || 'Tap to set collection point on map (optional)'}
-          </Text>
-          <Feather name="map-pin" size={20} color={collectionLocation ? "#10b981" : "#666"} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.serviceInfo}>
-        <Feather name="info" size={16} color="#10b981" />
-        <Text style={styles.serviceInfoText}>
-          We'll go to the shop, collect your items, and deliver them to you
-        </Text>
       </View>
     </View>
   );
 
-  const renderItemInformation = () => (
+  const renderItemInformationStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📝 What to Collect</Text>
+      <Text style={styles.stepTitle}>📦 What are we collecting?</Text>
       <Text style={styles.stepSubtitle}>
-        Tell us about the items you want us to collect
+        Provide details about the items to collect
       </Text>
-      
+
       <View style={styles.formContainer}>
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Describe the items to collect (e.g., 2x shoes size 42, 1x jacket XL)"
+          placeholder="Describe items to collect (e.g., 5 boxes of electronics, furniture set)"
           placeholderTextColor="#888"
           value={itemsToCollect}
           onChangeText={setItemsToCollect}
           multiline
-          numberOfLines={4}
           textAlignVertical="top"
         />
         
@@ -372,340 +433,322 @@ export default function CollectDeliverModal({
           keyboardType="numeric"
         />
         
-        <TextInput
-          style={[styles.input, styles.textArea]}
-          placeholder="Special instructions for collection (optional)"
-          placeholderTextColor="#888"
-          value={specialInstructions}
-          onChangeText={setSpecialInstructions}
-          multiline
-          numberOfLines={3}
-          textAlignVertical="top"
-        />
-      </View>
-
-      <View style={styles.valueNotice}>
-        <Feather name="shield" size={16} color="#10b981" />
-        <Text style={styles.valueNoticeText}>
-          Insurance coverage is automatically calculated based on item value
-        </Text>
+        <View style={styles.valueNotice}>
+          <Feather name="info" size={16} color="#10b981" />
+          <Text style={styles.valueNoticeText}>
+            Higher value items may incur additional insurance fees
+          </Text>
+        </View>
       </View>
     </View>
   );
 
-  const renderDeliverySetup = () => (
+  const renderDeliverySetupStep = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>🏠 Delivery to You</Text>
+      <Text style={styles.stepTitle}>🚚 Delivery Details</Text>
       <Text style={styles.stepSubtitle}>
-        Where should we deliver your collected items?
+        Where should we deliver the collected items?
       </Text>
-      
+
       <View style={styles.formContainer}>
+        {/* Destination Area Selection */}
+        <Text style={styles.fieldLabel}>Select Delivery Area:</Text>
+        {isLoadingData ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#10b981" />
+            <Text style={styles.loadingText}>Loading delivery areas...</Text>
+          </View>
+        ) : (
+          <FlatList
+            data={areas}
+            keyExtractor={(item) => item.id}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[
+                  styles.areaItem,
+                  selectedDestinationArea?.id === item.id && styles.selectedAreaItem
+                ]}
+                onPress={() => setSelectedDestinationArea(item)}
+              >
+                <View style={styles.areaInfo}>
+                  <Text style={styles.areaName}>{item.name}</Text>
+                  <Text style={styles.areaLocation}>{item.location?.name}</Text>
+                </View>
+                {selectedDestinationArea?.id === item.id && (
+                  <Feather name="check-circle" size={20} color="#10b981" />
+                )}
+              </TouchableOpacity>
+            )}
+            style={styles.areasList}
+            showsVerticalScrollIndicator={false}
+          />
+        )}
+        
+        {/* Receiver Details */}
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Full Name"
+          placeholderTextColor="#888"
+          value={receiverName}
+          onChangeText={setReceiverName}
+          autoCapitalize="words"
+        />
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Phone Number"
+          placeholderTextColor="#888"
+          value={receiverPhone}
+          onChangeText={setReceiverPhone}
+          keyboardType="phone-pad"
+        />
+        
         <TextInput
           style={[styles.input, styles.textArea]}
-          placeholder="Your delivery address, building details, floor, etc."
+          placeholder="Delivery address and instructions"
           placeholderTextColor="#888"
           value={deliveryAddress}
           onChangeText={setDeliveryAddress}
           multiline
-          numberOfLines={4}
           textAlignVertical="top"
         />
-      </View>
-
-      <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🎯 Delivery Location on Map (Optional)</Text>
-        <TouchableOpacity 
-          style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
-          onPress={() => selectLocationOnMap('delivery')}
-        >
-          <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
-            {deliveryLocation?.address || 'Tap to set delivery location on map (optional)'}
-          </Text>
-          <Feather name="map-pin" size={20} color={deliveryLocation ? "#10b981" : "#666"} />
-        </TouchableOpacity>
-      </View>
-
-      <View style={styles.deliveryInfo}>
-        <Feather name="clock" size={16} color="#10b981" />
-        <Text style={styles.deliveryInfoText}>
-          Typical collection and delivery time: 2-4 hours depending on location
-        </Text>
+        
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Special delivery instructions (optional)"
+          placeholderTextColor="#888"
+          value={specialInstructions}
+          onChangeText={setSpecialInstructions}
+          multiline
+          textAlignVertical="top"
+        />
       </View>
     </View>
   );
 
-  const renderPaymentConfirmation = () => {
-    const costs = calculateCosts();
-    
-    return (
-      <View style={styles.stepContent}>
-        <Text style={styles.stepTitle}>💳 Payment & Confirmation</Text>
-        <Text style={styles.stepSubtitle}>
-          Review costs and select payment method
-        </Text>
-        
-        <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
-          <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>📋 Service Summary</Text>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Collection from:</Text>
-              <Text style={styles.summaryValue}>{shopName}</Text>
+  const renderConfirmationStep = () => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>✅ Confirm Collection Service</Text>
+      <Text style={styles.stepSubtitle}>
+        Review details and proceed to payment
+      </Text>
+
+      <View style={styles.confirmationContainer}>
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>📍 Collection From</Text>
+          <Text style={styles.confirmationDetail}>{shopName}</Text>
+          <Text style={styles.confirmationSubDetail}>{shopContact}</Text>
+          <Text style={styles.confirmationSubDetail}>{collectionAddress}</Text>
+          <Text style={styles.confirmationSubDetail}>
+            Agent: {selectedOriginAgent?.name} ({selectedOriginAgent?.phone})
+          </Text>
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>📦 Items</Text>
+          <Text style={styles.confirmationDetail}>{itemsToCollect}</Text>
+          <Text style={styles.confirmationSubDetail}>
+            Estimated Value: KES {parseFloat(itemValue).toLocaleString()}
+          </Text>
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>🚚 Delivery To</Text>
+          <Text style={styles.confirmationDetail}>{receiverName}</Text>
+          <Text style={styles.confirmationDetail}>{receiverPhone}</Text>
+          <Text style={styles.confirmationSubDetail}>
+            Area: {selectedDestinationArea?.name}, {selectedDestinationArea?.location?.name}
+          </Text>
+          <Text style={styles.confirmationSubDetail}>{deliveryAddress}</Text>
+          {specialInstructions && (
+            <Text style={styles.confirmationSubDetail}>
+              Instructions: {specialInstructions}
+            </Text>
+          )}
+        </View>
+
+        <View style={styles.pricingSection}>
+          <Text style={styles.pricingSectionTitle}>💰 Total Cost</Text>
+          {estimatedCost && (
+            <Text style={styles.totalCost}>KES {estimatedCost.toLocaleString()}</Text>
+          )}
+          <View style={styles.serviceFeatures}>
+            <View style={styles.serviceFeature}>
+              <Feather name="package" size={16} color="#10b981" />
+              <Text style={styles.serviceFeatureText}>Complete pickup service</Text>
             </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Items:</Text>
-              <Text style={styles.summaryValue}>{itemsToCollect}</Text>
+            <View style={styles.serviceFeature}>
+              <Feather name="truck" size={16} color="#10b981" />
+              <Text style={styles.serviceFeatureText}>Safe transportation</Text>
             </View>
-            <View style={styles.summaryItem}>
-              <Text style={styles.summaryLabel}>Delivery to:</Text>
-              <Text style={styles.summaryValue}>{deliveryAddress}</Text>
+            <View style={styles.serviceFeature}>
+              <Feather name="shield" size={16} color="#10b981" />
+              <Text style={styles.serviceFeatureText}>Item value protection</Text>
+            </View>
+            <View style={styles.serviceFeature}>
+              <Feather name="clock" size={16} color="#10b981" />
+              <Text style={styles.serviceFeatureText}>Same-day collection</Text>
             </View>
           </View>
-
-          <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>💰 Cost Breakdown</Text>
-            <View style={styles.costBreakdown}>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Collection Fee</Text>
-                <Text style={styles.costValue}>KES {costs.collection}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Delivery Fee</Text>
-                <Text style={styles.costValue}>KES {costs.delivery}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Insurance Coverage</Text>
-                <Text style={styles.costValue}>KES {costs.insurance}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Service Fee</Text>
-                <Text style={styles.costValue}>KES {costs.service}</Text>
-              </View>
-              <View style={[styles.costLine, styles.totalCostLine]}>
-                <Text style={styles.totalCostLabel}>Total Amount</Text>
-                <Text style={styles.totalCostValue}>KES {costs.total.toLocaleString()}</Text>
-              </View>
-            </View>
+          
+          <View style={styles.paymentNotice}>
+            <Feather name="alert-circle" size={16} color="#f59e0b" />
+            <Text style={styles.paymentNoticeText}>
+              Payment required in advance for collection services
+            </Text>
           </View>
-
-          <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>💳 Payment Method</Text>
-            <View style={styles.paymentMethods}>
-              <TouchableOpacity
-                style={[styles.paymentOption, paymentMethod === 'mpesa' && styles.selectedPaymentOption]}
-                onPress={() => setPaymentMethod('mpesa')}
-              >
-                <View style={styles.paymentOptionContent}>
-                  <Feather name="smartphone" size={20} color="#10b981" />
-                  <Text style={styles.paymentOptionText}>M-Pesa</Text>
-                  {paymentMethod === 'mpesa' && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </View>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[styles.paymentOption, paymentMethod === 'card' && styles.selectedPaymentOption]}
-                onPress={() => setPaymentMethod('card')}
-              >
-                <View style={styles.paymentOptionContent}>
-                  <Feather name="credit-card" size={20} color="#10b981" />
-                  <Text style={styles.paymentOptionText}>Card Payment</Text>
-                  {paymentMethod === 'card' && (
-                    <Feather name="check-circle" size={20} color="#10b981" />
-                  )}
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>ℹ️ Important Notes</Text>
-            <View style={styles.notesList}>
-              <Text style={styles.noteItem}>• Payment must be made in advance</Text>
-              <Text style={styles.noteItem}>• You'll receive real-time updates via SMS</Text>
-              <Text style={styles.noteItem}>• Our rider will verify items before collection</Text>
-              <Text style={styles.noteItem}>• Insurance covers loss or damage during transit</Text>
-              <Text style={styles.noteItem}>• Digital payment methods ensure secure transactions</Text>
-            </View>
-          </View>
-        </ScrollView>
+        </View>
       </View>
-    );
-  };
+    </View>
+  );
 
-  const renderCurrentStep = () => {
+  const renderStepContent = () => {
     switch (currentStep) {
-      case 0: return renderCollectionDetails();
-      case 1: return renderItemInformation();
-      case 2: return renderDeliverySetup();
-      case 3: return renderPaymentConfirmation();
-      default: return renderCollectionDetails();
+      case 0:
+        return renderCollectionDetailsStep();
+      case 1:
+        return renderItemInformationStep();
+      case 2:
+        return renderDeliverySetupStep();
+      case 3:
+        return renderConfirmationStep();
+      default:
+        return renderCollectionDetailsStep();
     }
   };
 
   const renderNavigationButtons = () => (
     <View style={styles.navigationContainer}>
-      {currentStep > 0 && (
-        <TouchableOpacity onPress={prevStep} style={styles.backButton}>
-          <Feather name="arrow-left" size={20} color="#fff" />
-          <Text style={styles.backButtonText}>Back</Text>
-        </TouchableOpacity>
-      )}
-      
-      <View style={styles.spacer} />
-      
-      {currentStep < STEP_TITLES.length - 1 ? (
-        <TouchableOpacity 
-          onPress={nextStep} 
-          style={[
-            styles.nextButton,
-            !isStepValid(currentStep) && styles.disabledButton
-          ]}
-          disabled={!isStepValid(currentStep)}
-        >
-          <Text style={[
-            styles.nextButtonText,
-            !isStepValid(currentStep) && styles.disabledButtonText
-          ]}>
-            Next
-          </Text>
-          <Feather name="arrow-right" size={20} color={isStepValid(currentStep) ? "#fff" : "#666"} />
-        </TouchableOpacity>
-      ) : (
-        <TouchableOpacity 
-          onPress={handleSubmit} 
-          style={[
-            styles.submitButton,
-            (!isStepValid(currentStep) || isSubmitting) && styles.disabledButton
-          ]}
-          disabled={!isStepValid(currentStep) || isSubmitting}
-        >
-          {isSubmitting ? (
-            <ActivityIndicator size="small" color="#fff" />
-          ) : (
-            <>
-              <Text style={[
-                styles.submitButtonText,
-                (!isStepValid(currentStep) || isSubmitting) && styles.disabledButtonText
-              ]}>
-                Confirm & Pay
-              </Text>
-              <Feather name="check" size={20} color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#666"} />
-            </>
-          )}
-        </TouchableOpacity>
-      )}
+      <TouchableOpacity
+        style={[styles.navButton, styles.backButton, currentStep === 0 && styles.disabledButton]}
+        onPress={prevStep}
+        disabled={currentStep === 0}
+      >
+        <Feather name="chevron-left" size={20} color={currentStep === 0 ? "#666" : "#fff"} />
+        <Text style={[styles.navButtonText, currentStep === 0 && styles.disabledButtonText]}>
+          Back
+        </Text>
+      </TouchableOpacity>
+
+      <TouchableOpacity
+        style={[
+          styles.navButton,
+          currentStep === STEP_TITLES.length - 1 ? styles.submitButton : styles.nextButton,
+          !isStepValid(currentStep) && styles.disabledButton
+        ]}
+        onPress={currentStep === STEP_TITLES.length - 1 ? handleSubmit : nextStep}
+        disabled={!isStepValid(currentStep) || isSubmitting}
+      >
+        {isSubmitting ? (
+          <ActivityIndicator size="small" color="#fff" />
+        ) : (
+          <>
+            <Text style={[styles.navButtonText, !isStepValid(currentStep) && styles.disabledButtonText]}>
+              {currentStep === STEP_TITLES.length - 1 ? 'Create & Pay' : 'Next'}
+            </Text>
+            {currentStep < STEP_TITLES.length - 1 && (
+              <Feather name="chevron-right" size={20} color={!isStepValid(currentStep) ? "#666" : "#fff"} />
+            )}
+          </>
+        )}
+      </TouchableOpacity>
     </View>
   );
 
+  if (!visible) return null;
+
   return (
-    <Modal visible={visible} transparent animationType="none">
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <SafeAreaView style={styles.safeArea}>
-        <KeyboardAvoidingView 
-          style={styles.keyboardContainer}
+    <Modal transparent visible={visible} animationType="none">
+      <View style={styles.overlay}>
+        <StatusBar barStyle="light-content" />
+        <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          style={styles.keyboardAvoid}
         >
-          <View style={styles.overlay}>
-            <Animated.View
-              style={[
-                styles.modalContainer,
-                { 
-                  transform: [{ translateY: slideAnim }],
-                  height: modalHeight
-                }
-              ]}
-            >
-              <LinearGradient
-                colors={['#1a1a2e', '#16213e', '#0f1419']}
-                style={styles.modalContent}
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { 
+                transform: [{ translateY: slideAnim }],
+                height: isKeyboardVisible ? SCREEN_HEIGHT - keyboardHeight : SCREEN_HEIGHT * 0.95
+              }
+            ]}
+          >
+            <SafeAreaView style={styles.safeArea}>
+              {renderHeader()}
+              {renderProgressBar()}
+              
+              <ScrollView 
+                style={styles.scrollView}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
-                {renderHeader()}
-                {renderProgressBar()}
-                
-                <ScrollView 
-                  style={styles.contentContainer}
-                  contentContainerStyle={styles.scrollContentContainer}
-                  keyboardShouldPersistTaps="handled"
-                  showsVerticalScrollIndicator={false}
-                >
-                  {renderCurrentStep()}
-                </ScrollView>
-                
-                {renderNavigationButtons()}
-              </LinearGradient>
-            </Animated.View>
-          </View>
+                {renderStepContent()}
+              </ScrollView>
+              
+              {renderNavigationButtons()}
+            </SafeAreaView>
+          </Animated.View>
         </KeyboardAvoidingView>
-      </SafeAreaView>
+      </View>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: 'transparent',
-  },
-  keyboardContainer: {
-    flex: 1,
-  },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.9)',
     justifyContent: 'flex-end',
   },
-  modalContainer: {
-    width: SCREEN_WIDTH,
-  },
-  modalContent: {
+  keyboardAvoid: {
     flex: 1,
+  },
+  modalContainer: {
+    backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
   },
-  
-  // Header - Fixed padding for proper status bar handling
+  safeArea: {
+    flex: 1,
+  },
   header: {
     flexDirection: 'row',
-    alignItems: 'center',
     justifyContent: 'space-between',
+    alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 10 : 15,
-    paddingBottom: 8,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(16, 185, 129, 0.2)',
   },
   closeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    padding: 8,
+    borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    marginTop: 4,
+    flex: 1,
+    textAlign: 'center',
   },
   placeholder: {
     width: 40,
   },
-  
-  // Progress
   progressContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 16,
   },
   progressBackground: {
     height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
     borderRadius: 2,
+    marginBottom: 8,
   },
   progressForeground: {
-    height: '100%',
+    height: 4,
     backgroundColor: '#10b981',
     borderRadius: 2,
   },
@@ -713,40 +756,66 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#888',
     textAlign: 'center',
-    marginTop: 6,
   },
-  
-  // Content
-  contentContainer: {
+  scrollView: {
     flex: 1,
-  },
-  scrollContentContainer: {
-    flexGrow: 1,
-    paddingHorizontal: 20,
-    paddingBottom: 10,
   },
   stepContent: {
-    flex: 1,
-    minHeight: 300,
+    padding: 20,
   },
   stepTitle: {
-    fontSize: 22,
-    fontWeight: '700',
+    fontSize: 24,
+    fontWeight: 'bold',
     color: '#fff',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   stepSubtitle: {
-    fontSize: 15,
+    fontSize: 16,
     color: '#888',
     marginBottom: 20,
-    lineHeight: 20,
   },
-  
-  // Form
+  collectionInfo: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    gap: 12,
+  },
+  collectionInfoText: {
+    flex: 1,
+  },
+  collectionInfoTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#10b981',
+    marginBottom: 4,
+  },
+  collectionInfoDescription: {
+    fontSize: 14,
+    color: '#10b981',
+    lineHeight: 18,
+  },
   formContainer: {
     gap: 16,
     paddingVertical: 8,
-    marginBottom: 20,
+  },
+  fieldLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 14,
+    color: '#10b981',
+    marginTop: 10,
   },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
@@ -764,252 +833,195 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingTop: 14,
   },
-  
-  // Location section
-  locationSection: {
-    marginBottom: 20,
+  agentsList: {
+    maxHeight: 300,
+    marginBottom: 16,
   },
-  locationLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  locationInput: {
+  agentItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
     padding: 16,
+    marginBottom: 8,
     borderWidth: 1,
     borderColor: 'rgba(16, 185, 129, 0.3)',
   },
-  locationInputSelected: {
+  selectedAgentItem: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
     borderColor: '#10b981',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
-  locationText: {
+  agentInfo: {
     flex: 1,
+  },
+  agentName: {
     fontSize: 16,
-    color: '#888',
-  },
-  locationTextSelected: {
+    fontWeight: '600',
     color: '#fff',
+    marginBottom: 2,
   },
-  
-  // Service info
-  serviceInfo: {
+  agentLocation: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  agentPhone: {
+    fontSize: 12,
+    color: '#666',
+  },
+  areasList: {
+    maxHeight: 200,
+    marginBottom: 16,
+  },
+  areaItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderRadius: 8,
-    padding: 10,
-    gap: 8,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
-  serviceInfoText: {
+  selectedAreaItem: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    borderColor: '#10b981',
+  },
+  areaInfo: {
     flex: 1,
-    fontSize: 14,
-    color: '#10b981',
-    lineHeight: 18,
   },
-  
-  // Value notice
+  areaName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  areaLocation: {
+    fontSize: 14,
+    color: '#888',
+  },
   valueNotice: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
-    padding: 10,
-    marginTop: 10,
+    padding: 12,
     gap: 8,
   },
   valueNoticeText: {
     flex: 1,
     fontSize: 14,
     color: '#10b981',
-    lineHeight: 18,
   },
-  
-  // Delivery info
-  deliveryInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.1)',
-    borderRadius: 8,
-    padding: 10,
-    gap: 8,
-  },
-  deliveryInfoText: {
-    flex: 1,
-    fontSize: 14,
-    color: '#10b981',
-    lineHeight: 18,
-  },
-  
-  // Confirmation
   confirmationContainer: {
-    flex: 1,
+    gap: 16,
   },
   confirmationSection: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
-    padding: 14,
-    marginBottom: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
   },
   confirmationSectionTitle: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
     color: '#10b981',
-    marginBottom: 10,
-  },
-  
-  // Summary
-  summaryItem: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
     marginBottom: 8,
   },
-  summaryLabel: {
-    fontSize: 14,
-    color: '#888',
-    flex: 1,
-  },
-  summaryValue: {
-    fontSize: 14,
-    color: '#fff',
-    flex: 2,
-    textAlign: 'right',
-  },
-  
-  // Cost breakdown
-  costBreakdown: {
-    gap: 8,
-  },
-  costLine: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  costLabel: {
-    fontSize: 14,
-    color: '#888',
-  },
-  costValue: {
-    fontSize: 14,
-    color: '#fff',
-  },
-  totalCostLine: {
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    paddingTop: 8,
-    marginTop: 4,
-  },
-  totalCostLabel: {
+  confirmationDetail: {
     fontSize: 16,
-    fontWeight: '600',
     color: '#fff',
+    marginBottom: 4,
   },
-  totalCostValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#10b981',
+  confirmationSubDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
   },
-  
-  // Payment methods
-  paymentMethods: {
-    gap: 12,
-  },
-  paymentOption: {
+  pricingSection: {
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    padding: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  selectedPaymentOption: {
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
     borderColor: '#10b981',
   },
-  paymentOptionContent: {
+  pricingSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#10b981',
+    marginBottom: 8,
+  },
+  totalCost: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  serviceFeatures: {
+    gap: 8,
+    marginBottom: 12,
+  },
+  serviceFeature: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 16,
-    gap: 12,
+    gap: 8,
   },
-  paymentOptionText: {
+  serviceFeatureText: {
+    fontSize: 14,
+    color: '#10b981',
+  },
+  paymentNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(245, 158, 11, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  paymentNoticeText: {
     flex: 1,
-    fontSize: 16,
-    color: '#fff',
+    fontSize: 14,
+    color: '#f59e0b',
     fontWeight: '500',
   },
-  
-  // Notes
-  notesList: {
-    gap: 6,
-  },
-  noteItem: {
-    fontSize: 14,
-    color: '#888',
-    lineHeight: 18,
-  },
-  
-  // Navigation
   navigationContainer: {
     flexDirection: 'row',
-    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    borderTopColor: 'rgba(16, 185, 129, 0.2)',
+    gap: 12,
   },
-  spacer: {
+  navButton: {
     flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 16,
+    borderRadius: 12,
+    gap: 8,
   },
   backButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
-    borderRadius: 8,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 8,
-  },
-  backButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
   },
   nextButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
     backgroundColor: '#10b981',
-    gap: 8,
-  },
-  nextButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
   },
   submitButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    borderRadius: 8,
-    backgroundColor: '#10b981',
-    gap: 8,
-  },
-  submitButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
+    backgroundColor: '#059669',
   },
   disabledButton: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  navButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
   disabledButtonText: {
     color: '#666',
