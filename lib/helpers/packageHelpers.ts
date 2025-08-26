@@ -1,12 +1,25 @@
-// lib/helpers/packageHelpers.ts - Complete alignment with PackageCreationModal requirements
+// lib/helpers/packageHelpers.ts - Fixed state filtering and enhanced delivery type support
 import api from '../api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 // ==========================================
-// TYPE DEFINITIONS FOR PACKAGE CREATION MODAL
+// ENHANCED TYPE DEFINITIONS
 // ==========================================
 
-// Core data types expected by PackageCreationModal
+export type DeliveryType = 'doorstep' | 'agent' | 'fragile' | 'collection' | 'express' | 'bulk';
+export type PaymentMethod = 'mpesa' | 'card' | 'cash';
+export type CollectionType = 'shop_pickup' | 'office_pickup' | 'custom_location';
+
+// FIXED: Drawer state types matching CustomDrawerContent exactly
+export type DrawerState = 
+  | 'pending' 
+  | 'paid' 
+  | 'submitted' 
+  | 'in-transit' 
+  | 'delivered' 
+  | 'collected' 
+  | 'rejected';
+
 export interface Location {
   id: string;
   name: string;
@@ -31,81 +44,7 @@ export interface Agent {
   area?: Area;
 }
 
-// CRITICAL: PackageData interface exactly as expected by PackageCreationModal
-export interface PackageData {
-  sender_name: string;
-  sender_phone: string;
-  receiver_name: string;
-  receiver_phone: string;
-  origin_agent_id: string;
-  destination_agent_id?: string; // Optional for doorstep delivery
-  destination_area_id?: string;  // Optional, can be derived from agent
-  delivery_type: 'doorstep' | 'agent'; // Only these two types for standard modal
-  delivery_location?: string; // Required for doorstep delivery
-  
-  // Optional extended fields for enhanced delivery types (fragile, collection)
-  sender_email?: string;
-  receiver_email?: string;
-  business_name?: string;
-  special_instructions?: string;
-  special_handling?: boolean;
-  priority_level?: 'normal' | 'high' | 'urgent';
-  payment_method?: 'mpesa' | 'card' | 'cash';
-  requires_payment_advance?: boolean;
-  
-  // Collection-specific fields (for CollectDeliverModal)
-  shop_name?: string;
-  shop_contact?: string;
-  collection_address?: string;
-  items_to_collect?: string;
-  item_value?: number;
-  item_description?: string;
-  collection_type?: 'shop_pickup' | 'office_pickup' | 'custom_location';
-  
-  // Coordinates for mapping
-  pickup_latitude?: number;
-  pickup_longitude?: number;
-  delivery_latitude?: number;
-  delivery_longitude?: number;
-  
-  // Timing fields
-  payment_deadline?: string;
-  collection_scheduled_at?: string;
-  
-  // Legacy/compatibility fields
-  pickup_location?: string;
-  package_description?: string;
-  coordinates?: {
-    pickup?: { latitude: number; longitude: number; };
-    delivery?: { latitude: number; longitude: number; };
-  };
-  collection_details?: {
-    shop_name?: string;
-    shop_contact?: string;
-    items_to_collect?: string;
-    estimated_value?: string;
-    payment_method?: string;
-  };
-}
-
-// Form data structure expected by PackageCreationModal
-export interface PackageFormData {
-  locations: Location[];
-  areas: Area[];
-  agents: Agent[];
-}
-
-// Validation result for form data validation
-export interface ValidationResult {
-  isValid: boolean;
-  issues: string[];
-}
-
-// Extended delivery types for all modals
-export type DeliveryType = 'doorstep' | 'agent' | 'fragile' | 'collection' | 'express' | 'bulk';
-export type PaymentMethod = 'mpesa' | 'card' | 'cash';
-
-// Package interface for tracking and display
+// Enhanced Package interface with all delivery types
 export interface Package {
   id: string | number;
   code: string;
@@ -117,7 +56,7 @@ export interface Package {
   receiver_phone: string;
   route_description: string;
   cost: number;
-  delivery_type: string;
+  delivery_type: string; // Can be any delivery type
   delivery_type_display?: string;
   priority_level?: string;
   created_at: string;
@@ -136,7 +75,7 @@ export interface Package {
   receiver_email?: string;
   business_name?: string;
   
-  // Enhanced flags
+  // Enhanced flags for all delivery types
   is_fragile?: boolean;
   is_collection?: boolean;
   requires_special_handling?: boolean;
@@ -173,7 +112,81 @@ export interface Package {
   tracking_url?: string;
 }
 
-// QR Code response interface
+// Package creation data interface
+export interface PackageData {
+  // Core package information
+  sender_name?: string;
+  sender_phone?: string;
+  sender_email?: string;
+  receiver_name: string;
+  receiver_phone: string;
+  receiver_email?: string;
+  business_name?: string;
+  
+  // Location and routing
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+  delivery_location?: string;
+  
+  // Enhanced delivery type with all supported types
+  delivery_type: DeliveryType;
+  
+  // Special handling
+  special_instructions?: string;
+  special_handling?: boolean;
+  priority_level?: 'normal' | 'high' | 'urgent';
+  
+  // Collection-specific fields (for collection delivery type)
+  shop_name?: string;
+  shop_contact?: string;
+  collection_address?: string;
+  items_to_collect?: string;
+  item_value?: number;
+  item_description?: string;
+  collection_type?: CollectionType;
+  
+  // Payment and scheduling
+  payment_method?: PaymentMethod;
+  requires_payment_advance?: boolean;
+  payment_deadline?: string;
+  collection_scheduled_at?: string;
+  
+  // Coordinates for mapping
+  pickup_latitude?: number;
+  pickup_longitude?: number;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
+  
+  // Legacy/compatibility fields
+  pickup_location?: string;
+  package_description?: string;
+  coordinates?: {
+    pickup?: { latitude: number; longitude: number; };
+    delivery?: { latitude: number; longitude: number; };
+  };
+  collection_details?: {
+    shop_name?: string;
+    shop_contact?: string;
+    items_to_collect?: string;
+    estimated_value?: string;
+    payment_method?: PaymentMethod;
+  };
+}
+
+// Form data interfaces
+export interface PackageFormData {
+  locations: Location[];
+  areas: Area[];
+  agents: Agent[];
+}
+
+export interface ValidationResult {
+  isValid: boolean;
+  issues: string[];
+}
+
 export interface QRCodeResponse {
   data: {
     qr_code_base64: string | null;
@@ -186,7 +199,6 @@ export interface QRCodeResponse {
   message?: string;
 }
 
-// Package response interfaces
 export interface PackageResponse {
   data: Package[];
   pagination?: {
@@ -200,53 +212,56 @@ export interface PackageResponse {
 }
 
 export interface PackageFilters {
-  state?: string;
+  state?: DrawerState;
   delivery_type?: DeliveryType;
   search?: string;
   page?: number;
   per_page?: number;
 }
 
-// Drawer state types for track.tsx
-export type DrawerState = 
-  | 'pending' 
-  | 'paid' 
-  | 'submitted' 
-  | 'in-transit' 
-  | 'delivered' 
-  | 'collected' 
-  | 'rejected';
-
 // ==========================================
-// CONSTANTS AND MAPPINGS
+// FIXED STATE MAPPING
 // ==========================================
 
-// State mapping for drawer navigation
+// CRITICAL: State mapping from drawer to API (exactly matching CustomDrawerContent keys)
 export const STATE_MAPPING: Record<DrawerState, string> = {
-  'pending': 'pending_unpaid',
-  'paid': 'pending', 
-  'submitted': 'submitted',
-  'in-transit': 'in_transit',
+  'pending': 'pending_unpaid',     // Pending Payment -> pending_unpaid
+  'paid': 'pending',               // Paid/Processing -> pending  
+  'submitted': 'submitted',        // Submitted -> submitted
+  'in-transit': 'in_transit',      // In Transit -> in_transit
+  'delivered': 'delivered',        // Delivered -> delivered
+  'collected': 'collected',        // Collected -> collected
+  'rejected': 'rejected'           // Rejected -> rejected
+};
+
+// Reverse mapping for API to drawer state
+const REVERSE_STATE_MAPPING: Record<string, DrawerState> = {
+  'pending_unpaid': 'pending',
+  'pending': 'paid',
+  'submitted': 'submitted', 
+  'in_transit': 'in-transit',
   'delivered': 'delivered',
   'collected': 'collected',
   'rejected': 'rejected'
 };
 
-// Enhanced delivery type information
+// Enhanced delivery type information with fragile and collection
 export const DELIVERY_TYPE_INFO = {
   doorstep: {
     name: 'Door-to-Door Delivery',
     description: 'Package delivered directly to the recipient\'s location',
     icon: '🏠',
     requires_location: true,
-    base_cost: 150
+    base_cost: 150,
+    color: '#3b82f6'
   },
   agent: {
     name: 'Agent Collection',
     description: 'Package delivered to an agent for recipient collection',
     icon: '🏢',
     requires_agent: true,
-    base_cost: 100
+    base_cost: 100,
+    color: '#10b981'
   },
   fragile: {
     name: 'Fragile Handling',
@@ -254,7 +269,8 @@ export const DELIVERY_TYPE_INFO = {
     icon: '⚠️',
     requires_location: true,
     base_cost: 200,
-    priority: 'high'
+    priority: 'high',
+    color: '#ef4444'
   },
   collection: {
     name: 'Collection & Delivery',
@@ -263,7 +279,8 @@ export const DELIVERY_TYPE_INFO = {
     requires_location: true,
     requires_collection_details: true,
     base_cost: 250,
-    priority: 'medium'
+    priority: 'medium',
+    color: '#9333ea'
   },
   express: {
     name: 'Express Delivery',
@@ -271,18 +288,20 @@ export const DELIVERY_TYPE_INFO = {
     icon: '⚡',
     requires_location: true,
     base_cost: 300,
-    priority: 'high'
+    priority: 'high',
+    color: '#f59e0b'
   },
   bulk: {
     name: 'Bulk Package',
     description: 'Cost-effective solution for multiple items',
     icon: '📚',
-    base_cost: 80
+    base_cost: 80,
+    color: '#6b7280'
   }
 } as const;
 
 // ==========================================
-// CORE DATA LOADING FUNCTIONS (Required by PackageCreationModal)
+// ENHANCED PACKAGE FUNCTIONS
 // ==========================================
 
 // Cache variables for performance
@@ -293,7 +312,177 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * CRITICAL: Get all package form data - Main function used by PackageCreationModal
+ * CRITICAL: Get packages with proper state filtering
+ */
+export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
+  try {
+    console.log('📦 Fetching packages with filters:', filters);
+    
+    const params = new URLSearchParams();
+    
+    // FIXED: Proper state filtering
+    if (filters?.state) {
+      const apiState = STATE_MAPPING[filters.state];
+      if (apiState) {
+        params.append('state', apiState);
+        console.log('🔍 State filter applied:', filters.state, '->', apiState);
+      } else {
+        console.warn('⚠️ Unknown state filter:', filters.state);
+      }
+    }
+    
+    // Add other filters
+    if (filters?.delivery_type) {
+      params.append('delivery_type', filters.delivery_type);
+    }
+    
+    if (filters?.page) {
+      params.append('page', filters.page.toString());
+    }
+    
+    if (filters?.per_page) {
+      params.append('per_page', filters.per_page.toString());
+    }
+    
+    if (filters?.search) {
+      params.append('search', filters.search);
+    }
+    
+    const queryString = params.toString();
+    const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
+    
+    console.log('📡 API Request URL:', url);
+    
+    const response = await api.get(url, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    if (response.data.success !== false) {
+      const packagesData = response.data.data || [];
+      const transformedPackages = packagesData.map((pkg: any) => transformPackageData(pkg));
+      
+      console.log('✅ Packages loaded:', transformedPackages.length);
+      console.log('📊 Package states breakdown:', 
+        transformedPackages.reduce((acc: any, pkg) => {
+          acc[pkg.state] = (acc[pkg.state] || 0) + 1;
+          return acc;
+        }, {})
+      );
+      
+      return {
+        success: true,
+        data: transformedPackages,
+        pagination: response.data.meta || response.data.pagination
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to fetch packages');
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch packages:', error);
+    throw new Error(`Failed to load packages: ${error.message}`);
+  }
+};
+
+/**
+ * Get package details by code
+ */
+export const getPackageDetails = async (packageCode: string): Promise<Package> => {
+  try {
+    console.log('📦 Fetching package details for code:', packageCode);
+    
+    const response = await api.get(`/api/v1/packages/${packageCode}`, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    if (response.data.success !== false) {
+      const packageData = response.data.data || response.data;
+      const transformedPackage = transformPackageData(packageData);
+      
+      console.log('✅ Package details loaded:', transformedPackage.code);
+      return transformedPackage;
+    } else {
+      throw new Error(response.data.message || 'Package not found');
+    }
+    
+  } catch (error: any) {
+    console.error('❌ Failed to fetch package details:', error);
+    
+    if (error.response?.status === 404) {
+      throw new Error(`Package ${packageCode} not found`);
+    }
+    
+    const errorMessage = error.response?.data?.message || 
+                        error.response?.data?.error ||
+                        error.message || 
+                        'Failed to load package details';
+    throw new Error(errorMessage);
+  }
+};
+
+/**
+ * Get package QR code
+ */
+export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
+  try {
+    console.log('📱 Fetching QR code for package:', packageCode);
+    
+    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
+      headers: {
+        'Accept': 'application/json'
+      },
+      timeout: 10000
+    });
+    
+    if (response.data.success !== false) {
+      console.log('✅ QR code loaded for package:', packageCode);
+      return {
+        success: true,
+        data: response.data.data || response.data
+      };
+    } else {
+      throw new Error(response.data.message || 'Failed to generate QR code');
+    }
+    
+  } catch (error: any) {
+    console.warn('⚠️ Failed to fetch QR code:', error);
+    
+    return {
+      success: false,
+      data: {
+        qr_code_base64: null,
+        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+        package_code: packageCode,
+        package_state: 'unknown',
+        route_description: 'Unable to load route information'
+      },
+      message: error.response?.data?.message || error.message || 'Failed to load QR code'
+    };
+  }
+};
+
+/**
+ * Get packages by specific state
+ */
+export const getPackagesByState = async (state: DrawerState): Promise<PackageResponse> => {
+  return getPackages({ state });
+};
+
+/**
+ * Search packages
+ */
+export const searchPackages = async (searchQuery: string): Promise<PackageResponse> => {
+  return getPackages({ search: searchQuery });
+};
+
+/**
+ * Get comprehensive package form data
  */
 export const getPackageFormData = async (): Promise<PackageFormData> => {
   try {
@@ -392,125 +581,17 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
 };
 
 /**
- * Validate package form data structure - Used by PackageCreationModal
- */
-export const validatePackageFormData = (data: any): ValidationResult => {
-  const issues: string[] = [];
-  
-  try {
-    if (!data || typeof data !== 'object') {
-      issues.push('Data is not a valid object');
-      return { isValid: false, issues };
-    }
-    
-    // Check locations (optional but should be array if present)
-    if (data.locations !== undefined) {
-      if (!Array.isArray(data.locations)) {
-        issues.push('Locations must be an array');
-      } else {
-        data.locations.forEach((location: any, index: number) => {
-          if (!location.id || !location.name) {
-            issues.push(`Location ${index} missing required fields (id, name)`);
-          }
-        });
-      }
-    }
-    
-    // Check areas (required)
-    if (!data.areas || !Array.isArray(data.areas)) {
-      issues.push('Areas must be a non-empty array');
-    } else if (data.areas.length === 0) {
-      issues.push('At least one area is required');
-    } else {
-      data.areas.forEach((area: any, index: number) => {
-        if (!area.id || !area.name) {
-          issues.push(`Area ${index} missing required fields (id, name)`);
-        }
-      });
-    }
-    
-    // Check agents (required)
-    if (!data.agents || !Array.isArray(data.agents)) {
-      issues.push('Agents must be a non-empty array');
-    } else if (data.agents.length === 0) {
-      issues.push('At least one agent is required');
-    } else {
-      data.agents.forEach((agent: any, index: number) => {
-        if (!agent.id || !agent.name) {
-          issues.push(`Agent ${index} missing required fields (id, name)`);
-        }
-      });
-    }
-    
-    return {
-      isValid: issues.length === 0,
-      issues
-    };
-    
-  } catch (error: any) {
-    issues.push(`Validation error: ${error.message}`);
-    return { isValid: false, issues };
-  }
-};
-
-/**
- * Get package pricing - Used by PackageCreationModal for cost calculation
- */
-export const getPackagePricing = async (
-  originId: string, 
-  destinationId: string, 
-  deliveryType: string = 'agent'
-): Promise<{ cost: number; breakdown?: any }> => {
-  try {
-    console.log('💰 Getting package pricing:', { originId, destinationId, deliveryType });
-    
-    const response = await api.get(`/api/v1/packages/pricing`, {
-      params: {
-        origin_area_id: originId,
-        destination_area_id: destinationId,
-        delivery_type: deliveryType
-      },
-      timeout: 10000
-    });
-    
-    if (response.data.success !== false) {
-      const pricingData = response.data.data || response.data;
-      console.log('✅ Pricing loaded:', pricingData);
-      return pricingData;
-    } else {
-      throw new Error(response.data.message || 'Failed to get pricing');
-    }
-    
-  } catch (error: any) {
-    console.warn('⚠️ Failed to get pricing from API, using base cost:', error.message);
-    
-    // Return base cost from delivery type info as fallback
-    const typeInfo = DELIVERY_TYPE_INFO[deliveryType as keyof typeof DELIVERY_TYPE_INFO];
-    const baseCost = typeInfo?.base_cost || 150;
-    
-    return { 
-      cost: baseCost,
-      breakdown: {
-        base_cost: baseCost,
-        delivery_type: deliveryType,
-        note: 'Fallback pricing due to API error'
-      }
-    };
-  }
-};
-
-/**
- * Create package - Main function used by PackageCreationModal
+ * Create package with enhanced delivery type support
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
-    console.log('📦 Creating package via PackageCreationModal:', packageData.delivery_type);
+    console.log('📦 Creating package with delivery type:', packageData.delivery_type);
     console.log('📦 Package data:', JSON.stringify(packageData, null, 2));
     
-    // Validate package data
+    // Enhanced validation for different delivery types
     validatePackageCreationData(packageData);
     
-    // Build API payload
+    // Prepare comprehensive API payload
     const payload = {
       package: buildPackagePayload(packageData)
     };
@@ -561,15 +642,10 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
 // DATA LOADING FUNCTIONS
 // ==========================================
 
-/**
- * Get locations from API
- */
 export const getLocations = async (): Promise<Location[]> => {
   try {
     console.log('📍 Fetching locations...');
-    const response = await api.get('/api/v1/locations', {
-      timeout: 15000
-    });
+    const response = await api.get('/api/v1/locations', { timeout: 15000 });
     
     let transformedLocations: Location[] = [];
     
@@ -579,8 +655,6 @@ export const getLocations = async (): Promise<Location[]> => {
       transformedLocations = locationsData.map((item: any) => transformLocationData(item));
     } else if (Array.isArray(response.data)) {
       transformedLocations = response.data.map((item: any) => transformLocationData(item));
-    } else {
-      console.warn('⚠️ Unexpected locations API response format:', response.data);
     }
     
     console.log('✅ Locations loaded:', transformedLocations.length);
@@ -588,20 +662,14 @@ export const getLocations = async (): Promise<Location[]> => {
     
   } catch (error: any) {
     console.error('❌ Failed to fetch locations:', error);
-    // Return empty array instead of throwing - locations are optional
     return [];
   }
 };
 
-/**
- * Get areas from API
- */
 export const getAreas = async (): Promise<Area[]> => {
   try {
     console.log('🏢 Fetching areas...');
-    const response = await api.get('/api/v1/areas', {
-      timeout: 15000
-    });
+    const response = await api.get('/api/v1/areas', { timeout: 15000 });
     
     let transformedAreas: Area[] = [];
     
@@ -611,9 +679,6 @@ export const getAreas = async (): Promise<Area[]> => {
       transformedAreas = areasData.map((item: any) => transformAreaData(item));
     } else if (Array.isArray(response.data)) {
       transformedAreas = response.data.map((item: any) => transformAreaData(item));
-    } else {
-      console.warn('⚠️ Unexpected areas API response format:', response.data);
-      return [];
     }
     
     console.log('✅ Areas loaded:', transformedAreas.length);
@@ -625,15 +690,10 @@ export const getAreas = async (): Promise<Area[]> => {
   }
 };
 
-/**
- * Get agents from API
- */
 export const getAgents = async (): Promise<Agent[]> => {
   try {
     console.log('👥 Fetching agents...');
-    const response = await api.get('/api/v1/agents', {
-      timeout: 15000
-    });
+    const response = await api.get('/api/v1/agents', { timeout: 15000 });
     
     let transformedAgents: Agent[] = [];
     
@@ -643,9 +703,6 @@ export const getAgents = async (): Promise<Agent[]> => {
       transformedAgents = agentsData.map((item: any) => transformAgentData(item));
     } else if (Array.isArray(response.data)) {
       transformedAgents = response.data.map((item: any) => transformAgentData(item));
-    } else {
-      console.warn('⚠️ Unexpected agents API response format:', response.data);
-      return [];
     }
     
     console.log('✅ Agents loaded:', transformedAgents.length);
@@ -658,159 +715,12 @@ export const getAgents = async (): Promise<Agent[]> => {
 };
 
 // ==========================================
-// PACKAGE TRACKING FUNCTIONS (For track.tsx compatibility)
-// ==========================================
-
-/**
- * Get package details by code
- */
-export const getPackageDetails = async (packageCode: string): Promise<Package> => {
-  try {
-    console.log('📦 Fetching package details for code:', packageCode);
-    
-    const response = await api.get(`/api/v1/packages/${packageCode}`, {
-      headers: {
-        'Accept': 'application/json'
-      },
-      timeout: 15000
-    });
-    
-    if (response.data.success !== false) {
-      const packageData = response.data.data || response.data;
-      const transformedPackage = transformPackageData(packageData);
-      
-      console.log('✅ Package details loaded:', transformedPackage.code);
-      return transformedPackage;
-    } else {
-      throw new Error(response.data.message || 'Package not found');
-    }
-    
-  } catch (error: any) {
-    console.error('❌ Failed to fetch package details:', error);
-    
-    if (error.response?.status === 404) {
-      throw new Error(`Package ${packageCode} not found`);
-    }
-    
-    const errorMessage = error.response?.data?.message || 
-                        error.response?.data?.error ||
-                        error.message || 
-                        'Failed to load package details';
-    throw new Error(errorMessage);
-  }
-};
-
-/**
- * Get package QR code
- */
-export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
-  try {
-    console.log('📱 Fetching QR code for package:', packageCode);
-    
-    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
-      headers: {
-        'Accept': 'application/json'
-      },
-      timeout: 10000
-    });
-    
-    if (response.data.success !== false) {
-      console.log('✅ QR code loaded for package:', packageCode);
-      return {
-        success: true,
-        data: response.data.data || response.data
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to generate QR code');
-    }
-    
-  } catch (error: any) {
-    console.warn('⚠️ Failed to fetch QR code:', error);
-    
-    // Return fallback QR data structure
-    return {
-      success: false,
-      data: {
-        qr_code_base64: null,
-        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-        package_code: packageCode,
-        package_state: 'unknown',
-        route_description: 'Unable to load route information'
-      },
-      message: error.response?.data?.message || error.message || 'Failed to load QR code'
-    };
-  }
-};
-
-/**
- * Get packages with filtering
- */
-export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
-  try {
-    console.log('📦 Fetching packages with filters:', filters);
-    
-    const params = new URLSearchParams();
-    
-    if (filters?.state) {
-      const apiState = STATE_MAPPING[filters.state as keyof typeof STATE_MAPPING];
-      if (apiState) params.append('state', apiState);
-    }
-    
-    if (filters?.delivery_type) {
-      params.append('delivery_type', filters.delivery_type);
-    }
-    
-    if (filters?.page) {
-      params.append('page', filters.page.toString());
-    }
-    
-    if (filters?.per_page) {
-      params.append('per_page', filters.per_page.toString());
-    }
-    
-    if (filters?.search) {
-      params.append('search', filters.search);
-    }
-    
-    const queryString = params.toString();
-    const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
-    
-    const response = await api.get(url, {
-      headers: {
-        'Accept': 'application/json'
-      },
-      timeout: 15000
-    });
-    
-    if (response.data.success !== false) {
-      const packagesData = response.data.data || [];
-      const transformedPackages = packagesData.map((pkg: any) => transformPackageData(pkg));
-      
-      console.log('✅ Packages loaded:', transformedPackages.length);
-      
-      return {
-        success: true,
-        data: transformedPackages,
-        pagination: response.data.meta || response.data.pagination
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to fetch packages');
-    }
-    
-  } catch (error: any) {
-    console.error('❌ Failed to fetch packages:', error);
-    throw new Error(`Failed to load packages: ${error.message}`);
-  }
-};
-
-// ==========================================
-// DATA TRANSFORMATION FUNCTIONS
+// TRANSFORMATION FUNCTIONS
 // ==========================================
 
 const transformLocationData = (rawData: any): Location => {
   try {
     let locationData = rawData;
-    
     if (rawData.attributes) {
       locationData = { id: rawData.id, ...rawData.attributes };
     }
@@ -835,7 +745,6 @@ const transformLocationData = (rawData: any): Location => {
 const transformAreaData = (rawData: any): Area => {
   try {
     let areaData = rawData;
-    
     if (rawData.attributes) {
       areaData = { id: rawData.id, ...rawData.attributes };
     }
@@ -860,7 +769,6 @@ const transformAreaData = (rawData: any): Area => {
 const transformAgentData = (rawData: any): Agent => {
   try {
     let agentData = rawData;
-    
     if (rawData.attributes) {
       agentData = { id: rawData.id, ...rawData.attributes };
     }
@@ -953,13 +861,12 @@ const transformPackageData = (rawData: any): Package => {
 };
 
 // ==========================================
-// VALIDATION AND PAYLOAD BUILDING
+// VALIDATION AND UTILITY FUNCTIONS
 // ==========================================
 
 function validatePackageCreationData(packageData: PackageData): void {
   const errors: string[] = [];
   
-  // Core validations for PackageCreationModal
   if (!packageData.receiver_name?.trim()) {
     errors.push('Receiver name is required');
   }
@@ -972,42 +879,54 @@ function validatePackageCreationData(packageData: PackageData): void {
     errors.push('Delivery type is required');
   }
   
-  if (!packageData.origin_agent_id?.trim()) {
-    errors.push('Origin agent is required');
-  }
-  
-  // Delivery type-specific validations for PackageCreationModal
-  if (packageData.delivery_type === 'agent') {
-    if (!packageData.destination_agent_id?.trim()) {
-      errors.push('Destination agent is required for agent delivery');
-    }
-  } else if (packageData.delivery_type === 'doorstep') {
-    if (!packageData.delivery_location?.trim()) {
-      errors.push('Delivery location is required for doorstep delivery');
-    }
-  }
-  
-  // Extended validation for other delivery types
-  if (packageData.delivery_type === 'fragile') {
-    if (!packageData.delivery_location?.trim()) {
-      errors.push('Delivery location is required for fragile delivery');
-    }
-    packageData.special_handling = true;
-  }
-  
-  if (packageData.delivery_type === 'collection') {
-    if (!packageData.shop_name?.trim()) {
-      errors.push('Shop name is required for collection service');
-    }
-    if (!packageData.collection_address?.trim()) {
-      errors.push('Collection address is required for collection service');
-    }
-    if (!packageData.items_to_collect?.trim()) {
-      errors.push('Items to collect description is required');
-    }
-    if (!packageData.delivery_location?.trim()) {
-      errors.push('Delivery location is required for collection service');
-    }
+  // Delivery type-specific validations
+  switch (packageData.delivery_type) {
+    case 'agent':
+      if (!packageData.destination_agent_id?.trim()) {
+        errors.push('Destination agent is required for agent delivery');
+      }
+      break;
+      
+    case 'doorstep':
+      if (!packageData.delivery_location?.trim()) {
+        errors.push('Delivery location is required for doorstep delivery');
+      }
+      break;
+      
+    case 'fragile':
+      if (!packageData.delivery_location?.trim()) {
+        errors.push('Delivery location is required for fragile delivery');
+      }
+      packageData.special_handling = true;
+      break;
+      
+    case 'collection':
+      if (!packageData.shop_name?.trim()) {
+        errors.push('Shop name is required for collection service');
+      }
+      if (!packageData.collection_address?.trim()) {
+        errors.push('Collection address is required for collection service');
+      }
+      if (!packageData.items_to_collect?.trim()) {
+        errors.push('Items to collect description is required');
+      }
+      if (!packageData.delivery_location?.trim()) {
+        errors.push('Delivery location is required for collection service');
+      }
+      break;
+      
+    case 'express':
+      if (!packageData.delivery_location?.trim()) {
+        errors.push('Delivery location is required for express delivery');
+      }
+      packageData.priority_level = 'high';
+      break;
+      
+    case 'bulk':
+      if (!packageData.destination_agent_id && !packageData.delivery_location?.trim()) {
+        errors.push('Either destination agent or delivery location is required for bulk packages');
+      }
+      break;
   }
   
   if (errors.length > 0) {
@@ -1022,7 +941,7 @@ function buildPackagePayload(packageData: PackageData): any {
     receiver_name: packageData.receiver_name.trim(),
     receiver_phone: packageData.receiver_phone.trim(),
     delivery_type: packageData.delivery_type,
-    origin_agent_id: packageData.origin_agent_id,
+    origin_agent_id: packageData.origin_agent_id || null,
     destination_agent_id: packageData.destination_agent_id || null,
     destination_area_id: packageData.destination_area_id || null,
     delivery_location: packageData.delivery_location?.trim() || null,
@@ -1032,7 +951,7 @@ function buildPackagePayload(packageData: PackageData): any {
     requires_payment_advance: packageData.requires_payment_advance || false,
   };
   
-  // Add optional contact information
+  // Add optional fields
   if (packageData.sender_email?.trim()) {
     payload.sender_email = packageData.sender_email.trim();
   }
@@ -1090,11 +1009,7 @@ function buildPackagePayload(packageData: PackageData): any {
   return payload;
 }
 
-// ==========================================
-// UTILITY FUNCTIONS
-// ==========================================
-
-// State display helpers
+// State and utility functions
 export const getStateDisplay = (state: string): string => {
   const stateMap = {
     'pending_unpaid': 'Pending Payment',
@@ -1132,7 +1047,6 @@ export const formatRouteDescription = (originArea?: Area, destinationArea?: Area
   return `${origin} → ${destination}`;
 };
 
-// Package state utility functions for track.tsx
 export const canEditPackage = (state: string): boolean => {
   return ['pending_unpaid', 'pending'].includes(state);
 };
@@ -1160,7 +1074,82 @@ export const getNextValidStates = (currentState: string): string[] => {
   return stateTransitions[currentState as keyof typeof stateTransitions] || [];
 };
 
-// Additional helper functions for modal compatibility
+// Additional helper functions
+export const validatePackageFormData = (data: any): ValidationResult => {
+  const issues: string[] = [];
+  
+  try {
+    if (!data || typeof data !== 'object') {
+      issues.push('Data is not a valid object');
+      return { isValid: false, issues };
+    }
+    
+    if (!data.areas || !Array.isArray(data.areas)) {
+      issues.push('Areas must be a non-empty array');
+    } else if (data.areas.length === 0) {
+      issues.push('At least one area is required');
+    }
+    
+    if (!data.agents || !Array.isArray(data.agents)) {
+      issues.push('Agents must be a non-empty array');
+    } else if (data.agents.length === 0) {
+      issues.push('At least one agent is required');
+    }
+    
+    return {
+      isValid: issues.length === 0,
+      issues
+    };
+    
+  } catch (error: any) {
+    issues.push(`Validation error: ${error.message}`);
+    return { isValid: false, issues };
+  }
+};
+
+export const getPackagePricing = async (
+  originId: string, 
+  destinationId: string, 
+  deliveryType: string = 'agent'
+): Promise<{ cost: number; breakdown?: any }> => {
+  try {
+    console.log('💰 Getting package pricing:', { originId, destinationId, deliveryType });
+    
+    const response = await api.get(`/api/v1/packages/pricing`, {
+      params: {
+        origin_area_id: originId,
+        destination_area_id: destinationId,
+        delivery_type: deliveryType
+      },
+      timeout: 10000
+    });
+    
+    if (response.data.success !== false) {
+      const pricingData = response.data.data || response.data;
+      console.log('✅ Pricing loaded:', pricingData);
+      return pricingData;
+    } else {
+      throw new Error(response.data.message || 'Failed to get pricing');
+    }
+    
+  } catch (error: any) {
+    console.warn('⚠️ Failed to get pricing from API, using base cost:', error.message);
+    
+    const typeInfo = DELIVERY_TYPE_INFO[deliveryType as keyof typeof DELIVERY_TYPE_INFO];
+    const baseCost = typeInfo?.base_cost || 150;
+    
+    return { 
+      cost: baseCost,
+      breakdown: {
+        base_cost: baseCost,
+        delivery_type: deliveryType,
+        note: 'Fallback pricing due to API error'
+      }
+    };
+  }
+};
+
+// Additional utility functions
 export const getAgentsForArea = (agents: Agent[], areaId: string): Agent[] => {
   return agents.filter(agent => agent.area_id === areaId);
 };
@@ -1191,23 +1180,13 @@ export const getAgentById = (agents: Agent[], id: string): Agent | undefined => 
   return agents.find(agent => agent.id === id);
 };
 
-export const getPackagesByState = async (state: DrawerState): Promise<PackageResponse> => {
-  return getPackages({ state });
-};
-
-export const searchPackages = async (searchQuery: string): Promise<PackageResponse> => {
-  return getPackages({ search: searchQuery });
-};
-
 export const clearCache = async (): Promise<void> => {
   try {
-    // Clear memory cache
     areasCache = null;
     agentsCache = null;
     locationsCache = null;
     cacheTimestamp = 0;
     
-    // Clear AsyncStorage cache
     await AsyncStorage.multiRemove([
       'package_modal_locations',
       'package_modal_areas', 
@@ -1221,25 +1200,23 @@ export const clearCache = async (): Promise<void> => {
   }
 };
 
-// Default export with all functions for compatibility
+// Default export with all functions
 export default {
-  // Core functions required by PackageCreationModal
-  getPackageFormData,
-  validatePackageFormData,
-  getPackagePricing,
-  createPackage,
-  
-  // Data loading functions
-  getLocations,
-  getAreas,
-  getAgents,
-  
-  // Package tracking functions for track.tsx
-  getPackageDetails,
-  getPackageQRCode,
+  // Core package functions
   getPackages,
   getPackagesByState,
   searchPackages,
+  getPackageDetails,
+  getPackageQRCode,
+  createPackage,
+  
+  // Form data functions
+  getPackageFormData,
+  getPackagePricing,
+  validatePackageFormData,
+  getLocations,
+  getAreas,
+  getAgents,
   
   // Utility functions
   canEditPackage,
