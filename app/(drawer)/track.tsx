@@ -272,9 +272,9 @@ export default function Track() {
   // UPDATED: Get delivery type badge color with new types
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return '#8b5cf6';    // Purple
-      case 'agent': return '#3b82f6';       // Blue
-      case 'fragile': return '#f59e0b';     // Orange
+      case 'doorstep': return '#3b82f6';    // Blue (as shown in image)
+      case 'agent': return '#8b5cf6';       // Purple 
+      case 'fragile': return '#ef4444';     // Red/Orange (as shown in image)
       case 'collection': return '#10b981';  // Green
       case 'mixed': return '#10b981';       // Green for mixed
       default: return '#8b5cf6';
@@ -418,9 +418,9 @@ export default function Track() {
       icon: 'search',
       text: 'Track',
       onPress: () => handleViewTracking(item),
-      style: styles.actionButton,
-      textStyle: styles.actionButtonText,
-      iconColor: '#fff'
+      style: [styles.actionButton, styles.trackButton],
+      textStyle: [styles.actionButtonText, styles.trackButtonText],
+      iconColor: '#3b82f6'
     });
     
     // Edit button - only if editable
@@ -430,9 +430,9 @@ export default function Track() {
         icon: 'edit-3',
         text: 'Edit',
         onPress: () => handleEditPackage(item),
-        style: styles.actionButton,
-        textStyle: styles.actionButtonText,
-        iconColor: '#fff'
+        style: [styles.actionButton, styles.editButton],
+        textStyle: [styles.actionButtonText, styles.editButtonText],
+        iconColor: '#8b5cf6'
       });
     }
     
@@ -445,7 +445,7 @@ export default function Track() {
         onPress: () => handlePayPackage(item),
         style: [styles.actionButton, styles.payButton],
         textStyle: [styles.actionButtonText, styles.payButtonText],
-        iconColor: '#fff'
+        iconColor: '#10b981'
       });
     }
     
@@ -1078,7 +1078,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   
-  // UPDATED: Action button styling - more like the image with solid background
+  // UPDATED: Action button styling - outlined style like in the image
   actionButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1087,34 +1087,39 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 6,
-    backgroundColor: 'rgba(74, 85, 104, 0.8)', // More solid gray background
-    borderWidth: 1,
-    borderColor: 'rgba(155, 155, 155, 0.3)',
+    backgroundColor: 'transparent', // Transparent background
+    borderWidth: 1.5,
     gap: 6,
     minHeight: 36,
   },
   
   actionButtonText: {
     fontSize: 12,
-    color: '#fff', // White text
     fontWeight: '500',
   },
   
-  // Pay button specific styles - bright green to make it more noticeable
+  // Track button - blue outline
+  trackButton: {
+    borderColor: '#3b82f6',
+  },
+  trackButtonText: {
+    color: '#3b82f6',
+  },
+  
+  // Edit button - purple outline  
+  editButton: {
+    borderColor: '#8b5cf6',
+  },
+  editButtonText: {
+    color: '#8b5cf6',
+  },
+  
+  // Pay button - green outline
   payButton: {
-    backgroundColor: '#22c55e', // Bright green background for payment
-    borderColor: '#16a34a',
-    shadowColor: '#22c55e',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 3,
+    borderColor: '#10b981',
   },
   payButtonText: {
-    color: '#fff',
+    color: '#10b981',
     fontWeight: '600',
   },
   
