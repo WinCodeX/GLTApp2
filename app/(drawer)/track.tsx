@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Enhanced with proper header and navigation
+// app/(drawer)/track.tsx - FIXED: Proper state filtering
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -50,20 +50,6 @@ export default function Track() {
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
 
-  // FIXED: Map drawer states to actual API states
-  const getApiStateFromDrawerState = useCallback((drawerState: DrawerState): string => {
-    switch (drawerState) {
-      case 'pending': return 'pending_unpaid'; // Drawer "Pending" = API "pending_unpaid"
-      case 'paid': return 'pending'; // Drawer "Paid" = API "pending"
-      case 'submitted': return 'submitted';
-      case 'in-transit': return 'in_transit';
-      case 'delivered': return 'delivered';
-      case 'collected': return 'collected';
-      case 'rejected': return 'rejected';
-      default: return drawerState;
-    }
-  }, []);
-
   // Memoized state display
   const stateDisplayInfo = useMemo(() => {
     if (!selectedStatus) {
@@ -80,7 +66,7 @@ export default function Track() {
         title: 'Pending Payment',
         subtitle: 'Packages awaiting payment',
         icon: 'clock' as const,
-        color: '#f59e0b' // Orange/amber for pending payment
+        color: '#f97316' // Orange for pending payment
       },
       'paid': {
         title: 'Paid Packages',
@@ -192,11 +178,10 @@ export default function Track() {
 
   const handlePackageCreated = useCallback(() => {
     setShowCreateModal(false);
-    // Refresh packages list after creation
     loadPackages(true);
   }, []);
 
-  // Load packages based on selected status
+  // FIXED: Load packages with proper state filtering
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -206,18 +191,32 @@ export default function Track() {
       }
       setError(null);
 
-      console.log('📦 Loading packages for status:', selectedStatus);
+      console.log('📦 Loading packages for drawer status:', selectedStatus);
+      console.log('🔄 STATE_MAPPING check:', STATE_MAPPING);
       
-      // FIXED: Use mapped API state for filtering
-      const filters = selectedStatus ? { state: getApiStateFromDrawerState(selectedStatus) } : undefined;
+      // Pass the drawer state directly to getPackages - it will handle the mapping internally
+      const filters = selectedStatus ? { state: selectedStatus } : undefined;
+      
+      console.log('📨 Sending filters to API:', filters);
+      if (selectedStatus) {
+        console.log('🗺️ Will map to API state:', STATE_MAPPING[selectedStatus]);
+      }
+      
       const response = await getPackages(filters);
       
       console.log('✅ Packages loaded:', {
         count: response.data.length,
         drawerStatus: selectedStatus,
-        apiStatus: selectedStatus ? getApiStateFromDrawerState(selectedStatus) : 'all',
+        expectedApiState: selectedStatus ? STATE_MAPPING[selectedStatus] : 'all',
         totalCount: response.pagination.total_count
       });
+
+      // Log the actual states of returned packages to verify filtering
+      if (response.data.length > 0) {
+        const states = response.data.map(pkg => pkg.state);
+        const uniqueStates = [...new Set(states)];
+        console.log('📊 Returned package states:', uniqueStates);
+      }
       
       setPackages(response.data);
       
@@ -236,7 +235,7 @@ export default function Track() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedStatus, getApiStateFromDrawerState]);
+  }, [selectedStatus]);
 
   // Load data when component mounts or status changes
   useEffect(() => {
@@ -257,7 +256,7 @@ export default function Track() {
     }
   }, [router]);
 
-  // UPDATED: Get delivery type display with fragile and collection
+  // Get delivery type display with all types
   const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return 'Doorstep';
@@ -269,7 +268,7 @@ export default function Track() {
     }
   }, []);
 
-  // UPDATED: Get delivery type badge color with requested colors
+  // Get delivery type badge color with requested colors
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return '#8b5cf6';    // Purple
@@ -330,7 +329,7 @@ export default function Track() {
   
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
-      case 'pending_unpaid': return '#f97316'; // Orange to match "Pending Payment" in image
+      case 'pending_unpaid': return '#f97316'; // Orange to match image
       case 'pending': return '#10b981';
       case 'submitted': return '#3b82f6';
       case 'in_transit': return '#8b5cf6';
@@ -341,12 +340,12 @@ export default function Track() {
     }
   }, []);
 
-  // Check if package can be edited - FIXED: only certain states
+  // Check if package can be edited
   const canEditPackage = useCallback((state: string) => {
     return ['pending_unpaid', 'pending', 'rejected'].includes(state);
   }, []);
 
-  // Check if package needs payment - FIXED: only pending_unpaid
+  // Check if package needs payment
   const needsPayment = useCallback((state: string) => {
     return state === 'pending_unpaid';
   }, []);
@@ -380,8 +379,6 @@ export default function Track() {
   // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
-    
-    // Use simple object navigation
     router.push({
       pathname: '/(drawer)/track/tracking',
       params: { 
@@ -392,9 +389,8 @@ export default function Track() {
     });
   }, [router]);
 
-  // Get receiver name display - handle various possible field names
+  // Get receiver name display
   const getReceiverName = useCallback((packageItem: Package) => {
-    // Try different possible field names for receiver
     return packageItem.receiver_name || 
            packageItem.recipient_name || 
            packageItem.receiver?.name ||
@@ -403,7 +399,7 @@ export default function Track() {
            'Unknown Recipient';
   }, []);
 
-  // Render package item with conditional button rendering
+  // Render package item
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
@@ -461,18 +457,18 @@ export default function Track() {
               <Text style={styles.packageCode}>{item.code}</Text>
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
-          <View style={styles.badgeContainer}>
-            {/* Delivery Type Badge - transparent style */}
-            <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
-              <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
-                {getDeliveryTypeDisplay(item.delivery_type)}
-              </Text>
+            <View style={styles.badgeContainer}>
+              {/* Delivery Type Badge - transparent style */}
+              <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                  {getDeliveryTypeDisplay(item.delivery_type)}
+                </Text>
+              </View>
+              {/* State Badge - solid background style like in image */}
+              <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
+                <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
+              </View>
             </View>
-            {/* State Badge - solid background style like in image */}
-            <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
-              <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
-            </View>
-          </View>
           </View>
 
           {/* Receiver Section */}
@@ -486,7 +482,7 @@ export default function Track() {
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
           </View>
 
-          {/* Dynamic Action Buttons with updated styling */}
+          {/* Dynamic Action Buttons */}
           <View style={[
             styles.actionButtons,
             actionButtons.length === 1 && styles.singleButton,
@@ -973,7 +969,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   
-  // Package card styles - more compact
+  // Package card styles
   packageCard: {
     marginBottom: 12,
     borderRadius: 12,
@@ -1066,7 +1062,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  // UPDATED: Dynamic action buttons - new outlined style like the image
+  // Action buttons - outlined style
   actionButtons: {
     flexDirection: 'row',
     gap: 8,
@@ -1083,7 +1079,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   
-  // UPDATED: Action button styling - outlined style like in the image
+  // Base action button styling
   actionButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1092,7 +1088,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     paddingHorizontal: 12,
     borderRadius: 6,
-    backgroundColor: 'transparent', // Transparent background
+    backgroundColor: 'transparent',
     borderWidth: 1.5,
     gap: 6,
     minHeight: 36,
