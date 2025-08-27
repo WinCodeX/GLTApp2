@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Simplified with proper filtering and date grouping
+// app/(drawer)/track.tsx - Enhanced with proper header and navigation
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -12,64 +12,31 @@ import {
   Platform,
   TextInput,
   Animated,
-  SectionList,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter, useFocusEffect } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { 
   getPackages,
-  canEditPackage,
-  needsPayment,
-  getStateDisplay,
-  getStateColor,
   STATE_MAPPING,
   type Package,
-  type DrawerState,
-  type PackageFilters
+  type DrawerState
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
 import PackageCreationModal from '@/components/PackageCreationModal';
-
-// Enhanced delivery type colors
-const DELIVERY_TYPE_COLORS = {
-  doorstep: { color: '#3b82f6', label: 'Doorstep' },
-  agent: { color: '#10b981', label: 'Agent' },
-  fragile: { color: '#ef4444', label: 'Fragile' },
-  collection: { color: '#9333ea', label: 'Collection' },
-  express: { color: '#f59e0b', label: 'Express' },
-  bulk: { color: '#6b7280', label: 'Bulk' }
-} as const;
-
-// State display names with proper capitalization
-const STATE_DISPLAYS = {
-  'pending': 'Pending Payment',
-  'paid': 'Processing', 
-  'submitted': 'Ready for Pickup',
-  'in-transit': 'In Transit',
-  'delivered': 'Delivered',
-  'collected': 'Collected',
-  'rejected': 'Cancelled'
-} as const;
-
-interface GroupedPackage {
-  title: string;
-  data: Package[];
-  count: number;
-}
 
 export default function Track() {
   const params = useLocalSearchParams();
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
-  // FIXED: Get status from params properly
+  // Get status from params (from drawer navigation)
   const selectedStatus = params.status as DrawerState | undefined;
   
   // State management
-  const [allPackages, setAllPackages] = useState<Package[]>([]);
+  const [packages, setPackages] = useState<Package[]>([]);
   const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -81,48 +48,187 @@ export default function Track() {
   const [searchAnimation] = useState(new Animated.Value(0));
   
   // Modal state
-  const [showPackageModal, setShowPackageModal] = useState(false);
-  
-  // FIXED: Load packages with proper state filtering
+  const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // FIXED: Map drawer states to actual API states
+  const getApiStateFromDrawerState = useCallback((drawerState: DrawerState): string => {
+    switch (drawerState) {
+      case 'pending': return 'pending_unpaid'; // Drawer "Pending" = API "pending_unpaid"
+      case 'paid': return 'pending'; // Drawer "Paid" = API "pending"
+      case 'submitted': return 'submitted';
+      case 'in-transit': return 'in_transit';
+      case 'delivered': return 'delivered';
+      case 'collected': return 'collected';
+      case 'rejected': return 'rejected';
+      default: return drawerState;
+    }
+  }, []);
+
+  // Memoized state display
+  const stateDisplayInfo = useMemo(() => {
+    if (!selectedStatus) {
+      return {
+        title: 'All Packages',
+        subtitle: 'View all your packages',
+        icon: 'package' as const,
+        color: colors.primary
+      };
+    }
+
+    const statusConfig = {
+      'pending': {
+        title: 'Pending Payment',
+        subtitle: 'Packages awaiting payment',
+        icon: 'clock' as const,
+        color: '#f59e0b' // Orange/amber for pending payment
+      },
+      'paid': {
+        title: 'Paid Packages',
+        subtitle: 'Payment received, preparing for pickup',
+        icon: 'check-circle' as const,
+        color: '#10b981'
+      },
+      'submitted': {
+        title: 'Submitted Packages',
+        subtitle: 'Packages submitted for delivery',
+        icon: 'upload' as const,
+        color: '#3b82f6'
+      },
+      'in-transit': {
+        title: 'In Transit',
+        subtitle: 'Packages currently being delivered',
+        icon: 'truck' as const,
+        color: '#8b5cf6'
+      },
+      'delivered': {
+        title: 'Delivered',
+        subtitle: 'Successfully delivered packages',
+        icon: 'box' as const,
+        color: '#059669'
+      },
+      'collected': {
+        title: 'Collected',
+        subtitle: 'Packages collected by recipients',
+        icon: 'archive' as const,
+        color: '#0d9488'
+      },
+      'rejected': {
+        title: 'Rejected',
+        subtitle: 'Delivery rejected or failed',
+        icon: 'x-circle' as const,
+        color: '#ef4444'
+      }
+    };
+
+    return statusConfig[selectedStatus] || statusConfig['pending'];
+  }, [selectedStatus]);
+
+  // Search functionality
+  const filterPackages = useCallback((packages: Package[], query: string) => {
+    if (!query.trim()) {
+      return packages;
+    }
+
+    const lowercaseQuery = query.toLowerCase().trim();
+    
+    return packages.filter(pkg => {
+      // Get receiver name
+      const receiverName = (pkg.receiver_name || 
+                           pkg.recipient_name || 
+                           pkg.receiver?.name ||
+                           pkg.recipient?.name ||
+                           pkg.to_name || '').toLowerCase();
+      
+      // Get route/location info
+      const routeDescription = (pkg.route_description || '').toLowerCase();
+      const fromLocation = (pkg.from_location || '').toLowerCase();
+      const toLocation = (pkg.to_location || '').toLowerCase();
+      const packageCode = (pkg.code || '').toLowerCase();
+      
+      // Search in multiple fields
+      return receiverName.includes(lowercaseQuery) ||
+             routeDescription.includes(lowercaseQuery) ||
+             fromLocation.includes(lowercaseQuery) ||
+             toLocation.includes(lowercaseQuery) ||
+             packageCode.includes(lowercaseQuery);
+    });
+  }, []);
+
+  // Update filtered packages when search query or packages change
+  useEffect(() => {
+    const filtered = filterPackages(packages, searchQuery);
+    setFilteredPackages(filtered);
+  }, [packages, searchQuery, filterPackages]);
+
+  // Toggle search functionality
+  const toggleSearch = useCallback(() => {
+    const newVisible = !searchVisible;
+    setSearchVisible(newVisible);
+    
+    Animated.timing(searchAnimation, {
+      toValue: newVisible ? 1 : 0,
+      duration: 300,
+      useNativeDriver: false,
+    }).start();
+
+    if (!newVisible) {
+      setSearchQuery('');
+    }
+  }, [searchVisible, searchAnimation]);
+
+  // Clear search
+  const clearSearch = useCallback(() => {
+    setSearchQuery('');
+  }, []);
+
+  // Modal handlers
+  const handleOpenCreateModal = useCallback(() => {
+    setShowCreateModal(true);
+  }, []);
+
+  const handleCloseCreateModal = useCallback(() => {
+    setShowCreateModal(false);
+  }, []);
+
+  const handlePackageCreated = useCallback(() => {
+    setShowCreateModal(false);
+    // Refresh packages list after creation
+    loadPackages(true);
+  }, []);
+
+  // Load packages based on selected status
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
-      if (!isRefresh) setIsLoading(true);
-      if (isRefresh) setIsRefreshing(true);
+      if (isRefresh) {
+        setIsRefreshing(true);
+      } else {
+        setIsLoading(true);
+      }
       setError(null);
-      
+
       console.log('📦 Loading packages for status:', selectedStatus);
       
-      // Build filters for API call
-      const filters: PackageFilters = {};
-      
-      // CRITICAL: Apply state filter if specific status is selected
-      if (selectedStatus) {
-        filters.state = selectedStatus;
-        console.log('🔍 Filtering by state:', selectedStatus, '-> API state:', STATE_MAPPING[selectedStatus]);
-      }
-      
+      // FIXED: Use mapped API state for filtering
+      const filters = selectedStatus ? { state: getApiStateFromDrawerState(selectedStatus) } : undefined;
       const response = await getPackages(filters);
       
-      if (response.success) {
-        const packagesData = response.data || [];
-        console.log('✅ Packages loaded:', packagesData.length);
-        
-        setAllPackages(packagesData);
-        // Initially show all loaded packages (search will filter later)
-        setFilteredPackages(packagesData);
-        
-      } else {
-        throw new Error(response.message || 'Failed to load packages');
-      }
+      console.log('✅ Packages loaded:', {
+        count: response.data.length,
+        drawerStatus: selectedStatus,
+        apiStatus: selectedStatus ? getApiStateFromDrawerState(selectedStatus) : 'all',
+        totalCount: response.pagination.total_count
+      });
+      
+      setPackages(response.data);
       
     } catch (error: any) {
       console.error('❌ Failed to load packages:', error);
-      setError(error.message || 'Failed to load packages');
+      setError(error.message);
       
       Toast.show({
-        type: 'error',
+        type: 'errorToast',
         text1: 'Failed to Load Packages',
-        text2: error.message || 'Please check your connection and try again',
+        text2: error.message,
         position: 'top',
         visibilityTime: 3000,
       });
@@ -130,119 +236,122 @@ export default function Track() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedStatus]);
-  
-  // Load packages when screen focuses
-  useFocusEffect(
-    useCallback(() => {
-      loadPackages();
-    }, [loadPackages])
-  );
-  
-  // FIXED: Local search instead of server requests
-  const performLocalSearch = useCallback(() => {
-    if (!searchQuery.trim()) {
-      setFilteredPackages(allPackages);
-      return;
-    }
-    
-    const query = searchQuery.toLowerCase().trim();
-    const filtered = allPackages.filter(pkg => 
-      pkg.code.toLowerCase().includes(query) ||
-      pkg.receiver_name.toLowerCase().includes(query) ||
-      pkg.route_description.toLowerCase().includes(query) ||
-      pkg.delivery_location?.toLowerCase().includes(query)
-    );
-    
-    setFilteredPackages(filtered);
-    console.log('🔍 Local search results:', filtered.length, 'of', allPackages.length);
-  }, [searchQuery, allPackages]);
-  
-  // Apply local search when query changes
+  }, [selectedStatus, getApiStateFromDrawerState]);
+
+  // Load data when component mounts or status changes
   useEffect(() => {
-    const debounceTimer = setTimeout(() => {
-      performLocalSearch();
-    }, 300);
-    
-    return () => clearTimeout(debounceTimer);
-  }, [performLocalSearch]);
-  
-  // FIXED: Group packages by date
-  const groupedPackages = useMemo((): GroupedPackage[] => {
-    const now = new Date();
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    const yesterday = new Date(today.getTime() - 24 * 60 * 60 * 1000);
-    
-    const groups: { [key: string]: Package[] } = {};
-    
-    filteredPackages.forEach(pkg => {
-      const packageDate = new Date(pkg.created_at);
-      const packageDay = new Date(packageDate.getFullYear(), packageDate.getMonth(), packageDate.getDate());
-      
-      let groupKey: string;
-      
-      if (packageDay.getTime() === today.getTime()) {
-        groupKey = 'Today';
-      } else if (packageDay.getTime() === yesterday.getTime()) {
-        groupKey = 'Yesterday';
-      } else {
-        groupKey = packageDate.toLocaleDateString('en-US', {
-          month: 'long',
-          day: 'numeric',
-          year: packageDate.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-        });
-      }
-      
-      if (!groups[groupKey]) {
-        groups[groupKey] = [];
-      }
-      groups[groupKey].push(pkg);
-    });
-    
-    // Sort groups by date (Today, Yesterday, then chronological)
-    const sortedGroups = Object.keys(groups).sort((a, b) => {
-      if (a === 'Today') return -1;
-      if (b === 'Today') return 1;
-      if (a === 'Yesterday') return -1;
-      if (b === 'Yesterday') return 1;
-      
-      // For other dates, sort by most recent first
-      const dateA = new Date(a + ', ' + now.getFullYear());
-      const dateB = new Date(b + ', ' + now.getFullYear());
-      return dateB.getTime() - dateA.getTime();
-    });
-    
-    return sortedGroups.map(title => ({
-      title,
-      data: groups[title].sort((a, b) => 
-        new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-      ),
-      count: groups[title].length
-    }));
-  }, [filteredPackages]);
-  
-  // Handle refresh
+    loadPackages();
+  }, [loadPackages]);
+
+  // Refresh handler
   const handleRefresh = useCallback(() => {
     loadPackages(true);
   }, [loadPackages]);
-  
-  // Search functionality
-  const toggleSearch = useCallback(() => {
-    const toValue = searchVisible ? 0 : 1;
-    setSearchVisible(!searchVisible);
-    
-    Animated.timing(searchAnimation, {
-      toValue,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-    
-    if (searchVisible) {
-      setSearchQuery('');
+
+  // Navigation handlers
+  const handleBack = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+    } else {
+      router.push('/');
     }
-  }, [searchVisible, searchAnimation]);
+  }, [router]);
+
+  // UPDATED: Get delivery type display with fragile and collection
+  const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return 'Doorstep';
+      case 'agent': return 'Office'; // Changed from 'Agent' to 'Office'
+      case 'fragile': return 'Fragile';
+      case 'collection': return 'Collection';
+      case 'mixed': return 'Mixed';
+      default: return 'Office';
+    }
+  }, []);
+
+  // UPDATED: Get delivery type badge color with new types
+  const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return '#8b5cf6';    // Purple
+      case 'agent': return '#3b82f6';       // Blue
+      case 'fragile': return '#f59e0b';     // Orange
+      case 'collection': return '#10b981';  // Green
+      case 'mixed': return '#10b981';       // Green for mixed
+      default: return '#8b5cf6';
+    }
+  }, []);
+
+  // Group packages by date
+  const groupPackagesByDate = useCallback((packages: Package[]) => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    const groups: { [key: string]: Package[] } = {
+      'Today': [],
+      'Yesterday': [],
+    };
+
+    packages.forEach(pkg => {
+      const pkgDate = new Date(pkg.created_at);
+      const pkgDateStr = pkgDate.toDateString();
+      const todayStr = today.toDateString();
+      const yesterdayStr = yesterday.toDateString();
+
+      if (pkgDateStr === todayStr) {
+        groups['Today'].push(pkg);
+      } else if (pkgDateStr === yesterdayStr) {
+        groups['Yesterday'].push(pkg);
+      } else {
+        const dateKey = pkgDate.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        if (!groups[dateKey]) {
+          groups[dateKey] = [];
+        }
+        groups[dateKey].push(pkg);
+      }
+    });
+
+    // Remove empty groups and sort packages within groups by newest first
+    Object.keys(groups).forEach(key => {
+      if (groups[key].length === 0) {
+        delete groups[key];
+      } else {
+        groups[key].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      }
+    });
+
+    return groups;
+  }, []);
   
-  // Package action handlers
+  const getStateBadgeColor = useCallback((state: string) => {
+    switch (state) {
+      case 'pending_unpaid': return '#f59e0b'; // Orange for pending payment
+      case 'pending': return '#10b981';
+      case 'submitted': return '#3b82f6';
+      case 'in_transit': return '#8b5cf6';
+      case 'delivered': return '#059669';
+      case 'collected': return '#0d9488';
+      case 'rejected': return '#ef4444';
+      default: return colors.primary;
+    }
+  }, []);
+
+  // Check if package can be edited - FIXED: only certain states
+  const canEditPackage = useCallback((state: string) => {
+    return ['pending_unpaid', 'pending', 'rejected'].includes(state);
+  }, []);
+
+  // Check if package needs payment - FIXED: only pending_unpaid
+  const needsPayment = useCallback((state: string) => {
+    return state === 'pending_unpaid';
+  }, []);
+
+  // Handle edit package
   const handleEditPackage = useCallback((packageItem: Package) => {
     console.log('🔧 Editing package:', packageItem.code);
     router.push({
@@ -254,7 +363,8 @@ export default function Track() {
       }
     });
   }, [router]);
-  
+
+  // Handle pay for package
   const handlePayPackage = useCallback((packageItem: Package) => {
     console.log('💳 Processing payment for package:', packageItem.code);
     router.push({
@@ -266,9 +376,12 @@ export default function Track() {
       }
     });
   }, [router]);
-  
+
+  // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
+    
+    // Use simple object navigation
     router.push({
       pathname: '/(drawer)/track/tracking',
       params: { 
@@ -278,9 +391,10 @@ export default function Track() {
       }
     });
   }, [router]);
-  
-  // Get receiver name display
+
+  // Get receiver name display - handle various possible field names
   const getReceiverName = useCallback((packageItem: Package) => {
+    // Try different possible field names for receiver
     return packageItem.receiver_name || 
            packageItem.recipient_name || 
            packageItem.receiver?.name ||
@@ -288,56 +402,58 @@ export default function Track() {
            packageItem.to_name ||
            'Unknown Recipient';
   }, []);
-  
-  // Get delivery type styling
-  const getDeliveryTypeStyle = useCallback((deliveryType: string) => {
-    const normalizedType = deliveryType.toLowerCase();
-    return DELIVERY_TYPE_COLORS[normalizedType as keyof typeof DELIVERY_TYPE_COLORS] || DELIVERY_TYPE_COLORS.agent;
-  }, []);
-  
-  // FIXED: Render package item matching the design
+
+  // Render package item with conditional button rendering
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
     const receiverName = getReceiverName(item);
-    const deliveryStyle = getDeliveryTypeStyle(item.delivery_type);
     
-    // Build action buttons
+    // Build action buttons array based on state
     const actionButtons = [];
     
+    // Track button - always available
     actionButtons.push({
-      label: 'Track',
+      key: 'track',
       icon: 'search',
-      color: '#7c3aed',
-      backgroundColor: 'rgba(124, 58, 237, 0.1)',
-      onPress: () => handleViewTracking(item)
+      text: 'Track',
+      onPress: () => handleViewTracking(item),
+      style: styles.actionButton,
+      textStyle: styles.actionButtonText,
+      iconColor: '#fff'
     });
     
+    // Edit button - only if editable
     if (canEdit) {
       actionButtons.push({
-        label: 'Edit',
+        key: 'edit',
         icon: 'edit-3',
-        color: '#7c3aed',
-        backgroundColor: 'rgba(124, 58, 237, 0.1)',
-        onPress: () => handleEditPackage(item)
+        text: 'Edit',
+        onPress: () => handleEditPackage(item),
+        style: styles.actionButton,
+        textStyle: styles.actionButtonText,
+        iconColor: '#fff'
       });
     }
     
+    // Pay button - only if needs payment
     if (showPayButton) {
       actionButtons.push({
-        label: 'Pay',
+        key: 'pay',
         icon: 'credit-card',
-        color: '#fff',
-        backgroundColor: '#10b981',
-        onPress: () => handlePayPackage(item)
+        text: 'Pay',
+        onPress: () => handlePayPackage(item),
+        style: [styles.actionButton, styles.payButton],
+        textStyle: [styles.actionButtonText, styles.payButtonText],
+        iconColor: '#fff'
       });
     }
     
     return (
-      <View style={styles.packageItem}>
+      <View style={styles.packageCard}>
         <LinearGradient
           colors={['rgba(26, 26, 46, 0.8)', 'rgba(22, 33, 62, 0.8)']}
-          style={styles.packageGradient}
+          style={styles.packageCardGradient}
         >
           {/* Package Header */}
           <View style={styles.packageHeader}>
@@ -345,250 +461,252 @@ export default function Track() {
               <Text style={styles.packageCode}>{item.code}</Text>
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
-            
-            <View style={styles.packageBadges}>
-              <View style={[styles.deliveryTypeBadge, { backgroundColor: deliveryStyle.color }]}>
-                <Text style={styles.deliveryTypeText}>{deliveryStyle.label}</Text>
+            <View style={styles.badgeContainer}>
+              {/* Delivery Type Badge */}
+              <View style={[styles.deliveryTypeBadge, { backgroundColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                <Text style={styles.badgeText}>{getDeliveryTypeDisplay(item.delivery_type)}</Text>
               </View>
-              
-              <View style={[
-                styles.stateBadge,
-                { backgroundColor: getStateColor(item.state) }
-              ]}>
-                <Text style={styles.stateText}>
-                  {getStateDisplay(item.state).toUpperCase()}
-                </Text>
+              {/* State Badge with updated colors */}
+              <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
+                <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
               </View>
             </View>
           </View>
-          
-          {/* Package Details */}
-          <View style={styles.packageDetails}>
+
+          {/* Receiver Section */}
+          <View style={styles.receiverSection}>
             <Text style={styles.receiverText}>To: {receiverName}</Text>
-            
-            <View style={styles.costContainer}>
-              <Text style={styles.costLabel}>Cost</Text>
-              <Text style={styles.costValue}>KES {item.cost}</Text>
-            </View>
           </View>
-          
-          {/* Action Buttons */}
-          {actionButtons.length > 0 && (
-            <View style={styles.actionButtons}>
-              {actionButtons.map((button, buttonIndex) => (
-                <TouchableOpacity
-                  key={buttonIndex}
-                  style={[
-                    styles.actionButton, 
-                    { backgroundColor: button.backgroundColor }
-                  ]}
-                  onPress={button.onPress}
-                >
-                  <Feather name={button.icon as any} size={16} color={button.color} />
-                  <Text style={[styles.actionButtonText, { color: button.color }]}>
-                    {button.label}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+
+          {/* Cost Section */}
+          <View style={styles.costSection}>
+            <Text style={styles.costLabel}>Cost</Text>
+            <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
+          </View>
+
+          {/* Dynamic Action Buttons with updated styling */}
+          <View style={[
+            styles.actionButtons,
+            actionButtons.length === 1 && styles.singleButton,
+            actionButtons.length === 2 && styles.doubleButtons,
+            actionButtons.length === 3 && styles.tripleButtons
+          ]}>
+            {actionButtons.map((button) => (
+              <TouchableOpacity 
+                key={button.key}
+                style={button.style}
+                onPress={button.onPress}
+              >
+                <Feather name={button.icon as any} size={14} color={button.iconColor} />
+                <Text style={button.textStyle}>{button.text}</Text>
+              </TouchableOpacity>
+            ))}
+          </View>
         </LinearGradient>
       </View>
     );
-  }, [canEditPackage, needsPayment, getReceiverName, getDeliveryTypeStyle, handlePayPackage, handleEditPackage, handleViewTracking]);
-  
-  // Render section header
-  const renderSectionHeader = useCallback(({ section }: { section: GroupedPackage }) => (
-    <View style={styles.sectionHeader}>
-      <Text style={styles.sectionTitle}>{section.title}</Text>
-      <View style={styles.sectionCountBadge}>
-        <Text style={styles.sectionCountText}>{section.count} package{section.count !== 1 ? 's' : ''}</Text>
-      </View>
-    </View>
-  ), []);
-  
-  // Render search bar
-  const renderSearchBar = useCallback(() => (
-    <Animated.View style={[
-      styles.searchContainer,
-      {
-        height: searchAnimation.interpolate({
-          inputRange: [0, 1],
-          outputRange: [0, 60]
-        }),
-        opacity: searchAnimation
-      }
-    ]}>
-      <View style={styles.searchInputContainer}>
-        <Feather name="search" size={20} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search packages..."
-          placeholderTextColor="#888"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-          autoFocus={searchVisible}
-        />
-        {searchQuery.length > 0 && (
-          <TouchableOpacity onPress={() => setSearchQuery('')}>
-            <Feather name="x" size={20} color="#888" />
-          </TouchableOpacity>
-        )}
-      </View>
-    </Animated.View>
-  ), [searchAnimation, searchVisible, searchQuery]);
-  
+  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking, getReceiverName]);
+
   // Render empty state
   const renderEmptyState = useCallback(() => (
-    <View style={styles.emptyState}>
-      <Feather name="inbox" size={64} color="#444" />
-      <Text style={styles.emptyStateTitle}>
-        {selectedStatus 
-          ? `No ${STATE_DISPLAYS[selectedStatus]} Packages`
-          : 'No Packages Found'
-        }
-      </Text>
-      <Text style={styles.emptyStateMessage}>
-        {searchQuery.trim()
-          ? `No packages match "${searchQuery}"`
-          : selectedStatus
-          ? `You don't have any ${STATE_DISPLAYS[selectedStatus].toLowerCase()} packages yet.`
-          : 'You haven\'t created any packages yet.'
-        }
-      </Text>
-      
-      {!searchQuery.trim() && (
-        <TouchableOpacity style={styles.createPackageButton} onPress={() => setShowPackageModal(true)}>
-          <Feather name="plus" size={20} color="#fff" />
-          <Text style={styles.createPackageButtonText}>Create Package</Text>
-        </TouchableOpacity>
-      )}
+    <View style={styles.emptyStateContainer}>
+      <LinearGradient
+        colors={['rgba(26, 26, 46, 0.6)', 'rgba(22, 33, 62, 0.6)']}
+        style={styles.emptyStateCard}
+      >
+        <Feather name={stateDisplayInfo.icon} size={64} color="#666" />
+        <Text style={styles.emptyStateTitle}>
+          {searchQuery ? 'No Matching Packages' : `No ${stateDisplayInfo.title} Found`}
+        </Text>
+        <Text style={styles.emptyStateSubtitle}>
+          {searchQuery 
+            ? `No packages found matching "${searchQuery}". Try a different search term.`
+            : selectedStatus 
+              ? `You don't have any packages in "${stateDisplayInfo.title.toLowerCase()}" state.`
+              : 'You haven\'t created any packages yet.'
+          }
+        </Text>
+        
+        {!searchQuery && (
+          <TouchableOpacity style={styles.emptyStateButton} onPress={handleOpenCreateModal}>
+            <Feather name="plus" size={20} color="#fff" />
+            <Text style={styles.emptyStateButtonText}>Create Package</Text>
+          </TouchableOpacity>
+        )}
+      </LinearGradient>
     </View>
-  ), [selectedStatus, searchQuery]);
-  
-  // FIXED: Render header matching the design
-  const renderHeader = useCallback(() => {
-    const totalPackages = filteredPackages.length;
-    const statusTitle = selectedStatus ? STATE_DISPLAYS[selectedStatus] : 'All Packages';
-    const statusSubtitle = selectedStatus 
-      ? `Packages ${selectedStatus === 'pending' ? 'awaiting payment' : 'in this category'}`
-      : 'All your packages';
-    
-    return (
+  ), [stateDisplayInfo, selectedStatus, searchQuery, handleOpenCreateModal]);
+
+  // Render error state
+  const renderErrorState = useCallback(() => (
+    <View style={styles.errorContainer}>
+      <LinearGradient
+        colors={['rgba(239, 68, 68, 0.1)', 'rgba(220, 38, 38, 0.1)']}
+        style={styles.errorCard}
+      >
+        <Feather name="alert-circle" size={64} color="#ef4444" />
+        <Text style={styles.errorTitle}>Failed to Load Packages</Text>
+        <Text style={styles.errorMessage}>{error}</Text>
+        
+        <TouchableOpacity style={styles.retryButton} onPress={() => loadPackages()}>
+          <Feather name="refresh-cw" size={20} color="#fff" />
+          <Text style={styles.retryButtonText}>Try Again</Text>
+        </TouchableOpacity>
+      </LinearGradient>
+    </View>
+  ), [error, loadPackages]);
+
+  // Use filtered packages for display
+  const displayPackages = filteredPackages;
+
+  // Main render
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      
+      {/* Fixed Header with Back Button */}
       <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
         <LinearGradient
           colors={[colors.background, 'rgba(22, 33, 62, 0.95)']}
           style={styles.header}
         >
           <View style={styles.headerContent}>
-            <View style={styles.headerLeft}>
-              <TouchableOpacity style={styles.backButton} onPress={() => router.back()}>
-                <Feather name="arrow-left" size={24} color="#fff" />
-              </TouchableOpacity>
-              
-              <View style={styles.headerTitleContainer}>
-                <View style={styles.headerTitleRow}>
-                  <Feather name="clock" size={20} color="#f59e0b" style={styles.headerIcon} />
-                  <Text style={styles.headerTitle}>{statusTitle}</Text>
-                </View>
-                <Text style={styles.headerSubtitle}>{statusSubtitle}</Text>
+            {/* Back Button */}
+            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
+              <Feather name="arrow-left" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            {/* Header Info */}
+            <View style={styles.headerInfo}>
+              <View style={styles.headerIconContainer}>
+                <Feather 
+                  name={stateDisplayInfo.icon} 
+                  size={20} 
+                  color={stateDisplayInfo.color} 
+                />
+              </View>
+              <View style={styles.headerText}>
+                <Text style={styles.headerTitle}>{stateDisplayInfo.title}</Text>
+                <Text style={styles.headerSubtitle}>{stateDisplayInfo.subtitle}</Text>
               </View>
             </View>
             
-            <View style={styles.headerActions}>
-              {totalPackages > 0 && (
-                <View style={styles.packageCountBadge}>
-                  <Text style={styles.packageCountText}>{totalPackages}</Text>
-                </View>
-              )}
-              
-              <TouchableOpacity style={styles.headerActionButton} onPress={toggleSearch}>
-                <Feather name={searchVisible ? "x" : "search"} size={20} color={colors.primary} />
-              </TouchableOpacity>
-            </View>
+            {/* Search Button */}
+            <TouchableOpacity style={styles.searchButton} onPress={toggleSearch}>
+              <Feather name="search" size={20} color="#fff" />
+            </TouchableOpacity>
+            
+            {/* Package Count */}
+            {displayPackages.length > 0 && (
+              <View style={styles.packageCount}>
+                <Text style={styles.packageCountText}>{displayPackages.length}</Text>
+              </View>
+            )}
           </View>
         </LinearGradient>
-      </View>
-    );
-  }, [insets.top, selectedStatus, filteredPackages.length, searchVisible, toggleSearch, router]);
-  
-  if (isLoading && !isRefreshing) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-        {renderHeader()}
         
+        {/* Search Input Dropdown */}
+        <Animated.View style={[
+          styles.searchContainer,
+          {
+            maxHeight: searchAnimation.interpolate({
+              inputRange: [0, 1],
+              outputRange: [0, 60],
+            }),
+            opacity: searchAnimation,
+          }
+        ]}>
+          <LinearGradient
+            colors={['rgba(22, 33, 62, 0.95)', 'rgba(26, 26, 46, 0.95)']}
+            style={styles.searchInputContainer}
+          >
+            <Feather name="search" size={18} color="#888" style={styles.searchIcon} />
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search by receiver, location, or package code..."
+              placeholderTextColor="#888"
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            {searchQuery.length > 0 && (
+              <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
+                <Feather name="x" size={18} color="#888" />
+              </TouchableOpacity>
+            )}
+          </LinearGradient>
+        </Animated.View>
+      </View>
+
+      {/* Content */}
+      {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
           <Text style={styles.loadingText}>Loading packages...</Text>
         </View>
-      </View>
-    );
-  }
-  
-  if (error && filteredPackages.length === 0) {
-    return (
-      <View style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-        {renderHeader()}
-        
-        <View style={styles.errorContainer}>
-          <Feather name="wifi-off" size={64} color="#ef4444" />
-          <Text style={styles.errorTitle}>Connection Error</Text>
-          <Text style={styles.errorMessage}>{error}</Text>
+      ) : error ? (
+        renderErrorState()
+      ) : displayPackages.length === 0 ? (
+        renderEmptyState()
+      ) : (
+        <ScrollView
+          style={styles.packagesList}
+          contentContainerStyle={styles.packagesListContent}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={isRefreshing}
+              onRefresh={handleRefresh}
+              tintColor={colors.primary}
+              colors={[colors.primary]}
+            />
+          }
+        >
+          {/* Search Results Info */}
+          {searchQuery && (
+            <View style={styles.searchResultsInfo}>
+              <Text style={styles.searchResultsText}>
+                Found {displayPackages.length} package{displayPackages.length !== 1 ? 's' : ''} matching "{searchQuery}"
+              </Text>
+            </View>
+          )}
           
-          <TouchableOpacity style={styles.retryButton} onPress={() => loadPackages()}>
-            <Feather name="refresh-cw" size={20} color="#fff" />
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-  
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      
-      {/* Fixed Header */}
-      {renderHeader()}
-      
-      {/* Search Bar */}
-      {renderSearchBar()}
-      
-      {/* Package List */}
-      <SectionList
-        sections={groupedPackages}
-        renderItem={renderPackageItem}
-        renderSectionHeader={renderSectionHeader}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={[
-          styles.listContainer,
-          groupedPackages.length === 0 && styles.listContainerEmpty
-        ]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isRefreshing}
-            onRefresh={handleRefresh}
-            colors={[colors.primary]}
-            tintColor={colors.primary}
-            title="Pull to refresh packages"
-            titleColor="#888"
-          />
-        }
-        ListEmptyComponent={renderEmptyState}
-        stickySectionHeadersEnabled={false}
-      />
+          {/* Render Grouped Packages */}
+          {(() => {
+            const groupedPackages = groupPackagesByDate(displayPackages);
+            return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
+              <View key={dateGroup} style={styles.dateGroup}>
+                {/* Date Group Header */}
+                <View style={styles.dateGroupHeader}>
+                  <Text style={styles.dateGroupTitle}>{dateGroup}</Text>
+                  <Text style={styles.dateGroupCount}>{packages.length} package{packages.length !== 1 ? 's' : ''}</Text>
+                </View>
+                
+                {/* Packages in this date group */}
+                {packages.map((pkg) => (
+                  <View key={pkg.id}>
+                    {renderPackageItem({ item: pkg })}
+                  </View>
+                ))}
+              </View>
+            ));
+          })()}
+          
+          {/* Load more indicator if needed */}
+          <View style={styles.listFooter}>
+            <Text style={styles.listFooterText}>
+              Showing {displayPackages.length} packages
+            </Text>
+          </View>
+        </ScrollView>
+      )}
       
       {/* Package Creation Modal */}
       <PackageCreationModal
-        visible={showPackageModal}
-        onClose={() => setShowPackageModal(false)}
-        onSubmit={async () => {
-          setShowPackageModal(false);
-          loadPackages();
-        }}
+        visible={showCreateModal}
+        onClose={handleCloseCreateModal}
+        onPackageCreated={handlePackageCreated}
       />
     </View>
   );
@@ -600,23 +718,21 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   
-  // Header styles matching the design
+  // Fixed header styles
   headerContainer: {
+    position: 'relative',
     zIndex: 1000,
   },
   header: {
-    paddingBottom: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-  },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
   },
   backButton: {
     width: 40,
@@ -627,287 +743,388 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 16,
   },
-  headerTitleContainer: {
+  headerInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
     flex: 1,
   },
-  headerTitleRow: {
-    flexDirection: 'row',
+  headerIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  headerIcon: {
-    marginRight: 8,
+  headerText: {
+    flex: 1,
   },
   headerTitle: {
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
     color: '#fff',
+    marginBottom: 2,
   },
   headerSubtitle: {
-    fontSize: 14,
+    fontSize: 13,
     color: '#888',
-    marginTop: 2,
   },
-  headerActions: {
-    flexDirection: 'row',
+  searchButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
-    gap: 12,
+    justifyContent: 'center',
+    marginRight: 8,
   },
-  packageCountBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: 16,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    minWidth: 32,
+  packageCount: {
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 14,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+    borderColor: colors.primary,
+    minWidth: 28,
     alignItems: 'center',
   },
   packageCountText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
-  },
-  headerActionButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    color: colors.primary,
   },
   
-  // Search styles
+  // Search functionality styles
   searchContainer: {
-    paddingHorizontal: 20,
     overflow: 'hidden',
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 12,
-    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  searchIcon: {
+    marginRight: 12,
   },
   searchInput: {
     flex: 1,
     fontSize: 16,
     color: '#fff',
+    paddingVertical: 8,
   },
-  
-  // List styles
-  listContainer: {
-    padding: 20,
-    paddingTop: 8,
+  clearButton: {
+    padding: 4,
+    marginLeft: 8,
   },
-  listContainerEmpty: {
-    flex: 1,
+  searchResultsInfo: {
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 12,
   },
-  
-  // Section header styles
-  sectionHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingTop: 24,
-  },
-  sectionTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  sectionCountBadge: {
-    backgroundColor: colors.primary,
-    borderRadius: 12,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-  },
-  sectionCountText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  
-  // Package item styles matching the design
-  packageItem: {
-    marginBottom: 16,
-    borderRadius: 16,
-    overflow: 'hidden',
-  },
-  packageGradient: {
-    padding: 20,
-  },
-  packageHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  packageInfo: {
-    flex: 1,
-    marginRight: 16,
-  },
-  packageCode: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  routeDescription: {
+  searchResultsText: {
     fontSize: 14,
     color: '#888',
-    lineHeight: 20,
-  },
-  packageBadges: {
-    alignItems: 'flex-end',
-    gap: 8,
-  },
-  deliveryTypeBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  deliveryTypeText: {
-    fontSize: 12,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  stateBadge: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 16,
-  },
-  stateText: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: '#fff',
+    fontStyle: 'italic',
   },
   
-  // Package details styles
-  packageDetails: {
-    marginBottom: 16,
-  },
-  receiverText: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 8,
-  },
-  costContainer: {
-    marginBottom: 8,
-  },
-  costLabel: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 2,
-  },
-  costValue: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#10b981',
-  },
-  
-  // Action buttons styles
-  actionButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  actionButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    borderRadius: 20,
-    paddingHorizontal: 20,
-    paddingVertical: 10,
-    gap: 8,
-    flex: 1,
-    justifyContent: 'center',
-  },
-  actionButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  
-  // Loading styles
+  // Loading states
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 16,
+    paddingHorizontal: 40,
   },
   loadingText: {
     fontSize: 16,
     color: '#888',
-    textAlign: 'center',
+    marginTop: 16,
   },
   
-  // Error styles
+  // Error states
   errorContainer: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 16,
+    paddingHorizontal: 20,
+  },
+  errorCard: {
+    alignItems: 'center',
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    width: '100%',
+    maxWidth: 400,
   },
   errorTitle: {
     fontSize: 20,
-    fontWeight: '700',
-    color: '#fff',
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 16,
+    marginBottom: 8,
     textAlign: 'center',
   },
   errorMessage: {
-    fontSize: 16,
+    fontSize: 14,
     color: '#888',
     textAlign: 'center',
-    lineHeight: 24,
+    lineHeight: 20,
+    marginBottom: 24,
   },
   retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 25,
     paddingHorizontal: 24,
     paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#ef4444',
     gap: 8,
   },
   retryButtonText: {
     fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  
+  // Empty state
+  emptyStateContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  emptyStateCard: {
+    alignItems: 'center',
+    padding: 32,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    width: '100%',
+    maxWidth: 400,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyStateSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+    gap: 8,
+  },
+  emptyStateButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  
+  // Package list
+  packagesList: {
+    flex: 1,
+  },
+  packagesListContent: {
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+  },
+  
+  // Date grouping styles
+  dateGroup: {
+    marginBottom: 20,
+  },
+  dateGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+    marginBottom: 12,
+  },
+  dateGroupTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  dateGroupCount: {
+    fontSize: 12,
+    color: '#888',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  
+  // Package card styles - more compact
+  packageCard: {
+    marginBottom: 12,
+    borderRadius: 12,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  packageCardGradient: {
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  
+  // Package header
+  packageHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  packageInfo: {
+    flex: 1,
+  },
+  packageCode: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  routeDescription: {
+    fontSize: 12,
+    color: '#888',
+    lineHeight: 16,
+  },
+  
+  // Badge container and styles
+  badgeContainer: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  deliveryTypeBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  stateBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 8,
+  },
+  badgeText: {
+    fontSize: 10,
     fontWeight: '600',
     color: '#fff',
   },
   
-  // Empty state styles
-  emptyState: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-    gap: 16,
+  // Receiver section
+  receiverSection: {
+    marginBottom: 8,
   },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '700',
+  receiverText: {
+    fontSize: 14,
     color: '#fff',
-    textAlign: 'center',
+    fontWeight: '600',
   },
-  emptyStateMessage: {
-    fontSize: 16,
+  
+  // Cost section
+  costSection: {
+    marginBottom: 12,
+  },
+  costLabel: {
+    fontSize: 11,
     color: '#888',
-    textAlign: 'center',
-    lineHeight: 24,
+    marginBottom: 2,
+    fontWeight: '500',
   },
-  createPackageButton: {
+  costValue: {
+    fontSize: 16,
+    color: '#10b981',
+    fontWeight: '700',
+  },
+  
+  // UPDATED: Dynamic action buttons - new outlined style like the image
+  actionButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  
+  // Button layout variations
+  singleButton: {
+    justifyContent: 'center',
+  },
+  doubleButtons: {
+    justifyContent: 'space-between',
+  },
+  tripleButtons: {
+    justifyContent: 'space-between',
+  },
+  
+  // UPDATED: Action button styling - more like the image with solid background
+  actionButton: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: 25,
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    gap: 8,
-    marginTop: 8,
+    justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 6,
+    backgroundColor: 'rgba(74, 85, 104, 0.8)', // More solid gray background
+    borderWidth: 1,
+    borderColor: 'rgba(155, 155, 155, 0.3)',
+    gap: 6,
+    minHeight: 36,
   },
-  createPackageButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
+  
+  actionButtonText: {
+    fontSize: 12,
+    color: '#fff', // White text
+    fontWeight: '500',
+  },
+  
+  // Pay button specific styles - bright green to make it more noticeable
+  payButton: {
+    backgroundColor: '#22c55e', // Bright green background for payment
+    borderColor: '#16a34a',
+    shadowColor: '#22c55e',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  payButtonText: {
     color: '#fff',
+    fontWeight: '600',
+  },
+  
+  // List footer
+  listFooter: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  listFooterText: {
+    fontSize: 12,
+    color: '#666',
   },
 });
