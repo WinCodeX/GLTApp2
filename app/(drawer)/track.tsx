@@ -269,12 +269,12 @@ export default function Track() {
     }
   }, []);
 
-  // UPDATED: Get delivery type badge color to match image
+  // UPDATED: Get delivery type badge color with requested colors
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return '#3b82f6';    // Blue (matches image)
-      case 'agent': return '#8b5cf6';       // Purple 
-      case 'fragile': return '#f97316';     // Orange (matches FRAGILE in image)
+      case 'doorstep': return '#8b5cf6';    // Purple
+      case 'agent': return '#3b82f6';       // Blue (Office)
+      case 'fragile': return '#f97316';     // Orange
       case 'collection': return '#10b981';  // Green
       case 'mixed': return '#10b981';       // Green for mixed
       default: return '#8b5cf6';
@@ -461,16 +461,20 @@ export default function Track() {
               <Text style={styles.packageCode}>{item.code}</Text>
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
-            <View style={styles.badgeContainer}>
-              {/* Delivery Type Badge */}
-              <View style={[styles.deliveryTypeBadge, { backgroundColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
-                <Text style={styles.badgeText}>{getDeliveryTypeDisplay(item.delivery_type)}</Text>
-              </View>
-              {/* State Badge with updated colors */}
-              <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
-                <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
-              </View>
+          <View style={styles.badgeContainer}>
+            {/* Delivery Type Badge */}
+            <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+              <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                {getDeliveryTypeDisplay(item.delivery_type)}
+              </Text>
             </View>
+            {/* State Badge with transparent style */}
+            <View style={[styles.stateBadge, { borderColor: getStateBadgeColor(item.state) }]}>
+              <Text style={[styles.badgeText, { color: getStateBadgeColor(item.state) }]}>
+                {item.state_display?.toUpperCase()}
+              </Text>
+            </View>
+          </View>
           </View>
 
           {/* Receiver Section */}
@@ -1013,7 +1017,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   
-  // Badge container and styles
+  // Badge container and styles - updated for transparent style
   badgeContainer: {
     flexDirection: 'column',
     alignItems: 'flex-end',
@@ -1023,11 +1027,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
+    backgroundColor: 'transparent', // Transparent background
+    borderWidth: 1,
   },
   stateBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
+    backgroundColor: 'transparent', // Transparent background  
+    borderWidth: 1,
   },
   badgeText: {
     fontSize: 10,
