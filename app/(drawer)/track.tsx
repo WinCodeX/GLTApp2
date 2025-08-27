@@ -269,12 +269,12 @@ export default function Track() {
     }
   }, []);
 
-  // UPDATED: Get delivery type badge color with new types
+  // UPDATED: Get delivery type badge color to match image
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return '#3b82f6';    // Blue (as shown in image)
+      case 'doorstep': return '#3b82f6';    // Blue (matches image)
       case 'agent': return '#8b5cf6';       // Purple 
-      case 'fragile': return '#ef4444';     // Red/Orange (as shown in image)
+      case 'fragile': return '#f97316';     // Orange (matches FRAGILE in image)
       case 'collection': return '#10b981';  // Green
       case 'mixed': return '#10b981';       // Green for mixed
       default: return '#8b5cf6';
@@ -330,7 +330,7 @@ export default function Track() {
   
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
-      case 'pending_unpaid': return '#f59e0b'; // Orange for pending payment
+      case 'pending_unpaid': return '#f97316'; // Orange to match "Pending Payment" in image
       case 'pending': return '#10b981';
       case 'submitted': return '#3b82f6';
       case 'in_transit': return '#8b5cf6';
