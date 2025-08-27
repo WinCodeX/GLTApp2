@@ -1306,13 +1306,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Track button - FIXED: Dark blue outline to match image
+  // Track button - FIXED: Brighter border for visibility
   trackButton: {
-    borderColor: '#1e293b',
+    borderColor: '#64748b', // Light slate gray - much more visible
     backgroundColor: 'transparent',
   },
   trackButtonText: {
-    color: '#1e293b',
+    color: '#64748b', // Match the border color
   },
   
   // Edit button - purple outline  
