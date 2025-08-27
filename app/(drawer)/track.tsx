@@ -398,7 +398,28 @@ export default function Track() {
             console.error('❌ FILTERING FAILED!');
             console.error('Expected all packages to have state:', apiState);
             console.error('But got states:', uniqueStates);
-            console.error('This indicates a backend filtering issue');
+            console.error('This indicates a backend filtering issue in the packages controller');
+            console.error('Check the apply_filters method - role-based filtering might be overriding state filter');
+            
+            // FALLBACK: Apply client-side filtering as backup
+            console.log('🔧 Applying client-side filtering as fallback...');
+            const clientFiltered = response.data.filter(pkg => pkg.state === apiState);
+            console.log('🔧 Client-side filtered:', clientFiltered.length, 'packages');
+            
+            if (clientFiltered.length > 0) {
+              console.log('✅ Client-side filtering successful, using filtered results');
+              setPackages(clientFiltered);
+              return; // Exit early with client-filtered results
+            } else {
+              console.log('⚠️ Client-side filtering returned no results, using all results with warning');
+              Toast.show({
+                type: 'info',
+                text1: 'Backend Filtering Issue',
+                text2: 'Showing all packages due to backend filtering problem',
+                position: 'top',
+                visibilityTime: 4000,
+              });
+            }
           }
         }
       } else {
