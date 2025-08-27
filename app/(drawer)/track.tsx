@@ -181,7 +181,7 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
-  // FIXED: Load packages with proper state filtering
+  // FIXED: Load packages with proper state filtering and extensive debugging
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -191,32 +191,57 @@ export default function Track() {
       }
       setError(null);
 
-      console.log('📦 Loading packages for drawer status:', selectedStatus);
-      console.log('🔄 STATE_MAPPING check:', STATE_MAPPING);
+      console.log('🎯 === DEBUGGING PACKAGE FILTERING ===');
+      console.log('📦 selectedStatus from params:', selectedStatus);
+      console.log('🔄 STATE_MAPPING:', STATE_MAPPING);
+      console.log('📊 params.status (raw):', params.status);
+      console.log('📊 typeof params.status:', typeof params.status);
+      
+      // Check if the mapping works
+      if (selectedStatus) {
+        const mappedState = STATE_MAPPING[selectedStatus];
+        console.log('🗺️ Mapping result:', { 
+          drawerState: selectedStatus, 
+          apiState: mappedState,
+          mappingExists: mappedState !== undefined 
+        });
+      }
       
       // Pass the drawer state directly to getPackages - it will handle the mapping internally
       const filters = selectedStatus ? { state: selectedStatus } : undefined;
       
-      console.log('📨 Sending filters to API:', filters);
-      if (selectedStatus) {
-        console.log('🗺️ Will map to API state:', STATE_MAPPING[selectedStatus]);
-      }
+      console.log('📨 Final filters object:', JSON.stringify(filters, null, 2));
+      console.log('📨 Will call getPackages with:', filters);
       
       const response = await getPackages(filters);
       
-      console.log('✅ Packages loaded:', {
-        count: response.data.length,
-        drawerStatus: selectedStatus,
-        expectedApiState: selectedStatus ? STATE_MAPPING[selectedStatus] : 'all',
-        totalCount: response.pagination.total_count
+      console.log('✅ API Response received:', {
+        success: response.success,
+        totalPackages: response.data.length,
+        totalCount: response.pagination?.total_count,
+        message: response.message
       });
 
       // Log the actual states of returned packages to verify filtering
       if (response.data.length > 0) {
         const states = response.data.map(pkg => pkg.state);
         const uniqueStates = [...new Set(states)];
-        console.log('📊 Returned package states:', uniqueStates);
+        console.log('📊 Actual returned package states:', uniqueStates);
+        console.log('🎯 Expected state:', selectedStatus ? STATE_MAPPING[selectedStatus] : 'ALL');
+        
+        // Check if filtering worked
+        if (selectedStatus && STATE_MAPPING[selectedStatus]) {
+          const expectedState = STATE_MAPPING[selectedStatus];
+          const correctlyFiltered = states.every(state => state === expectedState);
+          console.log('✅ Filtering working correctly:', correctlyFiltered);
+          if (!correctlyFiltered) {
+            console.error('❌ FILTERING FAILED! Expected all packages to have state:', expectedState);
+          }
+        }
+      } else {
+        console.log('📦 No packages returned');
       }
+      console.log('🎯 === END DEBUGGING ===');
       
       setPackages(response.data);
       
