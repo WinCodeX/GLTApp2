@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - FIXED: Proper state filtering
+// app/(drawer)/track.tsx - FIXED: Proper state filtering and QR code integration
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -18,14 +18,74 @@ import { Feather } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
-import { 
-  getPackages,
-  STATE_MAPPING,
-  type Package,
-  type DrawerState
-} from '@/lib/helpers/packageHelpers';
+import api from '@/lib/api';
 import colors from '@/theme/colors';
 import PackageCreationModal from '@/components/PackageCreationModal';
+
+// Types
+interface Package {
+  id: string;
+  code: string;
+  state: string;
+  state_display: string;
+  sender_name: string;
+  receiver_name: string;
+  receiver_phone: string;
+  route_description: string;
+  cost: number;
+  delivery_type: string;
+  created_at: string;
+  updated_at: string;
+  origin_area?: any;
+  destination_area?: any;
+  origin_agent?: any;
+  destination_agent?: any;
+  delivery_location?: string;
+  sender_phone?: string;
+  sender_email?: string;
+  receiver_email?: string;
+  business_name?: string;
+  // Additional fields for compatibility
+  recipient_name?: string;
+  receiver?: { name: string };
+  recipient?: { name: string };
+  to_name?: string;
+  from_location?: string;
+  to_location?: string;
+}
+
+interface PackageResponse {
+  data: Package[];
+  pagination: {
+    total_count: number;
+    page: number;
+    per_page: number;
+    total_pages: number;
+  };
+  success: boolean;
+  message?: string;
+}
+
+// Drawer state type
+type DrawerState = 
+  | 'pending' 
+  | 'paid' 
+  | 'submitted' 
+  | 'in-transit' 
+  | 'delivered' 
+  | 'collected' 
+  | 'rejected';
+
+// FIXED: Correct state mapping based on backend expectations
+const STATE_MAPPING: Record<DrawerState, string> = {
+  'pending': 'pending_unpaid',     // Drawer "Pending" = API "pending_unpaid"
+  'paid': 'pending',               // Drawer "Paid" = API "pending"  
+  'submitted': 'submitted',        // Direct mapping
+  'in-transit': 'in_transit',      // Drawer uses hyphen, API uses underscore
+  'delivered': 'delivered',        // Direct mapping
+  'collected': 'collected',        // Direct mapping
+  'rejected': 'rejected'           // Direct mapping
+};
 
 export default function Track() {
   const params = useLocalSearchParams();
@@ -49,6 +109,109 @@ export default function Track() {
   
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+
+  // FIXED: Get packages with proper API integration
+  const getPackages = useCallback(async (filters?: { state?: string; search?: string; page?: number; per_page?: number }): Promise<PackageResponse> => {
+    try {
+      console.log('📦 FIXED getPackages called with filters:', filters);
+      
+      // Build query parameters
+      const params = new URLSearchParams();
+      
+      if (filters?.state) {
+        params.append('state', filters.state);
+        console.log('🎯 Adding state filter:', filters.state);
+      }
+      
+      if (filters?.page) {
+        params.append('page', filters.page.toString());
+      }
+      
+      if (filters?.per_page) {
+        params.append('per_page', filters.per_page.toString());
+      }
+      
+      if (filters?.search) {
+        params.append('search', filters.search);
+      }
+      
+      const queryString = params.toString();
+      const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
+      
+      console.log('📡 Making API request to:', url);
+      
+      const response = await api.get(url, {
+        timeout: 15000,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
+      
+      console.log('📡 API Response status:', response.status);
+      console.log('📡 API Response data keys:', Object.keys(response.data));
+      
+      if (!response.data.success) {
+        throw new Error(response.data.message || 'Failed to fetch packages');
+      }
+      
+      // Transform the response data to match expected format
+      const transformedPackages = response.data.data.map((pkg: any) => ({
+        id: String(pkg.id || ''),
+        code: pkg.code || '',
+        state: pkg.state || 'unknown',
+        state_display: pkg.state_display || pkg.state?.charAt(0).toUpperCase() + pkg.state?.slice(1) || 'Unknown',
+        sender_name: pkg.sender_name || 'Unknown Sender',
+        receiver_name: pkg.receiver_name || 'Unknown Receiver',
+        receiver_phone: pkg.receiver_phone || '',
+        route_description: pkg.route_description || 'Route information unavailable',
+        cost: Number(pkg.cost) || 0,
+        delivery_type: pkg.delivery_type || 'agent',
+        created_at: pkg.created_at || new Date().toISOString(),
+        updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
+        origin_area: pkg.origin_area,
+        destination_area: pkg.destination_area,
+        origin_agent: pkg.origin_agent,
+        destination_agent: pkg.destination_agent,
+        delivery_location: pkg.delivery_location,
+        sender_phone: pkg.sender_phone,
+        sender_email: pkg.sender_email,
+        receiver_email: pkg.receiver_email,
+        business_name: pkg.business_name,
+        // Additional fields for compatibility
+        recipient_name: pkg.recipient_name || pkg.receiver_name,
+        receiver: pkg.receiver || { name: pkg.receiver_name },
+        recipient: pkg.recipient || { name: pkg.receiver_name },
+        to_name: pkg.to_name || pkg.receiver_name,
+        from_location: pkg.from_location || pkg.origin_area?.name,
+        to_location: pkg.to_location || pkg.destination_area?.name,
+      }));
+      
+      const result: PackageResponse = {
+        data: transformedPackages,
+        pagination: response.data.pagination || {
+          total_count: transformedPackages.length,
+          page: 1,
+          per_page: transformedPackages.length,
+          total_pages: 1
+        },
+        success: true,
+        message: response.data.message
+      };
+      
+      console.log('✅ Transformed packages:', result.data.length);
+      return result;
+      
+    } catch (error: any) {
+      console.error('❌ getPackages error:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      throw error;
+    }
+  }, []);
 
   // Memoized state display
   const stateDisplayInfo = useMemo(() => {
@@ -181,7 +344,7 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
-  // FIXED: Load packages with proper state filtering and extensive debugging
+  // FIXED: Load packages with correct state mapping and error handling
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -191,27 +354,24 @@ export default function Track() {
       }
       setError(null);
 
-      console.log('🎯 === DEBUGGING PACKAGE FILTERING ===');
-      console.log('📦 selectedStatus from params:', selectedStatus);
+      console.log('🎯 === DEBUGGING PACKAGE FILTERING (FIXED VERSION) ===');
+      console.log('📦 selectedStatus from drawer params:', selectedStatus);
       console.log('🔄 STATE_MAPPING:', STATE_MAPPING);
-      console.log('📊 params.status (raw):', params.status);
-      console.log('📊 typeof params.status:', typeof params.status);
       
-      // Check if the mapping works
+      let apiState: string | undefined;
       if (selectedStatus) {
-        const mappedState = STATE_MAPPING[selectedStatus];
-        console.log('🗺️ Mapping result:', { 
+        apiState = STATE_MAPPING[selectedStatus];
+        console.log('🗺️ Mapping:', { 
           drawerState: selectedStatus, 
-          apiState: mappedState,
-          mappingExists: mappedState !== undefined 
+          apiState: apiState,
+          mappingExists: apiState !== undefined 
         });
       }
       
-      // Pass the drawer state directly to getPackages - it will handle the mapping internally
-      const filters = selectedStatus ? { state: selectedStatus } : undefined;
+      // Build filters with the correctly mapped API state
+      const filters = apiState ? { state: apiState } : undefined;
       
-      console.log('📨 Final filters object:', JSON.stringify(filters, null, 2));
-      console.log('📨 Will call getPackages with:', filters);
+      console.log('📨 Final filters for API:', JSON.stringify(filters, null, 2));
       
       const response = await getPackages(filters);
       
@@ -222,24 +382,27 @@ export default function Track() {
         message: response.message
       });
 
-      // Log the actual states of returned packages to verify filtering
+      // Log the actual states of returned packages to verify filtering worked
       if (response.data.length > 0) {
         const states = response.data.map(pkg => pkg.state);
         const uniqueStates = [...new Set(states)];
         console.log('📊 Actual returned package states:', uniqueStates);
-        console.log('🎯 Expected state:', selectedStatus ? STATE_MAPPING[selectedStatus] : 'ALL');
+        console.log('🎯 Expected state was:', apiState || 'ALL');
         
-        // Check if filtering worked
-        if (selectedStatus && STATE_MAPPING[selectedStatus]) {
-          const expectedState = STATE_MAPPING[selectedStatus];
-          const correctlyFiltered = states.every(state => state === expectedState);
+        // Check if filtering worked correctly
+        if (apiState) {
+          const correctlyFiltered = states.every(state => state === apiState);
           console.log('✅ Filtering working correctly:', correctlyFiltered);
+          
           if (!correctlyFiltered) {
-            console.error('❌ FILTERING FAILED! Expected all packages to have state:', expectedState);
+            console.error('❌ FILTERING FAILED!');
+            console.error('Expected all packages to have state:', apiState);
+            console.error('But got states:', uniqueStates);
+            console.error('This indicates a backend filtering issue');
           }
         }
       } else {
-        console.log('📦 No packages returned');
+        console.log('📦 No packages returned for state:', apiState || 'ALL');
       }
       console.log('🎯 === END DEBUGGING ===');
       
@@ -250,7 +413,7 @@ export default function Track() {
       setError(error.message);
       
       Toast.show({
-        type: 'errorToast',
+        type: 'error',
         text1: 'Failed to Load Packages',
         text2: error.message,
         position: 'top',
@@ -260,7 +423,7 @@ export default function Track() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedStatus]);
+  }, [selectedStatus, getPackages]);
 
   // Load data when component mounts or status changes
   useEffect(() => {
@@ -401,17 +564,67 @@ export default function Track() {
     });
   }, [router]);
 
-  // Handle view tracking details
-  const handleViewTracking = useCallback((packageItem: Package) => {
+  // FIXED: Handle view tracking details with QR code generation
+  const handleViewTracking = useCallback(async (packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
-    router.push({
-      pathname: '/(drawer)/track/tracking',
-      params: { 
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString(),
-        from: '/(drawer)/track'
+    
+    try {
+      // FIXED: Generate QR code using the app services before navigation
+      console.log('📱 Generating QR code using app services...');
+      
+      const qrResponse = await api.get(`/api/v1/packages/${packageItem.id}/qr_code`, {
+        params: {
+          include_qr_code: true,
+          qr_type: 'organic' // Use the organic QR generator from app services
+        }
+      });
+      
+      console.log('📱 QR Code API response:', qrResponse.data.success ? 'SUCCESS' : 'FAILED');
+      
+      let qrCodeData = null;
+      if (qrResponse.data.success && qrResponse.data.data?.qr_code_base64) {
+        qrCodeData = qrResponse.data.data;
+        console.log('✅ QR code generated successfully');
+      } else {
+        console.log('⚠️ QR code generation failed, proceeding without QR');
       }
-    });
+      
+      // Navigate to tracking page with QR data
+      router.push({
+        pathname: '/(drawer)/track/tracking',
+        params: { 
+          packageCode: packageItem.code,
+          packageId: packageItem.id.toString(),
+          from: '/(drawer)/track',
+          // Pass QR data if available
+          ...(qrCodeData && {
+            qrCodeBase64: qrCodeData.qr_code_base64,
+            trackingUrl: qrCodeData.tracking_url
+          })
+        }
+      });
+      
+    } catch (error: any) {
+      console.error('❌ Error generating QR code:', error);
+      
+      // Navigate anyway without QR code
+      router.push({
+        pathname: '/(drawer)/track/tracking',
+        params: { 
+          packageCode: packageItem.code,
+          packageId: packageItem.id.toString(),
+          from: '/(drawer)/track'
+        }
+      });
+      
+      Toast.show({
+        type: 'info',
+        text1: 'QR Code Unavailable',
+        text2: 'Tracking page will load without QR code',
+        position: 'top',
+        visibilityTime: 2000,
+      });
+    }
   }, [router]);
 
   // Get receiver name display
