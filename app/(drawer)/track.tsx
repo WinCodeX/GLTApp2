@@ -462,17 +462,15 @@ export default function Track() {
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
           <View style={styles.badgeContainer}>
-            {/* Delivery Type Badge */}
+            {/* Delivery Type Badge - transparent style */}
             <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
               <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
                 {getDeliveryTypeDisplay(item.delivery_type)}
               </Text>
             </View>
-            {/* State Badge with transparent style */}
-            <View style={[styles.stateBadge, { borderColor: getStateBadgeColor(item.state) }]}>
-              <Text style={[styles.badgeText, { color: getStateBadgeColor(item.state) }]}>
-                {item.state_display?.toUpperCase()}
-              </Text>
+            {/* State Badge - solid background style like in image */}
+            <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
+              <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
             </View>
           </View>
           </View>
@@ -1017,7 +1015,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   
-  // Badge container and styles - updated for transparent style
+  // Badge container and styles - mixed styles
   badgeContainer: {
     flexDirection: 'column',
     alignItems: 'flex-end',
@@ -1027,15 +1025,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: 'transparent', // Transparent background
+    backgroundColor: 'transparent', // Transparent background for delivery type
     borderWidth: 1,
   },
   stateBadge: {
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: 'transparent', // Transparent background  
-    borderWidth: 1,
+    // Solid background for state badges (like in image)
   },
   badgeText: {
     fontSize: 10,
