@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - FIXED: Prevents data refresh during step navigation
+// components/CollectDeliverModal.tsx - FIXED: Proper keyboard handling and header visibility
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -69,24 +69,24 @@ export default function CollectDeliverModal({
   
   const STEP_TITLES = [
     'Collection Details',
-    'Item Information',
+    'Item Information', 
     'Delivery Setup',
     'Payment & Confirmation'
   ];
 
-  // FIXED: One-time keyboard setup - no dependencies that cause refresh
+  // FIXED: Better keyboard handling to prevent modal hiding
   useEffect(() => {
     if (!visible) return;
 
     const keyboardDidShowListener = Keyboard.addListener(
-      'keyboardDidShow',
+      Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
       (e) => {
         setKeyboardHeight(e.endCoordinates.height);
         setIsKeyboardVisible(true);
       }
     );
     const keyboardDidHideListener = Keyboard.addListener(
-      'keyboardDidHide',
+      Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
       () => {
         setKeyboardHeight(0);
         setIsKeyboardVisible(false);
@@ -97,21 +97,28 @@ export default function CollectDeliverModal({
       keyboardDidHideListener?.remove();
       keyboardDidShowListener?.remove();
     };
-  }, [visible]); // FIXED: Only depend on visible, not currentStep
+  }, [visible]);
 
-  // FIXED: Modal height calculation - memoized to prevent recalculation
+  // FIXED: Better modal height calculation to prevent hiding
   const modalHeight = useMemo(() => {
+    const statusBarHeight = Platform.OS === 'ios' ? 47 : 24;
+    const headerHeight = 80;
+    const minModalHeight = 400;
+    
     if (isKeyboardVisible) {
-      const maxHeightWithKeyboard = SCREEN_HEIGHT - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
-      return Math.min(maxHeightWithKeyboard, SCREEN_HEIGHT * 0.85);
+      // When keyboard is visible, calculate available space
+      const availableHeight = SCREEN_HEIGHT - keyboardHeight - statusBarHeight;
+      return Math.max(availableHeight * 0.95, minModalHeight);
     }
-    return SCREEN_HEIGHT * 0.90;
+    
+    // When keyboard is hidden, use most of the screen
+    return Math.min(SCREEN_HEIGHT * 0.92, SCREEN_HEIGHT - statusBarHeight - 20);
   }, [isKeyboardVisible, keyboardHeight]);
 
   // FIXED: One-time initialization when modal opens
   useEffect(() => {
     if (visible && !isInitialized) {
-      console.log('🎯 Initializing CollectDeliverModal once...');
+      console.log('Initializing CollectDeliverModal once...');
       initializeModal();
       setIsInitialized(true);
       
@@ -121,31 +128,20 @@ export default function CollectDeliverModal({
         useNativeDriver: true,
       }).start();
     } else if (!visible) {
-      // Reset initialization flag when modal closes
       setIsInitialized(false);
     }
-  }, [visible]); // FIXED: Only depend on visible
+  }, [visible]);
 
-  // FIXED: Initialize modal data once - no re-fetching on step changes
   const initializeModal = useCallback(() => {
-    console.log('🔄 Setting up initial data...');
-    
-    // Set delivery location if provided
     if (initialLocation && !deliveryLocation) {
       setDeliveryLocation(initialLocation);
-      console.log('📍 Set initial delivery location:', initialLocation);
     }
     
-    // Set current step to 0
     setCurrentStep(0);
     setIsSubmitting(false);
-    
-    console.log('✅ Modal initialized without data fetching');
   }, [initialLocation, deliveryLocation]);
 
-  // FIXED: Reset form only when modal closes completely
   const resetForm = useCallback(() => {
-    console.log('🔄 Resetting form data...');
     setCurrentStep(0);
     setCollectionLocation(null);
     setDeliveryLocation(initialLocation);
@@ -168,12 +164,11 @@ export default function CollectDeliverModal({
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
-      resetForm(); // Only reset when actually closing
+      resetForm();
       onClose();
     });
   }, [slideAnim, onClose, resetForm]);
 
-  // FIXED: Location selection without data refresh
   const selectLocationOnMap = useCallback(async (type: 'collection' | 'delivery') => {
     Alert.alert(
       'Select Location',
@@ -201,22 +196,18 @@ export default function CollectDeliverModal({
               
               if (type === 'collection') {
                 setCollectionLocation(locationData);
-                console.log('📍 Collection location set:', locationData);
               } else {
                 setDeliveryLocation(locationData);
-                console.log('📍 Delivery location set:', locationData);
               }
             } catch (error) {
               Alert.alert('Error', 'Failed to get location');
-              console.error('Location error:', error);
             }
           }
         }
       ]
     );
-  }, []); // FIXED: No dependencies that cause refresh
+  }, []);
 
-  // FIXED: Step validation - pure function, no state dependencies
   const isStepValid = useCallback((step: number) => {
     switch (step) {
       case 0:
@@ -232,37 +223,23 @@ export default function CollectDeliverModal({
     }
   }, [shopName, collectionAddress, itemsToCollect, itemValue, deliveryAddress, paymentMethod]);
 
-  // FIXED: Step navigation without data refresh
   const nextStep = useCallback(() => {
-    console.log('➡️ Next step requested, current:', currentStep);
     if (currentStep < STEP_TITLES.length - 1 && isStepValid(currentStep)) {
-      setCurrentStep(prev => {
-        const newStep = prev + 1;
-        console.log('✅ Moving to step:', newStep);
-        return newStep;
-      });
-    } else {
-      console.log('❌ Cannot proceed to next step - validation failed');
+      setCurrentStep(prev => prev + 1);
     }
   }, [currentStep, isStepValid]);
 
   const prevStep = useCallback(() => {
-    console.log('⬅️ Previous step requested, current:', currentStep);
     if (currentStep > 0) {
-      setCurrentStep(prev => {
-        const newStep = prev - 1;
-        console.log('✅ Moving to step:', newStep);
-        return newStep;
-      });
+      setCurrentStep(prev => prev - 1);
     }
   }, [currentStep]);
 
-  // FIXED: Cost calculation - pure function
   const calculateCosts = useMemo(() => {
     const collectionFee = 200;
     const deliveryFee = 250;
     const itemValueNum = parseFloat(itemValue) || 0;
-    const insuranceFee = Math.max(50, itemValueNum * 0.02); // 2% or minimum 50
+    const insuranceFee = Math.max(50, itemValueNum * 0.02);
     const serviceFee = 100;
     
     return {
@@ -274,20 +251,15 @@ export default function CollectDeliverModal({
     };
   }, [itemValue]);
 
-  // FIXED: Submit handler - no data refresh, just form submission
   const handleSubmit = useCallback(async () => {
-    if (!isStepValid(currentStep)) {
-      console.log('❌ Form validation failed for step:', currentStep);
-      return;
-    }
+    if (!isStepValid(currentStep)) return;
 
-    console.log('🚀 Submitting collection request...');
     setIsSubmitting(true);
     
     try {
       const packageData: PackageData = {
-        receiver_name: 'Self', // Collecting for self
-        receiver_phone: '+254700000000', // Would come from user context
+        receiver_name: 'Self',
+        receiver_phone: '+254700000000',
         pickup_location: `${shopName} - ${collectionAddress}`,
         delivery_location: deliveryAddress,
         delivery_type: 'collection',
@@ -305,13 +277,10 @@ export default function CollectDeliverModal({
         }
       };
 
-      console.log('📦 Submitting package data:', packageData);
       await onSubmit(packageData);
-      
-      console.log('✅ Collection request submitted successfully');
       closeModal();
     } catch (error) {
-      console.error('❌ Error submitting collect & deliver request:', error);
+      console.error('Error submitting collect & deliver request:', error);
       Alert.alert('Submission Error', 'Failed to submit collection request. Please try again.');
     } finally {
       setIsSubmitting(false);
@@ -320,7 +289,19 @@ export default function CollectDeliverModal({
       itemValue, specialInstructions, paymentMethod, collectionLocation, deliveryLocation, 
       onSubmit, closeModal]);
 
-  // FIXED: Memoized render functions to prevent unnecessary re-renders
+  // FIXED: Header with proper positioning under status bar
+  const renderHeader = useCallback(() => (
+    <View style={styles.headerContainer}>
+      <View style={styles.header}>
+        <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
+          <Feather name="x" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
+        <View style={styles.placeholder} />
+      </View>
+    </View>
+  ), [closeModal, currentStep]);
+
   const renderProgressBar = useCallback(() => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -336,16 +317,6 @@ export default function CollectDeliverModal({
       </Text>
     </View>
   ), [currentStep]);
-
-  const renderHeader = useCallback(() => (
-    <View style={styles.header}>
-      <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
-        <Feather name="x" size={24} color="#fff" />
-      </TouchableOpacity>
-      <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
-      <View style={styles.placeholder} />
-    </View>
-  ), [closeModal, currentStep]);
 
   const renderCollectionDetails = useCallback(() => (
     <View style={styles.stepContent}>
@@ -479,7 +450,6 @@ export default function CollectDeliverModal({
         Review your collection request and payment details
       </Text>
       
-      {/* Cost breakdown */}
       <View style={styles.costBreakdown}>
         <Text style={styles.costTitle}>Service Breakdown</Text>
         
@@ -509,7 +479,6 @@ export default function CollectDeliverModal({
         </View>
       </View>
 
-      {/* Payment method selection */}
       <View style={styles.paymentSection}>
         <Text style={styles.sectionTitle}>Payment Method</Text>
         
@@ -536,7 +505,6 @@ export default function CollectDeliverModal({
         </TouchableOpacity>
       </View>
 
-      {/* Order summary */}
       <View style={styles.summarySection}>
         <Text style={styles.sectionTitle}>Order Summary</Text>
         <Text style={styles.summaryText}>📍 Collection: {shopName}</Text>
@@ -547,13 +515,12 @@ export default function CollectDeliverModal({
     </View>
   ), [calculateCosts, paymentMethod, shopName, itemsToCollect, itemValue, deliveryAddress]);
 
-  // FIXED: Navigation buttons with no data dependencies
   const renderNavigationButtons = useCallback(() => (
     <View style={styles.navigationContainer}>
       {currentStep > 0 && (
         <TouchableOpacity
           style={[styles.navButton, styles.backButton]}
-          onPress={prevStep} // FIXED: Direct call, no data refresh
+          onPress={prevStep}
           disabled={isSubmitting}
         >
           <Feather name="arrow-left" size={18} color="#10b981" />
@@ -567,7 +534,7 @@ export default function CollectDeliverModal({
           styles.nextButton,
           (!isStepValid(currentStep) || isSubmitting) && styles.disabledButton
         ]}
-        onPress={currentStep === STEP_TITLES.length - 1 ? handleSubmit : nextStep} // FIXED: Direct calls
+        onPress={currentStep === STEP_TITLES.length - 1 ? handleSubmit : nextStep}
         disabled={!isStepValid(currentStep) || isSubmitting}
       >
         {isSubmitting ? (
@@ -586,7 +553,6 @@ export default function CollectDeliverModal({
     </View>
   ), [currentStep, isStepValid, isSubmitting, prevStep, nextStep, handleSubmit]);
 
-  // FIXED: Step content renderer - memoized to prevent refresh
   const renderCurrentStep = useMemo(() => {
     switch (currentStep) {
       case 0:
@@ -609,11 +575,11 @@ export default function CollectDeliverModal({
       visible={visible}
       transparent
       animationType="none"
-      statusBarTranslucent
+      statusBarTranslucent={false}
     >
+      <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
+      
       <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="rgba(0,0,0,0.7)" translucent />
-        
         <Animated.View
           style={[
             styles.modalContainer,
@@ -635,11 +601,14 @@ export default function CollectDeliverModal({
             <KeyboardAvoidingView
               behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
               style={styles.contentContainer}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+              keyboardVerticalOffset={0}
             >
               <ScrollView
                 style={styles.scrollContainer}
-                contentContainerStyle={styles.scrollContentContainer}
+                contentContainerStyle={[
+                  styles.scrollContentContainer,
+                  { paddingBottom: isKeyboardVisible ? 10 : 90 }
+                ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
               >
@@ -670,14 +639,19 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  // Header
+  // FIXED: Header with proper spacing under status bar
+  headerContainer: {
+    backgroundColor: 'rgba(26, 26, 46, 0.95)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: Platform.OS === 'ios' ? 10 : 15,
-    paddingBottom: 8,
+    paddingVertical: 16,
+    minHeight: 60,
   },
   closeButton: {
     width: 40,
@@ -686,12 +660,14 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
+    zIndex: 10,
   },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    marginTop: 4,
+    textAlign: 'center',
+    flex: 1,
   },
   placeholder: {
     width: 40,
@@ -700,7 +676,8 @@ const styles = StyleSheet.create({
   // Progress
   progressContainer: {
     paddingHorizontal: 20,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
   },
   progressBackground: {
     height: 4,
@@ -729,12 +706,11 @@ const styles = StyleSheet.create({
   scrollContentContainer: {
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingBottom: 10,
   },
   stepContent: {
     flex: 1,
     minHeight: 300,
-    marginBottom: 20,
+    paddingVertical: 20,
   },
   stepTitle: {
     fontSize: 22,
@@ -752,7 +728,6 @@ const styles = StyleSheet.create({
   // Form
   formContainer: {
     gap: 16,
-    paddingVertical: 8,
     marginBottom: 20,
   },
   input: {
@@ -778,7 +753,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     gap: 8,
   },
   serviceInfoText: {
@@ -793,7 +768,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     marginTop: 10,
     gap: 8,
   },
@@ -809,7 +784,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
-    padding: 10,
+    padding: 12,
     gap: 8,
   },
   deliveryInfoText: {
@@ -928,13 +903,16 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   
-  // Navigation
+  // FIXED: Navigation buttons with proper positioning
   navigationContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    paddingVertical: 16,
+    paddingTop: 16,
+    paddingBottom: Platform.OS === 'ios' ? 20 : 16,
     gap: 12,
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    backgroundColor: 'rgba(26, 26, 46, 0.95)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
   navButton: {
     flex: 1,
@@ -944,6 +922,7 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     gap: 8,
+    minHeight: 50,
   },
   backButton: {
     backgroundColor: 'transparent',
