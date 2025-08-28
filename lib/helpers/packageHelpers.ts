@@ -1,7 +1,7 @@
-// lib/helpers/packageHelpers.ts - FIXED: Handle different delivery types properly
+// lib/helpers/packageHelpers.ts - FIXED: Import working getAreas from separate file
 import api from '../api';
 
-// FIXED: Import the working implementations from separate files
+// ✅ FIXED: Import the working implementations from separate files
 import { getAreas } from './getAreas';
 import { getAgents } from './getAgents';
 
@@ -50,20 +50,19 @@ export interface Package {
   business_name?: string;
 }
 
-// Enhanced Package creation data interface
+// ✅ FIXED: Enhanced Package creation data interface to support all delivery types
 export interface PackageData {
   sender_name: string;
   sender_phone: string;
   receiver_name: string;
   receiver_phone: string;
-  origin_area_id?: string;
-  destination_area_id?: string;
-  origin_agent_id?: string | null;
-  destination_agent_id?: string | null;
+  origin_area_id?: string; // ✅ FIXED: Optional for fragile deliveries
+  destination_area_id?: string; // ✅ FIXED: Optional for some delivery types
+  origin_agent_id?: string; // ✅ FIXED: Optional for fragile/collect deliveries
+  destination_agent_id?: string; // ✅ FIXED: Optional for doorstep deliveries
   delivery_type: string;
   delivery_location?: string;
-  
-  // Additional fields for special delivery types
+  // ✅ FIXED: Additional fields for special delivery types
   package_description?: string; // For fragile items description
   pickup_location?: string; // For collect & deliver and fragile
   coordinates?: {
@@ -78,24 +77,13 @@ export interface PackageData {
       address?: string;
     };
   };
-  
-  // Collection-specific fields
-  shop_name?: string;
-  shop_contact?: string;
-  collection_address?: string;
-  items_to_collect?: string;
-  item_value?: number;
-  item_description?: string;
-  special_instructions?: string;
-  payment_method?: string;
-  requires_payment_advance?: boolean;
-  collection_type?: string;
-  pickup_latitude?: number;
-  pickup_longitude?: number;
-  delivery_latitude?: number;
-  delivery_longitude?: number;
-  collection_scheduled_at?: string | null;
-  payment_deadline?: string | null;
+  collection_details?: {
+    shop_name?: string;
+    shop_contact?: string;
+    items_to_collect?: string;
+    estimated_value?: string;
+    payment_method?: string;
+  };
 }
 
 export interface PackageFormData {
@@ -167,18 +155,19 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Get all package form data required by the modal
+ * ✅ FIXED: Get all package form data required by the modal
+ * Now uses the working imported functions
  */
 export const getPackageFormData = async (): Promise<PackageFormData> => {
   try {
-    console.log('Starting getPackageFormData...');
+    console.log('📦 Starting getPackageFormData...');
     
     // Check if we have valid cached data
     const now = Date.now();
     const isCacheValid = cacheTimestamp && (now - cacheTimestamp) < CACHE_DURATION;
     
     if (isCacheValid && locationsCache && areasCache && agentsCache) {
-      console.log('Returning cached package form data:', {
+      console.log('✅ Returning cached package form data:', {
         locations: locationsCache.length,
         areas: areasCache.length,
         agents: agentsCache.length
@@ -191,30 +180,32 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       };
     }
     
-    console.log('Fetching fresh package form data from API...');
+    console.log('🌐 Fetching fresh package form data from API...');
     
+    // ✅ FIXED: Use the working imported functions instead of local implementations
     const [locationsResult, areasResult, agentsResult] = await Promise.allSettled([
       getLocations(),
-      getAreas(),
-      getAgents()
+      getAreas(), // This now uses the working implementation from getAreas.ts
+      getAgents() // This now uses the working implementation from getAgents.ts
     ]);
     
     // Handle locations
     let locations: Location[] = [];
     if (locationsResult.status === 'fulfilled') {
       locations = locationsResult.value;
-      console.log('Locations loaded:', locations.length);
+      console.log('✅ Locations loaded:', locations.length);
     } else {
-      console.error('Failed to load locations:', locationsResult.reason);
+      console.error('❌ Failed to load locations:', locationsResult.reason);
+      // Don't throw here, continue with empty array
     }
     
     // Handle areas
     let areas: Area[] = [];
     if (areasResult.status === 'fulfilled') {
       areas = areasResult.value;
-      console.log('Areas loaded:', areas.length);
+      console.log('✅ Areas loaded:', areas.length);
     } else {
-      console.error('Failed to load areas:', areasResult.reason);
+      console.error('❌ Failed to load areas:', areasResult.reason);
       throw new Error('Failed to load areas - required for package creation');
     }
     
@@ -222,18 +213,21 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
     let agents: Agent[] = [];
     if (agentsResult.status === 'fulfilled') {
       agents = agentsResult.value;
-      console.log('Agents loaded:', agents.length);
+      console.log('✅ Agents loaded:', agents.length);
     } else {
-      console.error('Failed to load agents:', agentsResult.reason);
+      console.error('❌ Failed to load agents:', agentsResult.reason);
       throw new Error('Failed to load agents - required for package creation');
     }
     
+    // ✅ FIXED: More flexible validation for minimum required data
     if (areas.length === 0) {
-      console.warn('No areas available - standard agent deliveries will be disabled');
+      console.warn('⚠️ No areas available - standard agent deliveries will be disabled');
+      // Don't throw error - some delivery types can work without areas
     }
     
     if (agents.length === 0) {
-      console.warn('No agents available - agent deliveries will be disabled');
+      console.warn('⚠️ No agents available - agent deliveries will be disabled');
+      // Don't throw error - fragile and collect deliveries can work without agents
     }
     
     // Update cache
@@ -248,7 +242,7 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       agents
     };
     
-    console.log('Package form data assembled successfully:', {
+    console.log('✅ Package form data assembled successfully:', {
       locations: locations.length,
       areas: areas.length,
       agents: agents.length
@@ -257,11 +251,11 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
     return formData;
     
   } catch (error: any) {
-    console.error('getPackageFormData failed:', error);
+    console.error('❌ getPackageFormData failed:', error);
     
     // Try to return cached data if available, even if stale
     if (locationsCache && areasCache && agentsCache) {
-      console.log('Returning stale cached data as fallback...');
+      console.log('📋 Returning stale cached data as fallback...');
       return {
         locations: locationsCache,
         areas: areasCache,
@@ -278,7 +272,7 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
  */
 export const getLocations = async (): Promise<Location[]> => {
   try {
-    console.log('Fetching locations from API...');
+    console.log('🌍 Fetching locations from API...');
     
     const response = await api.get('/api/v1/locations', {
       headers: {
@@ -297,15 +291,17 @@ export const getLocations = async (): Promise<Location[]> => {
     } else if (Array.isArray(response.data)) {
       transformedLocations = response.data.map((item: any) => transformLocationData(item));
     } else {
-      console.warn('Unexpected locations API response format:', response.data);
+      console.warn('⚠️ Unexpected locations API response format:', response.data);
     }
     
-    console.log('Locations loaded:', transformedLocations.length);
+    console.log('✅ Locations loaded:', transformedLocations.length);
     return transformedLocations;
     
   } catch (error: any) {
-    console.error('Failed to fetch locations:', error);
-    console.log('Continuing without locations data');
+    console.error('❌ Failed to fetch locations:', error);
+    
+    // Return empty array instead of throwing - locations are optional
+    console.log('⚠️ Continuing without locations data');
     return [];
   }
 };
@@ -317,6 +313,7 @@ const transformLocationData = (rawData: any): Location => {
   try {
     let locationData = rawData;
     
+    // Handle JSON:API format
     if (rawData.attributes) {
       locationData = {
         id: rawData.id,
@@ -339,7 +336,7 @@ const transformLocationData = (rawData: any): Location => {
 };
 
 /**
- * Validate package form data structure
+ * ✅ FIXED: Validate package form data structure with flexible requirements
  */
 export const validatePackageFormData = (data: any): ValidationResult => {
   const issues: string[] = [];
@@ -363,12 +360,13 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // Check areas (required for standard deliveries, optional for special deliveries)
+    // ✅ FIXED: Check areas (required for standard deliveries, optional for special deliveries)
     if (!data.areas || !Array.isArray(data.areas)) {
       issues.push('Areas must be an array');
     } else {
+      // Only warn if no areas available - don't fail validation entirely
       if (data.areas.length === 0) {
-        console.warn('No areas available - some delivery types may be limited');
+        console.warn('⚠️ No areas available - some delivery types may be limited');
       } else {
         data.areas.forEach((area: any, index: number) => {
           if (!area.id || !area.name) {
@@ -378,12 +376,13 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // Check agents (required for standard deliveries, optional for special deliveries)
+    // ✅ FIXED: Check agents (required for standard deliveries, optional for special deliveries)
     if (!data.agents || !Array.isArray(data.agents)) {
       issues.push('Agents must be an array');
     } else {
+      // Only warn if no agents available - don't fail validation entirely
       if (data.agents.length === 0) {
-        console.warn('No agents available - agent deliveries will be disabled');
+        console.warn('⚠️ No agents available - agent deliveries will be disabled');
       } else {
         data.agents.forEach((agent: any, index: number) => {
           if (!agent.id || !agent.name) {
@@ -405,14 +404,18 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * FIXED: Create package with different payload structures based on delivery type
+ * ✅ FIXED: Create a new package with conditional origin agent requirement
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
-    console.log('Creating package with data:', packageData);
-    console.log('Delivery type:', packageData.delivery_type);
+    console.log('📦 Creating package with data:', packageData);
     
-    // Basic validation
+    // ✅ FIXED: Make origin agent optional for fragile and collect deliveries
+    if (!packageData.origin_agent_id && 
+        !['fragile', 'collect', 'collect_deliver'].includes(packageData.delivery_type)) {
+      throw new Error('Origin agent is required for standard deliveries');
+    }
+    
     if (!packageData.receiver_name?.trim()) {
       throw new Error('Receiver name is required');
     }
@@ -425,115 +428,7 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error('Delivery type is required');
     }
     
-    let payload: any;
-    
-    // FIXED: Create different payload structures based on delivery type
-    switch (packageData.delivery_type.toLowerCase()) {
-      case 'collection':
-        // Collection delivery - send both top-level and nested package data
-        payload = {
-          // Top-level collection fields for controller processing
-          sender_name: packageData.sender_name,
-          sender_phone: packageData.sender_phone,
-          receiver_name: packageData.receiver_name,
-          receiver_phone: packageData.receiver_phone,
-          origin_agent_id: packageData.origin_agent_id || null,
-          destination_agent_id: packageData.destination_agent_id || null,
-          destination_area_id: packageData.destination_area_id || null,
-          delivery_type: 'collection',
-          delivery_location: packageData.delivery_location,
-          
-          // Collection-specific fields
-          shop_name: packageData.shop_name,
-          shop_contact: packageData.shop_contact,
-          collection_address: packageData.collection_address,
-          items_to_collect: packageData.items_to_collect,
-          item_value: packageData.item_value,
-          item_description: packageData.item_description,
-          special_instructions: packageData.special_instructions,
-          payment_method: packageData.payment_method,
-          requires_payment_advance: packageData.requires_payment_advance,
-          collection_type: packageData.collection_type,
-          pickup_latitude: packageData.pickup_latitude,
-          pickup_longitude: packageData.pickup_longitude,
-          delivery_latitude: packageData.delivery_latitude,
-          delivery_longitude: packageData.delivery_longitude,
-          collection_scheduled_at: packageData.collection_scheduled_at,
-          payment_deadline: packageData.payment_deadline,
-          
-          // Nested package object (required by controller)
-          package: {
-            sender_name: packageData.sender_name,
-            sender_phone: packageData.sender_phone,
-            receiver_name: packageData.receiver_name,
-            receiver_phone: packageData.receiver_phone,
-            delivery_type: 'collection',
-            delivery_location: packageData.delivery_location,
-          }
-        };
-        break;
-        
-      case 'fragile':
-        // Fragile delivery - send both top-level and nested package data
-        payload = {
-          // Top-level fields for controller processing
-          sender_name: packageData.sender_name,
-          sender_phone: packageData.sender_phone,
-          receiver_name: packageData.receiver_name,
-          receiver_phone: packageData.receiver_phone,
-          delivery_type: 'fragile',
-          delivery_location: packageData.delivery_location,
-          package_description: packageData.package_description,
-          pickup_location: packageData.pickup_location,
-          
-          // Coordinates if available
-          ...(packageData.coordinates?.pickup && {
-            pickup_latitude: packageData.coordinates.pickup.latitude,
-            pickup_longitude: packageData.coordinates.pickup.longitude,
-          }),
-          ...(packageData.coordinates?.delivery && {
-            delivery_latitude: packageData.coordinates.delivery.latitude,
-            delivery_longitude: packageData.coordinates.delivery.longitude,
-          }),
-          
-          // Nested package object
-          package: {
-            sender_name: packageData.sender_name,
-            sender_phone: packageData.sender_phone,
-            receiver_name: packageData.receiver_name,
-            receiver_phone: packageData.receiver_phone,
-            delivery_type: 'fragile',
-            delivery_location: packageData.delivery_location,
-            package_description: packageData.package_description,
-            pickup_location: packageData.pickup_location,
-          }
-        };
-        break;
-        
-      case 'doorstep':
-      case 'agent':
-      default:
-        // Standard delivery - traditional format with nested package object only
-        payload = {
-          package: {
-            sender_name: packageData.sender_name,
-            sender_phone: packageData.sender_phone,
-            receiver_name: packageData.receiver_name,
-            receiver_phone: packageData.receiver_phone,
-            origin_area_id: packageData.origin_area_id,
-            destination_area_id: packageData.destination_area_id,
-            origin_agent_id: packageData.origin_agent_id,
-            destination_agent_id: packageData.destination_agent_id,
-            delivery_type: packageData.delivery_type,
-            delivery_location: packageData.delivery_location,
-          }
-        };
-        break;
-    }
-    
-    console.log('Sending payload:', JSON.stringify(payload, null, 2));
-    
-    const response = await api.post('/api/v1/packages', payload, {
+    const response = await api.post('/api/v1/packages', packageData, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
@@ -541,18 +436,16 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       timeout: 30000
     });
     
-    console.log('Package created successfully:', response.data);
+    console.log('✅ Package created successfully:', response.data);
     return response.data;
     
   } catch (error: any) {
-    console.error('Failed to create package:', error);
+    console.error('❌ Failed to create package:', error);
     
     if (error.response?.data?.message) {
       throw new Error(error.response.data.message);
     } else if (error.response?.data?.error) {
       throw new Error(error.response.data.error);
-    } else if (error.response?.data?.errors && Array.isArray(error.response.data.errors)) {
-      throw new Error(error.response.data.errors.join(', '));
     } else {
       throw new Error(error.message || 'Failed to create package');
     }
@@ -564,7 +457,7 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
  */
 export const getPackagePricing = async (packageData: Partial<PackageData>): Promise<any> => {
   try {
-    console.log('Getting package pricing for:', packageData);
+    console.log('💰 Getting package pricing for:', packageData);
     
     const response = await api.post('/api/v1/packages/pricing', packageData, {
       headers: {
@@ -574,26 +467,29 @@ export const getPackagePricing = async (packageData: Partial<PackageData>): Prom
       timeout: 15000
     });
     
-    console.log('Pricing calculated:', response.data);
+    console.log('✅ Pricing calculated:', response.data);
     return response.data;
     
   } catch (error: any) {
-    console.error('Failed to get package pricing:', error);
+    console.error('❌ Failed to get package pricing:', error);
     throw new Error(error.response?.data?.message || error.message || 'Failed to calculate pricing');
   }
 };
+
+// ✅ REMOVED: The duplicate/incomplete getAreas function that was causing issues
+// ✅ REMOVED: The duplicate/incomplete getAgents function that was causing issues
 
 // Export the working functions from the separate files
 export { getAreas } from './getAreas';
 export { getAgents } from './getAgents';
 
-// Rest of existing helper functions...
+// Rest of your existing helper functions...
 export const getAgentsForArea = async (areaId: string): Promise<Agent[]> => {
   try {
     const agents = await getAgents();
     return agents.filter(agent => agent.area_id === areaId);
   } catch (error: any) {
-    console.error('Failed to get agents for area:', error);
+    console.error('❌ Failed to get agents for area:', error);
     return [];
   }
 };
@@ -605,7 +501,7 @@ export const searchAreas = async (query: string): Promise<Area[]> => {
       area.name.toLowerCase().includes(query.toLowerCase())
     );
   } catch (error: any) {
-    console.error('Failed to search areas:', error);
+    console.error('❌ Failed to search areas:', error);
     return [];
   }
 };
@@ -618,7 +514,7 @@ export const searchAgents = async (query: string): Promise<Agent[]> => {
       agent.phone.includes(query)
     );
   } catch (error: any) {
-    console.error('Failed to search agents:', error);
+    console.error('❌ Failed to search agents:', error);
     return [];
   }
 };
@@ -628,7 +524,7 @@ export const clearCache = (): void => {
   agentsCache = null;
   locationsCache = null;
   cacheTimestamp = 0;
-  console.log('Package helpers cache cleared');
+  console.log('🧹 Package helpers cache cleared');
 };
 
 export const getAreaById = async (areaId: string): Promise<Area | null> => {
@@ -636,7 +532,7 @@ export const getAreaById = async (areaId: string): Promise<Area | null> => {
     const areas = await getAreas();
     return areas.find(area => area.id === areaId) || null;
   } catch (error: any) {
-    console.error('Failed to get area by ID:', error);
+    console.error('❌ Failed to get area by ID:', error);
     return null;
   }
 };
@@ -646,7 +542,7 @@ export const getAgentById = async (agentId: string): Promise<Agent | null> => {
     const agents = await getAgents();
     return agents.find(agent => agent.id === agentId) || null;
   } catch (error: any) {
-    console.error('Failed to get agent by ID:', error);
+    console.error('❌ Failed to get agent by ID:', error);
     return null;
   }
 };
@@ -846,10 +742,10 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
   }
 };
 
-// Additional helper functions for packages management
+// Additional helper functions for packages management...
 export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
   try {
-    console.log('Fetching packages with filters:', filters);
+    console.log('📦 Fetching packages with filters:', filters);
     
     const params = new URLSearchParams();
     
@@ -873,7 +769,7 @@ export const getPackages = async (filters?: PackageFilters): Promise<PackageResp
     const queryString = params.toString();
     const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
     
-    console.log('API call URL:', url);
+    console.log('🔗 API call URL:', url);
     
     const response = await api.get(url, {
       headers: {
@@ -883,7 +779,7 @@ export const getPackages = async (filters?: PackageFilters): Promise<PackageResp
       timeout: 15000
     });
     
-    console.log('Packages API response:', {
+    console.log('✅ Packages API response:', {
       success: response.data.success,
       dataCount: response.data.data?.length || 0,
       totalCount: response.data.pagination?.total_count || 0
@@ -913,7 +809,7 @@ export const getPackages = async (filters?: PackageFilters): Promise<PackageResp
     }
     
   } catch (error: any) {
-    console.error('Failed to fetch packages:', error);
+    console.error('❌ Failed to fetch packages:', error);
     
     return {
       data: [],
@@ -1016,7 +912,7 @@ const transformPackageData = (rawData: any, included: any[] = []): Package => {
   }
 };
 
-// Additional package management functions
+// Additional package management functions...
 export const getPackagesByState = async (state: DrawerState, page = 1, perPage = 20): Promise<PackageResponse> => {
   return getPackages({ state, page, per_page: perPage });
 };
@@ -1027,7 +923,7 @@ export const searchPackages = async (query: string, page = 1, perPage = 20): Pro
 
 export const getPackageDetails = async (packageId: string): Promise<Package> => {
   try {
-    console.log('Fetching package details for ID:', packageId);
+    console.log('📦 Fetching package details for ID:', packageId);
     
     const response = await api.get(`/api/v1/packages/${packageId}`, {
       headers: {
@@ -1045,16 +941,16 @@ export const getPackageDetails = async (packageId: string): Promise<Package> => 
     }
     
   } catch (error: any) {
-    console.error('Failed to fetch package details:', error);
+    console.error('❌ Failed to fetch package details:', error);
     throw new Error(error.response?.data?.message || error.message || 'Failed to fetch package details');
   }
 };
 
 export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
   try {
-    console.log('Fetching QR code for package:', packageCode);
+    console.log('📱 Fetching QR code for package:', packageCode);
     
-    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
+    const response = await api.get(`/api/v1/packages/${packageCode}/qr`, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
@@ -1062,73 +958,54 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
       timeout: 15000
     });
     
-    console.log('QR Code response:', response.data);
-    
-    if (response.data.success !== false && response.data.data) {
-      return {
-        data: {
-          qr_code_base64: response.data.data.qr_code_base64 || null,
-          tracking_url: response.data.data.tracking_url || `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-          package_code: packageCode,
-          package_state: response.data.data.package_state || 'unknown',
-          route_description: response.data.data.route_description || 'Route information unavailable'
-        },
-        success: true,
-        message: response.data.message
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to generate QR code');
-    }
+    console.log('✅ QR Code response:', response.data);
+    return response.data;
     
   } catch (error: any) {
-    console.error('Failed to fetch QR code:', error);
-    
-    return {
-      data: {
-        qr_code_base64: null,
-        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-        package_code: packageCode,
-        package_state: 'unknown',
-        route_description: 'Route information unavailable'
-      },
-      success: false,
-      message: error.message || 'Failed to generate QR code'
-    };
+    console.error('❌ Failed to fetch QR code:', error);
+    throw new Error(error.response?.data?.message || error.message || 'Failed to fetch QR code');
   }
 };
 
 export const refreshData = async (): Promise<void> => {
   try {
-    console.log('Refreshing package helpers data...');
+    console.log('🔄 Refreshing package helpers data...');
     
+    // Clear cache to force fresh fetch
     clearCache();
     
+    // Fetch fresh data
     const [locations, areas, agents] = await Promise.allSettled([
       getLocations(),
       getAreas(),
       getAgents()
     ]);
     
-    console.log('Data refresh results:', {
+    console.log('🔄 Data refresh results:', {
       locations: locations.status === 'fulfilled' ? locations.value.length : 'failed',
       areas: areas.status === 'fulfilled' ? areas.value.length : 'failed',
       agents: agents.status === 'fulfilled' ? agents.value.length : 'failed'
     });
   } catch (error: any) {
-    console.error('Failed to refresh package helpers data:', error);
+    console.error('❌ Failed to refresh package helpers data:', error);
     throw error;
   }
 };
 
-// Default export with all functions
+// Updated default export with all functions
 export default {
+  // NEW MAIN FUNCTIONS
   getPackageFormData,
   validatePackageFormData,
   createPackage,
   getPackagePricing,
   getLocations,
+  
+  // IMPORTED FUNCTIONS (now working)
   getAreas,
   getAgents,
+  
+  // EXISTING FUNCTIONS
   getAgentsForArea,
   searchAreas,
   searchAgents,
@@ -1142,6 +1019,8 @@ export default {
   getNextValidStates,
   formatRouteDescription,
   refreshData,
+  
+  // Package-specific functions
   getPackages,
   getPackagesByState,
   searchPackages,
