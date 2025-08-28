@@ -428,6 +428,12 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error('Origin agent is required for standard deliveries');
     }
     
+    // FIXED: Also check destination area for collection deliveries
+    if (!packageData.destination_area_id && 
+        !['fragile', 'collection'].includes(packageData.delivery_type)) {
+      throw new Error('Destination area is required for standard deliveries');
+    }
+    
     if (!packageData.receiver_name?.trim()) {
       throw new Error('Receiver name is required');
     }
