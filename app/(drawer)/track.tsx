@@ -617,7 +617,7 @@ export default function Track() {
     // Build action buttons array based on state
     const actionButtons = [];
     
-    // Track button - always available - FIXED: Changed icon to navigation
+    // Track button - always available - FIXED: Updated icon color to match outline
     actionButtons.push({
       key: 'track',
       icon: 'navigation',
@@ -625,7 +625,7 @@ export default function Track() {
       onPress: () => handleViewTracking(item),
       style: [styles.actionButton, styles.trackButton],
       textStyle: [styles.actionButtonText, styles.trackButtonText],
-      iconColor: '#1e293b' // Dark blue/navy to match image
+      iconColor: '#64748b' // Updated to match the border color
     });
     
     // Edit button - only if editable
