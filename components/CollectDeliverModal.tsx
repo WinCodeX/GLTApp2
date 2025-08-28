@@ -257,13 +257,13 @@ export default function CollectDeliverModal({
       
       const packageData: PackageData = {
         sender_name: 'Collection Service',
-        sender_phone: '+254700000000',
+        sender_phone: '+254700000000', 
         receiver_name: 'Current User',
         receiver_phone: '+254700000000',
         origin_agent_id: null,
         destination_agent_id: null,
         destination_area_id: null,
-        delivery_type: 'collection',
+        delivery_type: 'collection', // This must be 'collection' not 'doorstep'
         delivery_location: deliveryAddress,
         
         // Collection-specific fields
