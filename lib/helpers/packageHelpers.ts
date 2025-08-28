@@ -79,7 +79,7 @@ export interface PackageData {
     };
   };
   
-  // FIXED: Collection-specific fields
+  // Collection-specific fields
   shop_name?: string;
   shop_contact?: string;
   collection_address?: string;
@@ -166,20 +166,6 @@ let locationsCache: Location[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// FIXED: Delivery types that don't require origin agent
-const NO_ORIGIN_AGENT_DELIVERY_TYPES = [
-  'fragile', 
-  'collect', 
-  'collect_deliver',
-  'collection' // Added for CollectDeliverModal support
-];
-
-// FIXED: Delivery types that don't require destination area
-const NO_DESTINATION_AREA_DELIVERY_TYPES = [
-  'fragile',
-  'collection'
-];
-
 /**
  * FIXED: Get all package form data required by the modal
  * Now uses the working imported functions
@@ -208,7 +194,7 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
     
     console.log('Fetching fresh package form data from API...');
     
-    // FIXED: Use the working imported functions instead of local implementations
+    // Use the working imported functions instead of local implementations
     const [locationsResult, areasResult, agentsResult] = await Promise.allSettled([
       getLocations(),
       getAreas(), // This now uses the working implementation from getAreas.ts
@@ -245,7 +231,7 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       throw new Error('Failed to load agents - required for package creation');
     }
     
-    // FIXED: More flexible validation for minimum required data
+    // More flexible validation for minimum required data
     if (areas.length === 0) {
       console.warn('No areas available - standard agent deliveries will be disabled');
       // Don't throw error - some delivery types can work without areas
@@ -386,7 +372,7 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // FIXED: Check areas (required for standard deliveries, optional for special deliveries)
+    // Check areas (required for standard deliveries, optional for special deliveries)
     if (!data.areas || !Array.isArray(data.areas)) {
       issues.push('Areas must be an array');
     } else {
@@ -402,7 +388,7 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // FIXED: Check agents (required for standard deliveries, optional for special deliveries)
+    // Check agents (required for standard deliveries, optional for special deliveries)
     if (!data.agents || !Array.isArray(data.agents)) {
       issues.push('Agents must be an array');
     } else {
@@ -430,115 +416,31 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * FIXED: Validate individual package data for creation
- */
-const validatePackageData = (packageData: PackageData): ValidationResult => {
-  const issues: string[] = [];
-  
-  try {
-    // Basic required fields
-    if (!packageData.receiver_name?.trim()) {
-      issues.push('Receiver name is required');
-    }
-    
-    if (!packageData.receiver_phone?.trim()) {
-      issues.push('Receiver phone is required');
-    }
-    
-    if (!packageData.delivery_type) {
-      issues.push('Delivery type is required');
-    }
-    
-    // FIXED: Conditional validation based on delivery type
-    const deliveryType = packageData.delivery_type.toLowerCase();
-    
-    // Check if origin agent is required
-    if (!NO_ORIGIN_AGENT_DELIVERY_TYPES.includes(deliveryType)) {
-      if (!packageData.origin_agent_id) {
-        issues.push('Origin agent is required for standard deliveries');
-      }
-    }
-    
-    // Check if destination area is required
-    if (!NO_DESTINATION_AREA_DELIVERY_TYPES.includes(deliveryType)) {
-      if (!packageData.destination_area_id) {
-        issues.push('Destination area is required for standard deliveries');
-      }
-    }
-    
-    // Collection-specific validation
-    if (deliveryType === 'collection') {
-      if (!packageData.shop_name?.trim()) {
-        issues.push('Shop name is required for collection deliveries');
-      }
-      
-      if (!packageData.collection_address?.trim()) {
-        issues.push('Collection address is required for collection deliveries');
-      }
-      
-      if (!packageData.items_to_collect?.trim()) {
-        issues.push('Items to collect description is required');
-      }
-      
-      if (!packageData.item_value || packageData.item_value <= 0) {
-        issues.push('Item value is required and must be greater than 0');
-      }
-      
-      if (!packageData.delivery_location?.trim()) {
-        issues.push('Delivery location is required for collection deliveries');
-      }
-    }
-    
-    // Fragile-specific validation
-    if (deliveryType === 'fragile') {
-      if (!packageData.pickup_location?.trim()) {
-        issues.push('Pickup location is required for fragile deliveries');
-      }
-      
-      if (!packageData.delivery_location?.trim()) {
-        issues.push('Delivery location is required for fragile deliveries');
-      }
-      
-      if (!packageData.package_description?.trim()) {
-        issues.push('Package description is required for fragile items');
-      }
-    }
-    
-    return {
-      isValid: issues.length === 0,
-      issues
-    };
-    
-  } catch (error: any) {
-    issues.push(`Package validation error: ${error.message}`);
-    return { isValid: false, issues };
-  }
-};
-
-/**
- * FIXED: Create a new package with flexible origin agent requirement
+ * FIXED: Create a new package with simple validation - back to original approach
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
     console.log('Creating package with data:', packageData);
     
-    // FIXED: Validate package data first
-    const validation = validatePackageData(packageData);
-    if (!validation.isValid) {
-      throw new Error(validation.issues.join(', '));
+    // FIXED: Simple validation like original - don't overcomplicate
+    if (!packageData.origin_agent_id && 
+        !['fragile', 'collect', 'collect_deliver', 'collection'].includes(packageData.delivery_type)) {
+      throw new Error('Origin agent is required for standard deliveries');
     }
     
-    // FIXED: Clean up package data - remove null values and ensure proper structure
-    const cleanPackageData = {
-      ...packageData,
-      // Convert null to undefined for optional fields
-      origin_agent_id: packageData.origin_agent_id || undefined,
-      destination_agent_id: packageData.destination_agent_id || undefined,
-      origin_area_id: packageData.origin_area_id || undefined,
-      destination_area_id: packageData.destination_area_id || undefined
-    };
+    if (!packageData.receiver_name?.trim()) {
+      throw new Error('Receiver name is required');
+    }
     
-    const response = await api.post('/api/v1/packages', cleanPackageData, {
+    if (!packageData.receiver_phone?.trim()) {
+      throw new Error('Receiver phone is required');
+    }
+    
+    if (!packageData.delivery_type) {
+      throw new Error('Delivery type is required');
+    }
+    
+    const response = await api.post('/api/v1/packages', packageData, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
@@ -734,20 +636,6 @@ export const formatRouteDescription = (originArea?: Area, destinationArea?: Area
   const destination = destinationArea.location?.name || destinationArea.name;
   
   return `${origin} → ${destination}`;
-};
-
-// FIXED: Utility functions for delivery type checking
-export const requiresOriginAgent = (deliveryType: string): boolean => {
-  return !NO_ORIGIN_AGENT_DELIVERY_TYPES.includes(deliveryType.toLowerCase());
-};
-
-export const requiresDestinationArea = (deliveryType: string): boolean => {
-  return !NO_DESTINATION_AREA_DELIVERY_TYPES.includes(deliveryType.toLowerCase());
-};
-
-export const isSpecialDeliveryType = (deliveryType: string): boolean => {
-  const specialTypes = ['fragile', 'collection', 'collect', 'collect_deliver'];
-  return specialTypes.includes(deliveryType.toLowerCase());
 };
 
 // Data transformation helpers
@@ -1073,7 +961,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
   try {
     console.log('Fetching QR code for package:', packageCode);
     
-    // FIXED: Use the correct endpoint path
     const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
       headers: {
         'Accept': 'application/json',
@@ -1156,11 +1043,6 @@ export default {
   // IMPORTED FUNCTIONS
   getAreas,
   getAgents,
-  
-  // UTILITY FUNCTIONS
-  requiresOriginAgent,
-  requiresDestinationArea,
-  isSpecialDeliveryType,
   
   // EXISTING FUNCTIONS
   getAgentsForArea,
