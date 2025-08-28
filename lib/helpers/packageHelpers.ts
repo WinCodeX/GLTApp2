@@ -425,36 +425,36 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error('Delivery type is required');
     }
     
-    // FIXED: Bulletproof validation with explicit delivery type checking
-    const deliveryType = packageData.delivery_type.toLowerCase().trim();
-    const specialDeliveryTypes = ['fragile', 'collect', 'collect_deliver', 'collection'];
+    // // FIXED: Bulletproof validation with explicit delivery type checking
+    // const deliveryType = packageData.delivery_type.toLowerCase().trim();
+    // const specialDeliveryTypes = ['fragile', 'collect', 'collect_deliver', 'collection'];
     
-    console.log('📦 Normalized delivery type:', deliveryType);
-    console.log('📦 Special delivery types:', specialDeliveryTypes);
-    console.log('📦 Is special delivery?', specialDeliveryTypes.includes(deliveryType));
+    // console.log('📦 Normalized delivery type:', deliveryType);
+    // console.log('📦 Special delivery types:', specialDeliveryTypes);
+    // console.log('📦 Is special delivery?', specialDeliveryTypes.includes(deliveryType));
     
-    // Origin agent validation - skip for special delivery types
-    if (!packageData.origin_agent_id) {
-      const requiresOriginAgent = !specialDeliveryTypes.includes(deliveryType);
-      console.log('📦 Requires origin agent?', requiresOriginAgent);
+    // // Origin agent validation - skip for special delivery types
+    // if (!packageData.origin_agent_id) {
+    //   const requiresOriginAgent = !specialDeliveryTypes.includes(deliveryType);
+    //   console.log('📦 Requires origin agent?', requiresOriginAgent);
       
-      if (requiresOriginAgent) {
-        throw new Error('Origin agent is required for standard deliveries');
-      }
-    }
+    //   if (requiresOriginAgent) {
+    //     throw new Error('Origin agent is required for standard deliveries');
+    //   }
+    // }
     
-    // Destination area validation - skip for fragile and collection deliveries
-    if (!packageData.destination_area_id) {
-      const noAreaDeliveryTypes = ['fragile', 'collection'];
-      const requiresDestinationArea = !noAreaDeliveryTypes.includes(deliveryType);
-      console.log('📦 Requires destination area?', requiresDestinationArea);
+    // // Destination area validation - skip for fragile and collection deliveries
+    // if (!packageData.destination_area_id) {
+    //   const noAreaDeliveryTypes = ['fragile', 'collection'];
+    //   const requiresDestinationArea = !noAreaDeliveryTypes.includes(deliveryType);
+    //   console.log('📦 Requires destination area?', requiresDestinationArea);
       
-      if (requiresDestinationArea) {
-        throw new Error('Destination area is required for standard deliveries');
-      }
-    }
+    //   if (requiresDestinationArea) {
+    //     throw new Error('Destination area is required for standard deliveries');
+    //   }
+    // }
     
-    console.log('📦 Validation passed, sending to API...');
+    // console.log('📦 Validation passed, sending to API...');
     
     const response = await api.post('/api/v1/packages', payload, {
       headers: {
