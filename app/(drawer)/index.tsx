@@ -345,7 +345,7 @@ export default function HomeScreen() {
         sender_phone: userInfo.phone,
         receiver_name: userInfo.name, // Delivering to self
         receiver_phone: userInfo.phone,
-        delivery_type: 'doorstep' as const,
+        delivery_type: 'collection' as const,
       };
       
       const response = await createPackage(enhancedPackageData);
