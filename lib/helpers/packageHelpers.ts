@@ -416,24 +416,16 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * FIXED: Create a new package with simple validation - back to original approach
+ * FIXED: Create a new package with bulletproof validation and debugging
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
-    console.log('Creating package with data:', packageData);
+    console.log('📦 Creating package with data:', packageData);
+    console.log('📦 Delivery type:', packageData.delivery_type);
+    console.log('📦 Origin agent ID:', packageData.origin_agent_id);
+    console.log('📦 Destination area ID:', packageData.destination_area_id);
     
-    // FIXED: Simple validation like original - don't overcomplicate
-    if (!packageData.origin_agent_id && 
-        !['fragile', 'collect', 'collect_deliver', 'collection'].includes(packageData.delivery_type)) {
-      throw new Error('Origin agent is required for standard deliveries');
-    }
-    
-    // FIXED: Also check destination area for collection deliveries
-    if (!packageData.destination_area_id && 
-        !['fragile', 'collection'].includes(packageData.delivery_type)) {
-      throw new Error('Destination area is required for standard deliveries');
-    }
-    
+    // Basic required fields
     if (!packageData.receiver_name?.trim()) {
       throw new Error('Receiver name is required');
     }
@@ -446,6 +438,37 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error('Delivery type is required');
     }
     
+    // FIXED: Bulletproof validation with explicit delivery type checking
+    const deliveryType = packageData.delivery_type.toLowerCase().trim();
+    const specialDeliveryTypes = ['fragile', 'collect', 'collect_deliver', 'collection'];
+    
+    console.log('📦 Normalized delivery type:', deliveryType);
+    console.log('📦 Special delivery types:', specialDeliveryTypes);
+    console.log('📦 Is special delivery?', specialDeliveryTypes.includes(deliveryType));
+    
+    // Origin agent validation - skip for special delivery types
+    if (!packageData.origin_agent_id) {
+      const requiresOriginAgent = !specialDeliveryTypes.includes(deliveryType);
+      console.log('📦 Requires origin agent?', requiresOriginAgent);
+      
+      if (requiresOriginAgent) {
+        throw new Error('Origin agent is required for standard deliveries');
+      }
+    }
+    
+    // Destination area validation - skip for fragile and collection deliveries
+    if (!packageData.destination_area_id) {
+      const noAreaDeliveryTypes = ['fragile', 'collection'];
+      const requiresDestinationArea = !noAreaDeliveryTypes.includes(deliveryType);
+      console.log('📦 Requires destination area?', requiresDestinationArea);
+      
+      if (requiresDestinationArea) {
+        throw new Error('Destination area is required for standard deliveries');
+      }
+    }
+    
+    console.log('📦 Validation passed, sending to API...');
+    
     const response = await api.post('/api/v1/packages', packageData, {
       headers: {
         'Accept': 'application/json',
@@ -454,11 +477,11 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       timeout: 30000
     });
     
-    console.log('Package created successfully:', response.data);
+    console.log('✅ Package created successfully:', response.data);
     return response.data;
     
   } catch (error: any) {
-    console.error('Failed to create package:', error);
+    console.error('❌ Failed to create package:', error);
     
     if (error.response?.data?.message) {
       throw new Error(error.response.data.message);
