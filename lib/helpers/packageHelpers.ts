@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - FIXED: Import working getAreas from separate file
+// lib/helpers/packageHelpers.ts - FIXED: Handle different delivery types properly
 import api from '../api';
 
 // FIXED: Import the working implementations from separate files
@@ -50,16 +50,16 @@ export interface Package {
   business_name?: string;
 }
 
-// FIXED: Enhanced Package creation data interface to support collection deliveries
+// Enhanced Package creation data interface
 export interface PackageData {
   sender_name: string;
   sender_phone: string;
   receiver_name: string;
   receiver_phone: string;
-  origin_area_id?: string; // Optional for fragile and collection deliveries
-  destination_area_id?: string; // Optional for some delivery types
-  origin_agent_id?: string | null; // Optional for fragile/collection deliveries
-  destination_agent_id?: string | null; // Optional for doorstep deliveries
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string | null;
+  destination_agent_id?: string | null;
   delivery_type: string;
   delivery_location?: string;
   
@@ -167,8 +167,7 @@ let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
 /**
- * FIXED: Get all package form data required by the modal
- * Now uses the working imported functions
+ * Get all package form data required by the modal
  */
 export const getPackageFormData = async (): Promise<PackageFormData> => {
   try {
@@ -194,11 +193,10 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
     
     console.log('Fetching fresh package form data from API...');
     
-    // Use the working imported functions instead of local implementations
     const [locationsResult, areasResult, agentsResult] = await Promise.allSettled([
       getLocations(),
-      getAreas(), // This now uses the working implementation from getAreas.ts
-      getAgents() // This now uses the working implementation from getAgents.ts
+      getAreas(),
+      getAgents()
     ]);
     
     // Handle locations
@@ -208,7 +206,6 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       console.log('Locations loaded:', locations.length);
     } else {
       console.error('Failed to load locations:', locationsResult.reason);
-      // Don't throw here, continue with empty array
     }
     
     // Handle areas
@@ -231,15 +228,12 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       throw new Error('Failed to load agents - required for package creation');
     }
     
-    // More flexible validation for minimum required data
     if (areas.length === 0) {
       console.warn('No areas available - standard agent deliveries will be disabled');
-      // Don't throw error - some delivery types can work without areas
     }
     
     if (agents.length === 0) {
       console.warn('No agents available - agent deliveries will be disabled');
-      // Don't throw error - fragile and collection deliveries can work without agents
     }
     
     // Update cache
@@ -311,8 +305,6 @@ export const getLocations = async (): Promise<Location[]> => {
     
   } catch (error: any) {
     console.error('Failed to fetch locations:', error);
-    
-    // Return empty array instead of throwing - locations are optional
     console.log('Continuing without locations data');
     return [];
   }
@@ -325,7 +317,6 @@ const transformLocationData = (rawData: any): Location => {
   try {
     let locationData = rawData;
     
-    // Handle JSON:API format
     if (rawData.attributes) {
       locationData = {
         id: rawData.id,
@@ -348,7 +339,7 @@ const transformLocationData = (rawData: any): Location => {
 };
 
 /**
- * FIXED: Validate package form data structure with flexible requirements
+ * Validate package form data structure
  */
 export const validatePackageFormData = (data: any): ValidationResult => {
   const issues: string[] = [];
@@ -376,7 +367,6 @@ export const validatePackageFormData = (data: any): ValidationResult => {
     if (!data.areas || !Array.isArray(data.areas)) {
       issues.push('Areas must be an array');
     } else {
-      // Only warn if no areas available - don't fail validation entirely
       if (data.areas.length === 0) {
         console.warn('No areas available - some delivery types may be limited');
       } else {
@@ -392,7 +382,6 @@ export const validatePackageFormData = (data: any): ValidationResult => {
     if (!data.agents || !Array.isArray(data.agents)) {
       issues.push('Agents must be an array');
     } else {
-      // Only warn if no agents available - don't fail validation entirely
       if (data.agents.length === 0) {
         console.warn('No agents available - agent deliveries will be disabled');
       } else {
@@ -416,16 +405,14 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * FIXED: Create a new package with bulletproof validation and debugging
+ * FIXED: Create package with different payload structures based on delivery type
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
-    console.log('📦 Creating package with data:', packageData);
-    console.log('📦 Delivery type:', packageData.delivery_type);
-    console.log('📦 Origin agent ID:', packageData.origin_agent_id);
-    console.log('📦 Destination area ID:', packageData.destination_area_id);
+    console.log('Creating package with data:', packageData);
+    console.log('Delivery type:', packageData.delivery_type);
     
-    // Basic required fields
+    // Basic validation
     if (!packageData.receiver_name?.trim()) {
       throw new Error('Receiver name is required');
     }
@@ -438,38 +425,115 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error('Delivery type is required');
     }
     
-    // FIXED: Bulletproof validation with explicit delivery type checking
-    const deliveryType = packageData.delivery_type.toLowerCase().trim();
-    const specialDeliveryTypes = ['fragile', 'collect', 'collect_deliver', 'collection'];
+    let payload: any;
     
-    console.log('📦 Normalized delivery type:', deliveryType);
-    console.log('📦 Special delivery types:', specialDeliveryTypes);
-    console.log('📦 Is special delivery?', specialDeliveryTypes.includes(deliveryType));
-    
-    // Origin agent validation - skip for special delivery types
-    if (!packageData.origin_agent_id) {
-      const requiresOriginAgent = !specialDeliveryTypes.includes(deliveryType);
-      console.log('📦 Requires origin agent?', requiresOriginAgent);
-      
-      if (requiresOriginAgent) {
-        throw new Error('Origin agent is required for standard deliveries');
-      }
+    // FIXED: Create different payload structures based on delivery type
+    switch (packageData.delivery_type.toLowerCase()) {
+      case 'collection':
+        // Collection delivery - send both top-level and nested package data
+        payload = {
+          // Top-level collection fields for controller processing
+          sender_name: packageData.sender_name,
+          sender_phone: packageData.sender_phone,
+          receiver_name: packageData.receiver_name,
+          receiver_phone: packageData.receiver_phone,
+          origin_agent_id: packageData.origin_agent_id || null,
+          destination_agent_id: packageData.destination_agent_id || null,
+          destination_area_id: packageData.destination_area_id || null,
+          delivery_type: 'collection',
+          delivery_location: packageData.delivery_location,
+          
+          // Collection-specific fields
+          shop_name: packageData.shop_name,
+          shop_contact: packageData.shop_contact,
+          collection_address: packageData.collection_address,
+          items_to_collect: packageData.items_to_collect,
+          item_value: packageData.item_value,
+          item_description: packageData.item_description,
+          special_instructions: packageData.special_instructions,
+          payment_method: packageData.payment_method,
+          requires_payment_advance: packageData.requires_payment_advance,
+          collection_type: packageData.collection_type,
+          pickup_latitude: packageData.pickup_latitude,
+          pickup_longitude: packageData.pickup_longitude,
+          delivery_latitude: packageData.delivery_latitude,
+          delivery_longitude: packageData.delivery_longitude,
+          collection_scheduled_at: packageData.collection_scheduled_at,
+          payment_deadline: packageData.payment_deadline,
+          
+          // Nested package object (required by controller)
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            delivery_type: 'collection',
+            delivery_location: packageData.delivery_location,
+          }
+        };
+        break;
+        
+      case 'fragile':
+        // Fragile delivery - send both top-level and nested package data
+        payload = {
+          // Top-level fields for controller processing
+          sender_name: packageData.sender_name,
+          sender_phone: packageData.sender_phone,
+          receiver_name: packageData.receiver_name,
+          receiver_phone: packageData.receiver_phone,
+          delivery_type: 'fragile',
+          delivery_location: packageData.delivery_location,
+          package_description: packageData.package_description,
+          pickup_location: packageData.pickup_location,
+          
+          // Coordinates if available
+          ...(packageData.coordinates?.pickup && {
+            pickup_latitude: packageData.coordinates.pickup.latitude,
+            pickup_longitude: packageData.coordinates.pickup.longitude,
+          }),
+          ...(packageData.coordinates?.delivery && {
+            delivery_latitude: packageData.coordinates.delivery.latitude,
+            delivery_longitude: packageData.coordinates.delivery.longitude,
+          }),
+          
+          // Nested package object
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            delivery_type: 'fragile',
+            delivery_location: packageData.delivery_location,
+            package_description: packageData.package_description,
+            pickup_location: packageData.pickup_location,
+          }
+        };
+        break;
+        
+      case 'doorstep':
+      case 'agent':
+      default:
+        // Standard delivery - traditional format with nested package object only
+        payload = {
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            origin_area_id: packageData.origin_area_id,
+            destination_area_id: packageData.destination_area_id,
+            origin_agent_id: packageData.origin_agent_id,
+            destination_agent_id: packageData.destination_agent_id,
+            delivery_type: packageData.delivery_type,
+            delivery_location: packageData.delivery_location,
+          }
+        };
+        break;
     }
     
-    // Destination area validation - skip for fragile and collection deliveries
-    if (!packageData.destination_area_id) {
-      const noAreaDeliveryTypes = ['fragile', 'collection'];
-      const requiresDestinationArea = !noAreaDeliveryTypes.includes(deliveryType);
-      console.log('📦 Requires destination area?', requiresDestinationArea);
-      
-      if (requiresDestinationArea) {
-        throw new Error('Destination area is required for standard deliveries');
-      }
-    }
+    console.log('Sending payload:', JSON.stringify(payload, null, 2));
     
-    console.log('📦 Validation passed, sending to API...');
-    
-    const response = await api.post('/api/v1/packages', packageData, {
+    const response = await api.post('/api/v1/packages', payload, {
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
@@ -477,11 +541,11 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       timeout: 30000
     });
     
-    console.log('✅ Package created successfully:', response.data);
+    console.log('Package created successfully:', response.data);
     return response.data;
     
   } catch (error: any) {
-    console.error('❌ Failed to create package:', error);
+    console.error('Failed to create package:', error);
     
     if (error.response?.data?.message) {
       throw new Error(error.response.data.message);
@@ -523,7 +587,7 @@ export const getPackagePricing = async (packageData: Partial<PackageData>): Prom
 export { getAreas } from './getAreas';
 export { getAgents } from './getAgents';
 
-// Rest of your existing helper functions...
+// Rest of existing helper functions...
 export const getAgentsForArea = async (areaId: string): Promise<Agent[]> => {
   try {
     const agents = await getAgents();
@@ -782,7 +846,7 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
   }
 };
 
-// Additional helper functions for packages management...
+// Additional helper functions for packages management
 export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
   try {
     console.log('Fetching packages with filters:', filters);
@@ -952,7 +1016,7 @@ const transformPackageData = (rawData: any, included: any[] = []): Package => {
   }
 };
 
-// Additional package management functions...
+// Additional package management functions
 export const getPackagesByState = async (state: DrawerState, page = 1, perPage = 20): Promise<PackageResponse> => {
   return getPackages({ state, page, per_page: perPage });
 };
@@ -1000,7 +1064,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
     
     console.log('QR Code response:', response.data);
     
-    // Handle the response format
     if (response.data.success !== false && response.data.data) {
       return {
         data: {
@@ -1020,7 +1083,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
   } catch (error: any) {
     console.error('Failed to fetch QR code:', error);
     
-    // Return fallback QR data instead of throwing
     return {
       data: {
         qr_code_base64: null,
@@ -1039,10 +1101,8 @@ export const refreshData = async (): Promise<void> => {
   try {
     console.log('Refreshing package helpers data...');
     
-    // Clear cache to force fresh fetch
     clearCache();
     
-    // Fetch fresh data
     const [locations, areas, agents] = await Promise.allSettled([
       getLocations(),
       getAreas(),
@@ -1060,20 +1120,15 @@ export const refreshData = async (): Promise<void> => {
   }
 };
 
-// Updated default export with all functions
+// Default export with all functions
 export default {
-  // MAIN FUNCTIONS
   getPackageFormData,
   validatePackageFormData,
   createPackage,
   getPackagePricing,
   getLocations,
-  
-  // IMPORTED FUNCTIONS
   getAreas,
   getAgents,
-  
-  // EXISTING FUNCTIONS
   getAgentsForArea,
   searchAreas,
   searchAgents,
@@ -1087,8 +1142,6 @@ export default {
   getNextValidStates,
   formatRouteDescription,
   refreshData,
-  
-  // Package-specific functions
   getPackages,
   getPackagesByState,
   searchPackages,
