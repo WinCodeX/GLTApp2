@@ -43,6 +43,7 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="gltapp2"/>
         <data android:scheme="exp+gltapp2"/>
+        <data android:scheme="https"/>
       </intent-filter>
     </activity>
   </application>

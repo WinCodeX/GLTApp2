@@ -27,7 +27,7 @@
       <dict>
         <key>CFBundleURLSchemes</key>
         <array>
-          <string>gltapp2</string>
+          <string>https</string>
           <string>com.lvl0-x.gltapp2</string>
         </array>
       </dict>
