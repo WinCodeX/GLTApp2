@@ -538,7 +538,123 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       destination_area_id: packageData.destination_area_id || undefined
     };
     
+<<<<<<< HEAD
     const response = await api.post('/api/v1/packages', cleanPackageData, {
+=======
+    if (!packageData.delivery_type) {
+      throw new Error('Delivery type is required');
+    }
+    
+    let payload: any;
+    
+    // FIXED: Create different payload structures based on delivery type
+    switch (packageData.delivery_type.toLowerCase()) {
+      case 'collection':
+        // Collection delivery - send both top-level and nested package data
+        payload = {
+          // Top-level collection fields for controller processing
+          sender_name: packageData.sender_name,
+          sender_phone: packageData.sender_phone,
+          receiver_name: packageData.receiver_name,
+          receiver_phone: packageData.receiver_phone,
+          origin_agent_id: packageData.origin_agent_id || null,
+          destination_agent_id: packageData.destination_agent_id || null,
+          destination_area_id: packageData.destination_area_id || null,
+          delivery_type: 'collection',
+          delivery_location: packageData.delivery_location,
+          
+          // Collection-specific fields
+          shop_name: packageData.shop_name,
+          shop_contact: packageData.shop_contact,
+          collection_address: packageData.collection_address,
+          items_to_collect: packageData.items_to_collect,
+          item_value: packageData.item_value,
+          item_description: packageData.item_description,
+          special_instructions: packageData.special_instructions,
+          payment_method: packageData.payment_method,
+          requires_payment_advance: packageData.requires_payment_advance,
+          collection_type: packageData.collection_type,
+          pickup_latitude: packageData.pickup_latitude,
+          pickup_longitude: packageData.pickup_longitude,
+          delivery_latitude: packageData.delivery_latitude,
+          delivery_longitude: packageData.delivery_longitude,
+          collection_scheduled_at: packageData.collection_scheduled_at,
+          payment_deadline: packageData.payment_deadline,
+          
+          // Nested package object (required by controller)
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            delivery_type: 'collection',
+            delivery_location: packageData.delivery_location,
+          }
+        };
+        break;
+        
+      case 'fragile':
+        // Fragile delivery - send both top-level and nested package data
+        payload = {
+          // Top-level fields for controller processing
+          sender_name: packageData.sender_name,
+          sender_phone: packageData.sender_phone,
+          receiver_name: packageData.receiver_name,
+          receiver_phone: packageData.receiver_phone,
+          delivery_type: 'fragile',
+          delivery_location: packageData.delivery_location,
+          package_description: packageData.package_description,
+          pickup_location: packageData.pickup_location,
+          
+          // Coordinates if available
+          ...(packageData.coordinates?.pickup && {
+            pickup_latitude: packageData.coordinates.pickup.latitude,
+            pickup_longitude: packageData.coordinates.pickup.longitude,
+          }),
+          ...(packageData.coordinates?.delivery && {
+            delivery_latitude: packageData.coordinates.delivery.latitude,
+            delivery_longitude: packageData.coordinates.delivery.longitude,
+          }),
+          
+          // Nested package object
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            delivery_type: 'fragile',
+            delivery_location: packageData.delivery_location,
+            package_description: packageData.package_description,
+            pickup_location: packageData.pickup_location,
+          }
+        };
+        break;
+        
+      case 'doorstep':
+      case 'agent':
+      default:
+        // Standard delivery - traditional format with nested package object only
+        payload = {
+          package: {
+            sender_name: packageData.sender_name,
+            sender_phone: packageData.sender_phone,
+            receiver_name: packageData.receiver_name,
+            receiver_phone: packageData.receiver_phone,
+            origin_area_id: packageData.origin_area_id,
+            destination_area_id: packageData.destination_area_id,
+            origin_agent_id: packageData.origin_agent_id,
+            destination_agent_id: packageData.destination_agent_id,
+            delivery_type: packageData.delivery_type,
+            delivery_location: packageData.delivery_location,
+          }
+        };
+        break;
+    }
+    
+    console.log('Sending payload:', JSON.stringify(payload, null, 2));
+    
+    const response = await api.post('/api/v1/packages', {
+>>>>>>> 3d85f2b (fix submit error)
       headers: {
         'Accept': 'application/json',
         'Content-Type': 'application/json'
