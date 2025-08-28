@@ -50,17 +50,40 @@ export interface Package {
   business_name?: string;
 }
 
+// ✅ FIXED: Enhanced Package creation data interface to support all delivery types
 export interface PackageData {
   sender_name: string;
   sender_phone: string;
   receiver_name: string;
   receiver_phone: string;
-  origin_area_id: string;
-  destination_area_id: string;
-  origin_agent_id: string;
-  destination_agent_id: string;
+  origin_area_id?: string; // ✅ FIXED: Optional for fragile deliveries
+  destination_area_id?: string; // ✅ FIXED: Optional for some delivery types
+  origin_agent_id?: string; // ✅ FIXED: Optional for fragile/collect deliveries
+  destination_agent_id?: string; // ✅ FIXED: Optional for doorstep deliveries
   delivery_type: string;
   delivery_location?: string;
+  // ✅ FIXED: Additional fields for special delivery types
+  package_description?: string; // For fragile items description
+  pickup_location?: string; // For collect & deliver and fragile
+  coordinates?: {
+    pickup?: {
+      latitude: number;
+      longitude: number;
+      address?: string;
+    };
+    delivery?: {
+      latitude: number;
+      longitude: number;
+      address?: string;
+    };
+  };
+  collection_details?: {
+    shop_name?: string;
+    shop_contact?: string;
+    items_to_collect?: string;
+    estimated_value?: string;
+    payment_method?: string;
+  };
 }
 
 export interface PackageFormData {
@@ -196,13 +219,15 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       throw new Error('Failed to load agents - required for package creation');
     }
     
-    // Validate minimum required data
+    // ✅ FIXED: More flexible validation for minimum required data
     if (areas.length === 0) {
-      throw new Error('No areas available - cannot create packages');
+      console.warn('⚠️ No areas available - standard agent deliveries will be disabled');
+      // Don't throw error - some delivery types can work without areas
     }
     
     if (agents.length === 0) {
-      throw new Error('No agents available - cannot create packages');
+      console.warn('⚠️ No agents available - agent deliveries will be disabled');
+      // Don't throw error - fragile and collect deliveries can work without agents
     }
     
     // Update cache
@@ -311,7 +336,7 @@ const transformLocationData = (rawData: any): Location => {
 };
 
 /**
- * ✅ FIXED: Validate package form data structure
+ * ✅ FIXED: Validate package form data structure with flexible requirements
  */
 export const validatePackageFormData = (data: any): ValidationResult => {
   const issues: string[] = [];
@@ -335,30 +360,36 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // Check areas (required)
+    // ✅ FIXED: Check areas (required for standard deliveries, optional for special deliveries)
     if (!data.areas || !Array.isArray(data.areas)) {
-      issues.push('Areas must be a non-empty array');
-    } else if (data.areas.length === 0) {
-      issues.push('At least one area is required');
+      issues.push('Areas must be an array');
     } else {
-      data.areas.forEach((area: any, index: number) => {
-        if (!area.id || !area.name) {
-          issues.push(`Area ${index} missing required fields (id, name)`);
-        }
-      });
+      // Only warn if no areas available - don't fail validation entirely
+      if (data.areas.length === 0) {
+        console.warn('⚠️ No areas available - some delivery types may be limited');
+      } else {
+        data.areas.forEach((area: any, index: number) => {
+          if (!area.id || !area.name) {
+            issues.push(`Area ${index} missing required fields (id, name)`);
+          }
+        });
+      }
     }
     
-    // Check agents (required)
+    // ✅ FIXED: Check agents (required for standard deliveries, optional for special deliveries)
     if (!data.agents || !Array.isArray(data.agents)) {
-      issues.push('Agents must be a non-empty array');
-    } else if (data.agents.length === 0) {
-      issues.push('At least one agent is required');
+      issues.push('Agents must be an array');
     } else {
-      data.agents.forEach((agent: any, index: number) => {
-        if (!agent.id || !agent.name) {
-          issues.push(`Agent ${index} missing required fields (id, name)`);
-        }
-      });
+      // Only warn if no agents available - don't fail validation entirely
+      if (data.agents.length === 0) {
+        console.warn('⚠️ No agents available - agent deliveries will be disabled');
+      } else {
+        data.agents.forEach((agent: any, index: number) => {
+          if (!agent.id || !agent.name) {
+            issues.push(`Agent ${index} missing required fields (id, name)`);
+          }
+        });
+      }
     }
     
     return {
@@ -373,15 +404,16 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * Create a new package
+ * ✅ FIXED: Create a new package with conditional origin agent requirement
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
     console.log('📦 Creating package with data:', packageData);
     
-    // Validate required fields
-    if (!packageData.origin_agent_id) {
-      throw new Error('Origin agent is required');
+    // ✅ FIXED: Make origin agent optional for fragile and collect deliveries
+    if (!packageData.origin_agent_id && 
+        !['fragile', 'collect', 'collect_deliver'].includes(packageData.delivery_type)) {
+      throw new Error('Origin agent is required for standard deliveries');
     }
     
     if (!packageData.receiver_name?.trim()) {
