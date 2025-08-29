@@ -774,10 +774,14 @@ export default function PackageCreationModal({
 
       console.log('✅ All packages created successfully:', responses);
 
-      // FIXED: Only call onSubmit with the last package for success modal, don't create it again
-      if (responses.length > 0) {
-        await onSubmit(currentPackageData);
-      }
+      // Show success message instead of calling onSubmit to avoid duplicate creation
+      Toast.show({
+        type: 'success',
+        text1: 'Packages Created Successfully',
+        text2: `${packagesToSubmit.length} package${packagesToSubmit.length > 1 ? 's' : ''} created`,
+        position: 'top',
+        visibilityTime: 3000,
+      });
 
       // Clear pending packages and close modal
       setPendingPackages([]);
