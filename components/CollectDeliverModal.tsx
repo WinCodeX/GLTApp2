@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - FIXED: Areas selection & multiple collection creation
+// components/CollectDeliverModal.tsx - FIXED: Location fetching and payment note
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -160,15 +160,14 @@ const LocationAreaSelectorModal: React.FC<{
 
   const useCurrentLocation = async () => {
     try {
-      let { status } = await Location.requestForegroundPermissionsAsync();
+      const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
         Alert.alert('Permission Required', 'Location permission is needed to use your current location');
         return;
       }
 
       const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.Balanced,
-        timeout: 15000,
+        accuracy: Location.Accuracy.High,
       });
       
       const reverseGeocode = await Location.reverseGeocodeAsync({
@@ -189,7 +188,7 @@ const LocationAreaSelectorModal: React.FC<{
       closeModal();
     } catch (error) {
       console.error('Location error:', error);
-      Alert.alert('Location Error', 'Could not get your current location. Please ensure location services are enabled and try again.');
+      Alert.alert('Error', 'Failed to get current location. Please enable location services.');
     }
   };
 
@@ -1054,7 +1053,7 @@ export default function CollectDeliverModal({
             <View style={styles.paymentAdvanceNote}>
               <Feather name="info" size={16} color="#10b981" />
               <Text style={styles.paymentAdvanceNoteText}>
-                For high-value items (over KES 5,000), payment may be required before collection for security purposes.
+                Please note that collections will not be scheduled until they are paid for. If you submit without payment you can find it in the pending section.
               </Text>
             </View>
           </View>
@@ -1580,7 +1579,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // Payment advance note styles (informational only)
+  // Updated payment note styles
   paymentAdvanceNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
