@@ -275,49 +275,46 @@ const LocationAreaSelectorModal: React.FC<{
 
               {/* Results */}
               <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
-                {searchQuery.length > 0 ? (
-                  <View>
-                    {/* Areas Section */}
-                    {searchResults.areas.length > 0 && (
-                      <View>
-                        <Text style={styles.sectionTitle}>Areas ({searchResults.areas.length})</Text>
-                        <FlatList
-                          data={searchResults.areas}
-                          keyExtractor={(item) => `area-${item.id}`}
-                          renderItem={renderAreaItem}
-                          scrollEnabled={false}
-                        />
-                      </View>
-                    )}
-                    
-                    {/* Agents Section */}
-                    {type === 'delivery' && searchResults.agents.length > 0 && (
-                      <View style={{ marginTop: 16 }}>
-                        <Text style={styles.sectionTitle}>Agents ({searchResults.agents.length})</Text>
-                        <FlatList
-                          data={searchResults.agents}
-                          keyExtractor={(item) => `agent-${item.id}`}
-                          renderItem={renderAgentItem}
-                          scrollEnabled={false}
-                        />
-                      </View>
-                    )}
-                    
-                    {searchResults.areas.length === 0 && searchResults.agents.length === 0 && (
-                      <View style={styles.noResults}>
-                        <Feather name="search" size={48} color="#666" />
-                        <Text style={styles.noResultsText}>No locations found</Text>
-                        <Text style={styles.noResultsSubtext}>Try a different search term</Text>
-                      </View>
-                    )}
-                  </View>
-                ) : (
-                  <View style={styles.noResults}>
-                    <Feather name="package" size={48} color="#666" />
-                    <Text style={styles.noResultsText}>Start typing to search</Text>
-                    <Text style={styles.noResultsSubtext}>Search for areas or {type === 'delivery' ? 'agents' : 'locations'}</Text>
-                  </View>
-                )}
+                <View>
+                  {/* Areas Section */}
+                  {(searchQuery.length > 0 ? searchResults.areas : areas).length > 0 && (
+                    <View>
+                      <Text style={styles.sectionTitle}>
+                        Areas ({searchQuery.length > 0 ? searchResults.areas.length : areas.length})
+                      </Text>
+                      <FlatList
+                        data={searchQuery.length > 0 ? searchResults.areas : areas}
+                        keyExtractor={(item) => `area-${item.id}`}
+                        renderItem={renderAreaItem}
+                        scrollEnabled={false}
+                      />
+                    </View>
+                  )}
+                  
+                  {/* Agents Section */}
+                  {type === 'delivery' && (searchQuery.length > 0 ? searchResults.agents : agents).length > 0 && (
+                    <View style={{ marginTop: 16 }}>
+                      <Text style={styles.sectionTitle}>
+                        Agents ({searchQuery.length > 0 ? searchResults.agents.length : agents.length})
+                      </Text>
+                      <FlatList
+                        data={searchQuery.length > 0 ? searchResults.agents : agents}
+                        keyExtractor={(item) => `agent-${item.id}`}
+                        renderItem={renderAgentItem}
+                        scrollEnabled={false}
+                      />
+                    </View>
+                  )}
+                  
+                  {/* Show no results only when searching and nothing found */}
+                  {searchQuery.length > 0 && searchResults.areas.length === 0 && searchResults.agents.length === 0 && (
+                    <View style={styles.noResults}>
+                      <Feather name="search" size={48} color="#666" />
+                      <Text style={styles.noResultsText}>No locations found</Text>
+                      <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+                    </View>
+                  )}
+                </View>
               </ScrollView>
             </LinearGradient>
           </View>
