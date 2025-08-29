@@ -1,3 +1,5 @@
+// components/FragileDeliveryModal.tsx - ENHANCED: Location search & multiple package creation
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -16,113 +18,312 @@ import {
   StatusBar,
   Alert,
   Keyboard,
+  FlatList,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import Toast from 'react-native-toast-message';
+import * as Location from 'expo-location';
 import { 
-  getPackageFormData,
-  validatePackageFormData,
-  createPackage,
-  type Location, 
+  type PackageData, 
   type Area, 
-  type Agent,
-  type PackageData 
+  type Agent, 
+  type Location as LocationType,
+  getPackageFormData 
 } from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 24;
 
+interface LocationData {
+  latitude: number;
+  longitude: number;
+  address?: string;
+  name?: string;
+  description?: string;
+}
+
 interface FragileDeliveryModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  currentLocation: { latitude: number; longitude: number; address?: string } | null;
+  onCreateAnother?: () => void; // NEW: Callback for creating another fragile delivery
+  currentLocation: LocationData | null;
 }
 
-interface PendingFragilePackage extends PackageData {
-  id: string;
-  created_at: number;
-}
+// NEW: Enhanced Location/Area Selection Modal Component
+const LocationAreaSelectorModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+  onLocationSelect: (location: LocationData, area?: Area, agent?: Agent) => void;
+  title: string;
+  type: 'pickup' | 'delivery';
+  areas: Area[];
+  agents: Agent[];
+  currentLocation?: LocationData | null;
+}> = ({ visible, onClose, onLocationSelect, title, type, areas, agents, currentLocation }) => {
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedArea, setSelectedArea] = useState<Area | null>(null);
+  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
+  const [searchResults, setSearchResults] = useState<{areas: Area[], agents: Agent[]}>({areas: [], agents: []});
+  const [isSearching, setIsSearching] = useState(false);
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
-// Storage keys for caching
-const STORAGE_KEYS = {
-  LOCATIONS: 'fragile_modal_locations',
-  AREAS: 'fragile_modal_areas',
-  AGENTS: 'fragile_modal_agents',
-  LAST_UPDATED: 'fragile_modal_last_updated'
-} as const;
+  useEffect(() => {
+    if (visible) {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
 
-const CACHE_DURATION = 24 * 60 * 60 * 1000;
+  const closeModal = () => {
+    Animated.timing(slideAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
+    });
+  };
 
-const useDataCache = () => {
-  const isCacheValid = useCallback(async (): Promise<boolean> => {
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query);
+    if (query.length < 2) {
+      setSearchResults({areas: [], agents: []});
+      return;
+    }
+    
+    setIsSearching(true);
     try {
-      const lastUpdated = await AsyncStorage.getItem(STORAGE_KEYS.LAST_UPDATED);
-      if (!lastUpdated) return false;
+      const lowercaseQuery = query.toLowerCase();
       
-      const timeDiff = Date.now() - parseInt(lastUpdated);
-      return timeDiff < CACHE_DURATION;
+      // Search areas by name and location
+      const filteredAreas = areas.filter(area => 
+        area.name.toLowerCase().includes(lowercaseQuery) ||
+        area.location?.name.toLowerCase().includes(lowercaseQuery)
+      );
+      
+      // Search agents by name and area
+      const filteredAgents = agents.filter(agent => 
+        agent.name.toLowerCase().includes(lowercaseQuery) ||
+        agent.area?.name.toLowerCase().includes(lowercaseQuery) ||
+        agent.area?.location?.name.toLowerCase().includes(lowercaseQuery)
+      );
+      
+      setSearchResults({
+        areas: filteredAreas,
+        agents: filteredAgents
+      });
     } catch (error) {
-      console.error('Error checking cache validity:', error);
-      return false;
+      console.error('Search error:', error);
+    } finally {
+      setIsSearching(false);
     }
-  }, []);
+  };
 
-  const loadFromCache = useCallback(async () => {
+  const handleAreaSelect = (area: Area) => {
+    setSelectedArea(area);
+    
+    // Create location data from area
+    const locationData: LocationData = {
+      latitude: 0, // Placeholder - would need actual coordinates
+      longitude: 0,
+      address: `${area.name}, ${area.location?.name}`,
+      name: area.name,
+      description: `${area.name} area in ${area.location?.name}`
+    };
+    
+    onLocationSelect(locationData, area);
+    closeModal();
+  };
+
+  const handleAgentSelect = (agent: Agent) => {
+    setSelectedAgent(agent);
+    
+    // Create location data from agent's area
+    const locationData: LocationData = {
+      latitude: 0, // Placeholder - would need actual coordinates
+      longitude: 0,
+      address: `${agent.name} - ${agent.area?.name}, ${agent.area?.location?.name}`,
+      name: agent.area?.name || 'Unknown Area',
+      description: `Agent: ${agent.name}`
+    };
+    
+    onLocationSelect(locationData, agent.area, agent);
+    closeModal();
+  };
+
+  const useCurrentLocation = async () => {
     try {
-      const [locationsStr, areasStr, agentsStr] = await Promise.all([
-        AsyncStorage.getItem(STORAGE_KEYS.LOCATIONS),
-        AsyncStorage.getItem(STORAGE_KEYS.AREAS),
-        AsyncStorage.getItem(STORAGE_KEYS.AGENTS)
-      ]);
-
-      if (!locationsStr || !areasStr || !agentsStr) return null;
-
-      return {
-        locations: JSON.parse(locationsStr),
-        areas: JSON.parse(areasStr),
-        agents: JSON.parse(agentsStr)
+      const location = await Location.getCurrentPositionAsync({});
+      const address = await Location.reverseGeocodeAsync({
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+      });
+      
+      const currentLoc: LocationData = {
+        latitude: location.coords.latitude,
+        longitude: location.coords.longitude,
+        address: address[0] ? 
+          `${address[0].street}, ${address[0].city}` : 'Current Location',
+        name: 'Current Location',
+        description: 'Your current position'
       };
-    } catch (error) {
-      console.error('Error loading from cache:', error);
-      return null;
-    }
-  }, []);
 
-  const saveToCache = useCallback(async (data: { locations: Location[], areas: Area[], agents: Agent[] }) => {
-    try {
-      await Promise.all([
-        AsyncStorage.setItem(STORAGE_KEYS.LOCATIONS, JSON.stringify(data.locations)),
-        AsyncStorage.setItem(STORAGE_KEYS.AREAS, JSON.stringify(data.areas)),
-        AsyncStorage.setItem(STORAGE_KEYS.AGENTS, JSON.stringify(data.agents)),
-        AsyncStorage.setItem(STORAGE_KEYS.LAST_UPDATED, Date.now().toString())
-      ]);
-      console.log('Fragile modal data cached successfully');
+      onLocationSelect(currentLoc);
+      closeModal();
     } catch (error) {
-      console.error('Error saving to cache:', error);
+      Alert.alert('Error', 'Failed to get current location');
     }
-  }, []);
+  };
 
-  const clearCache = useCallback(async () => {
-    try {
-      await Promise.all(Object.values(STORAGE_KEYS).map(key => 
-        AsyncStorage.removeItem(key)
-      ));
-      console.log('Fragile modal cache cleared');
-    } catch (error) {
-      console.error('Error clearing cache:', error);
-    }
-  }, []);
+  const renderAreaItem = ({ item }: { item: Area }) => (
+    <TouchableOpacity
+      style={[
+        styles.locationItem,
+        selectedArea?.id === item.id && styles.selectedLocationItem
+      ]}
+      onPress={() => handleAreaSelect(item)}
+    >
+      <View style={styles.locationIcon}>
+        <Text style={styles.locationInitials}>
+          {item.initials || item.name.substring(0, 2).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <Text style={styles.locationAddress}>{item.location?.name}</Text>
+        <Text style={styles.locationDescription}>Area</Text>
+      </View>
+      {selectedArea?.id === item.id && (
+        <Feather name="check-circle" size={20} color="#f97316" />
+      )}
+    </TouchableOpacity>
+  );
 
-  return { isCacheValid, loadFromCache, saveToCache, clearCache };
+  const renderAgentItem = ({ item }: { item: Agent }) => (
+    <TouchableOpacity
+      style={[
+        styles.locationItem,
+        selectedAgent?.id === item.id && styles.selectedLocationItem
+      ]}
+      onPress={() => handleAgentSelect(item)}
+    >
+      <View style={styles.locationIcon}>
+        <Text style={styles.locationInitials}>
+          {item.name.substring(0, 2).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <Text style={styles.locationAddress}>{item.area?.name} • {item.area?.location?.name}</Text>
+        <Text style={styles.locationDescription}>Agent • {item.phone}</Text>
+      </View>
+      {selectedAgent?.id === item.id && (
+        <Feather name="check-circle" size={20} color="#f97316" />
+      )}
+    </TouchableOpacity>
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="none">
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={styles.mapModalSafeArea}>
+        <Animated.View
+          style={[
+            styles.mapModalContainer,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          <View style={styles.mapContainer}>
+            <LinearGradient
+              colors={['#1a1a2e', '#2d3748', '#4a5568']}
+              style={styles.mapGradient}
+            >
+              {/* Header */}
+              <View style={styles.mapHeader}>
+                <TouchableOpacity onPress={closeModal} style={styles.mapCloseButton}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+                <Text style={styles.mapHeaderTitle}>{title}</Text>
+                <TouchableOpacity onPress={useCurrentLocation} style={styles.currentLocationButton}>
+                  <Feather name="target" size={20} color="#f97316" />
+                </TouchableOpacity>
+              </View>
+              
+              {/* Search */}
+              <View style={styles.mapSearchContainer}>
+                <TextInput
+                  style={styles.mapSearchInput}
+                  placeholder="Search for areas or agents..."
+                  placeholderTextColor="#888"
+                  value={searchQuery}
+                  onChangeText={handleSearch}
+                />
+                {isSearching && <ActivityIndicator size="small" color="#f97316" />}
+              </View>
+
+              {/* Results */}
+              <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
+                {searchQuery.length > 0 ? (
+                  <View>
+                    {/* Areas Section */}
+                    {searchResults.areas.length > 0 && (
+                      <View>
+                        <Text style={styles.sectionTitle}>Areas ({searchResults.areas.length})</Text>
+                        <FlatList
+                          data={searchResults.areas}
+                          keyExtractor={(item) => `area-${item.id}`}
+                          renderItem={renderAreaItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {/* Agents Section */}
+                    {type === 'delivery' && searchResults.agents.length > 0 && (
+                      <View style={{ marginTop: 16 }}>
+                        <Text style={styles.sectionTitle}>Agents ({searchResults.agents.length})</Text>
+                        <FlatList
+                          data={searchResults.agents}
+                          keyExtractor={(item) => `agent-${item.id}`}
+                          renderItem={renderAgentItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {searchResults.areas.length === 0 && searchResults.agents.length === 0 && (
+                      <View style={styles.noResults}>
+                        <Feather name="search" size={48} color="#666" />
+                        <Text style={styles.noResultsText}>No locations found</Text>
+                        <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+                      </View>
+                    )}
+                  </View>
+                ) : (
+                  <View style={styles.noResults}>
+                    <Feather name="map-pin" size={48} color="#666" />
+                    <Text style={styles.noResultsText}>Start typing to search</Text>
+                    <Text style={styles.noResultsSubtext}>Search for areas or {type === 'delivery' ? 'agents' : 'locations'}</Text>
+                  </View>
+                )}
+              </ScrollView>
+            </LinearGradient>
+          </View>
+        </Animated.View>
+      </SafeAreaView>
+    </Modal>
+  );
 };
 
 export default function FragileDeliveryModal({
   visible,
   onClose,
   onSubmit,
+  onCreateAnother, // NEW: For creating multiple packages
   currentLocation: initialLocation
 }: FragileDeliveryModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -131,72 +332,61 @@ export default function FragileDeliveryModal({
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  const { isCacheValid, loadFromCache, saveToCache, clearCache } = useDataCache();
-
-  // Data states
-  const [locations, setLocations] = useState<Location[]>([]);
+  
+  // NEW: Package form data
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
-  const [isDataLoading, setIsDataLoading] = useState(false);
-  const [dataError, setDataError] = useState<string | null>(null);
-
-  // Multi-package states
-  const [pendingPackages, setPendingPackages] = useState<PendingFragilePackage[]>([]);
-  const [isCreatingMultiple, setIsCreatingMultiple] = useState(false);
+  const [isLoadingFormData, setIsLoadingFormData] = useState(false);
+  
+  // Location states with area/agent support
+  const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
+  const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(null);
+  const [selectedPickupArea, setSelectedPickupArea] = useState<Area | null>(null);
+  const [selectedDeliveryArea, setSelectedDeliveryArea] = useState<Area | null>(null);
+  const [selectedDeliveryAgent, setSelectedDeliveryAgent] = useState<Agent | null>(null);
+  const [isLocationLoading, setIsLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   
   // Form states
   const [receiverName, setReceiverName] = useState('');
   const [receiverPhone, setReceiverPhone] = useState('');
-  const [pickupAgentId, setPickupAgentId] = useState('');
-  const [deliveryAgentId, setDeliveryAgentId] = useState('');
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [itemDescription, setItemDescription] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
-
-  // Search states
-  const [searchQueries, setSearchQueries] = useState({
-    pickupAgent: '',
-    deliveryAgent: ''
-  });
-
-  const [sortConfig, setSortConfig] = useState<{
-    field: 'name' | 'location';
-    direction: 'asc' | 'desc';
-  }>({
-    field: 'name',
-    direction: 'asc'
-  });
+  
+  // Map modal states
+  const [showPickupMapModal, setShowPickupMapModal] = useState(false);
+  const [showDeliveryMapModal, setShowDeliveryMapModal] = useState(false);
   
   const STEP_TITLES = [
-    'Pickup & Delivery Locations',
+    'Location Setup',
     'Receiver Details', 
     'Package Information',
     'Confirm Fragile Delivery'
   ];
 
-  // Calculate modal height
-  const modalHeight = useMemo(() => {
-    if (isKeyboardVisible) {
-      const availableHeight = SCREEN_HEIGHT - keyboardHeight;
-      const maxModalHeight = availableHeight - STATUS_BAR_HEIGHT - 20;
-      return Math.min(maxModalHeight, availableHeight * 0.85);
-    }
-    return SCREEN_HEIGHT * 0.90;
-  }, [isKeyboardVisible, keyboardHeight]);
+  // Load form data
+  useEffect(() => {
+    const loadFormData = async () => {
+      if (!visible) return;
+      
+      try {
+        setIsLoadingFormData(true);
+        const formData = await getPackageFormData();
+        setAreas(formData.areas || []);
+        setAgents(formData.agents || []);
+      } catch (error) {
+        console.error('Failed to load form data:', error);
+        setLocationError('Failed to load location data');
+      } finally {
+        setIsLoadingFormData(false);
+      }
+    };
 
-  const totalPackages = pendingPackages.length + (currentStep === STEP_TITLES.length - 1 ? 1 : 0);
+    loadFormData();
+  }, [visible]);
 
-  const selectedPickupAgent = useMemo(() => 
-    agents.find(agent => agent.id === pickupAgentId),
-    [agents, pickupAgentId]
-  );
-
-  const selectedDeliveryAgent = useMemo(() => 
-    agents.find(agent => agent.id === deliveryAgentId),
-    [agents, deliveryAgentId]
-  );
-
-  // Keyboard handling
+  // Enhanced keyboard handling
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -219,11 +409,20 @@ export default function FragileDeliveryModal({
     };
   }, []);
 
+  // Better modal height calculation
+  const modalHeight = useMemo(() => {
+    if (isKeyboardVisible) {
+      const availableHeight = SCREEN_HEIGHT - keyboardHeight;
+      const maxModalHeight = availableHeight - STATUS_BAR_HEIGHT - 20;
+      return Math.min(maxModalHeight, availableHeight * 0.85);
+    }
+    return SCREEN_HEIGHT * 0.90;
+  }, [isKeyboardVisible, keyboardHeight]);
+
   useEffect(() => {
     if (visible) {
-      console.log('Fragile modal opened, loading data...');
       resetForm();
-      loadModalData();
+      requestLocationPermission();
       
       Animated.timing(slideAnim, {
         toValue: 0,
@@ -233,277 +432,80 @@ export default function FragileDeliveryModal({
     }
   }, [visible]);
 
-  const loadModalData = useCallback(async () => {
-    try {
-      setIsDataLoading(true);
-      setDataError(null);
-      
-      // Check cache first
-      const cacheValid = await isCacheValid();
-      
-      if (cacheValid) {
-        const cachedData = await loadFromCache();
-        if (cachedData) {
-          console.log('Loading fragile modal data from cache...');
-          setLocations(cachedData.locations);
-          setAreas(cachedData.areas);
-          setAgents(cachedData.agents);
-          
-          const validation = validatePackageFormData(cachedData);
-          if (!validation.isValid) {
-            console.warn('Cached data validation failed:', validation.issues);
-            await clearCache();
-            throw new Error('Cached data is invalid, fetching fresh data...');
-          }
-          
-          setIsDataLoading(false);
-          return;
-        }
-      }
-      
-      console.log('Fetching fresh fragile modal data from API...');
-      const formData = await getPackageFormData();
-      
-      const validation = validatePackageFormData(formData);
-      if (!validation.isValid) {
-        console.error('Fresh data validation failed:', validation.issues);
-        setDataError(`Data validation failed: ${validation.issues.join(', ')}`);
-        return;
-      }
-      
-      setLocations(formData.locations);
-      setAreas(formData.areas);
-      setAgents(formData.agents);
-      
-      await saveToCache({
-        locations: formData.locations,
-        areas: formData.areas,
-        agents: formData.agents
-      });
-      
-    } catch (error: any) {
-      console.error('Failed to load fragile modal data:', error);
-      setDataError(error.message || 'Failed to load data');
-      
-      const cachedData = await loadFromCache();
-      if (cachedData) {
-        console.log('Using expired cache as fallback...');
-        setLocations(cachedData.locations);
-        setAreas(cachedData.areas);
-        setAgents(cachedData.agents);
-        setDataError(null);
-      }
-    } finally {
-      setIsDataLoading(false);
-    }
-  }, [isCacheValid, loadFromCache, saveToCache, clearCache]);
-
-  const resetForm = useCallback(() => {
+  const resetForm = () => {
     setCurrentStep(0);
+    setPickupLocation(initialLocation);
+    setDeliveryLocation(null);
+    setSelectedPickupArea(null);
+    setSelectedDeliveryArea(null);
+    setSelectedDeliveryAgent(null);
     setReceiverName('');
     setReceiverPhone('');
-    setPickupAgentId('');
-    setDeliveryAgentId('');
     setDeliveryAddress('');
     setItemDescription('');
     setSpecialInstructions('');
     setIsSubmitting(false);
-    setSearchQueries({
-      pickupAgent: '',
-      deliveryAgent: ''
-    });
-    setSortConfig({ field: 'name', direction: 'asc' });
-    setPendingPackages([]);
-    setIsCreatingMultiple(false);
-  }, []);
-
-  const resetFormForNewPackage = useCallback(() => {
-    setCurrentStep(0);
-    setReceiverName('');
-    setReceiverPhone('');
-    setPickupAgentId('');
-    setDeliveryAgentId('');
-    setDeliveryAddress('');
-    setItemDescription('');
-    setSpecialInstructions('');
-    setSearchQueries({
-      pickupAgent: '',
-      deliveryAgent: ''
-    });
-    setSortConfig({ field: 'name', direction: 'asc' });
-  }, []);
+    setLocationError(null);
+  };
 
   const closeModal = useCallback(() => {
-    if (pendingPackages.length > 0) {
-      Alert.alert(
-        'Unsaved Packages',
-        `You have ${pendingPackages.length} unsaved fragile package(s). If you close now, all progress will be lost. Submit your packages first.`,
-        [
-          {
-            text: 'Continue Editing',
-            style: 'cancel'
-          },
-          {
-            text: 'Close and Lose Progress',
-            style: 'destructive',
-            onPress: () => {
-              setPendingPackages([]);
-              setIsCreatingMultiple(false);
-              Keyboard.dismiss();
-              Animated.timing(slideAnim, {
-                toValue: SCREEN_HEIGHT,
-                duration: 250,
-                useNativeDriver: true,
-              }).start(() => {
-                onClose();
-              });
-            }
-          }
-        ]
-      );
-    } else {
-      Keyboard.dismiss();
-      Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start(() => {
-        onClose();
-      });
-    }
-  }, [slideAnim, onClose, pendingPackages.length]);
-
-  const updateSearchQuery = useCallback((field: keyof typeof searchQueries, value: string) => {
-    setSearchQueries(prev => ({ ...prev, [field]: value }));
-  }, []);
-
-  const handleSortChange = useCallback((field: 'name' | 'location') => {
-    setSortConfig(prev => ({
-      field,
-      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
-    }));
-  }, []);
-
-  const getGroupedItems = useCallback((items: Agent[], searchQuery: string) => {
-    // First filter the items based on search query
-    const filtered = items.filter(agent => {
-      const searchLower = searchQuery.toLowerCase();
-      const name = agent.name || '';
-      const areaName = agent.area?.name || '';
-      const locationName = agent.area?.location?.name || '';
-      
-      return (
-        name.toLowerCase().includes(searchLower) ||
-        areaName.toLowerCase().includes(searchLower) ||
-        locationName.toLowerCase().includes(searchLower)
-      );
+    Keyboard.dismiss();
+    Animated.timing(slideAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
     });
-    
-    if (filtered.length === 0) return [];
-    
-    if (sortConfig.field === 'name') {
-      // For name sorting: return flat list sorted by name only
-      const sorted = filtered.sort((a, b) => {
-        const aName = a.name || '';
-        const bName = b.name || '';
-        const comparison = aName.localeCompare(bName, 'en', { sensitivity: 'base' });
-        return sortConfig.direction === 'asc' ? comparison : -comparison;
-      });
+  }, [slideAnim, onClose]);
+
+  const requestLocationPermission = async () => {
+    try {
+      setIsLocationLoading(true);
+      setLocationError(null);
       
-      return [{
-        locationName: 'All Items',
-        items: sorted
-      }];
-    } else {
-      // For location sorting: group by location
-      const grouped = filtered.reduce((acc, agent) => {
-        const locationName = agent.area?.location?.name || 'Unknown Location';
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationError('Location permission denied. Please enable location services.');
+        return;
+      }
+      
+      if (!pickupLocation) {
+        const location = await Location.getCurrentPositionAsync({});
+        const address = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+        });
         
-        if (!acc[locationName]) {
-          acc[locationName] = [];
-        }
-        acc[locationName].push(agent);
-        return acc;
-      }, {} as Record<string, Agent[]>);
-
-      const sortedGroups = Object.entries(grouped)
-        .sort(([a], [b]) => {
-          if (a === 'Unknown Location') return 1;
-          if (b === 'Unknown Location') return -1;
-          const comparison = a.localeCompare(b, 'en', { sensitivity: 'base' });
-          return sortConfig.direction === 'asc' ? comparison : -comparison;
-        })
-        .map(([locationName, items]) => ({
-          locationName,
-          items: items.sort((a, b) => {
-            const aName = a.name || '';
-            const bName = b.name || '';
-            return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
-          })
-        }));
-      
-      return sortedGroups;
+        setPickupLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
+        });
+      }
+    } catch (error) {
+      setLocationError('Failed to get current location');
+    } finally {
+      setIsLocationLoading(false);
     }
-  }, [sortConfig]);
+  };
 
-  const renderSearchAndSortHeader = useCallback((
-    searchValue: string,
-    onSearchChange: (value: string) => void,
-    placeholder: string
-  ) => (
-    <View style={styles.searchAndSortContainer}>
-      <View style={styles.searchInputContainer}>
-        <Feather name="search" size={20} color="#888" />
-        <TextInput
-          style={styles.searchInput}
-          placeholder={placeholder}
-          placeholderTextColor="#888"
-          value={searchValue}
-          onChangeText={onSearchChange}
-        />
-        {searchValue.length > 0 && (
-          <TouchableOpacity onPress={() => onSearchChange('')}>
-            <Feather name="x" size={16} color="#888" />
-          </TouchableOpacity>
-        )}
-      </View>
-      
-      <View style={styles.sortContainer}>
-        <Text style={styles.sortLabel}>Sort by:</Text>
-        <View style={styles.sortButtons}>
-          {(['name', 'location'] as const).map((option) => (
-            <TouchableOpacity
-              key={option}
-              style={[
-                styles.sortButton,
-                sortConfig.field === option && styles.activeSortButton
-              ]}
-              onPress={() => handleSortChange(option)}
-            >
-              <Text style={[
-                styles.sortButtonText,
-                sortConfig.field === option && styles.activeSortButtonText
-              ]}>
-                {option.charAt(0).toUpperCase() + option.slice(1)}
-              </Text>
-              {sortConfig.field === option && (
-                <Feather 
-                  name={sortConfig.direction === 'asc' ? 'arrow-up' : 'arrow-down'} 
-                  size={12} 
-                  color="#f97316" 
-                />
-              )}
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
-    </View>
-  ), [sortConfig, handleSortChange]);
+  // NEW: Enhanced location selection with area/agent support
+  const handlePickupLocationSelect = (location: LocationData, area?: Area, agent?: Agent) => {
+    setPickupLocation(location);
+    if (area) setSelectedPickupArea(area);
+  };
+
+  const handleDeliveryLocationSelect = (location: LocationData, area?: Area, agent?: Agent) => {
+    setDeliveryLocation(location);
+    if (area) setSelectedDeliveryArea(area);
+    if (agent) setSelectedDeliveryAgent(agent);
+  };
 
   const isStepValid = useCallback((step: number) => {
     switch (step) {
       case 0:
-        return pickupAgentId.length > 0 && deliveryAgentId.length > 0;
+        return pickupLocation !== null && deliveryLocation !== null;
       case 1:
         return receiverName.trim().length > 0 && receiverPhone.trim().length > 0;
       case 2:
@@ -513,7 +515,7 @@ export default function FragileDeliveryModal({
       default:
         return false;
     }
-  }, [pickupAgentId, deliveryAgentId, receiverName, receiverPhone, deliveryAddress, itemDescription]);
+  }, [pickupLocation, deliveryLocation, receiverName, receiverPhone, deliveryAddress, itemDescription]);
 
   const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isStepValid(currentStep)) {
@@ -527,110 +529,51 @@ export default function FragileDeliveryModal({
     }
   }, [currentStep]);
 
-  const addAnotherPackage = useCallback(() => {
-    const newPendingPackage: PendingFragilePackage = {
-      receiver_name: receiverName,
-      receiver_phone: receiverPhone,
-      sender_name: 'Current User',
-      sender_phone: '+254700000000',
-      origin_agent_id: pickupAgentId,
-      destination_agent_id: deliveryAgentId,
-      delivery_type: 'fragile',
-      delivery_location: deliveryAddress,
-      package_description: `FRAGILE DELIVERY: ${itemDescription}${specialInstructions ? `\nSpecial Instructions: ${specialInstructions}` : ''}`,
-      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
-      created_at: Date.now()
-    };
-    
-    setPendingPackages(prev => [...prev, newPendingPackage]);
-    setIsCreatingMultiple(true);
-    resetFormForNewPackage();
-  }, [receiverName, receiverPhone, pickupAgentId, deliveryAgentId, deliveryAddress, itemDescription, specialInstructions, resetFormForNewPackage]);
-
-  const removePendingPackage = useCallback((packageId: string) => {
-    setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
-  }, []);
-
   const handleSubmit = async () => {
     if (!isStepValid(currentStep)) return;
 
     setIsSubmitting(true);
     try {
-      // Get pickup agent's area ID
-      let pickupAreaId = '';
-      if (selectedPickupAgent?.area?.id) {
-        pickupAreaId = selectedPickupAgent.area.id;
-      }
-
-      // Get delivery agent's area ID
-      let deliveryAreaId = '';
-      if (selectedDeliveryAgent?.area?.id) {
-        deliveryAreaId = selectedDeliveryAgent.area.id;
-      }
-
-      const currentPackageData: PackageData = {
+      const packageData: PackageData = {
+        sender_name: 'Fragile Service',
+        sender_phone: '+254700000000',
         receiver_name: receiverName,
         receiver_phone: receiverPhone,
-        sender_name: 'Current User',
-        sender_phone: '+254700000000',
-        origin_agent_id: pickupAgentId,
-        destination_agent_id: deliveryAgentId,
-        origin_area_id: pickupAreaId,
-        destination_area_id: deliveryAreaId,
+        
+        // NEW: Set area and agent IDs properly
+        origin_area_id: selectedPickupArea?.id,
+        destination_area_id: selectedDeliveryArea?.id || selectedDeliveryAgent?.area?.id,
+        origin_agent_id: null,
+        destination_agent_id: selectedDeliveryAgent?.id || null,
+        
         delivery_type: 'fragile',
         delivery_location: deliveryAddress,
-        package_description: `FRAGILE DELIVERY: ${itemDescription}${specialInstructions ? `\nSpecial Instructions: ${specialInstructions}` : ''}`
+        package_description: `FRAGILE DELIVERY: ${itemDescription}${specialInstructions ? `\nSpecial Instructions: ${specialInstructions}` : ''}`,
+        pickup_location: pickupLocation?.address || '',
+        coordinates: pickupLocation && deliveryLocation ? {
+          pickup: pickupLocation,
+          delivery: deliveryLocation
+        } : undefined,
       };
 
-      // Prepare all packages for submission
-      const allPackages = [
-        ...pendingPackages.map(pkg => ({
-          ...pkg,
-          origin_area_id: agents.find(a => a.id === pkg.origin_agent_id)?.area?.id || '',
-          destination_area_id: agents.find(a => a.id === pkg.destination_agent_id)?.area?.id || ''
-        })),
-        currentPackageData
-      ];
-
-      console.log(`Submitting ${allPackages.length} fragile packages...`);
-
-      // Submit all packages
-      const responses = await Promise.all(
-        allPackages.map(pkg => createPackage(pkg))
-      );
-
-      console.log('All fragile packages created successfully:', responses);
-
-      // Show success message
-      Toast.show({
-        type: 'success',
-        text1: 'Fragile Packages Created Successfully',
-        text2: `${allPackages.length} fragile package${allPackages.length > 1 ? 's' : ''} created`,
-        position: 'top',
-        visibilityTime: 3000,
-      });
-
-      // Clear pending packages and close modal
-      setPendingPackages([]);
-      setIsCreatingMultiple(false);
+      await onSubmit(packageData);
       closeModal();
-      
-    } catch (error: any) {
-      console.error('Failed to submit fragile packages:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Failed to Create Fragile Packages',
-        text2: error.message,
-        position: 'top',
-        visibilityTime: 4000,
-      });
+    } catch (error) {
+      console.error('Error submitting fragile delivery:', error);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const renderProgressBar = useCallback(() => (
+  // NEW: Handle creating another fragile delivery
+  const handleCreateAnother = () => {
+    resetForm();
+    if (onCreateAnother) {
+      onCreateAnother();
+    }
+  };
+
+  const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
         <View 
@@ -642,12 +585,11 @@ export default function FragileDeliveryModal({
       </View>
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
-        {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length > 1 ? 's' : ''} pending`}
       </Text>
     </View>
-  ), [currentStep, pendingPackages.length]);
+  );
 
-  const renderHeader = useCallback(() => (
+  const renderHeader = () => (
     <View style={styles.header}>
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
@@ -655,134 +597,56 @@ export default function FragileDeliveryModal({
       <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
       <View style={styles.placeholder} />
     </View>
-  ), [closeModal, currentStep]);
+  );
 
   const renderLocationSetup = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Fragile Delivery Setup</Text>
+      <Text style={styles.stepTitle}>⚠️ Fragile Delivery Setup</Text>
       <Text style={styles.stepSubtitle}>
-        Select pickup and delivery locations for fragile items
+        Set your pickup and delivery locations for fragile items
       </Text>
       
-      {dataError && (
+      {locationError && (
         <View style={styles.errorBanner}>
           <Feather name="alert-circle" size={16} color="#ea580c" />
-          <Text style={styles.errorText}>{dataError}</Text>
-          <TouchableOpacity onPress={loadModalData}>
+          <Text style={styles.errorText}>{locationError}</Text>
+          <TouchableOpacity onPress={requestLocationPermission}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
       )}
       
-      {isDataLoading && (
+      {isLocationLoading && (
         <View style={styles.loadingBanner}>
           <ActivityIndicator size="small" color="#f97316" />
-          <Text style={styles.loadingText}>Loading locations...</Text>
+          <Text style={styles.loadingText}>Getting your location...</Text>
         </View>
       )}
-
+      
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>Pickup Location</Text>
-        <Text style={styles.locationSubtitle}>Select pickup office</Text>
-        
-        {renderSearchAndSortHeader(
-          searchQueries.pickupAgent,
-          (value) => updateSearchQuery('pickupAgent', value),
-          'Search pickup offices...'
-        )}
-        
-        <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-          {getGroupedItems(agents, searchQueries.pickupAgent).map((group, groupIndex) => (
-            <View key={groupIndex}>
-              {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-                </View>
-              )}
-              
-              {group.items.map((agent) => (
-                <TouchableOpacity
-                  key={agent.id}
-                  style={[
-                    styles.selectionItem,
-                    pickupAgentId === agent.id && styles.selectedItem
-                  ]}
-                  onPress={() => setPickupAgentId(agent.id)}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {agent.name.substring(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{agent.name}</Text>
-                      <Text style={styles.selectionLocation}>
-                        {agent.area?.name} • {agent.area?.location?.name}
-                      </Text>
-                    </View>
-                    {pickupAgentId === agent.id && (
-                      <Feather name="check-circle" size={20} color="#f97316" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))}
-        </ScrollView>
+        <Text style={styles.locationLabel}>📍 Pickup Location</Text>
+        <TouchableOpacity 
+          style={[styles.locationInput, pickupLocation && styles.locationInputSelected]}
+          onPress={() => setShowPickupMapModal(true)}
+        >
+          <Text style={[styles.locationText, pickupLocation && styles.locationTextSelected]}>
+            {pickupLocation?.address || 'Tap to select pickup location'}
+          </Text>
+          <Feather name="map" size={20} color={pickupLocation ? "#f97316" : "#666"} />
+        </TouchableOpacity>
       </View>
-
+      
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>Delivery Location</Text>
-        <Text style={styles.locationSubtitle}>Select delivery office</Text>
-        
-        {renderSearchAndSortHeader(
-          searchQueries.deliveryAgent,
-          (value) => updateSearchQuery('deliveryAgent', value),
-          'Search delivery offices...'
-        )}
-        
-        <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
-          {getGroupedItems(agents, searchQueries.deliveryAgent).map((group, groupIndex) => (
-            <View key={groupIndex}>
-              {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-                </View>
-              )}
-              
-              {group.items.map((agent) => (
-                <TouchableOpacity
-                  key={agent.id}
-                  style={[
-                    styles.selectionItem,
-                    deliveryAgentId === agent.id && styles.selectedItem
-                  ]}
-                  onPress={() => setDeliveryAgentId(agent.id)}
-                >
-                  <View style={styles.selectionItemContent}>
-                    <View style={styles.selectionInitials}>
-                      <Text style={styles.selectionInitialsText}>
-                        {agent.name.substring(0, 2).toUpperCase()}
-                      </Text>
-                    </View>
-                    <View style={styles.selectionInfo}>
-                      <Text style={styles.selectionName}>{agent.name}</Text>
-                      <Text style={styles.selectionLocation}>
-                        {agent.area?.name} • {agent.area?.location?.name}
-                      </Text>
-                    </View>
-                    {deliveryAgentId === agent.id && (
-                      <Feather name="check-circle" size={20} color="#f97316" />
-                    )}
-                  </View>
-                </TouchableOpacity>
-              ))}
-            </View>
-          ))}
-        </ScrollView>
+        <Text style={styles.locationLabel}>🎯 Delivery Location</Text>
+        <TouchableOpacity 
+          style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
+          onPress={() => setShowDeliveryMapModal(true)}
+        >
+          <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
+            {deliveryLocation?.address || 'Tap to select delivery location'}
+          </Text>
+          <Feather name="map" size={20} color={deliveryLocation ? "#f97316" : "#666"} />
+        </TouchableOpacity>
       </View>
 
       <View style={styles.fragileInfo}>
@@ -830,7 +694,7 @@ export default function FragileDeliveryModal({
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Package Details</Text>
       <Text style={styles.stepSubtitle}>
-        Provide details about your fragile items
+        Provide details about your fragile items and delivery requirements
       </Text>
       
       <View style={styles.formContainer}>
@@ -882,69 +746,45 @@ export default function FragileDeliveryModal({
 
   const renderConfirmation = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Confirm Fragile Delivery</Text>
+      <Text style={styles.stepTitle}>🎯 Confirm Fragile Delivery</Text>
       <Text style={styles.stepSubtitle}>
-        {pendingPackages.length > 0 
-          ? `Review all ${totalPackages} fragile package${totalPackages > 1 ? 's' : ''} before submitting`
-          : 'Review all information before submitting'
-        }
+        Please review your fragile delivery details
       </Text>
       
-      {/* Show pending packages if any */}
-      {pendingPackages.length > 0 && (
-        <View style={styles.pendingPackagesContainer}>
-          <Text style={styles.pendingPackagesTitle}>Pending Fragile Packages ({pendingPackages.length})</Text>
-          {pendingPackages.map((pkg, index) => (
-            <View key={pkg.id} style={styles.pendingPackageItem}>
-              <View style={styles.pendingPackageHeader}>
-                <Text style={styles.pendingPackageNumber}>Fragile Package {index + 1}</Text>
-                <TouchableOpacity 
-                  onPress={() => removePendingPackage(pkg.id)}
-                  style={styles.removePendingPackageButton}
-                >
-                  <Feather name="trash-2" size={16} color="#ef4444" />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.pendingPackageSummary}>
-                {pkg.receiver_name} • Fragile Delivery
-              </Text>
-            </View>
-          ))}
-        </View>
-      )}
-      
       <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
-        <Text style={styles.currentPackageTitle}>
-          {pendingPackages.length > 0 ? `Fragile Package ${pendingPackages.length + 1}` : 'Current Fragile Package'}
-        </Text>
-
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Route</Text>
+          <Text style={styles.confirmationSectionTitle}>🗺️ Route</Text>
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
               <Text style={styles.routeLabel}>From</Text>
-              <Text style={styles.routeAddress}>{selectedPickupAgent?.name}</Text>
-              <Text style={styles.routeArea}>{selectedPickupAgent?.area?.name} • {selectedPickupAgent?.area?.location?.name}</Text>
+              <Text style={styles.routeAddress}>{pickupLocation?.address}</Text>
+              {selectedPickupArea && (
+                <Text style={styles.routeAreaDetail}>{selectedPickupArea.name}</Text>
+              )}
             </View>
             <View style={styles.routeArrow}>
               <Feather name="arrow-right" size={20} color="#f97316" />
             </View>
             <View style={styles.routePoint}>
               <Text style={styles.routeLabel}>To</Text>
-              <Text style={styles.routeAddress}>{selectedDeliveryAgent?.name}</Text>
-              <Text style={styles.routeArea}>{selectedDeliveryAgent?.area?.name} • {selectedDeliveryAgent?.area?.location?.name}</Text>
+              <Text style={styles.routeAddress}>{deliveryLocation?.address}</Text>
+              {(selectedDeliveryArea || selectedDeliveryAgent) && (
+                <Text style={styles.routeAreaDetail}>
+                  {selectedDeliveryAgent ? `Agent: ${selectedDeliveryAgent.name}` : selectedDeliveryArea?.name}
+                </Text>
+              )}
             </View>
           </View>
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Receiver</Text>
+          <Text style={styles.confirmationSectionTitle}>👤 Receiver</Text>
           <Text style={styles.confirmationDetail}>{receiverName}</Text>
           <Text style={styles.confirmationDetail}>{receiverPhone}</Text>
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Package Details</Text>
+          <Text style={styles.confirmationSectionTitle}>📦 Package Details</Text>
           <Text style={styles.confirmationDetail}>Item: {itemDescription}</Text>
           <Text style={styles.confirmationSubDetail}>Address: {deliveryAddress}</Text>
           {specialInstructions && (
@@ -955,7 +795,7 @@ export default function FragileDeliveryModal({
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Fragile Service</Text>
+          <Text style={styles.confirmationSectionTitle}>⚠️ Fragile Service</Text>
           <View style={styles.serviceFeatures}>
             <View style={styles.serviceFeature}>
               <Feather name="shield" size={16} color="#f97316" />
@@ -973,7 +813,7 @@ export default function FragileDeliveryModal({
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Cost Breakdown</Text>
+          <Text style={styles.confirmationSectionTitle}>💰 Cost Breakdown</Text>
           <View style={styles.costBreakdown}>
             <View style={styles.costLine}>
               <Text style={styles.costLabel}>Fragile Service Fee</Text>
@@ -993,23 +833,22 @@ export default function FragileDeliveryModal({
             </View>
           </View>
         </View>
-      </ScrollView>
 
-      {/* Add Another Package Button */}
-      {currentStep === STEP_TITLES.length - 1 && (
-        <View style={styles.addAnotherContainer}>
+        {/* NEW: Add Another Package Section */}
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>📋 Multiple Packages</Text>
           <TouchableOpacity 
-            onPress={addAnotherPackage}
             style={styles.addAnotherButton}
+            onPress={handleCreateAnother}
           >
-            <Feather name="plus" size={20} color="#f97316" />
+            <Feather name="plus-circle" size={20} color="#f97316" />
             <Text style={styles.addAnotherButtonText}>Add Another Fragile Delivery</Text>
           </TouchableOpacity>
-          <Text style={styles.addAnotherNote}>
-            Note: If you close before submitting, all progress will be lost. Submit your packages first.
+          <Text style={styles.addAnotherDescription}>
+            Need to send multiple fragile packages? Create another delivery with the same care and handling.
           </Text>
         </View>
-      )}
+      </ScrollView>
     </View>
   );
 
@@ -1068,10 +907,7 @@ export default function FragileDeliveryModal({
                 styles.submitButtonText,
                 (!isStepValid(currentStep) || isSubmitting) && styles.disabledButtonText
               ]}>
-                {pendingPackages.length > 0 
-                  ? `Submit ${totalPackages} Fragile Package${totalPackages > 1 ? 's' : ''}`
-                  : 'Schedule Fragile Delivery'
-                }
+                Schedule Fragile Delivery
               </Text>
               <Feather name="alert-triangle" size={20} color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#666"} />
             </>
@@ -1081,101 +917,84 @@ export default function FragileDeliveryModal({
     </View>
   );
 
-  const renderMainContent = () => {
-    if (isDataLoading) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#f97316" />
-          <Text style={styles.loadingTitle}>Loading Package Data</Text>
-          <Text style={styles.loadingSubtitle}>
-            Fetching locations and offices...
-          </Text>
-        </View>
-      );
-    }
-
-    if (dataError) {
-      return (
-        <View style={styles.errorContainer}>
-          <TouchableOpacity onPress={closeModal} style={styles.closeButtonAbsolute}>
-            <Feather name="x" size={24} color="#fff" />
-          </TouchableOpacity>
-          
-          <Feather name="alert-circle" size={64} color="#ef4444" />
-          <Text style={styles.errorTitle}>Failed to Load Data</Text>
-          <Text style={styles.errorMessage}>
-            {dataError}
-            Check your internet connection and make sure your API is running.
-          </Text>
-          
-          <View style={styles.errorButtons}>
-            <TouchableOpacity onPress={loadModalData} style={styles.retryButton}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-
-    return (
-      <>
-        {renderHeader()}
-        {renderProgressBar()}
-        
-        <ScrollView 
-          style={styles.contentContainer}
-          contentContainerStyle={[
-            styles.scrollContentContainer,
-            isKeyboardVisible && styles.keyboardVisiblePadding
-          ]}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {renderCurrentStep()}
-        </ScrollView>
-        
-        {renderNavigationButtons()}
-      </>
-    );
-  };
-
   return (
-    <Modal visible={visible} transparent animationType="none">
-      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
-      <View style={styles.modalWrapper}>
-        <KeyboardAvoidingView 
-          style={styles.keyboardContainer}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={0}
-        >
-          <View style={styles.overlay}>
-            <Animated.View
-              style={[
-                styles.modalContainer,
-                { 
-                  transform: [{ translateY: slideAnim }],
-                  height: modalHeight
-                }
-              ]}
-            >
-              <LinearGradient
-                colors={['#1a1a2e', '#16213e', '#0f1419']}
-                style={styles.modalContent}
+    <>
+      <Modal visible={visible} transparent animationType="none">
+        <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+        <View style={styles.modalWrapper}>
+          <KeyboardAvoidingView 
+            style={styles.keyboardContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <View style={styles.overlay}>
+              <Animated.View
+                style={[
+                  styles.modalContainer,
+                  { 
+                    transform: [{ translateY: slideAnim }],
+                    height: modalHeight
+                  }
+                ]}
               >
-                {renderMainContent()}
-              </LinearGradient>
-            </Animated.View>
-          </View>
-        </KeyboardAvoidingView>
-      </View>
-    </Modal>
+                <LinearGradient
+                  colors={['#1a1a2e', '#16213e', '#0f1419']}
+                  style={styles.modalContent}
+                >
+                  {renderHeader()}
+                  {renderProgressBar()}
+                  
+                  <View style={styles.contentWrapper}>
+                    <ScrollView 
+                      style={styles.contentContainer}
+                      contentContainerStyle={[
+                        styles.scrollContentContainer,
+                        isKeyboardVisible && styles.keyboardVisiblePadding
+                      ]}
+                      keyboardShouldPersistTaps="handled"
+                      showsVerticalScrollIndicator={false}
+                      keyboardDismissMode="interactive"
+                    >
+                      {renderCurrentStep()}
+                    </ScrollView>
+                  </View>
+                  
+                  {renderNavigationButtons()}
+                </LinearGradient>
+              </Animated.View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      {/* Enhanced Location Picker Modals */}
+      <LocationAreaSelectorModal
+        visible={showPickupMapModal}
+        onClose={() => setShowPickupMapModal(false)}
+        onLocationSelect={handlePickupLocationSelect}
+        title="Select Pickup Location"
+        type="pickup"
+        areas={areas}
+        agents={agents}
+        currentLocation={pickupLocation}
+      />
+      
+      <LocationAreaSelectorModal
+        visible={showDeliveryMapModal}
+        onClose={() => setShowDeliveryMapModal(false)}
+        onLocationSelect={handleDeliveryLocationSelect}
+        title="Select Delivery Location"
+        type="delivery"
+        areas={areas}
+        agents={agents}
+        currentLocation={deliveryLocation}
+      />
+    </>
   );
 }
 
 const styles = StyleSheet.create({
+  // Modal wrapper
   modalWrapper: {
     flex: 1,
     paddingTop: STATUS_BAR_HEIGHT,
@@ -1199,6 +1018,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   
+  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1215,18 +1035,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeButtonAbsolute: {
-    position: 'absolute',
-    top: 15,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -1237,6 +1045,7 @@ const styles = StyleSheet.create({
     width: 40,
   },
   
+  // Progress
   progressContainer: {
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -1258,6 +1067,10 @@ const styles = StyleSheet.create({
     marginTop: 6,
   },
   
+  // Content structure
+  contentWrapper: {
+    flex: 1,
+  },
   contentContainer: {
     flex: 1,
   },
@@ -1320,152 +1133,36 @@ const styles = StyleSheet.create({
     color: '#f97316',
   },
   
-  // Search and sort
-  searchAndSortContainer: {
-    marginBottom: 15,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.3)',
-    paddingHorizontal: 16,
-    minHeight: 44,
-    gap: 12,
-    marginBottom: 10,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingVertical: 10,
-  },
-  
-  sortContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  sortLabel: {
-    fontSize: 14,
-    color: '#888',
-    fontWeight: '500',
-  },
-  sortButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 4,
-  },
-  activeSortButton: {
-    backgroundColor: 'rgba(249, 115, 22, 0.2)',
-    borderColor: '#f97316',
-  },
-  sortButtonText: {
-    fontSize: 12,
-    color: '#888',
-    fontWeight: '500',
-  },
-  activeSortButtonText: {
-    color: '#f97316',
-    fontWeight: '600',
-  },
-  
   // Location section
   locationSection: {
     marginBottom: 20,
   },
   locationLabel: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 4,
-  },
-  locationSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    marginBottom: 12,
-  },
-  
-  locationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingVertical: 6,
-    marginTop: 8,
-    marginBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(249, 115, 22, 0.2)',
-  },
-  locationHeaderText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#f97316',
-  },
-  locationHeaderCount: {
-    fontSize: 12,
-    color: '#888',
-  },
-  
-  selectionList: {
-    maxHeight: 200,
-  },
-  selectionItem: {
+    color: '#fff',
     marginBottom: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    overflow: 'hidden',
   },
-  selectedItem: {
-    backgroundColor: 'rgba(249, 115, 22, 0.2)',
-    borderWidth: 1,
-    borderColor: '#f97316',
-  },
-  selectionItemContent: {
+  locationInput: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.3)',
   },
-  selectionInitials: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(249, 115, 22, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
+  locationInputSelected: {
+    borderColor: '#f97316',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
   },
-  selectionInitialsText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  selectionInfo: {
+  locationText: {
     flex: 1,
-  },
-  selectionName: {
     fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 3,
-  },
-  selectionLocation: {
-    fontSize: 14,
     color: '#888',
-    marginBottom: 2,
+  },
+  locationTextSelected: {
+    color: '#fff',
   },
   
   // Fragile info
@@ -1532,86 +1229,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   
-  // Pending packages
-  pendingPackagesContainer: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.3)',
-  },
-  pendingPackagesTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#f97316',
-    marginBottom: 12,
-  },
-  pendingPackageItem: {
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 8,
-    padding: 12,
-    marginBottom: 8,
-  },
-  pendingPackageHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  pendingPackageNumber: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  removePendingPackageButton: {
-    padding: 4,
-  },
-  pendingPackageSummary: {
-    fontSize: 13,
-    color: '#888',
-  },
-  currentPackageTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 16,
-  },
-  
-  // Add another package
-  addAnotherContainer: {
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  addAnotherButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(249, 115, 22, 0.2)',
-    borderWidth: 1,
-    borderColor: '#f97316',
-    gap: 8,
-  },
-  addAnotherButtonText: {
-    fontSize: 16,
-    color: '#f97316',
-    fontWeight: '600',
-  },
-  addAnotherNote: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 10,
-    lineHeight: 16,
-    paddingHorizontal: 20,
-  },
-  
   // Confirmation
   confirmationContainer: {
     flex: 1,
-    maxHeight: 400,
   },
   confirmationSection: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
@@ -1654,11 +1274,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
     fontWeight: '500',
-    marginBottom: 2,
   },
-  routeArea: {
+  routeAreaDetail: {
     fontSize: 12,
-    color: '#888',
+    color: '#f97316',
+    marginTop: 2,
   },
   routeArrow: {
     paddingHorizontal: 10,
@@ -1712,6 +1332,30 @@ const styles = StyleSheet.create({
     color: '#f97316',
   },
   
+  // NEW: Add another package button
+  addAnotherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.3)',
+    marginBottom: 8,
+  },
+  addAnotherButtonText: {
+    fontSize: 16,
+    color: '#f97316',
+    fontWeight: '600',
+  },
+  addAnotherDescription: {
+    fontSize: 13,
+    color: '#888',
+    lineHeight: 16,
+  },
+  
+  // Navigation container
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1772,71 +1416,136 @@ const styles = StyleSheet.create({
   disabledButtonText: {
     color: '#666',
   },
-  
-  loadingContainer: {
+
+  // MAP MODAL STYLES
+  mapModalSafeArea: {
     flex: 1,
+    backgroundColor: 'transparent',
+    paddingTop: STATUS_BAR_HEIGHT,
+  },
+  mapModalContainer: {
+    flex: 1,
+    backgroundColor: '#0a0a0f',
+  },
+  mapContainer: {
+    flex: 1,
+  },
+  mapGradient: {
+    flex: 1,
+  },
+  mapHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 15,
+    paddingBottom: 10,
+  },
+  mapCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
   },
-  loadingTitle: {
-    fontSize: 20,
+  mapHeaderTitle: {
+    fontSize: 18,
     fontWeight: '600',
     color: '#fff',
-    marginTop: 20,
-    marginBottom: 8,
   },
-  loadingSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  errorContainer: {
-    flex: 1,
+  currentLocationButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(249, 115, 22, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    padding: 40,
   },
-  errorTitle: {
-    fontSize: 20,
+  mapSearchContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  mapSearchInput: {
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.3)',
+  },
+  searchResults: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
     fontWeight: '600',
-    color: '#ef4444',
-    marginTop: 20,
-    marginBottom: 16,
-    textAlign: 'center',
+    color: '#f97316',
+    marginBottom: 10,
+    marginTop: 10,
   },
-  errorMessage: {
-    fontSize: 14,
+  noResults: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    fontSize: 18,
     color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 30,
+    marginTop: 16,
   },
-  errorButtons: {
+  noResultsSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  locationItem: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.6)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     gap: 12,
   },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#f97316',
+  selectedLocationItem: {
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderWidth: 1,
+    borderColor: '#f97316',
   },
-  retryButtonText: {
-    fontSize: 16,
-    color: '#fff',
+  locationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(249, 115, 22, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationInitials: {
+    fontSize: 14,
     fontWeight: '600',
+    color: '#f97316',
   },
-  cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  locationInfo: {
+    flex: 1,
   },
-  cancelButtonText: {
+  locationName: {
     fontSize: 16,
+    fontWeight: '600',
     color: '#fff',
-    fontWeight: '500',
+    marginBottom: 2,
+  },
+  locationAddress: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  locationDescription: {
+    fontSize: 12,
+    color: '#666',
   },
 });
