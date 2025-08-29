@@ -375,8 +375,7 @@ export default function PackageCreationModal({
       destination_agent_id: '',
       delivery_type: 'doorstep' as DeliveryType,
       package_size: 'medium' as PackageSize,
-      receiver_notes: '',
-      rider_notes: ''
+      special_instructions: ''
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -404,8 +403,7 @@ export default function PackageCreationModal({
       destination_agent_id: '',
       delivery_type: 'doorstep' as DeliveryType,
       package_size: 'medium' as PackageSize,
-      receiver_notes: '',
-      rider_notes: ''
+      special_instructions: ''
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -914,31 +912,19 @@ export default function PackageCreationModal({
             </View>
             
             <Text style={styles.largePackageModalSubtitle}>
-              Large packages require additional handling care. Please provide specific instructions:
+              Large packages require additional handling care. Please provide special instructions:
             </Text>
             
             <View style={styles.largePackageFormContainer}>
-              <Text style={styles.largePackageInputLabel}>Instructions for Receiver:</Text>
+              <Text style={styles.largePackageInputLabel}>Special Handling Instructions:</Text>
               <TextInput
                 style={[styles.input, styles.textArea]}
-                placeholder="e.g., Handle with care, fragile contents, requires 2 people to carry..."
+                placeholder="e.g., Handle with care, fragile contents, requires 2 people to carry, use freight elevator, call before delivery..."
                 placeholderTextColor="#888"
-                value={packageData.receiver_notes}
-                onChangeText={(value) => updatePackageData('receiver_notes', value)}
+                value={packageData.special_instructions}
+                onChangeText={(value) => updatePackageData('special_instructions', value)}
                 multiline
-                numberOfLines={3}
-                textAlignVertical="top"
-              />
-              
-              <Text style={styles.largePackageInputLabel}>Instructions for Delivery Rider:</Text>
-              <TextInput
-                style={[styles.input, styles.textArea]}
-                placeholder="e.g., Use freight elevator, call before delivery, requires assistance..."
-                placeholderTextColor="#888"
-                value={packageData.rider_notes}
-                onChangeText={(value) => updatePackageData('rider_notes', value)}
-                multiline
-                numberOfLines={3}
+                numberOfLines={4}
                 textAlignVertical="top"
               />
             </View>
@@ -1441,21 +1427,11 @@ export default function PackageCreationModal({
             </View>
           )}
 
-          {/* Show large package notes */}
-          {packageData.package_size === 'large' && (packageData.receiver_notes || packageData.rider_notes) && (
+          {/* Show large package instructions */}
+          {packageData.package_size === 'large' && packageData.special_instructions && (
             <View style={styles.largePackageNotesInfo}>
-              {packageData.receiver_notes && (
-                <View>
-                  <Text style={styles.confirmationSubDetail}>Receiver Instructions:</Text>
-                  <Text style={styles.confirmationDetail}>{packageData.receiver_notes}</Text>
-                </View>
-              )}
-              {packageData.rider_notes && (
-                <View>
-                  <Text style={styles.confirmationSubDetail}>Rider Instructions:</Text>
-                  <Text style={styles.confirmationDetail}>{packageData.rider_notes}</Text>
-                </View>
-              )}
+              <Text style={styles.confirmationSubDetail}>Special Handling Instructions:</Text>
+              <Text style={styles.confirmationDetail}>{packageData.special_instructions}</Text>
             </View>
           )}
         </View>
