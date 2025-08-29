@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - ENHANCED: Location search & multiple package creation
+// components/CollectDeliverModal.tsx - ENHANCED: Areas selection & multiple collection creation
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -46,11 +46,21 @@ interface CollectDeliverModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  onCreateAnother?: () => void; // NEW: Callback for creating another collection
   currentLocation: LocationData | null;
 }
 
-// NEW: Enhanced Location/Area Selection Modal Component  
+// NEW: Pending collection interface
+interface PendingCollection {
+  id: string;
+  shopName: string;
+  collectionAddress: string;
+  itemsToCollect: string;
+  itemValue: string;
+  selectedArea: Area | null;
+  createdAt: number;
+}
+
+// Enhanced Location/Area Selection Modal Component  
 const LocationAreaSelectorModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -105,12 +115,12 @@ const LocationAreaSelectorModal: React.FC<{
         area.location?.name.toLowerCase().includes(lowercaseQuery)
       );
       
-      // Search agents by name and area
-      const filteredAgents = agents.filter(agent => 
+      // Search agents by name and area (for delivery type)
+      const filteredAgents = type === 'delivery' ? agents.filter(agent => 
         agent.name.toLowerCase().includes(lowercaseQuery) ||
         agent.area?.name.toLowerCase().includes(lowercaseQuery) ||
         agent.area?.location?.name.toLowerCase().includes(lowercaseQuery)
-      );
+      ) : [];
       
       setSearchResults({
         areas: filteredAreas,
@@ -126,7 +136,6 @@ const LocationAreaSelectorModal: React.FC<{
   const handleAreaSelect = (area: Area) => {
     setSelectedArea(area);
     
-    // Create location data from area
     const locationData: LocationData = {
       latitude: 0, // Placeholder - would need actual coordinates
       longitude: 0,
@@ -142,7 +151,6 @@ const LocationAreaSelectorModal: React.FC<{
   const handleAgentSelect = (agent: Agent) => {
     setSelectedAgent(agent);
     
-    // Create location data from agent's area
     const locationData: LocationData = {
       latitude: 0, // Placeholder - would need actual coordinates  
       longitude: 0,
@@ -323,7 +331,6 @@ export default function CollectDeliverModal({
   visible,
   onClose,
   onSubmit,
-  onCreateAnother, // NEW: For creating multiple packages
   currentLocation: initialLocation
 }: CollectDeliverModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -333,17 +340,20 @@ export default function CollectDeliverModal({
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
-  // NEW: Package form data
+  // NEW: Areas and agents data
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isLoadingFormData, setIsLoadingFormData] = useState(false);
   
-  // Location states with area/agent support
+  // Location states with area support
   const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(initialLocation);
   const [selectedCollectionArea, setSelectedCollectionArea] = useState<Area | null>(null);
   const [selectedDeliveryArea, setSelectedDeliveryArea] = useState<Area | null>(null);
   const [selectedDeliveryAgent, setSelectedDeliveryAgent] = useState<Agent | null>(null);
+  
+  // NEW: Pending collections state
+  const [pendingCollections, setPendingCollections] = useState<PendingCollection[]>([]);
   
   // Form states
   const [shopName, setShopName] = useState('');
@@ -368,7 +378,7 @@ export default function CollectDeliverModal({
     'Payment & Confirmation'
   ];
 
-  // Load form data
+  // Load form data including areas
   useEffect(() => {
     const loadFormData = async () => {
       if (!visible) return;
@@ -378,6 +388,10 @@ export default function CollectDeliverModal({
         const formData = await getPackageFormData();
         setAreas(formData.areas || []);
         setAgents(formData.agents || []);
+        console.log('✅ Loaded areas and agents:', { 
+          areas: formData.areas?.length || 0, 
+          agents: formData.agents?.length || 0 
+        });
       } catch (error) {
         console.error('Failed to load form data:', error);
       } finally {
@@ -458,7 +472,34 @@ export default function CollectDeliverModal({
   }, [isKeyboardVisible, keyboardHeight]);
 
   const closeModal = useCallback(() => {
-    // Reset form when closing
+    // NEW: Show warning if there are pending collections
+    if (pendingCollections.length > 0) {
+      Alert.alert(
+        'Unsaved Collections',
+        `You have ${pendingCollections.length} unsaved collection(s). If you close now, all progress will be lost.`,
+        [
+          {
+            text: 'Continue Editing',
+            style: 'cancel'
+          },
+          {
+            text: 'Close and Lose Progress',
+            style: 'destructive',
+            onPress: () => {
+              resetForm();
+              onClose();
+            }
+          }
+        ]
+      );
+    } else {
+      resetForm();
+      onClose();
+    }
+  }, [onClose, pendingCollections.length]);
+
+  // Reset form
+  const resetForm = useCallback(() => {
     setCurrentStep(0);
     setShopName('');
     setShopContact('');
@@ -475,11 +516,26 @@ export default function CollectDeliverModal({
     setSelectedCollectionArea(null);
     setSelectedDeliveryArea(null);
     setSelectedDeliveryAgent(null);
-    
-    onClose();
-  }, [onClose, initialLocation]);
+    setPendingCollections([]);
+  }, [initialLocation]);
 
-  // NEW: Enhanced location selection with area/agent support
+  // NEW: Reset for new collection (keep delivery info)
+  const resetForNewCollection = useCallback(() => {
+    setCurrentStep(0);
+    setShopName('');
+    setShopContact('');
+    setCollectionAddress('');
+    setItemsToCollect('');
+    setItemValue('');
+    setItemDescription('');
+    setSpecialInstructions('');
+    setRequiresPaymentAdvance(false);
+    setCollectionLocation(null);
+    setSelectedCollectionArea(null);
+    // Keep delivery info for convenience
+  }, []);
+
+  // Enhanced location selection with area support
   const handleCollectionLocationSelect = (location: LocationData, area?: Area, agent?: Agent) => {
     setCollectionLocation(location);
     if (area) setSelectedCollectionArea(area);
@@ -490,6 +546,27 @@ export default function CollectDeliverModal({
     if (area) setSelectedDeliveryArea(area);
     if (agent) setSelectedDeliveryAgent(agent);
   };
+
+  // NEW: Add current collection to pending list
+  const addAnotherCollection = useCallback(() => {
+    const newPendingCollection: PendingCollection = {
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      shopName,
+      collectionAddress,
+      itemsToCollect,
+      itemValue,
+      selectedArea: selectedCollectionArea,
+      createdAt: Date.now()
+    };
+    
+    setPendingCollections(prev => [...prev, newPendingCollection]);
+    resetForNewCollection();
+  }, [shopName, collectionAddress, itemsToCollect, itemValue, selectedCollectionArea, resetForNewCollection]);
+
+  // NEW: Remove pending collection
+  const removePendingCollection = useCallback((collectionId: string) => {
+    setPendingCollections(prev => prev.filter(coll => coll.id !== collectionId));
+  }, []);
 
   const isStepValid = useCallback((step: number) => {
     switch (step) {
@@ -534,89 +611,101 @@ export default function CollectDeliverModal({
     };
   };
 
+  // NEW: Calculate total cost for all collections
+  const calculateTotalCosts = () => {
+    const currentCost = calculateCosts();
+    const pendingCosts = pendingCollections.map(coll => {
+      const itemValueNum = parseFloat(coll.itemValue) || 0;
+      const insuranceFee = Math.max(50, itemValueNum * 0.02);
+      return 200 + 250 + Math.round(insuranceFee) + 100; // Same structure as calculateCosts
+    });
+    
+    const totalPendingCost = pendingCosts.reduce((sum, cost) => sum + cost, 0);
+    
+    return {
+      current: currentCost.total,
+      pending: totalPendingCost,
+      total: currentCost.total + totalPendingCost,
+      count: pendingCollections.length + 1
+    };
+  };
+
   const handleSubmit = async () => {
     if (!isStepValid(currentStep)) return;
 
     setIsSubmitting(true);
     try {
-      const costs = calculateCosts();
-      
-      const packageData: PackageData = {
-        sender_name: 'Collection Service',
-        sender_phone: '+254700000000', 
-        receiver_name: 'Current User',
-        receiver_phone: '+254700000000',
-        
-        // NEW: Set area and agent IDs properly
-        origin_area_id: selectedCollectionArea?.id,
-        destination_area_id: selectedDeliveryArea?.id || selectedDeliveryAgent?.area?.id,
-        origin_agent_id: null,
-        destination_agent_id: selectedDeliveryAgent?.id || null,
-        
-        delivery_type: 'collection',
-        delivery_location: deliveryAddress,
-        
-        // Collection-specific fields
-        shop_name: shopName,
-        shop_contact: shopContact,
-        collection_address: collectionAddress,
-        items_to_collect: itemsToCollect,
-        item_value: parseFloat(itemValue) || 0,
-        item_description: itemDescription.trim() || itemsToCollect,
-        special_instructions: specialInstructions.trim(),
-        payment_method: paymentMethod,
-        requires_payment_advance: requiresPaymentAdvance,
-        collection_type: 'shop_pickup',
-        
-        // Coordinates if available
-        pickup_latitude: collectionLocation?.latitude,
-        pickup_longitude: collectionLocation?.longitude,
-        delivery_latitude: deliveryLocation?.latitude,
-        delivery_longitude: deliveryLocation?.longitude,
-        
-        // Timing
-        collection_scheduled_at: null,
-        payment_deadline: requiresPaymentAdvance ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null,
-      };
+      // Create all packages - pending collections + current
+      const allCollections = [
+        ...pendingCollections.map(coll => ({
+          shopName: coll.shopName,
+          collectionAddress: coll.collectionAddress,
+          itemsToCollect: coll.itemsToCollect,
+          itemValue: coll.itemValue,
+          selectedArea: coll.selectedArea
+        })),
+        {
+          shopName,
+          collectionAddress,
+          itemsToCollect,
+          itemValue,
+          selectedArea: selectedCollectionArea
+        }
+      ];
 
-      console.log('🚀 Submitting collection package data:', packageData);
+      // Submit each collection
+      for (const collection of allCollections) {
+        const costs = calculateCosts(); // Using current logic for each
+        
+        const packageData: PackageData = {
+          sender_name: 'Collection Service',
+          sender_phone: '+254700000000', 
+          receiver_name: 'Current User',
+          receiver_phone: '+254700000000',
+          
+          // Set area IDs properly
+          origin_area_id: collection.selectedArea?.id || undefined,
+          destination_area_id: selectedDeliveryArea?.id || selectedDeliveryAgent?.area?.id || undefined,
+          origin_agent_id: undefined,
+          destination_agent_id: selectedDeliveryAgent?.id || undefined,
+          
+          delivery_type: 'collection',
+          delivery_location: deliveryAddress,
+          
+          // Collection-specific fields
+          shop_name: collection.shopName,
+          shop_contact: shopContact,
+          collection_address: collection.collectionAddress,
+          items_to_collect: collection.itemsToCollect,
+          item_value: parseFloat(collection.itemValue) || 0,
+          item_description: itemDescription.trim() || collection.itemsToCollect,
+          special_instructions: specialInstructions.trim(),
+          payment_method: paymentMethod,
+          requires_payment_advance: requiresPaymentAdvance,
+          collection_type: 'shop_pickup',
+          
+          // Coordinates if available
+          pickup_latitude: collectionLocation?.latitude,
+          pickup_longitude: collectionLocation?.longitude,
+          delivery_latitude: deliveryLocation?.latitude,
+          delivery_longitude: deliveryLocation?.longitude,
+          
+          // Timing
+          collection_scheduled_at: null,
+          payment_deadline: requiresPaymentAdvance ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null,
+        };
 
-      await onSubmit(packageData);
+        console.log('🚀 Submitting collection package data:', packageData);
+        await onSubmit(packageData);
+      }
+
+      console.log(`✅ Successfully submitted ${allCollections.length} collection(s)`);
       closeModal();
     } catch (error) {
       console.error('Error submitting collect & deliver request:', error);
       Alert.alert('Error', 'Failed to create collection request. Please try again.');
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  // NEW: Handle creating another collection
-  const handleCreateAnother = () => {
-    // Reset form but keep some common data
-    const currentDeliveryArea = selectedDeliveryArea;
-    const currentDeliveryAgent = selectedDeliveryAgent;
-    const currentDeliveryLoc = deliveryLocation;
-    
-    setCurrentStep(0);
-    setShopName('');
-    setShopContact('');
-    setCollectionAddress('');
-    setItemsToCollect('');
-    setItemValue('');
-    setItemDescription('');
-    setSpecialInstructions('');
-    setRequiresPaymentAdvance(false);
-    setCollectionLocation(null);
-    setSelectedCollectionArea(null);
-    
-    // Keep delivery info for convenience
-    setDeliveryLocation(currentDeliveryLoc);
-    setSelectedDeliveryArea(currentDeliveryArea);
-    setSelectedDeliveryAgent(currentDeliveryAgent);
-    
-    if (onCreateAnother) {
-      onCreateAnother();
     }
   };
 
@@ -632,9 +721,10 @@ export default function CollectDeliverModal({
       </View>
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
+        {pendingCollections.length > 0 && ` • ${pendingCollections.length} collection${pendingCollections.length > 1 ? 's' : ''} pending`}
       </Text>
     </View>
-  ), [currentStep]);
+  ), [currentStep, pendingCollections.length]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.headerContainer}>
@@ -650,7 +740,7 @@ export default function CollectDeliverModal({
 
   const renderCollectionDetails = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📦 Collection Setup</Text>
+      <Text style={styles.stepTitle}>Collection Setup</Text>
       <Text style={styles.stepSubtitle}>
         Where should we collect your items from?
       </Text>
@@ -686,16 +776,20 @@ export default function CollectDeliverModal({
         />
       </View>
 
+      {/* NEW: Optional area selection */}
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>📍 Collection Location (Optional)</Text>
+        <Text style={styles.locationLabel}>Collection Area (Optional)</Text>
         <TouchableOpacity 
-          style={[styles.locationInput, collectionLocation && styles.locationInputSelected]}
+          style={[styles.locationInput, selectedCollectionArea && styles.locationInputSelected]}
           onPress={() => setShowCollectionMapModal(true)}
         >
-          <Text style={[styles.locationText, collectionLocation && styles.locationTextSelected]}>
-            {collectionLocation?.address || 'Tap to set collection location (optional)'}
+          <Text style={[styles.locationText, selectedCollectionArea && styles.locationTextSelected]}>
+            {selectedCollectionArea ? 
+              `${selectedCollectionArea.name} • ${selectedCollectionArea.location?.name}` :
+              'Tap to select collection area (optional)'
+            }
           </Text>
-          <Feather name="map" size={20} color={collectionLocation ? "#10b981" : "#666"} />
+          <Feather name="map" size={20} color={selectedCollectionArea ? "#10b981" : "#666"} />
         </TouchableOpacity>
       </View>
 
@@ -710,7 +804,7 @@ export default function CollectDeliverModal({
 
   const renderItemInformation = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>📝 Item Details</Text>
+      <Text style={styles.stepTitle}>Item Details</Text>
       <Text style={styles.stepSubtitle}>
         Tell us about the items we'll be collecting
       </Text>
@@ -759,7 +853,7 @@ export default function CollectDeliverModal({
 
   const renderDeliverySetup = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>🚚 Delivery Setup</Text>
+      <Text style={styles.stepTitle}>Delivery Setup</Text>
       <Text style={styles.stepSubtitle}>
         Where should we deliver your collected items?
       </Text>
@@ -788,16 +882,22 @@ export default function CollectDeliverModal({
         />
       </View>
 
+      {/* NEW: Optional delivery area selection */}
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🎯 Delivery Location (Optional)</Text>
+        <Text style={styles.locationLabel}>Delivery Area (Optional)</Text>
         <TouchableOpacity 
-          style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
+          style={[styles.locationInput, (selectedDeliveryArea || selectedDeliveryAgent) && styles.locationInputSelected]}
           onPress={() => setShowDeliveryMapModal(true)}
         >
-          <Text style={[styles.locationText, deliveryLocation && styles.locationTextSelected]}>
-            {deliveryLocation?.address || 'Tap to set delivery location (optional)'}
+          <Text style={[styles.locationText, (selectedDeliveryArea || selectedDeliveryAgent) && styles.locationTextSelected]}>
+            {selectedDeliveryAgent ? 
+              `Agent: ${selectedDeliveryAgent.name} • ${selectedDeliveryAgent.area?.name}` :
+              selectedDeliveryArea ? 
+                `${selectedDeliveryArea.name} • ${selectedDeliveryArea.location?.name}` :
+                'Tap to select delivery area (optional)'
+            }
           </Text>
-          <Feather name="map-pin" size={20} color={deliveryLocation ? "#10b981" : "#666"} />
+          <Feather name="map-pin" size={20} color={(selectedDeliveryArea || selectedDeliveryAgent) ? "#10b981" : "#666"} />
         </TouchableOpacity>
       </View>
 
@@ -811,18 +911,48 @@ export default function CollectDeliverModal({
   );
 
   const renderPaymentConfirmation = () => {
-    const costs = calculateCosts();
+    const totalCosts = calculateTotalCosts();
     
     return (
       <View style={styles.stepContent}>
-        <Text style={styles.stepTitle}>💳 Payment & Confirmation</Text>
+        <Text style={styles.stepTitle}>Payment & Confirmation</Text>
         <Text style={styles.stepSubtitle}>
-          Review costs and select payment method
+          {pendingCollections.length > 0 ? 
+            `Review all ${totalCosts.count} collection${totalCosts.count > 1 ? 's' : ''} and confirm payment` :
+            'Review costs and select payment method'
+          }
         </Text>
         
         <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
+          {/* NEW: Show pending collections */}
+          {pendingCollections.length > 0 && (
+            <View style={styles.pendingCollectionsSection}>
+              <Text style={styles.confirmationSectionTitle}>Pending Collections ({pendingCollections.length})</Text>
+              {pendingCollections.map((collection, index) => (
+                <View key={collection.id} style={styles.pendingCollectionItem}>
+                  <View style={styles.pendingCollectionHeader}>
+                    <Text style={styles.pendingCollectionNumber}>Collection {index + 1}</Text>
+                    <TouchableOpacity 
+                      onPress={() => removePendingCollection(collection.id)}
+                      style={styles.removePendingButton}
+                    >
+                      <Feather name="trash-2" size={16} color="#ef4444" />
+                    </TouchableOpacity>
+                  </View>
+                  <Text style={styles.pendingCollectionSummary}>
+                    {collection.shopName} • {collection.itemsToCollect} • KES {collection.itemValue}
+                    {collection.selectedArea && ` • ${collection.selectedArea.name}`}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+
+          {/* Current Collection Section */}
           <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>📋 Service Summary</Text>
+            <Text style={styles.confirmationSectionTitle}>
+              {pendingCollections.length > 0 ? `Collection ${pendingCollections.length + 1} Summary` : 'Service Summary'}
+            </Text>
             <View style={styles.summaryItem}>
               <Text style={styles.summaryLabel}>Collection from:</Text>
               <Text style={styles.summaryValue}>{shopName}</Text>
@@ -836,6 +966,12 @@ export default function CollectDeliverModal({
               <Text style={styles.summaryValue}>{deliveryAddress.length > 30 ? 
                 `${deliveryAddress.substring(0, 30)}...` : deliveryAddress}</Text>
             </View>
+            {selectedCollectionArea && (
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Collection area:</Text>
+                <Text style={styles.summaryValue}>{selectedCollectionArea.name}</Text>
+              </View>
+            )}
             {(selectedDeliveryArea || selectedDeliveryAgent) && (
               <View style={styles.summaryItem}>
                 <Text style={styles.summaryLabel}>Delivery area:</Text>
@@ -846,34 +982,57 @@ export default function CollectDeliverModal({
             )}
           </View>
 
+          {/* Cost Breakdown */}
           <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>💰 Cost Breakdown</Text>
+            <Text style={styles.confirmationSectionTitle}>
+              {pendingCollections.length > 0 ? 'Total Cost Breakdown' : 'Cost Breakdown'}
+            </Text>
             <View style={styles.costBreakdown}>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Collection Fee</Text>
-                <Text style={styles.costValue}>KES {costs.collection}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Delivery Fee</Text>
-                <Text style={styles.costValue}>KES {costs.delivery}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Insurance</Text>
-                <Text style={styles.costValue}>KES {costs.insurance}</Text>
-              </View>
-              <View style={styles.costLine}>
-                <Text style={styles.costLabel}>Service Fee</Text>
-                <Text style={styles.costValue}>KES {costs.service}</Text>
-              </View>
-              <View style={[styles.costLine, styles.totalLine]}>
-                <Text style={styles.totalLabel}>Total</Text>
-                <Text style={styles.totalValue}>KES {costs.total}</Text>
-              </View>
+              {pendingCollections.length > 0 ? (
+                <>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Pending Collections ({pendingCollections.length})</Text>
+                    <Text style={styles.costValue}>KES {totalCosts.pending}</Text>
+                  </View>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Current Collection</Text>
+                    <Text style={styles.costValue}>KES {totalCosts.current}</Text>
+                  </View>
+                  <View style={[styles.costLine, styles.totalLine]}>
+                    <Text style={styles.totalLabel}>Total ({totalCosts.count} collections)</Text>
+                    <Text style={styles.totalValue}>KES {totalCosts.total}</Text>
+                  </View>
+                </>
+              ) : (
+                <>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Collection Fee</Text>
+                    <Text style={styles.costValue}>KES {calculateCosts().collection}</Text>
+                  </View>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Delivery Fee</Text>
+                    <Text style={styles.costValue}>KES {calculateCosts().delivery}</Text>
+                  </View>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Insurance</Text>
+                    <Text style={styles.costValue}>KES {calculateCosts().insurance}</Text>
+                  </View>
+                  <View style={styles.costLine}>
+                    <Text style={styles.costLabel}>Service Fee</Text>
+                    <Text style={styles.costValue}>KES {calculateCosts().service}</Text>
+                  </View>
+                  <View style={[styles.costLine, styles.totalLine]}>
+                    <Text style={styles.totalLabel}>Total</Text>
+                    <Text style={styles.totalValue}>KES {calculateCosts().total}</Text>
+                  </View>
+                </>
+              )}
             </View>
           </View>
 
+          {/* Payment Method */}
           <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>💳 Payment Method</Text>
+            <Text style={styles.confirmationSectionTitle}>Payment Method</Text>
             <View style={styles.paymentOptions}>
               <TouchableOpacity
                 style={[styles.paymentOption, paymentMethod === 'mpesa' && styles.paymentOptionSelected]}
@@ -912,18 +1071,18 @@ export default function CollectDeliverModal({
             </TouchableOpacity>
           </View>
 
-          {/* NEW: Add Another Package Section */}
+          {/* NEW: Add Another Collection Section */}
           <View style={styles.confirmationSection}>
-            <Text style={styles.confirmationSectionTitle}>📋 Multiple Collections</Text>
+            <Text style={styles.confirmationSectionTitle}>Multiple Collections</Text>
             <TouchableOpacity 
               style={styles.addAnotherButton}
-              onPress={handleCreateAnother}
+              onPress={addAnotherCollection}
             >
               <Feather name="plus-circle" size={20} color="#10b981" />
               <Text style={styles.addAnotherButtonText}>Add Another Collection</Text>
             </TouchableOpacity>
             <Text style={styles.addAnotherDescription}>
-              Need to collect items from multiple shops? Create another collection request.
+              Need to collect items from multiple shops? Add another collection to this order.
             </Text>
           </View>
         </ScrollView>
@@ -932,6 +1091,15 @@ export default function CollectDeliverModal({
   };
 
   const renderStepContent = () => {
+    if (isLoadingFormData) {
+      return (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#10b981" />
+          <Text style={styles.loadingText}>Loading areas...</Text>
+        </View>
+      );
+    }
+
     switch (currentStep) {
       case 0:
         return renderCollectionDetails();
@@ -982,7 +1150,10 @@ export default function CollectDeliverModal({
                 <>
                   <Text style={[styles.submitButtonText, 
                                (!isStepValid(currentStep) || isSubmitting) && styles.submitButtonTextDisabled]}>
-                    Create Collection Request
+                    {pendingCollections.length > 0 ? 
+                      `Create ${totalCosts.count} Collection${totalCosts.count > 1 ? 's' : ''}` :
+                      'Create Collection Request'
+                    }
                   </Text>
                   <Feather name="check" size={20} color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#888"} />
                 </>
@@ -1055,7 +1226,7 @@ export default function CollectDeliverModal({
         visible={showCollectionMapModal}
         onClose={() => setShowCollectionMapModal(false)}
         onLocationSelect={handleCollectionLocationSelect}
-        title="Select Collection Location"
+        title="Select Collection Area"
         type="collection"
         areas={areas}
         agents={agents}
@@ -1066,7 +1237,7 @@ export default function CollectDeliverModal({
         visible={showDeliveryMapModal}
         onClose={() => setShowDeliveryMapModal(false)}
         onLocationSelect={handleDeliveryLocationSelect}
-        title="Select Delivery Location"
+        title="Select Delivery Area"
         type="delivery"
         areas={areas}
         agents={agents}
@@ -1183,6 +1354,20 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     lineHeight: 22,
   },
+  
+  // Loading
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#888',
+    marginTop: 12,
+  },
+  
   formContainer: {
     gap: 16,
     marginBottom: 20,
@@ -1278,7 +1463,7 @@ const styles = StyleSheet.create({
   },
   confirmationContainer: {
     flex: 1,
-    maxHeight: 400,
+    maxHeight: 500,
   },
   confirmationSection: {
     marginBottom: 20,
@@ -1289,6 +1474,41 @@ const styles = StyleSheet.create({
     color: '#fff',
     marginBottom: 12,
   },
+  
+  // NEW: Pending collections styles
+  pendingCollectionsSection: {
+    backgroundColor: 'rgba(16, 185, 129, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  pendingCollectionItem: {
+    backgroundColor: 'rgba(26, 26, 46, 0.6)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  pendingCollectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  pendingCollectionNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#10b981',
+  },
+  removePendingButton: {
+    padding: 4,
+  },
+  pendingCollectionSummary: {
+    fontSize: 13,
+    color: '#888',
+  },
+  
   summaryItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1389,7 +1609,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   
-  // NEW: Add another package button
+  // NEW: Add another collection button styles
   addAnotherButton: {
     flexDirection: 'row',
     alignItems: 'center',
