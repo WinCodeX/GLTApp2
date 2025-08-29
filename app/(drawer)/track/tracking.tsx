@@ -273,18 +273,37 @@ export default function PackageTracking() {
       setError(null);
 
       console.log('📦 Loading package data for code:', packageCode);
+      console.log('📦 Package ID:', packageId);
+      console.log('📦 From page:', params.from);
       
-      const response = await getPackageDetails(packageCode);
+      // Try to use packageId first if available, then fallback to packageCode
+      let packageData;
       
-      if (response?.data) {
-        console.log('✅ Package data loaded:', response.data.code);
-        setPackage(response.data);
-        setTimeline(createTimelineFromPackage(response.data));
+      if (packageId) {
+        console.log('📦 Attempting to load by ID:', packageId);
+        try {
+          packageData = await getPackageDetails(packageId);
+        } catch (idError) {
+          console.warn('⚠️ Failed to load by ID, trying by code:', idError);
+          packageData = await getPackageDetails(packageCode);
+        }
+      } else {
+        console.log('📦 Loading by code only:', packageCode);
+        packageData = await getPackageDetails(packageCode);
+      }
+      
+      if (packageData) {
+        console.log('✅ Package data loaded:', packageData.code || packageData.id);
+        console.log('📦 Package state:', packageData.state);
+        console.log('📦 Package type:', packageData.delivery_type);
+        
+        setPackage(packageData);
+        setTimeline(createTimelineFromPackage(packageData));
         
         // Load QR code
         setIsLoadingQR(true);
         try {
-          const qrResponse = await getPackageQRCode(response.data.id.toString());
+          const qrResponse = await getPackageQRCode(packageData.id?.toString() || packageCode);
           if (qrResponse?.data) {
             setQrData(qrResponse.data);
             console.log('✅ QR code loaded for tracking');
@@ -296,24 +315,32 @@ export default function PackageTracking() {
         }
         
       } else {
-        throw new Error('Package not found');
+        throw new Error('Package not found or invalid response');
       }
       
     } catch (error: any) {
       console.error('❌ Failed to load package data:', error);
-      setError(error.message || 'Failed to load package details');
+      console.error('❌ Error details:', {
+        message: error.message,
+        code: error.code,
+        status: error.status,
+        response: error.response?.data
+      });
+      
+      const errorMessage = error.message || 'Failed to load package details';
+      setError(errorMessage);
       
       Toast.show({
         type: 'errorToast',
         text1: 'Failed to Load Package',
-        text2: error.message || 'Unable to load package details',
+        text2: errorMessage,
         position: 'top',
         visibilityTime: 3000,
       });
     } finally {
       setIsLoading(false);
     }
-  }, [packageCode, createTimelineFromPackage]);
+  }, [packageCode, packageId, params.from, createTimelineFromPackage]);
 
   // Handle share tracking
   const handleShareTracking = useCallback(async () => {
