@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - UPDATED: Added package_size and special_instructions
+// lib/helpers/packageHelpers.ts - UPDATED: Added package_size, special_instructions, and agent-to-area mapping
 import api from '../api';
 
 // FIXED: Import the working implementations from separate files
@@ -184,6 +184,34 @@ const NO_DESTINATION_AREA_DELIVERY_TYPES = [
   'fragile',
   'collection'
 ];
+
+/**
+ * UPDATED: Helper function to resolve area ID from agent ID
+ */
+const resolveAreaIdFromAgent = async (agentId: string): Promise<string | null> => {
+  try {
+    if (!agentId) return null;
+    
+    console.log('Resolving area ID for agent:', agentId);
+    
+    // Get agents data (use cache if available)
+    const agents = await getAgents();
+    const agent = agents.find(a => a.id === agentId);
+    
+    if (!agent) {
+      console.warn('Agent not found:', agentId);
+      return null;
+    }
+    
+    const areaId = agent.area?.id;
+    console.log('Resolved area ID:', areaId, 'for agent:', agent.name);
+    
+    return areaId || null;
+  } catch (error) {
+    console.error('Failed to resolve area ID from agent:', error);
+    return null;
+  }
+};
 
 /**
  * Get all package form data required by the modal
@@ -502,8 +530,12 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
     
     // Fragile-specific validation
     if (deliveryType === 'fragile') {
-      if (!packageData.pickup_location?.trim()) {
-        issues.push('Pickup location is required for fragile deliveries');
+      if (!packageData.origin_agent_id?.trim()) {
+        issues.push('Pickup agent is required for fragile deliveries');
+      }
+      
+      if (!packageData.destination_agent_id?.trim()) {
+        issues.push('Delivery agent is required for fragile deliveries');
       }
       
       if (!packageData.delivery_location?.trim()) {
@@ -527,7 +559,7 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
 };
 
 /**
- * UPDATED: Create a new package with package_size and special_instructions support
+ * UPDATED: Create a new package with proper agent-to-area mapping and package_size/special_instructions support
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
@@ -539,18 +571,72 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error(validation.issues.join(', '));
     }
     
+    // UPDATED: Enhanced package data processing with agent-to-area mapping
+    let processedPackageData = { ...packageData };
+    
+    const deliveryType = packageData.delivery_type.toLowerCase();
+    
+    // FIXED: Auto-resolve area IDs from agent IDs for special delivery types
+    if (deliveryType === 'fragile') {
+      console.log('Processing fragile delivery - resolving area IDs from agents...');
+      
+      // Resolve origin area from origin agent
+      if (packageData.origin_agent_id && !packageData.origin_area_id) {
+        const originAreaId = await resolveAreaIdFromAgent(packageData.origin_agent_id);
+        if (originAreaId) {
+          processedPackageData.origin_area_id = originAreaId;
+          console.log('Resolved origin area ID:', originAreaId);
+        }
+      }
+      
+      // Resolve destination area from destination agent
+      if (packageData.destination_agent_id && !packageData.destination_area_id) {
+        const destinationAreaId = await resolveAreaIdFromAgent(packageData.destination_agent_id);
+        if (destinationAreaId) {
+          processedPackageData.destination_area_id = destinationAreaId;
+          console.log('Resolved destination area ID:', destinationAreaId);
+        }
+      }
+    }
+    
+    if (deliveryType === 'collection') {
+      console.log('Processing collection delivery - resolving area ID from destination agent...');
+      
+      // Resolve destination area from destination agent
+      if (packageData.destination_agent_id && !packageData.destination_area_id) {
+        const destinationAreaId = await resolveAreaIdFromAgent(packageData.destination_agent_id);
+        if (destinationAreaId) {
+          processedPackageData.destination_area_id = destinationAreaId;
+          console.log('Resolved destination area ID for collection:', destinationAreaId);
+        }
+      }
+    }
+    
+    if (deliveryType === 'doorstep') {
+      console.log('Processing doorstep delivery - resolving origin area ID from agent...');
+      
+      // Resolve origin area from origin agent (existing functionality)
+      if (packageData.origin_agent_id && !packageData.origin_area_id) {
+        const originAreaId = await resolveAreaIdFromAgent(packageData.origin_agent_id);
+        if (originAreaId) {
+          processedPackageData.origin_area_id = originAreaId;
+          console.log('Resolved origin area ID for doorstep:', originAreaId);
+        }
+      }
+    }
+    
     // UPDATED: Clean up package data and ensure package_size and special_instructions are included
     const cleanPackageData = {
-      ...packageData,
+      ...processedPackageData,
       // Convert null to undefined for optional fields
-      origin_agent_id: packageData.origin_agent_id || undefined,
-      destination_agent_id: packageData.destination_agent_id || undefined,
-      origin_area_id: packageData.origin_area_id || undefined,
-      destination_area_id: packageData.destination_area_id || undefined,
+      origin_agent_id: processedPackageData.origin_agent_id || undefined,
+      destination_agent_id: processedPackageData.destination_agent_id || undefined,
+      origin_area_id: processedPackageData.origin_area_id || undefined,
+      destination_area_id: processedPackageData.destination_area_id || undefined,
       
       // UPDATED: Include package_size and special_instructions for doorstep deliveries
-      package_size: packageData.delivery_type === 'doorstep' ? packageData.package_size || 'medium' : undefined,
-      special_instructions: packageData.special_instructions || undefined
+      package_size: deliveryType === 'doorstep' ? processedPackageData.package_size || 'medium' : undefined,
+      special_instructions: processedPackageData.special_instructions || undefined
     };
     
     // Remove undefined values to keep the payload clean
@@ -564,7 +650,9 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       ...cleanPackageData,
       // Log which fields are being sent
       has_package_size: !!cleanPackageData.package_size,
-      has_special_instructions: !!cleanPackageData.special_instructions
+      has_special_instructions: !!cleanPackageData.special_instructions,
+      resolved_origin_area: !!cleanPackageData.origin_area_id,
+      resolved_destination_area: !!cleanPackageData.destination_area_id
     });
     
     const response = await api.post('/api/v1/packages', cleanPackageData, {
@@ -1187,6 +1275,7 @@ export default {
   requiresOriginAgent,
   requiresDestinationArea,
   isSpecialDeliveryType,
+  resolveAreaIdFromAgent, // NEW: Export the area resolution helper
   
   // EXISTING FUNCTIONS
   getAgentsForArea,
