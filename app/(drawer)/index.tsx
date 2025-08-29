@@ -336,19 +336,14 @@ export default function HomeScreen() {
       
       console.log('✅ Package created successfully:', response);
       
-      Alert.alert(
-        'Success! 🎉',
-        `Package created successfully!\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
-        [
-          {
-            text: 'Create Another',
-            onPress: () => {
-              setTimeout(() => setShowPackageModal(true), 500);
-            }
-          },
-          { text: 'OK' }
-        ]
-      );
+      showSuccessPopup({
+        title: 'Package Created Successfully!',
+        message: 'Your package has been created and is ready for delivery.',
+        trackingNumber: response.tracking_number || 'Generated',
+        status: response.status || 'Pending Payment',
+        color: '#8B5CF6',
+        icon: 'send'
+      });
       
     } catch (error: any) {
       console.error('❌ Error creating package:', error);
@@ -657,6 +652,8 @@ export default function HomeScreen() {
                         setShowFragileModal(true);
                       } else if (successModalData?.icon === 'package') {
                         setShowCollectModal(true);
+                      } else if (successModalData?.icon === 'send') {
+                        setShowPackageModal(true);
                       }
                     }, 500);
                   }}
@@ -666,7 +663,7 @@ export default function HomeScreen() {
                   ]}
                 >
                   <Text style={[styles.successModalButtonText, { color: successModalData?.color }]}>
-                    Schedule Another
+                    {successModalData?.icon === 'send' ? 'Create Another' : 'Schedule Another'}
                   </Text>
                 </TouchableOpacity>
               </View>
