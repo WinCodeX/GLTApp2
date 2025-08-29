@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - FIXED: Removed QR code call and updated styling
+// app/(drawer)/track.tsx - UPDATED: State badge colors
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -534,15 +534,16 @@ export default function Track() {
     return groups;
   }, []);
   
+  // UPDATED: State badge colors as requested
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
-      case 'pending_unpaid': return '#f97316'; // Orange to match image
-      case 'pending': return '#10b981';
-      case 'submitted': return '#3b82f6';
-      case 'in_transit': return '#8b5cf6';
-      case 'delivered': return '#059669';
-      case 'collected': return '#0d9488';
-      case 'rejected': return '#ef4444';
+      case 'pending_unpaid': return '#ef4444';  // Red
+      case 'pending': return '#f97316';         // Orange
+      case 'submitted': return '#eab308';       // Yellow
+      case 'in_transit': return '#8b5cf6';      // Purple
+      case 'delivered': return '#10b981';       // Green
+      case 'collected': return '#2563eb';       // Royal Blue
+      case 'rejected': return '#ef4444';        // Red
       default: return colors.primary;
     }
   }, []);
@@ -583,7 +584,7 @@ export default function Track() {
     });
   }, [router]);
 
-  // FIXED: Handle view tracking details - REMOVED QR code generation
+  // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
     
@@ -617,7 +618,7 @@ export default function Track() {
     // Build action buttons array based on state
     const actionButtons = [];
     
-    // Track button - always available - FIXED: Updated icon color to match outline
+    // Track button - always available
     actionButtons.push({
       key: 'track',
       icon: 'navigation',
@@ -625,7 +626,7 @@ export default function Track() {
       onPress: () => handleViewTracking(item),
       style: [styles.actionButton, styles.trackButton],
       textStyle: [styles.actionButtonText, styles.trackButtonText],
-      iconColor: '#64748b' // Updated to match the border color
+      iconColor: '#64748b'
     });
     
     // Edit button - only if editable
@@ -641,7 +642,7 @@ export default function Track() {
       });
     }
     
-    // Pay button - only if needs payment - FIXED: Changed to solid purple background
+    // Pay button - only if needs payment
     if (showPayButton) {
       actionButtons.push({
         key: 'pay',
@@ -673,7 +674,7 @@ export default function Track() {
                   {getDeliveryTypeDisplay(item.delivery_type)}
                 </Text>
               </View>
-              {/* State Badge - solid background style like in image */}
+              {/* State Badge - solid background style */}
               <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
                 <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
               </View>
@@ -685,7 +686,7 @@ export default function Track() {
             <Text style={styles.receiverText}>To: {receiverName}</Text>
           </View>
 
-          {/* Cost Section - FIXED: Changed color to purple */}
+          {/* Cost Section */}
           <View style={styles.costSection}>
             <Text style={styles.costLabel}>Cost</Text>
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
@@ -1220,7 +1221,7 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   
-  // Badge container and styles - mixed styles
+  // Badge container and styles
   badgeContainer: {
     flexDirection: 'column',
     alignItems: 'flex-end',
@@ -1254,7 +1255,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Cost section - FIXED: Changed color to purple
+  // Cost section
   costSection: {
     marginBottom: 12,
   },
@@ -1266,7 +1267,7 @@ const styles = StyleSheet.create({
   },
   costValue: {
     fontSize: 16,
-    color: '#8b5cf6', // Changed from green to purple
+    color: '#8b5cf6',
     fontWeight: '700',
   },
   
@@ -1306,13 +1307,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Track button - FIXED: Brighter border for visibility
+  // Track button
   trackButton: {
-    borderColor: '#64748b', // Light slate gray - much more visible
+    borderColor: '#64748b',
     backgroundColor: 'transparent',
   },
   trackButtonText: {
-    color: '#64748b', // Match the border color
+    color: '#64748b',
   },
   
   // Edit button - purple outline  
@@ -1324,13 +1325,13 @@ const styles = StyleSheet.create({
     color: '#8b5cf6',
   },
   
-  // Pay button - FIXED: Solid purple background to match image
+  // Pay button - solid purple background
   payButton: {
     borderColor: '#8b5cf6',
-    backgroundColor: '#8b5cf6', // Solid purple background
+    backgroundColor: '#8b5cf6',
   },
   payButtonText: {
-    color: '#fff', // White text on purple background
+    color: '#fff',
     fontWeight: '600',
   },
   
