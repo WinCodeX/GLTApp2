@@ -647,7 +647,7 @@ export default function Track() {
       actionButtons.push({
         key: 'pay',
         icon: 'credit-card',
-        text: 'Pay Now',
+        text: 'Pay',
         onPress: () => handlePayPackage(item),
         style: [styles.actionButton, styles.payButton],
         textStyle: [styles.actionButtonText, styles.payButtonText],
