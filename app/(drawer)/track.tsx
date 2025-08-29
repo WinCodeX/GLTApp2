@@ -1,28 +1,29 @@
-// app/(drawer)/track.tsx - UPDATED: State badge colors
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import { useFocusEffect, useRouter } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
+  Dimensions,
+  FlatList,
+  RefreshControl,
+  SafeAreaView,
+  StatusBar,
   StyleSheet,
   Text,
-  View,
-  ScrollView,
   TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-  StatusBar,
-  Platform,
-  TextInput,
-  Animated,
+  View,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
-import api from '@/lib/api';
-import colors from '@/theme/colors';
-import PackageCreationModal from '@/components/PackageCreationModal';
 
-// Types
+import GLTHeader from '../../components/GLTHeader';
+import PackageEditModal from '../../components/PackageEditModal';
+import { useUser } from '../../context/UserContext';
+import { getPackages } from '../../lib/helpers/packageHelpers';
+import colors from '../../theme/colors';
+
+const { width: screenWidth } = Dimensions.get('window');
+
 interface Package {
   id: string;
   code: string;
@@ -35,395 +36,61 @@ interface Package {
   cost: number;
   delivery_type: string;
   created_at: string;
-  updated_at: string;
-  origin_area?: any;
-  destination_area?: any;
-  origin_agent?: any;
-  destination_agent?: any;
-  delivery_location?: string;
   sender_phone?: string;
-  sender_email?: string;
-  receiver_email?: string;
-  business_name?: string;
-  // Additional fields for compatibility
-  recipient_name?: string;
-  receiver?: { name: string };
-  recipient?: { name: string };
-  to_name?: string;
-  from_location?: string;
-  to_location?: string;
 }
 
-interface PackageResponse {
-  data: Package[];
-  pagination: {
-    total_count: number;
-    page: number;
-    per_page: number;
-    total_pages: number;
-  };
-  success: boolean;
-  message?: string;
+interface TrackScreenProps {
+  initialStatus?: string;
 }
 
-// Drawer state type
-type DrawerState = 
-  | 'pending' 
-  | 'paid' 
-  | 'submitted' 
-  | 'in-transit' 
-  | 'delivered' 
-  | 'collected' 
-  | 'rejected';
-
-// State mapping based on backend expectations
-const STATE_MAPPING: Record<DrawerState, string> = {
-  'pending': 'pending_unpaid',     // Drawer "Pending" = API "pending_unpaid"
-  'paid': 'pending',               // Drawer "Paid" = API "pending"  
-  'submitted': 'submitted',        // Direct mapping
-  'in-transit': 'in_transit',      // Drawer uses hyphen, API uses underscore
-  'delivered': 'delivered',        // Direct mapping
-  'collected': 'collected',        // Direct mapping
-  'rejected': 'rejected'           // Direct mapping
-};
-
-export default function Track() {
-  const params = useLocalSearchParams();
-  const router = useRouter();
-  const insets = useSafeAreaInsets();
-  
-  // Get status from params (from drawer navigation)
-  const selectedStatus = params.status as DrawerState | undefined;
-  
+export default function TrackScreen({ initialStatus }: TrackScreenProps) {
   // State management
   const [packages, setPackages] = useState<Package[]>([]);
-  const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [selectedStatus, setSelectedStatus] = useState<string | undefined>(initialStatus);
+  const [editModalVisible, setEditModalVisible] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   
-  // Search state
-  const [searchVisible, setSearchVisible] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [searchAnimation] = useState(new Animated.Value(0));
-  
-  // Modal state
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  // Hooks
+  const router = useRouter();
+  const { user } = useUser();
 
-  // Get packages with proper API integration
-  const getPackages = useCallback(async (filters?: { state?: string; search?: string; page?: number; per_page?: number }): Promise<PackageResponse> => {
-    try {
-      console.log('📦 getPackages called with filters:', filters);
-      
-      // Build query parameters
-      const params = new URLSearchParams();
-      
-      if (filters?.state) {
-        params.append('state', filters.state);
-        console.log('🎯 Adding state filter:', filters.state);
-      }
-      
-      if (filters?.page) {
-        params.append('page', filters.page.toString());
-      }
-      
-      if (filters?.per_page) {
-        params.append('per_page', filters.per_page.toString());
-      }
-      
-      if (filters?.search) {
-        params.append('search', filters.search);
-      }
-      
-      const queryString = params.toString();
-      const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
-      
-      console.log('📡 Making API request to:', url);
-      
-      const response = await api.get(url, {
-        timeout: 15000,
-        headers: {
-          'Accept': 'application/json',
-          'Content-Type': 'application/json'
-        }
-      });
-      
-      console.log('📡 API Response status:', response.status);
-      console.log('📡 API Response data keys:', Object.keys(response.data));
-      
-      if (!response.data.success) {
-        throw new Error(response.data.message || 'Failed to fetch packages');
-      }
-      
-      // Transform the response data to match expected format
-      const transformedPackages = response.data.data.map((pkg: any) => ({
-        id: String(pkg.id || ''),
-        code: pkg.code || '',
-        state: pkg.state || 'unknown',
-        state_display: pkg.state_display || pkg.state?.charAt(0).toUpperCase() + pkg.state?.slice(1) || 'Unknown',
-        sender_name: pkg.sender_name || 'Unknown Sender',
-        receiver_name: pkg.receiver_name || 'Unknown Receiver',
-        receiver_phone: pkg.receiver_phone || '',
-        route_description: pkg.route_description || 'Route information unavailable',
-        cost: Number(pkg.cost) || 0,
-        delivery_type: pkg.delivery_type || 'agent',
-        created_at: pkg.created_at || new Date().toISOString(),
-        updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
-        origin_area: pkg.origin_area,
-        destination_area: pkg.destination_area,
-        origin_agent: pkg.origin_agent,
-        destination_agent: pkg.destination_agent,
-        delivery_location: pkg.delivery_location,
-        sender_phone: pkg.sender_phone,
-        sender_email: pkg.sender_email,
-        receiver_email: pkg.receiver_email,
-        business_name: pkg.business_name,
-        // Additional fields for compatibility
-        recipient_name: pkg.recipient_name || pkg.receiver_name,
-        receiver: pkg.receiver || { name: pkg.receiver_name },
-        recipient: pkg.recipient || { name: pkg.receiver_name },
-        to_name: pkg.to_name || pkg.receiver_name,
-        from_location: pkg.from_location || pkg.origin_area?.name,
-        to_location: pkg.to_location || pkg.destination_area?.name,
-      }));
-      
-      const result: PackageResponse = {
-        data: transformedPackages,
-        pagination: response.data.pagination || {
-          total_count: transformedPackages.length,
-          page: 1,
-          per_page: transformedPackages.length,
-          total_pages: 1
-        },
-        success: true,
-        message: response.data.message
-      };
-      
-      console.log('✅ Transformed packages:', result.data.length);
-      return result;
-      
-    } catch (error: any) {
-      console.error('❌ getPackages error:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        status: error.response?.status,
-        data: error.response?.data
-      });
-      throw error;
+  // Status filter options
+  const statusOptions = useMemo(() => [
+    { label: 'All', value: undefined, color: '#6b7280' },
+    { label: 'Pending', value: 'pending_unpaid', color: '#ef4444' },
+    { label: 'Paid', value: 'pending', color: '#f59e0b' },
+    { label: 'Submitted', value: 'submitted', color: '#667eea' },
+    { label: 'In Transit', value: 'in_transit', color: '#764ba2' },
+    { label: 'Delivered', value: 'delivered', color: '#10b981' },
+    { label: 'Collected', value: 'collected', color: '#059669' },
+    { label: 'Rejected', value: 'rejected', color: '#dc2626' },
+  ], []);
+
+  // Load packages
+  const loadPackages = useCallback(async (isRefresh: boolean = false) => {
+    if (isRefresh) {
+      setIsRefreshing(true);
+    } else {
+      setIsLoading(true);
     }
-  }, []);
-
-  // Memoized state display
-  const stateDisplayInfo = useMemo(() => {
-    if (!selectedStatus) {
-      return {
-        title: 'All Packages',
-        subtitle: 'View all your packages',
-        icon: 'package' as const,
-        color: colors.primary
-      };
-    }
-
-    const statusConfig = {
-      'pending': {
-        title: 'Pending Payment',
-        subtitle: 'Packages awaiting payment',
-        icon: 'clock' as const,
-        color: '#f97316' // Orange for pending payment
-      },
-      'paid': {
-        title: 'Paid Packages',
-        subtitle: 'Payment received, preparing for pickup',
-        icon: 'check-circle' as const,
-        color: '#10b981'
-      },
-      'submitted': {
-        title: 'Submitted Packages',
-        subtitle: 'Packages submitted for delivery',
-        icon: 'upload' as const,
-        color: '#3b82f6'
-      },
-      'in-transit': {
-        title: 'In Transit',
-        subtitle: 'Packages currently being delivered',
-        icon: 'truck' as const,
-        color: '#8b5cf6'
-      },
-      'delivered': {
-        title: 'Delivered',
-        subtitle: 'Successfully delivered packages',
-        icon: 'box' as const,
-        color: '#059669'
-      },
-      'collected': {
-        title: 'Collected',
-        subtitle: 'Packages collected by recipients',
-        icon: 'archive' as const,
-        color: '#0d9488'
-      },
-      'rejected': {
-        title: 'Rejected',
-        subtitle: 'Delivery rejected or failed',
-        icon: 'x-circle' as const,
-        color: '#ef4444'
-      }
-    };
-
-    return statusConfig[selectedStatus] || statusConfig['pending'];
-  }, [selectedStatus]);
-
-  // Search functionality
-  const filterPackages = useCallback((packages: Package[], query: string) => {
-    if (!query.trim()) {
-      return packages;
-    }
-
-    const lowercaseQuery = query.toLowerCase().trim();
     
-    return packages.filter(pkg => {
-      // Get receiver name
-      const receiverName = (pkg.receiver_name || 
-                           pkg.recipient_name || 
-                           pkg.receiver?.name ||
-                           pkg.recipient?.name ||
-                           pkg.to_name || '').toLowerCase();
-      
-      // Get route/location info
-      const routeDescription = (pkg.route_description || '').toLowerCase();
-      const fromLocation = (pkg.from_location || '').toLowerCase();
-      const toLocation = (pkg.to_location || '').toLowerCase();
-      const packageCode = (pkg.code || '').toLowerCase();
-      
-      // Search in multiple fields
-      return receiverName.includes(lowercaseQuery) ||
-             routeDescription.includes(lowercaseQuery) ||
-             fromLocation.includes(lowercaseQuery) ||
-             toLocation.includes(lowercaseQuery) ||
-             packageCode.includes(lowercaseQuery);
-    });
-  }, []);
+    setError(null);
 
-  // Update filtered packages when search query or packages change
-  useEffect(() => {
-    const filtered = filterPackages(packages, searchQuery);
-    setFilteredPackages(filtered);
-  }, [packages, searchQuery, filterPackages]);
-
-  // Toggle search functionality
-  const toggleSearch = useCallback(() => {
-    const newVisible = !searchVisible;
-    setSearchVisible(newVisible);
-    
-    Animated.timing(searchAnimation, {
-      toValue: newVisible ? 1 : 0,
-      duration: 300,
-      useNativeDriver: false,
-    }).start();
-
-    if (!newVisible) {
-      setSearchQuery('');
-    }
-  }, [searchVisible, searchAnimation]);
-
-  // Clear search
-  const clearSearch = useCallback(() => {
-    setSearchQuery('');
-  }, []);
-
-  // Modal handlers
-  const handleOpenCreateModal = useCallback(() => {
-    setShowCreateModal(true);
-  }, []);
-
-  const handleCloseCreateModal = useCallback(() => {
-    setShowCreateModal(false);
-  }, []);
-
-  const handlePackageCreated = useCallback(() => {
-    setShowCreateModal(false);
-    loadPackages(true);
-  }, []);
-
-  // Load packages with correct state mapping and error handling
-  const loadPackages = useCallback(async (isRefresh = false) => {
     try {
-      if (isRefresh) {
-        setIsRefreshing(true);
-      } else {
-        setIsLoading(true);
-      }
-      setError(null);
-
-      console.log('🎯 === DEBUGGING PACKAGE FILTERING ===');
-      console.log('📦 selectedStatus from drawer params:', selectedStatus);
-      console.log('🔄 STATE_MAPPING:', STATE_MAPPING);
+      console.log('🔄 Loading packages with status:', selectedStatus);
       
-      let apiState: string | undefined;
-      if (selectedStatus) {
-        apiState = STATE_MAPPING[selectedStatus];
-        console.log('🗺️ Mapping:', { 
-          drawerState: selectedStatus, 
-          apiState: apiState,
-          mappingExists: apiState !== undefined 
-        });
-      }
-      
-      // Build filters with the correctly mapped API state
-      const filters = apiState ? { state: apiState } : undefined;
-      
-      console.log('📨 Final filters for API:', JSON.stringify(filters, null, 2));
-      
+      const filters = selectedStatus ? 
+        { state: selectedStatus } : undefined;
       const response = await getPackages(filters);
       
-      console.log('✅ API Response received:', {
-        success: response.success,
-        totalPackages: response.data.length,
-        totalCount: response.pagination?.total_count,
-        message: response.message
+      console.log('✅ Packages loaded:', {
+        count: response.data.length,
+        status: selectedStatus,
+        totalCount: response.pagination.total_count
       });
-
-      // Log the actual states of returned packages to verify filtering worked
-      if (response.data.length > 0) {
-        const states = response.data.map(pkg => pkg.state);
-        const uniqueStates = [...new Set(states)];
-        console.log('📊 Actual returned package states:', uniqueStates);
-        console.log('🎯 Expected state was:', apiState || 'ALL');
-        
-        // Check if filtering worked correctly
-        if (apiState) {
-          const correctlyFiltered = states.every(state => state === apiState);
-          console.log('✅ Filtering working correctly:', correctlyFiltered);
-          
-          if (!correctlyFiltered) {
-            console.error('❌ FILTERING FAILED!');
-            console.error('Expected all packages to have state:', apiState);
-            console.error('But got states:', uniqueStates);
-            
-            // FALLBACK: Apply client-side filtering as backup
-            console.log('🔧 Applying client-side filtering as fallback...');
-            const clientFiltered = response.data.filter(pkg => pkg.state === apiState);
-            console.log('🔧 Client-side filtered:', clientFiltered.length, 'packages');
-            
-            if (clientFiltered.length > 0) {
-              console.log('✅ Client-side filtering successful, using filtered results');
-              setPackages(clientFiltered);
-              return;
-            } else {
-              console.log('⚠️ Client-side filtering returned no results, using all results with warning');
-              Toast.show({
-                type: 'info',
-                text1: 'Backend Filtering Issue',
-                text2: 'Showing all packages due to backend filtering problem',
-                position: 'top',
-                visibilityTime: 4000,
-              });
-            }
-          }
-        }
-      } else {
-        console.log('📦 No packages returned for state:', apiState || 'ALL');
-      }
-      console.log('🎯 === END DEBUGGING ===');
       
       setPackages(response.data);
       
@@ -432,7 +99,7 @@ export default function Track() {
       setError(error.message);
       
       Toast.show({
-        type: 'error',
+        type: 'errorToast',
         text1: 'Failed to Load Packages',
         text2: error.message,
         position: 'top',
@@ -442,7 +109,7 @@ export default function Track() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, [selectedStatus, getPackages]);
+  }, [selectedStatus]);
 
   // Load data when component mounts or status changes
   useEffect(() => {
@@ -463,26 +130,22 @@ export default function Track() {
     }
   }, [router]);
 
-  // Get delivery type display with all types
+  // Get delivery type display
   const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return 'Doorstep';
+      case 'doorstep': return 'Home';
       case 'agent': return 'Office';
-      case 'fragile': return 'Fragile';
-      case 'collection': return 'Collection';
       case 'mixed': return 'Mixed';
       default: return 'Office';
     }
   }, []);
 
-  // Get delivery type badge color with requested colors
+  // Get delivery type badge color
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return '#8b5cf6';    // Purple
-      case 'agent': return '#3b82f6';       // Blue (Office)
-      case 'fragile': return '#f97316';     // Orange
-      case 'collection': return '#10b981';  // Green
-      case 'mixed': return '#10b981';       // Green for mixed
+      case 'doorstep': return '#3b82f6'; // Blue
+      case 'agent': return '#8b5cf6';    // Purple
+      case 'mixed': return '#f59e0b';    // Orange
       default: return '#8b5cf6';
     }
   }, []);
@@ -493,140 +156,139 @@ export default function Track() {
     const yesterday = new Date(today);
     yesterday.setDate(yesterday.getDate() - 1);
     
-    const groups: { [key: string]: Package[] } = {
-      'Today': [],
-      'Yesterday': [],
-    };
-
+    const groups: { [key: string]: Package[] } = {};
+    
     packages.forEach(pkg => {
       const pkgDate = new Date(pkg.created_at);
-      const pkgDateStr = pkgDate.toDateString();
-      const todayStr = today.toDateString();
-      const yesterdayStr = yesterday.toDateString();
-
-      if (pkgDateStr === todayStr) {
-        groups['Today'].push(pkg);
-      } else if (pkgDateStr === yesterdayStr) {
-        groups['Yesterday'].push(pkg);
+      let groupKey: string;
+      
+      if (pkgDate.toDateString() === today.toDateString()) {
+        groupKey = 'Today';
+      } else if (pkgDate.toDateString() === yesterday.toDateString()) {
+        groupKey = 'Yesterday';
       } else {
-        const dateKey = pkgDate.toLocaleDateString('en-US', {
+        groupKey = pkgDate.toLocaleDateString('en-GB', {
           weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
+          day: 'numeric',
+          month: 'long'
         });
-        if (!groups[dateKey]) {
-          groups[dateKey] = [];
-        }
-        groups[dateKey].push(pkg);
       }
-    });
-
-    // Remove empty groups and sort packages within groups by newest first
-    Object.keys(groups).forEach(key => {
-      if (groups[key].length === 0) {
-        delete groups[key];
-      } else {
-        groups[key].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      
+      if (!groups[groupKey]) {
+        groups[groupKey] = [];
       }
+      groups[groupKey].push(pkg);
     });
-
+    
     return groups;
   }, []);
-  
-  // UPDATED: State badge colors as requested
+
+  // Get state badge color
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
-      case 'pending_unpaid': return '#ef4444';  // Red
-      case 'pending': return '#f97316';         // Orange
-      case 'submitted': return '#eab308';       // Yellow
-      case 'in_transit': return '#8b5cf6';      // Purple
-      case 'delivered': return '#10b981';       // Green
-      case 'collected': return '#2563eb';       // Royal Blue
-      case 'rejected': return '#ef4444';        // Red
-      default: return colors.primary;
+      case 'pending_unpaid': return '#ef4444';
+      case 'pending': return '#f59e0b';
+      case 'submitted': return '#667eea';
+      case 'in_transit': return '#764ba2';
+      case 'delivered': return '#10b981';
+      case 'collected': return '#059669';
+      case 'rejected': return '#dc2626';
+      default: return '#6b7280';
     }
   }, []);
 
-  // Check if package can be edited
-  const canEditPackage = useCallback((state: string) => {
-    return ['pending_unpaid', 'pending', 'rejected'].includes(state);
-  }, []);
-
-  // Check if package needs payment
-  const needsPayment = useCallback((state: string) => {
-    return state === 'pending_unpaid';
-  }, []);
-
-  // Handle edit package
-  const handleEditPackage = useCallback((packageItem: Package) => {
-    console.log('🔧 Editing package:', packageItem.code);
-    router.push({
-      pathname: '/(drawer)/(tabs)/send',
-      params: { 
-        edit: 'true',
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString()
-      }
-    });
+  // Package action handlers
+  const handleViewTracking = useCallback((pkg: Package) => {
+    router.push(`/track/tracking?code=${pkg.code}`);
   }, [router]);
 
-  // Handle pay for package
-  const handlePayPackage = useCallback((packageItem: Package) => {
-    console.log('💳 Processing payment for package:', packageItem.code);
-    router.push({
-      pathname: '/(drawer)/payment',
-      params: { 
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString(),
-        amount: packageItem.cost.toString()
-      }
-    });
-  }, [router]);
+  const handleEditPackage = useCallback((pkg: Package) => {
+    setSelectedPackage(pkg);
+    setEditModalVisible(true);
+  }, []);
 
-  // Handle view tracking details
-  const handleViewTracking = useCallback((packageItem: Package) => {
-    console.log('🔍 Viewing tracking for package:', packageItem.code);
+  const handlePayPackage = useCallback((pkg: Package) => {
+    // TODO: Implement payment flow
+    console.log('Pay for package:', pkg.code);
+  }, []);
+
+  const handleEditModalClose = useCallback(() => {
+    setEditModalVisible(false);
+    setSelectedPackage(null);
+  }, []);
+
+  const handleEditModalSuccess = useCallback(() => {
+    handleEditModalClose();
+    loadPackages(); // Reload packages after successful edit
+  }, [handleEditModalClose, loadPackages]);
+
+  // Determine if package can be edited based on user role and package state
+  const canEditPackage = useCallback((pkg: Package) => {
+    if (!user) return false;
     
-    // Navigate directly to tracking page without QR code generation
-    router.push({
-      pathname: '/(drawer)/track/tracking',
-      params: { 
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString(),
-        from: '/(drawer)/track'
-      }
-    });
-  }, [router]);
+    // Admin can edit most states except collected
+    if (user.role === 'admin' || user.role === 'super_admin') {
+      return !['collected'].includes(pkg.state);
+    }
+    
+    // Agents can edit limited states
+    if (user.role === 'agent') {
+      return ['pending', 'submitted', 'in_transit'].includes(pkg.state);
+    }
+    
+    // Users can only edit unpaid packages
+    return pkg.state === 'pending_unpaid';
+  }, [user]);
 
-  // Get receiver name display
-  const getReceiverName = useCallback((packageItem: Package) => {
-    return packageItem.receiver_name || 
-           packageItem.recipient_name || 
-           packageItem.receiver?.name ||
-           packageItem.recipient?.name ||
-           packageItem.to_name ||
-           'Unknown Recipient';
-  }, []);
+  // Render status filter
+  const renderStatusFilter = useCallback(() => (
+    <View style={styles.filterContainer}>
+      <FlatList
+        horizontal
+        data={statusOptions}
+        keyExtractor={(item) => item.value || 'all'}
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.filterContent}
+        renderItem={({ item }) => {
+          const isSelected = selectedStatus === item.value;
+          return (
+            <TouchableOpacity
+              style={[
+                styles.filterButton,
+                isSelected && [styles.filterButtonActive, { backgroundColor: item.color }]
+              ]}
+              onPress={() => setSelectedStatus(item.value)}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                isSelected && styles.filterButtonTextActive
+              ]}>
+                {item.label}
+              </Text>
+            </TouchableOpacity>
+          );
+        }}
+      />
+    </View>
+  ), [statusOptions, selectedStatus]);
 
-  // Render package item
+  // Render package item with dynamic action buttons
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
-    const canEdit = canEditPackage(item.state);
-    const showPayButton = needsPayment(item.state);
-    const receiverName = getReceiverName(item);
+    const canEdit = canEditPackage(item);
+    const showPayButton = item.state === 'pending_unpaid';
     
-    // Build action buttons array based on state
+    // Determine button layout based on state
     const actionButtons = [];
     
     // Track button - always available
     actionButtons.push({
       key: 'track',
-      icon: 'navigation',
+      icon: 'search',
       text: 'Track',
       onPress: () => handleViewTracking(item),
-      style: [styles.actionButton, styles.trackButton],
-      textStyle: [styles.actionButtonText, styles.trackButtonText],
-      iconColor: '#64748b'
+      style: styles.actionButton,
+      textStyle: styles.actionButtonText,
+      iconColor: colors.primary
     });
     
     // Edit button - only if editable
@@ -636,9 +298,9 @@ export default function Track() {
         icon: 'edit-3',
         text: 'Edit',
         onPress: () => handleEditPackage(item),
-        style: [styles.actionButton, styles.editButton],
-        textStyle: [styles.actionButtonText, styles.editButtonText],
-        iconColor: '#8b5cf6'
+        style: styles.actionButton,
+        textStyle: styles.actionButtonText,
+        iconColor: colors.primary
       });
     }
     
@@ -668,39 +330,37 @@ export default function Track() {
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
             <View style={styles.badgeContainer}>
-              {/* Delivery Type Badge - transparent style */}
-              <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
-                <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
-                  {getDeliveryTypeDisplay(item.delivery_type)}
-                </Text>
+              {/* Delivery Type Badge */}
+              <View style={[styles.deliveryTypeBadge, { backgroundColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
+                <Text style={styles.badgeText}>{getDeliveryTypeDisplay(item.delivery_type)}</Text>
               </View>
-              {/* State Badge - solid background style */}
+              {/* State Badge */}
               <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
-                <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
+                <Text style={styles.badgeText}>{item.state_display}</Text>
               </View>
             </View>
           </View>
-
+          
           {/* Receiver Section */}
           <View style={styles.receiverSection}>
-            <Text style={styles.receiverText}>To: {receiverName}</Text>
+            <Text style={styles.receiverText}>To: {item.receiver_name}</Text>
           </View>
-
+          
           {/* Cost Section */}
           <View style={styles.costSection}>
-            <Text style={styles.costLabel}>Cost</Text>
+            <Text style={styles.costLabel}>Amount</Text>
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
           </View>
-
+          
           {/* Dynamic Action Buttons */}
           <View style={[
             styles.actionButtons,
             actionButtons.length === 1 && styles.singleButton,
             actionButtons.length === 2 && styles.doubleButtons,
-            actionButtons.length === 3 && styles.tripleButtons
+            actionButtons.length === 3 && styles.tripleButtons,
           ]}>
             {actionButtons.map((button) => (
-              <TouchableOpacity 
+              <TouchableOpacity
                 key={button.key}
                 style={button.style}
                 onPress={button.onPress}
@@ -713,496 +373,237 @@ export default function Track() {
         </LinearGradient>
       </View>
     );
-  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking, getReceiverName]);
+  }, [
+    canEditPackage,
+    handleViewTracking,
+    handleEditPackage,
+    handlePayPackage,
+    getDeliveryTypeDisplay,
+    getDeliveryTypeBadgeColor,
+    getStateBadgeColor
+  ]);
+
+  // Render date section header
+  const renderDateHeader = useCallback((date: string, count: number) => (
+    <View style={styles.dateHeaderContainer}>
+      <LinearGradient
+        colors={['rgba(124, 58, 237, 0.15)', 'rgba(124, 58, 237, 0.05)']}
+        style={styles.dateHeader}
+      >
+        <Text style={styles.dateHeaderText}>{date}</Text>
+        <Text style={styles.dateHeaderCount}>{count} package{count !== 1 ? 's' : ''}</Text>
+      </LinearGradient>
+    </View>
+  ), []);
 
   // Render empty state
   const renderEmptyState = useCallback(() => (
-    <View style={styles.emptyStateContainer}>
-      <LinearGradient
-        colors={['rgba(26, 26, 46, 0.6)', 'rgba(22, 33, 62, 0.6)']}
-        style={styles.emptyStateCard}
-      >
-        <Feather name={stateDisplayInfo.icon} size={64} color="#666" />
-        <Text style={styles.emptyStateTitle}>
-          {searchQuery ? 'No Matching Packages' : `No ${stateDisplayInfo.title} Found`}
-        </Text>
-        <Text style={styles.emptyStateSubtitle}>
-          {searchQuery 
-            ? `No packages found matching "${searchQuery}". Try a different search term.`
-            : selectedStatus 
-              ? `You don't have any packages in "${stateDisplayInfo.title.toLowerCase()}" state.`
-              : 'You haven\'t created any packages yet.'
-          }
-        </Text>
-        
-        {!searchQuery && (
-          <TouchableOpacity style={styles.emptyStateButton} onPress={handleOpenCreateModal}>
-            <Feather name="plus" size={20} color="#fff" />
-            <Text style={styles.emptyStateButtonText}>Create Package</Text>
-          </TouchableOpacity>
-        )}
-      </LinearGradient>
+    <View style={styles.emptyState}>
+      <Feather name="package" size={48} color="#666" />
+      <Text style={styles.emptyStateTitle}>No Packages Found</Text>
+      <Text style={styles.emptyStateText}>
+        {selectedStatus 
+          ? `No packages with status "${statusOptions.find(opt => opt.value === selectedStatus)?.label}"`
+          : "You haven't created any packages yet"}
+      </Text>
     </View>
-  ), [stateDisplayInfo, selectedStatus, searchQuery, handleOpenCreateModal]);
+  ), [selectedStatus, statusOptions]);
+
+  // Render loading state
+  const renderLoadingState = useCallback(() => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color={colors.primary} />
+      <Text style={styles.loadingText}>Loading packages...</Text>
+    </View>
+  ), []);
 
   // Render error state
   const renderErrorState = useCallback(() => (
     <View style={styles.errorContainer}>
-      <LinearGradient
-        colors={['rgba(239, 68, 68, 0.1)', 'rgba(220, 38, 38, 0.1)']}
-        style={styles.errorCard}
-      >
-        <Feather name="alert-circle" size={64} color="#ef4444" />
-        <Text style={styles.errorTitle}>Failed to Load Packages</Text>
-        <Text style={styles.errorMessage}>{error}</Text>
-        
-        <TouchableOpacity style={styles.retryButton} onPress={() => loadPackages()}>
-          <Feather name="refresh-cw" size={20} color="#fff" />
-          <Text style={styles.retryButtonText}>Try Again</Text>
-        </TouchableOpacity>
-      </LinearGradient>
+      <Feather name="alert-circle" size={48} color="#ef4444" />
+      <Text style={styles.errorTitle}>Failed to Load Packages</Text>
+      <Text style={styles.errorText}>{error}</Text>
+      <TouchableOpacity style={styles.retryButton} onPress={() => loadPackages()}>
+        <Text style={styles.retryButtonText}>Retry</Text>
+      </TouchableOpacity>
     </View>
   ), [error, loadPackages]);
 
-  // Use filtered packages for display
-  const displayPackages = filteredPackages;
+  // Render main content
+  const renderContent = useCallback(() => {
+    if (isLoading) return renderLoadingState();
+    if (error) return renderErrorState();
+    if (packages.length === 0) return renderEmptyState();
 
-  // Main render
-  return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
-      
-      {/* Fixed Header with Back Button */}
-      <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
-        <LinearGradient
-          colors={[colors.background, 'rgba(22, 33, 62, 0.95)']}
-          style={styles.header}
-        >
-          <View style={styles.headerContent}>
-            {/* Back Button */}
-            <TouchableOpacity style={styles.backButton} onPress={handleBack}>
-              <Feather name="arrow-left" size={24} color="#fff" />
-            </TouchableOpacity>
-            
-            {/* Header Info */}
-            <View style={styles.headerInfo}>
-              <View style={styles.headerIconContainer}>
-                <Feather 
-                  name={stateDisplayInfo.icon} 
-                  size={20} 
-                  color={stateDisplayInfo.color} 
-                />
+    const groupedPackages = groupPackagesByDate(packages);
+    const sections = Object.entries(groupedPackages).map(([date, packages]) => ({
+      date,
+      packages
+    }));
+
+    return (
+      <FlatList
+        data={sections}
+        keyExtractor={(item) => item.date}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            colors={[colors.primary]}
+            tintColor={colors.primary}
+          />
+        }
+        renderItem={({ item: section }) => (
+          <View>
+            {renderDateHeader(section.date, section.packages.length)}
+            {section.packages.map((pkg) => (
+              <View key={pkg.id}>
+                {renderPackageItem({ item: pkg })}
               </View>
-              <View style={styles.headerText}>
-                <Text style={styles.headerTitle}>{stateDisplayInfo.title}</Text>
-                <Text style={styles.headerSubtitle}>{stateDisplayInfo.subtitle}</Text>
-              </View>
-            </View>
-            
-            {/* Search Button */}
-            <TouchableOpacity style={styles.searchButton} onPress={toggleSearch}>
-              <Feather name="search" size={20} color="#fff" />
-            </TouchableOpacity>
-            
-            {/* Package Count */}
-            {displayPackages.length > 0 && (
-              <View style={styles.packageCount}>
-                <Text style={styles.packageCountText}>{displayPackages.length}</Text>
-              </View>
-            )}
+            ))}
           </View>
-        </LinearGradient>
-        
-        {/* Search Input Dropdown */}
-        <Animated.View style={[
-          styles.searchContainer,
-          {
-            maxHeight: searchAnimation.interpolate({
-              inputRange: [0, 1],
-              outputRange: [0, 60],
-            }),
-            opacity: searchAnimation,
-          }
-        ]}>
-          <LinearGradient
-            colors={['rgba(22, 33, 62, 0.95)', 'rgba(26, 26, 46, 0.95)']}
-            style={styles.searchInputContainer}
-          >
-            <Feather name="search" size={18} color="#888" style={styles.searchIcon} />
-            <TextInput
-              style={styles.searchInput}
-              placeholder="Search by receiver, location, or package code..."
-              placeholderTextColor="#888"
-              value={searchQuery}
-              onChangeText={setSearchQuery}
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {searchQuery.length > 0 && (
-              <TouchableOpacity onPress={clearSearch} style={styles.clearButton}>
-                <Feather name="x" size={18} color="#888" />
-              </TouchableOpacity>
-            )}
-          </LinearGradient>
-        </Animated.View>
-      </View>
-
-      {/* Content */}
-      {isLoading ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.loadingText}>Loading packages...</Text>
-        </View>
-      ) : error ? (
-        renderErrorState()
-      ) : displayPackages.length === 0 ? (
-        renderEmptyState()
-      ) : (
-        <ScrollView
-          style={styles.packagesList}
-          contentContainerStyle={styles.packagesListContent}
-          showsVerticalScrollIndicator={false}
-          refreshControl={
-            <RefreshControl
-              refreshing={isRefreshing}
-              onRefresh={handleRefresh}
-              tintColor={colors.primary}
-              colors={[colors.primary]}
-            />
-          }
-        >
-          {/* Search Results Info */}
-          {searchQuery && (
-            <View style={styles.searchResultsInfo}>
-              <Text style={styles.searchResultsText}>
-                Found {displayPackages.length} package{displayPackages.length !== 1 ? 's' : ''} matching "{searchQuery}"
-              </Text>
-            </View>
-          )}
-          
-          {/* Render Grouped Packages */}
-          {(() => {
-            const groupedPackages = groupPackagesByDate(displayPackages);
-            return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
-              <View key={dateGroup} style={styles.dateGroup}>
-                {/* Date Group Header */}
-                <View style={styles.dateGroupHeader}>
-                  <Text style={styles.dateGroupTitle}>{dateGroup}</Text>
-                  <Text style={styles.dateGroupCount}>{packages.length} package{packages.length !== 1 ? 's' : ''}</Text>
-                </View>
-                
-                {/* Packages in this date group */}
-                {packages.map((pkg) => (
-                  <View key={pkg.id}>
-                    {renderPackageItem({ item: pkg })}
-                  </View>
-                ))}
-              </View>
-            ));
-          })()}
-          
-          {/* Load more indicator if needed */}
+        )}
+        contentContainerStyle={styles.listContainer}
+        ListFooterComponent={() => (
           <View style={styles.listFooter}>
             <Text style={styles.listFooterText}>
-              Showing {displayPackages.length} packages
+              {packages.length} package{packages.length !== 1 ? 's' : ''} total
             </Text>
           </View>
-        </ScrollView>
-      )}
-      
-      {/* Package Creation Modal */}
-      <PackageCreationModal
-        visible={showCreateModal}
-        onClose={handleCloseCreateModal}
-        onPackageCreated={handlePackageCreated}
+        )}
       />
-    </View>
+    );
+  }, [
+    isLoading,
+    error,
+    packages,
+    isRefreshing,
+    renderLoadingState,
+    renderErrorState,
+    renderEmptyState,
+    groupPackagesByDate,
+    handleRefresh,
+    renderDateHeader,
+    renderPackageItem
+  ]);
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      
+      {/* Header */}
+      <GLTHeader
+        title="Track Packages"
+        onBackPress={handleBack}
+        showBackButton
+      />
+      
+      {/* Status Filter */}
+      {renderStatusFilter()}
+      
+      {/* Main Content */}
+      <View style={styles.contentContainer}>
+        {renderContent()}
+      </View>
+      
+      {/* Edit Modal */}
+      <PackageEditModal
+        visible={editModalVisible}
+        package={selectedPackage}
+        userRole={user?.role || 'user'}
+        onClose={handleEditModalClose}
+        onSuccess={handleEditModalSuccess}
+      />
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#0a0a0a',
   },
   
-  // Fixed header styles
-  headerContainer: {
-    position: 'relative',
-    zIndex: 1000,
-  },
-  header: {
-    paddingHorizontal: 20,
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 16,
-  },
-  headerInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  headerIconContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  headerText: {
-    flex: 1,
-  },
-  headerTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  headerSubtitle: {
-    fontSize: 13,
-    color: '#888',
-  },
-  searchButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  packageCount: {
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 14,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-    borderColor: colors.primary,
-    minWidth: 28,
-    alignItems: 'center',
-  },
-  packageCountText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: colors.primary,
-  },
-  
-  // Search functionality styles
-  searchContainer: {
-    overflow: 'hidden',
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
+  // Filter styles
+  filterContainer: {
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
-  searchIcon: {
-    marginRight: 12,
-  },
-  searchInput: {
-    flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingVertical: 8,
-  },
-  clearButton: {
-    padding: 4,
-    marginLeft: 8,
-  },
-  searchResultsInfo: {
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-    marginBottom: 12,
-  },
-  searchResultsText: {
-    fontSize: 14,
-    color: '#888',
-    fontStyle: 'italic',
-  },
-  
-  // Loading states
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 40,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 16,
-  },
-  
-  // Error states
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
-  },
-  errorCard: {
-    alignItems: 'center',
-    padding: 32,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(239, 68, 68, 0.3)',
-    width: '100%',
-    maxWidth: 400,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ef4444',
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  retryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#ef4444',
+  filterContent: {
+    paddingHorizontal: 16,
     gap: 8,
   },
-  retryButtonText: {
-    fontSize: 16,
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  filterButtonActive: {
+    borderColor: 'transparent',
+  },
+  filterButtonText: {
+    fontSize: 14,
+    color: '#ccc',
+    fontWeight: '500',
+  },
+  filterButtonTextActive: {
     color: '#fff',
     fontWeight: '600',
   },
   
-  // Empty state
-  emptyStateContainer: {
+  // Content container
+  contentContainer: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 20,
   },
-  emptyStateCard: {
+  listContainer: {
+    padding: 16,
+    paddingTop: 8,
+  },
+  
+  // Date header styles
+  dateHeaderContainer: {
+    marginVertical: 8,
+  },
+  dateHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 32,
-    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    width: '100%',
-    maxWidth: 400,
   },
-  emptyStateTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-    marginBottom: 8,
-    textAlign: 'center',
-  },
-  emptyStateSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 24,
-  },
-  emptyStateButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: colors.primary,
-    gap: 8,
-  },
-  emptyStateButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  
-  // Package list
-  packagesList: {
-    flex: 1,
-  },
-  packagesListContent: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
-  },
-  
-  // Date grouping styles
-  dateGroup: {
-    marginBottom: 20,
-  },
-  dateGroupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 4,
-    paddingVertical: 8,
-    marginBottom: 12,
-  },
-  dateGroupTitle: {
+  dateHeaderText: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
   },
-  dateGroupCount: {
+  dateHeaderCount: {
     fontSize: 12,
     color: '#888',
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
   },
   
   // Package card styles
   packageCard: {
-    marginBottom: 12,
+    marginVertical: 6,
     borderRadius: 12,
     overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: {
-      width: 0,
-      height: 2,
-    },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   packageCardGradient: {
     padding: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   
-  // Package header
+  // Package header (code + badges)
   packageHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 12,
   },
@@ -1231,8 +632,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 3,
     borderRadius: 8,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
   },
   stateBadge: {
     paddingHorizontal: 8,
@@ -1267,11 +666,11 @@ const styles = StyleSheet.create({
   },
   costValue: {
     fontSize: 16,
-    color: '#8b5cf6',
+    color: '#10b981',
     fontWeight: '700',
   },
   
-  // Action buttons
+  // Dynamic action buttons - adaptive layout
   actionButtons: {
     flexDirection: 'row',
     gap: 8,
@@ -1288,47 +687,29 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   
-  // Base action button styling
   actionButton: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 6,
-    borderWidth: 1.5,
-    gap: 6,
-    minHeight: 36,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    gap: 4,
   },
   
   actionButtonText: {
     fontSize: 12,
-    fontWeight: '500',
+    color: colors.primary,
+    fontWeight: '600',
   },
   
-  // Track button
-  trackButton: {
-    borderColor: '#64748b',
-    backgroundColor: 'transparent',
-  },
-  trackButtonText: {
-    color: '#64748b',
-  },
-  
-  // Edit button - purple outline  
-  editButton: {
-    borderColor: '#8b5cf6',
-    backgroundColor: 'transparent',
-  },
-  editButtonText: {
-    color: '#8b5cf6',
-  },
-  
-  // Pay button - solid purple background
+  // Pay button specific styles
   payButton: {
-    borderColor: '#8b5cf6',
-    backgroundColor: '#8b5cf6',
+    backgroundColor: '#10b981',
+    borderColor: '#059669',
   },
   payButtonText: {
     color: '#fff',
@@ -1343,5 +724,76 @@ const styles = StyleSheet.create({
   listFooterText: {
     fontSize: 12,
     color: '#666',
+  },
+  
+  // Loading state
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#888',
+    marginTop: 12,
+  },
+  
+  // Error state
+  errorContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: colors.primary,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  
+  // Empty state
+  emptyState: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 32,
+    paddingVertical: 40,
+  },
+  emptyStateTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptyStateText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
