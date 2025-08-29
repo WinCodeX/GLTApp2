@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - FIXED: Import working getAreas from separate file
+// lib/helpers/packageHelpers.ts - UPDATED: Added package_size and special_instructions
 import api from '../api';
 
 // FIXED: Import the working implementations from separate files
@@ -48,9 +48,11 @@ export interface Package {
   sender_email?: string;
   receiver_email?: string;
   business_name?: string;
+  package_size?: string;
+  special_instructions?: string;
 }
 
-// FIXED: Enhanced Package creation data interface to support collection deliveries
+// UPDATED: Enhanced Package creation data interface with package_size and special_instructions
 export interface PackageData {
   sender_name: string;
   sender_phone: string;
@@ -62,6 +64,10 @@ export interface PackageData {
   destination_agent_id?: string | null; // Optional for doorstep deliveries
   delivery_type: string;
   delivery_location?: string;
+  
+  // UPDATED: Added package size and special instructions for doorstep deliveries
+  package_size?: string; // 'small', 'medium', 'large' for doorstep deliveries
+  special_instructions?: string; // For large packages and special handling requirements
   
   // Additional fields for special delivery types
   package_description?: string; // For fragile items description
@@ -79,14 +85,13 @@ export interface PackageData {
     };
   };
   
-  // FIXED: Collection-specific fields
+  // Collection-specific fields
   shop_name?: string;
   shop_contact?: string;
   collection_address?: string;
   items_to_collect?: string;
   item_value?: number;
   item_description?: string;
-  special_instructions?: string;
   payment_method?: string;
   requires_payment_advance?: boolean;
   collection_type?: string;
@@ -166,23 +171,22 @@ let locationsCache: Location[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// FIXED: Delivery types that don't require origin agent
+// Delivery types that don't require origin agent
 const NO_ORIGIN_AGENT_DELIVERY_TYPES = [
   'fragile', 
   'collect', 
   'collect_deliver',
-  'collection' // Added for CollectDeliverModal support
+  'collection'
 ];
 
-// FIXED: Delivery types that don't require destination area
+// Delivery types that don't require destination area
 const NO_DESTINATION_AREA_DELIVERY_TYPES = [
   'fragile',
   'collection'
 ];
 
 /**
- * FIXED: Get all package form data required by the modal
- * Now uses the working imported functions
+ * Get all package form data required by the modal
  */
 export const getPackageFormData = async (): Promise<PackageFormData> => {
   try {
@@ -208,11 +212,10 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
     
     console.log('Fetching fresh package form data from API...');
     
-    // FIXED: Use the working imported functions instead of local implementations
     const [locationsResult, areasResult, agentsResult] = await Promise.allSettled([
       getLocations(),
-      getAreas(), // This now uses the working implementation from getAreas.ts
-      getAgents() // This now uses the working implementation from getAgents.ts
+      getAreas(),
+      getAgents()
     ]);
     
     // Handle locations
@@ -222,7 +225,6 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       console.log('Locations loaded:', locations.length);
     } else {
       console.error('Failed to load locations:', locationsResult.reason);
-      // Don't throw here, continue with empty array
     }
     
     // Handle areas
@@ -245,15 +247,12 @@ export const getPackageFormData = async (): Promise<PackageFormData> => {
       throw new Error('Failed to load agents - required for package creation');
     }
     
-    // FIXED: More flexible validation for minimum required data
     if (areas.length === 0) {
       console.warn('No areas available - standard agent deliveries will be disabled');
-      // Don't throw error - some delivery types can work without areas
     }
     
     if (agents.length === 0) {
       console.warn('No agents available - agent deliveries will be disabled');
-      // Don't throw error - fragile and collection deliveries can work without agents
     }
     
     // Update cache
@@ -325,8 +324,6 @@ export const getLocations = async (): Promise<Location[]> => {
     
   } catch (error: any) {
     console.error('Failed to fetch locations:', error);
-    
-    // Return empty array instead of throwing - locations are optional
     console.log('Continuing without locations data');
     return [];
   }
@@ -339,7 +336,6 @@ const transformLocationData = (rawData: any): Location => {
   try {
     let locationData = rawData;
     
-    // Handle JSON:API format
     if (rawData.attributes) {
       locationData = {
         id: rawData.id,
@@ -362,7 +358,7 @@ const transformLocationData = (rawData: any): Location => {
 };
 
 /**
- * FIXED: Validate package form data structure with flexible requirements
+ * Validate package form data structure with flexible requirements
  */
 export const validatePackageFormData = (data: any): ValidationResult => {
   const issues: string[] = [];
@@ -386,11 +382,10 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // FIXED: Check areas (required for standard deliveries, optional for special deliveries)
+    // Check areas (required for standard deliveries, optional for special deliveries)
     if (!data.areas || !Array.isArray(data.areas)) {
       issues.push('Areas must be an array');
     } else {
-      // Only warn if no areas available - don't fail validation entirely
       if (data.areas.length === 0) {
         console.warn('No areas available - some delivery types may be limited');
       } else {
@@ -402,11 +397,10 @@ export const validatePackageFormData = (data: any): ValidationResult => {
       }
     }
     
-    // FIXED: Check agents (required for standard deliveries, optional for special deliveries)
+    // Check agents (required for standard deliveries, optional for special deliveries)
     if (!data.agents || !Array.isArray(data.agents)) {
       issues.push('Agents must be an array');
     } else {
-      // Only warn if no agents available - don't fail validation entirely
       if (data.agents.length === 0) {
         console.warn('No agents available - agent deliveries will be disabled');
       } else {
@@ -430,7 +424,7 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * FIXED: Validate individual package data for creation
+ * UPDATED: Validate individual package data for creation including package size and special instructions
  */
 const validatePackageData = (packageData: PackageData): ValidationResult => {
   const issues: string[] = [];
@@ -449,7 +443,7 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
       issues.push('Delivery type is required');
     }
     
-    // FIXED: Conditional validation based on delivery type
+    // Conditional validation based on delivery type
     const deliveryType = packageData.delivery_type.toLowerCase();
     
     // Check if origin agent is required
@@ -463,6 +457,23 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
     if (!NO_DESTINATION_AREA_DELIVERY_TYPES.includes(deliveryType)) {
       if (!packageData.destination_area_id) {
         issues.push('Destination area is required for standard deliveries');
+      }
+    }
+    
+    // UPDATED: Doorstep delivery validation with package size
+    if (deliveryType === 'doorstep') {
+      if (!packageData.delivery_location?.trim()) {
+        issues.push('Delivery location is required for doorstep deliveries');
+      }
+      
+      // Validate package size if provided
+      if (packageData.package_size && !['small', 'medium', 'large'].includes(packageData.package_size)) {
+        issues.push('Package size must be small, medium, or large');
+      }
+      
+      // Validate special instructions for large packages
+      if (packageData.package_size === 'large' && !packageData.special_instructions?.trim()) {
+        issues.push('Special instructions are required for large packages');
       }
     }
     
@@ -516,27 +527,45 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
 };
 
 /**
- * FIXED: Create a new package with flexible origin agent requirement
+ * UPDATED: Create a new package with package_size and special_instructions support
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
     console.log('Creating package with data:', packageData);
     
-    // FIXED: Validate package data first
+    // Validate package data first
     const validation = validatePackageData(packageData);
     if (!validation.isValid) {
       throw new Error(validation.issues.join(', '));
     }
     
-    // FIXED: Clean up package data - remove null values and ensure proper structure
+    // UPDATED: Clean up package data and ensure package_size and special_instructions are included
     const cleanPackageData = {
       ...packageData,
       // Convert null to undefined for optional fields
       origin_agent_id: packageData.origin_agent_id || undefined,
       destination_agent_id: packageData.destination_agent_id || undefined,
       origin_area_id: packageData.origin_area_id || undefined,
-      destination_area_id: packageData.destination_area_id || undefined
+      destination_area_id: packageData.destination_area_id || undefined,
+      
+      // UPDATED: Include package_size and special_instructions for doorstep deliveries
+      package_size: packageData.delivery_type === 'doorstep' ? packageData.package_size || 'medium' : undefined,
+      special_instructions: packageData.special_instructions || undefined
     };
+    
+    // Remove undefined values to keep the payload clean
+    Object.keys(cleanPackageData).forEach(key => {
+      if (cleanPackageData[key] === undefined) {
+        delete cleanPackageData[key];
+      }
+    });
+    
+    console.log('Sending package data to API:', {
+      ...cleanPackageData,
+      // Log which fields are being sent
+      has_package_size: !!cleanPackageData.package_size,
+      has_special_instructions: !!cleanPackageData.special_instructions
+    });
     
     const response = await api.post('/api/v1/packages', cleanPackageData, {
       headers: {
@@ -736,7 +765,7 @@ export const formatRouteDescription = (originArea?: Area, destinationArea?: Area
   return `${origin} → ${destination}`;
 };
 
-// FIXED: Utility functions for delivery type checking
+// Utility functions for delivery type checking
 export const requiresOriginAgent = (deliveryType: string): boolean => {
   return !NO_ORIGIN_AGENT_DELIVERY_TYPES.includes(deliveryType.toLowerCase());
 };
@@ -750,7 +779,7 @@ export const isSpecialDeliveryType = (deliveryType: string): boolean => {
   return specialTypes.includes(deliveryType.toLowerCase());
 };
 
-// Data transformation helpers
+// Additional package management and transformation functions...
 const transformAreaData = (rawData: any, included: any[] = []): Area => {
   try {
     let areaData = rawData;
@@ -865,7 +894,7 @@ const transformAgentData = (rawData: any, included: any[] = []): Agent => {
   }
 };
 
-// Additional helper functions for packages management...
+// Package management functions...
 export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
   try {
     console.log('Fetching packages with filters:', filters);
@@ -1026,7 +1055,9 @@ const transformPackageData = (rawData: any, included: any[] = []): Package => {
       sender_phone: packageData.sender_phone,
       sender_email: packageData.sender_email,
       receiver_email: packageData.receiver_email,
-      business_name: packageData.business_name
+      business_name: packageData.business_name,
+      package_size: packageData.package_size,
+      special_instructions: packageData.special_instructions
     };
     
   } catch (error) {
@@ -1073,7 +1104,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
   try {
     console.log('Fetching QR code for package:', packageCode);
     
-    // FIXED: Use the correct endpoint path
     const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
       headers: {
         'Accept': 'application/json',
@@ -1084,7 +1114,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
     
     console.log('QR Code response:', response.data);
     
-    // Handle the response format
     if (response.data.success !== false && response.data.data) {
       return {
         data: {
@@ -1104,7 +1133,6 @@ export const getPackageQRCode = async (packageCode: string): Promise<QRCodeRespo
   } catch (error: any) {
     console.error('Failed to fetch QR code:', error);
     
-    // Return fallback QR data instead of throwing
     return {
       data: {
         qr_code_base64: null,
@@ -1123,10 +1151,8 @@ export const refreshData = async (): Promise<void> => {
   try {
     console.log('Refreshing package helpers data...');
     
-    // Clear cache to force fresh fetch
     clearCache();
     
-    // Fetch fresh data
     const [locations, areas, agents] = await Promise.allSettled([
       getLocations(),
       getAreas(),
