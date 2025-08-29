@@ -920,7 +920,7 @@ export default function CollectDeliverModal({
           }
         </Text>
         
-        <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
+        <ScrollView style={styles.confirmationScrollContainer} showsVerticalScrollIndicator={false}>
           {/* NEW: Show pending collections */}
           {pendingCollections.length > 0 && (
             <View style={styles.pendingCollectionsSection}>
@@ -1457,6 +1457,9 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#10b981',
     lineHeight: 18,
+  },
+  confirmationScrollContainer: {
+    flex: 1,
   },
   confirmationContainer: {
     flex: 1,
