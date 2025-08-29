@@ -77,6 +77,7 @@ interface ExtendedPackageData extends PackageData {
 interface PendingPackage extends ExtendedPackageData {
   id: string;
   created_at: number;
+  delivery_location?: string;
 }
 
 // Custom hooks for better separation of concerns
@@ -168,8 +169,9 @@ export default function PackageCreationModal({
   const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
   const [isCreatingMultiple, setIsCreatingMultiple] = useState(false);
 
-  // NEW: Package size and notes states
+  // FIXED: Separate state for large package modal to prevent input refreshing
   const [showLargePackageModal, setShowLargePackageModal] = useState(false);
+  const [largePackageInstructions, setLargePackageInstructions] = useState('');
 
   // Form data with extended properties
   const [packageData, setPackageData] = useState<ExtendedPackageData>({
@@ -387,6 +389,10 @@ export default function PackageCreationModal({
     });
     setSortConfig({ field: 'name', direction: 'asc' });
     setShowLargePackageModal(false);
+    setLargePackageInstructions('');
+    // FIXED: Clear pending packages on full reset
+    setPendingPackages([]);
+    setIsCreatingMultiple(false);
   }, []);
 
   // NEW: Reset only for new package (keep pending packages)
@@ -414,6 +420,7 @@ export default function PackageCreationModal({
     });
     setSortConfig({ field: 'name', direction: 'asc' });
     setShowLargePackageModal(false);
+    setLargePackageInstructions('');
   }, []);
 
   const closeModal = useCallback(() => {
@@ -528,6 +535,7 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type, packageData.package_size, calculateSizeCost]);
 
+  // FIXED: Simplified updatePackageData without package size modal trigger
   const updatePackageData = useCallback((field: keyof ExtendedPackageData, value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
@@ -538,15 +546,21 @@ export default function PackageCreationModal({
           updated.origin_area_id = selectedAgent.area.id;
         }
       }
-
-      // NEW: Handle package size change for large packages
-      if (field === 'package_size' && value === 'large' && prev.package_size !== 'large') {
-        setTimeout(() => setShowLargePackageModal(true), 100);
-      }
       
       return updated;
     });
   }, [agents]);
+
+  // FIXED: Separate handler for package size with modal trigger
+  const handlePackageSizeChange = useCallback((size: PackageSize) => {
+    updatePackageData('package_size', size);
+    
+    // Show modal only when changing TO large package
+    if (size === 'large' && packageData.package_size !== 'large') {
+      setLargePackageInstructions(packageData.special_instructions || '');
+      setShowLargePackageModal(true);
+    }
+  }, [updatePackageData, packageData.package_size, packageData.special_instructions]);
 
   const updateSearchQuery = useCallback((field: keyof typeof searchQueries, value: string) => {
     setSearchQueries(prev => ({ ...prev, [field]: value }));
@@ -720,7 +734,7 @@ export default function PackageCreationModal({
     setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
   }, []);
 
-  // NEW: Submit all packages (pending + current)
+  // FIXED: Submit all packages without calling onSubmit to avoid duplication
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
@@ -741,8 +755,8 @@ export default function PackageCreationModal({
         delivery_location: deliveryLocation
       };
 
-      // Prepare all packages for submission
-      const allPackages = [
+      // FIXED: Only create packages that haven't been submitted yet
+      const packagesToSubmit = [
         ...pendingPackages.map(pkg => ({
           ...pkg,
           sender_name: 'Current User',
@@ -751,17 +765,19 @@ export default function PackageCreationModal({
         currentPackageData
       ];
 
-      console.log(`📦 Submitting ${allPackages.length} packages...`);
+      console.log(`📦 Submitting ${packagesToSubmit.length} packages...`);
 
-      // Submit all packages
+      // Submit all packages via API
       const responses = await Promise.all(
-        allPackages.map(pkg => createPackage(pkg))
+        packagesToSubmit.map(pkg => createPackage(pkg))
       );
 
       console.log('✅ All packages created successfully:', responses);
 
-      // Call the onSubmit callback with the current package (for the success modal)
-      await onSubmit(currentPackageData);
+      // FIXED: Only call onSubmit with the last package for success modal, don't create it again
+      if (responses.length > 0) {
+        await onSubmit(currentPackageData);
+      }
 
       // Clear pending packages and close modal
       setPendingPackages([]);
@@ -806,6 +822,12 @@ export default function PackageCreationModal({
       });
     }
   }, [clearCache, loadModalData]);
+
+  // FIXED: Save large package instructions and close modal
+  const handleSaveLargePackageInstructions = useCallback(() => {
+    updatePackageData('special_instructions', largePackageInstructions);
+    setShowLargePackageModal(false);
+  }, [largePackageInstructions, updatePackageData]);
 
   // Enhanced Search and Sort Header Component
   const renderSearchAndSortHeader = useCallback((
@@ -892,7 +914,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // NEW: Large Package Notes Modal
+  // FIXED: Large Package Notes Modal with separate state
   const renderLargePackageModal = useCallback(() => (
     <Modal visible={showLargePackageModal} transparent animationType="fade">
       <View style={styles.largePackageModalOverlay}>
@@ -921,8 +943,8 @@ export default function PackageCreationModal({
                 style={[styles.input, styles.textArea]}
                 placeholder="e.g., Handle with care, fragile contents, requires 2 people to carry, use freight elevator, call before delivery..."
                 placeholderTextColor="#888"
-                value={packageData.special_instructions}
-                onChangeText={(value) => updatePackageData('special_instructions', value)}
+                value={largePackageInstructions}
+                onChangeText={setLargePackageInstructions}
                 multiline
                 numberOfLines={4}
                 textAlignVertical="top"
@@ -930,7 +952,7 @@ export default function PackageCreationModal({
             </View>
 
             <TouchableOpacity 
-              onPress={() => setShowLargePackageModal(false)} 
+              onPress={handleSaveLargePackageInstructions} 
               style={styles.largePackageModalButton}
             >
               <Text style={styles.largePackageModalButtonText}>Save Instructions</Text>
@@ -939,7 +961,7 @@ export default function PackageCreationModal({
         </View>
       </View>
     </Modal>
-  ), [showLargePackageModal, packageData.receiver_notes, packageData.rider_notes, updatePackageData]);
+  ), [showLargePackageModal, largePackageInstructions, handleSaveLargePackageInstructions]);
 
   // Step 0: UPDATED - Sender Office Selection
   const renderOriginAgentSelection = useCallback(() => {
@@ -1068,7 +1090,7 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  // UPDATED: Delivery method selection with new labels
+  // FIXED: Delivery method selection with fixed package size handler
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
@@ -1114,7 +1136,7 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       </View>
 
-      {/* NEW: Package Size Selection for Home Delivery */}
+      {/* FIXED: Package Size Selection for Home Delivery with proper handler */}
       {packageData.delivery_type === 'doorstep' && (
         <View style={styles.packageSizeContainer}>
           <Text style={styles.packageSizeTitle}>Package Size</Text>
@@ -1125,7 +1147,7 @@ export default function PackageCreationModal({
                 styles.packageSizeOption,
                 packageData.package_size === 'small' && styles.selectedPackageSizeOption
               ]}
-              onPress={() => updatePackageData('package_size', 'small')}
+              onPress={() => handlePackageSizeChange('small')}
             >
               <View style={styles.packageSizeContent}>
                 <Text style={styles.packageSizeLabel}>Small</Text>
@@ -1141,7 +1163,7 @@ export default function PackageCreationModal({
                 styles.packageSizeOption,
                 packageData.package_size === 'medium' && styles.selectedPackageSizeOption
               ]}
-              onPress={() => updatePackageData('package_size', 'medium')}
+              onPress={() => handlePackageSizeChange('medium')}
             >
               <View style={styles.packageSizeContent}>
                 <Text style={styles.packageSizeLabel}>Medium</Text>
@@ -1157,7 +1179,7 @@ export default function PackageCreationModal({
                 styles.packageSizeOption,
                 packageData.package_size === 'large' && styles.selectedPackageSizeOption
               ]}
-              onPress={() => updatePackageData('package_size', 'large')}
+              onPress={() => handlePackageSizeChange('large')}
             >
               <View style={styles.packageSizeContent}>
                 <Text style={styles.packageSizeLabel}>Large</Text>
@@ -1178,7 +1200,7 @@ export default function PackageCreationModal({
         </Text>
       </View>
     </View>
-  ), [packageData.delivery_type, packageData.package_size, updatePackageData]);
+  ), [packageData.delivery_type, packageData.package_size, updatePackageData, handlePackageSizeChange]);
 
   const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
