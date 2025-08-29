@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - FIXED: Location fetching and payment note
+// components/CollectDeliverModal.tsx - FIXED: Location, submission, and input issues
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -158,6 +158,7 @@ const LocationAreaSelectorModal: React.FC<{
     closeModal();
   };
 
+  // Fixed location fetching to match FragileDeliveryModal
   const useCurrentLocation = async () => {
     try {
       const { status } = await Location.requestForegroundPermissionsAsync();
@@ -166,11 +167,9 @@ const LocationAreaSelectorModal: React.FC<{
         return;
       }
 
-      const location = await Location.getCurrentPositionAsync({
-        accuracy: Location.Accuracy.High,
-      });
+      const location = await Location.getCurrentPositionAsync({});
       
-      const reverseGeocode = await Location.reverseGeocodeAsync({
+      const address = await Location.reverseGeocodeAsync({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
       });
@@ -178,8 +177,8 @@ const LocationAreaSelectorModal: React.FC<{
       const currentLoc: LocationData = {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
-        address: reverseGeocode[0] ? 
-          `${reverseGeocode[0].street || ''} ${reverseGeocode[0].city || ''}`.trim() || 'Current Location' : 'Current Location',
+        address: address[0] ? 
+          `${address[0].street}, ${address[0].city}` : 'Current Location',
         name: 'Current Location',
         description: 'Your current GPS position'
       };
@@ -188,7 +187,7 @@ const LocationAreaSelectorModal: React.FC<{
       closeModal();
     } catch (error) {
       console.error('Location error:', error);
-      Alert.alert('Error', 'Failed to get current location. Please enable location services.');
+      Alert.alert('Error', 'Failed to get current location');
     }
   };
 
@@ -327,7 +326,7 @@ export default function CollectDeliverModal({
   // Pending collections state
   const [pendingCollections, setPendingCollections] = useState<PendingCollection[]>([]);
   
-  // Form states
+  // Form states - using refs for inputs that have focus issues
   const [shopName, setShopName] = useState('');
   const [shopContact, setShopContact] = useState('');
   const [collectionAddress, setCollectionAddress] = useState('');
@@ -337,6 +336,12 @@ export default function CollectDeliverModal({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card'>('mpesa');
+  
+  // Refs for TextInputs to prevent focus loss
+  const specialInstructionsRef = useRef<TextInput>(null);
+  const itemDescriptionRef = useRef<TextInput>(null);
+  const collectionAddressRef = useRef<TextInput>(null);
+  const deliveryAddressRef = useRef<TextInput>(null);
   
   // Map modal states
   const [showCollectionMapModal, setShowCollectionMapModal] = useState(false);
@@ -367,7 +372,7 @@ export default function CollectDeliverModal({
   const savePendingCollections = async (collections: PendingCollection[]) => {
     try {
       await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(collections));
-      console.log('Saved pending collections to storage');
+      console.log('Saved pending collections to storage:', collections.length);
     } catch (error) {
       console.error('Failed to save pending collections:', error);
     }
@@ -540,6 +545,11 @@ export default function CollectDeliverModal({
 
   // Add current collection to pending list
   const addAnotherCollection = useCallback(async () => {
+    if (!shopName.trim() || !collectionAddress.trim() || !itemsToCollect.trim() || !itemValue.trim()) {
+      Alert.alert('Incomplete Form', 'Please fill in all required fields before adding another collection.');
+      return;
+    }
+
     const newPendingCollection: PendingCollection = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       shopName,
@@ -557,6 +567,7 @@ export default function CollectDeliverModal({
     const updatedCollections = [...pendingCollections, newPendingCollection];
     setPendingCollections(updatedCollections);
     await savePendingCollections(updatedCollections);
+    console.log('Added pending collection. Total pending:', updatedCollections.length);
     resetForNewCollection();
   }, [
     shopName, shopContact, collectionAddress, itemsToCollect, itemValue, 
@@ -569,6 +580,7 @@ export default function CollectDeliverModal({
     const updatedCollections = pendingCollections.filter(coll => coll.id !== collectionId);
     setPendingCollections(updatedCollections);
     await savePendingCollections(updatedCollections);
+    console.log('Removed pending collection. Total pending:', updatedCollections.length);
   }, [pendingCollections]);
 
   const isStepValid = useCallback((step: number) => {
@@ -614,30 +626,36 @@ export default function CollectDeliverModal({
     };
   };
 
+  // Fixed submission logic to prevent double submissions
   const handleSubmit = async () => {
-    if (!isStepValid(currentStep)) return;
+    if (!isStepValid(currentStep) || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
-      // Create all packages - pending collections + current
-      const allCollections = [
-        ...pendingCollections,
-        {
-          id: Date.now().toString(),
-          shopName,
-          shopContact,
-          collectionAddress,
-          itemsToCollect,
-          itemValue,
-          itemDescription,
-          specialInstructions,
-          selectedArea: selectedCollectionArea,
-          collectionLocation,
-          createdAt: Date.now()
-        }
-      ];
+      // Current collection data
+      const currentCollection = {
+        id: Date.now().toString(),
+        shopName,
+        shopContact,
+        collectionAddress,
+        itemsToCollect,
+        itemValue,
+        itemDescription,
+        specialInstructions,
+        selectedArea: selectedCollectionArea,
+        collectionLocation,
+        createdAt: Date.now()
+      };
 
+      // All collections to submit (pending + current)
+      const allCollections = [...pendingCollections, currentCollection];
+      console.log(`Submitting ${allCollections.length} collection(s)`);
+
+      // Get proper destination area ID from selected agent or area
+      const destinationAreaId = selectedDeliveryAgent?.area?.id || selectedDeliveryArea?.id || undefined;
+      
       // Submit each collection
+      let submittedCount = 0;
       for (const collection of allCollections) {
         const packageData: PackageData = {
           sender_name: 'Collection Service',
@@ -646,7 +664,7 @@ export default function CollectDeliverModal({
           receiver_phone: '+254700000000',
           
           origin_area_id: collection.selectedArea?.id || undefined,
-          destination_area_id: selectedDeliveryArea?.id || selectedDeliveryAgent?.area?.id || undefined,
+          destination_area_id: destinationAreaId,
           origin_agent_id: undefined,
           destination_agent_id: selectedDeliveryAgent?.id || undefined,
           
@@ -672,17 +690,24 @@ export default function CollectDeliverModal({
           payment_deadline: null,
         };
 
-        console.log('Submitting collection package data:', packageData);
+        console.log(`Submitting collection ${submittedCount + 1}/${allCollections.length}:`, {
+          shop: collection.shopName,
+          items: collection.itemsToCollect,
+          destinationAreaId,
+          agentId: selectedDeliveryAgent?.id
+        });
+        
         await onSubmit(packageData);
+        submittedCount++;
       }
 
-      console.log(`Successfully submitted ${allCollections.length} collection(s)`);
+      console.log(`Successfully submitted ${submittedCount} collection(s)`);
       
-      // Clear AsyncStorage after successful submission
+      // Clear storage and reset form after successful submission
       await AsyncStorage.removeItem(STORAGE_KEY);
       setPendingCollections([]);
+      resetForm();
       
-      closeModal();
     } catch (error) {
       console.error('Error submitting collect & deliver request:', error);
       Alert.alert('Error', 'Failed to create collection request. Please try again.');
@@ -729,6 +754,7 @@ export default function CollectDeliverModal({
       
       <View style={styles.formContainer}>
         <TextInput
+          key="shop-name-input"
           style={styles.input}
           placeholder="Shop/Store Name *"
           placeholderTextColor="#888"
@@ -738,6 +764,7 @@ export default function CollectDeliverModal({
         />
         
         <TextInput
+          key="shop-contact-input"
           style={styles.input}
           placeholder="Shop Contact Number (optional)"
           placeholderTextColor="#888"
@@ -747,6 +774,8 @@ export default function CollectDeliverModal({
         />
         
         <TextInput
+          ref={collectionAddressRef}
+          key="collection-address-input"
           style={[styles.input, styles.textArea]}
           placeholder="Collection address, building details, floor, etc. *"
           placeholderTextColor="#888"
@@ -792,6 +821,7 @@ export default function CollectDeliverModal({
       
       <View style={styles.formContainer}>
         <TextInput
+          key="items-to-collect-input"
           style={[styles.input, styles.textArea]}
           placeholder="What items should we collect? (e.g., phone, laptop, documents) *"
           placeholderTextColor="#888"
@@ -803,6 +833,7 @@ export default function CollectDeliverModal({
         />
         
         <TextInput
+          key="item-value-input"
           style={styles.input}
           placeholder="Estimated total value (KES) *"
           placeholderTextColor="#888"
@@ -812,6 +843,8 @@ export default function CollectDeliverModal({
         />
         
         <TextInput
+          ref={itemDescriptionRef}
+          key="item-description-input"
           style={[styles.input, styles.textArea]}
           placeholder="Additional item description or details (optional)"
           placeholderTextColor="#888"
@@ -841,6 +874,8 @@ export default function CollectDeliverModal({
       
       <View style={styles.formContainer}>
         <TextInput
+          ref={deliveryAddressRef}
+          key="delivery-address-input"
           style={[styles.input, styles.textArea]}
           placeholder="Your delivery address, building details, floor, etc. *"
           placeholderTextColor="#888"
@@ -852,6 +887,8 @@ export default function CollectDeliverModal({
         />
         
         <TextInput
+          ref={specialInstructionsRef}
+          key="special-instructions-input"
           style={[styles.input, styles.textArea]}
           placeholder="Special delivery instructions (optional)"
           placeholderTextColor="#888"
@@ -1579,7 +1616,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // Updated payment note styles
+  // Payment note styles
   paymentAdvanceNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
