@@ -20,6 +20,7 @@ import {
   Keyboard,
   FlatList,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -48,6 +49,8 @@ interface CollectDeliverModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
   currentLocation: LocationData | null;
 }
+
+const STORAGE_KEY = 'pending_collections';
 
 // NEW: Pending collection interface
 interface PendingCollection {
@@ -165,7 +168,18 @@ const LocationAreaSelectorModal: React.FC<{
 
   const useCurrentLocation = async () => {
     try {
-      const location = await Location.getCurrentPositionAsync({});
+      // Request permissions first
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission Denied', 'Location permission is required to use current location');
+        return;
+      }
+
+      const location = await Location.getCurrentPositionAsync({
+        accuracy: Location.Accuracy.Balanced,
+        timeout: 10000,
+      });
+      
       const address = await Location.reverseGeocodeAsync({
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -175,7 +189,7 @@ const LocationAreaSelectorModal: React.FC<{
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
         address: address[0] ? 
-          `${address[0].street}, ${address[0].city}` : 'Current Location',
+          `${address[0].street || ''} ${address[0].city || ''}`.trim() || 'Current Location' : 'Current Location',
         name: 'Current Location',
         description: 'Your current position'
       };
@@ -183,7 +197,8 @@ const LocationAreaSelectorModal: React.FC<{
       onLocationSelect(currentLoc);
       closeModal();
     } catch (error) {
-      Alert.alert('Error', 'Failed to get current location');
+      console.error('Location error:', error);
+      Alert.alert('Error', 'Failed to get current location. Please check your location settings.');
     }
   };
 
@@ -362,7 +377,6 @@ export default function CollectDeliverModal({
   const [deliveryAddress, setDeliveryAddress] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'mpesa' | 'card'>('mpesa');
-  const [requiresPaymentAdvance, setRequiresPaymentAdvance] = useState(false);
   
   // Map modal states
   const [showCollectionMapModal, setShowCollectionMapModal] = useState(false);
@@ -389,6 +403,9 @@ export default function CollectDeliverModal({
           areas: formData.areas?.length || 0, 
           agents: formData.agents?.length || 0 
         });
+
+        // Load pending collections from AsyncStorage
+        await loadPendingCollections();
       } catch (error) {
         console.error('Failed to load form data:', error);
       } finally {
@@ -398,6 +415,30 @@ export default function CollectDeliverModal({
 
     loadFormData();
   }, [visible]);
+
+  // NEW: Load pending collections from AsyncStorage
+  const loadPendingCollections = async () => {
+    try {
+      const saved = await AsyncStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        const collections = JSON.parse(saved);
+        setPendingCollections(collections);
+        console.log('📦 Loaded pending collections from storage:', collections.length);
+      }
+    } catch (error) {
+      console.error('Failed to load pending collections:', error);
+    }
+  };
+
+  // NEW: Save pending collections to AsyncStorage
+  const savePendingCollections = async (collections: PendingCollection[]) => {
+    try {
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(collections));
+      console.log('💾 Saved pending collections to storage');
+    } catch (error) {
+      console.error('Failed to save pending collections:', error);
+    }
+  };
 
   // Enhanced keyboard handling
   useEffect(() => {
@@ -496,7 +537,7 @@ export default function CollectDeliverModal({
   }, [onClose, pendingCollections.length]);
 
   // Reset form
-  const resetForm = useCallback(() => {
+  const resetForm = useCallback(async () => {
     setCurrentStep(0);
     setShopName('');
     setShopContact('');
@@ -507,13 +548,14 @@ export default function CollectDeliverModal({
     setDeliveryAddress('');
     setSpecialInstructions('');
     setPaymentMethod('mpesa');
-    setRequiresPaymentAdvance(false);
     setCollectionLocation(null);
     setDeliveryLocation(initialLocation);
     setSelectedCollectionArea(null);
     setSelectedDeliveryArea(null);
     setSelectedDeliveryAgent(null);
     setPendingCollections([]);
+    // Clear from AsyncStorage
+    await AsyncStorage.removeItem(STORAGE_KEY);
   }, [initialLocation]);
 
   // NEW: Reset for new collection (keep delivery info)
@@ -545,7 +587,7 @@ export default function CollectDeliverModal({
   };
 
   // NEW: Add current collection to pending list
-  const addAnotherCollection = useCallback(() => {
+  const addAnotherCollection = useCallback(async () => {
     const newPendingCollection: PendingCollection = {
       id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
       shopName,
@@ -556,14 +598,18 @@ export default function CollectDeliverModal({
       createdAt: Date.now()
     };
     
-    setPendingCollections(prev => [...prev, newPendingCollection]);
+    const updatedCollections = [...pendingCollections, newPendingCollection];
+    setPendingCollections(updatedCollections);
+    await savePendingCollections(updatedCollections);
     resetForNewCollection();
-  }, [shopName, collectionAddress, itemsToCollect, itemValue, selectedCollectionArea, resetForNewCollection]);
+  }, [shopName, collectionAddress, itemsToCollect, itemValue, selectedCollectionArea, pendingCollections, resetForNewCollection, savePendingCollections]);
 
   // NEW: Remove pending collection
-  const removePendingCollection = useCallback((collectionId: string) => {
-    setPendingCollections(prev => prev.filter(coll => coll.id !== collectionId));
-  }, []);
+  const removePendingCollection = useCallback(async (collectionId: string) => {
+    const updatedCollections = pendingCollections.filter(coll => coll.id !== collectionId);
+    setPendingCollections(updatedCollections);
+    await savePendingCollections(updatedCollections);
+  }, [pendingCollections, savePendingCollections]);
 
   const isStepValid = useCallback((step: number) => {
     switch (step) {
@@ -678,7 +724,6 @@ export default function CollectDeliverModal({
           item_description: itemDescription.trim() || collection.itemsToCollect,
           special_instructions: specialInstructions.trim(),
           payment_method: paymentMethod,
-          requires_payment_advance: requiresPaymentAdvance,
           collection_type: 'shop_pickup',
           
           // Coordinates if available
@@ -689,7 +734,7 @@ export default function CollectDeliverModal({
           
           // Timing
           collection_scheduled_at: null,
-          payment_deadline: requiresPaymentAdvance ? new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString() : null,
+          payment_deadline: null, // No longer using payment advance requirement
         };
 
         console.log('🚀 Submitting collection package data:', packageData);
@@ -697,6 +742,11 @@ export default function CollectDeliverModal({
       }
 
       console.log(`✅ Successfully submitted ${allCollections.length} collection(s)`);
+      
+      // Clear pending collections from AsyncStorage after successful submission
+      await AsyncStorage.removeItem(STORAGE_KEY);
+      setPendingCollections([]);
+      
       closeModal();
     } catch (error) {
       console.error('Error submitting collect & deliver request:', error);
@@ -908,7 +958,18 @@ export default function CollectDeliverModal({
   );
 
   const renderPaymentConfirmation = () => {
-    const totalCosts = calculateTotalCosts();
+    const costs = calculateCosts();
+    const totalCollectionsCount = pendingCollections.length + 1;
+    
+    // Calculate total costs for all collections
+    const currentCost = costs.total;
+    const pendingCosts = pendingCollections.map(coll => {
+      const itemValueNum = parseFloat(coll.itemValue) || 0;
+      const insuranceFee = Math.max(50, itemValueNum * 0.02);
+      return 200 + 250 + Math.round(insuranceFee) + 100;
+    });
+    const totalPendingCost = pendingCosts.reduce((sum, cost) => sum + cost, 0);
+    const grandTotal = currentCost + totalPendingCost;
     
     return (
       <View style={styles.stepContent}>
@@ -989,38 +1050,38 @@ export default function CollectDeliverModal({
                 <>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Pending Collections ({pendingCollections.length})</Text>
-                    <Text style={styles.costValue}>KES {totalCosts.pending}</Text>
+                    <Text style={styles.costValue}>KES {totalPendingCost}</Text>
                   </View>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Current Collection</Text>
-                    <Text style={styles.costValue}>KES {totalCosts.current}</Text>
+                    <Text style={styles.costValue}>KES {currentCost}</Text>
                   </View>
                   <View style={[styles.costLine, styles.totalLine]}>
-                    <Text style={styles.totalLabel}>Total ({totalCosts.count} collections)</Text>
-                    <Text style={styles.totalValue}>KES {totalCosts.total}</Text>
+                    <Text style={styles.totalLabel}>Total ({totalCollectionsCount} collections)</Text>
+                    <Text style={styles.totalValue}>KES {grandTotal}</Text>
                   </View>
                 </>
               ) : (
                 <>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Collection Fee</Text>
-                    <Text style={styles.costValue}>KES {calculateCosts().collection}</Text>
+                    <Text style={styles.costValue}>KES {costs.collection}</Text>
                   </View>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Delivery Fee</Text>
-                    <Text style={styles.costValue}>KES {calculateCosts().delivery}</Text>
+                    <Text style={styles.costValue}>KES {costs.delivery}</Text>
                   </View>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Insurance</Text>
-                    <Text style={styles.costValue}>KES {calculateCosts().insurance}</Text>
+                    <Text style={styles.costValue}>KES {costs.insurance}</Text>
                   </View>
                   <View style={styles.costLine}>
                     <Text style={styles.costLabel}>Service Fee</Text>
-                    <Text style={styles.costValue}>KES {calculateCosts().service}</Text>
+                    <Text style={styles.costValue}>KES {costs.service}</Text>
                   </View>
                   <View style={[styles.costLine, styles.totalLine]}>
                     <Text style={styles.totalLabel}>Total</Text>
-                    <Text style={styles.totalValue}>KES {calculateCosts().total}</Text>
+                    <Text style={styles.totalValue}>KES {costs.total}</Text>
                   </View>
                 </>
               )}
@@ -1148,7 +1209,7 @@ export default function CollectDeliverModal({
                   <Text style={[styles.submitButtonText, 
                                (!isStepValid(currentStep) || isSubmitting) && styles.submitButtonTextDisabled]}>
                     {pendingCollections.length > 0 ? 
-                      `Create ${totalCosts.count} Collection${totalCosts.count > 1 ? 's' : ''}` :
+                      `Create ${pendingCollections.length + 1} Collection${pendingCollections.length > 0 ? 's' : ''}` :
                       'Create Collection Request'
                     }
                   </Text>
@@ -1606,6 +1667,23 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 14,
     color: '#888',
+    lineHeight: 18,
+  },
+  
+  // NEW: Payment advance note styles (replacing selectable option)
+  paymentAdvanceNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+    marginTop: 12,
+  },
+  paymentAdvanceNoteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#10b981',
     lineHeight: 18,
   },
   
