@@ -1139,7 +1139,7 @@ export default function CollectDeliverModal({
                   <Text style={[styles.submitButtonText, 
                                (!isStepValid(currentStep) || isSubmitting) && styles.submitButtonTextDisabled]}>
                     {pendingCollections.length > 0 ? 
-                      `Create ${totalCollectionsCount} Collection${totalCollectionsCount > 1 ? 's' : ''}` :
+                      `Create ${pendingCollections.length + 1} Collection${pendingCollections.length > 0 ? 's' : ''}` :
                       'Create Collection Request'
                     }
                   </Text>
