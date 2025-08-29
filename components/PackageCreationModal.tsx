@@ -654,11 +654,28 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, typeof items>);
 
+    // Sort locations alphabetically A-Z, with "Unknown Location" at the end
     return Object.entries(grouped)
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => {
+        if (a === 'Unknown Location') return 1;
+        if (b === 'Unknown Location') return -1;
+        return a.localeCompare(b, 'en', { sensitivity: 'base' });
+      })
       .map(([locationName, items]) => ({
         locationName,
-        items
+        // Sort items within each location alphabetically A-Z
+        items: items.sort((a, b) => {
+          let aName = '';
+          let bName = '';
+          if (itemType === 'agent') {
+            aName = (a as Agent).name || '';
+            bName = (b as Agent).name || '';
+          } else {
+            aName = (a as Area).name || '';
+            bName = (b as Area).name || '';
+          }
+          return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
+        })
       }));
   }, [applySortAndFilter]);
 
