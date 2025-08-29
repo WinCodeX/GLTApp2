@@ -45,6 +45,15 @@ interface DeliveryInfo {
   description: string;
 }
 
+interface SuccessModalData {
+  title: string;
+  message: string;
+  trackingNumber: string;
+  status: string;
+  color: string;
+  icon: string;
+}
+
 const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   fragile: {
     title: 'Fragile Items',
@@ -73,6 +82,10 @@ export default function HomeScreen() {
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedInfo, setSelectedInfo] = useState<DeliveryInfo | null>(null);
   
+  // Success modal states
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
+  
   // User info (this would come from authentication/user context in real app)
   const [userInfo] = useState({
     name: 'Current User',
@@ -86,6 +99,10 @@ export default function HomeScreen() {
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsScale = useRef(new Animated.Value(0)).current;
   const optionsTranslateY = useRef(new Animated.Value(100)).current;
+  
+  // Success modal animations
+  const successModalScale = useRef(new Animated.Value(0)).current;
+  const successModalOpacity = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     const locationTagWidth = 120;
@@ -201,6 +218,55 @@ export default function HomeScreen() {
     setSelectedInfo(null);
   };
 
+  // Success Modal Handlers
+  const showSuccessPopup = (data: SuccessModalData) => {
+    setSuccessModalData(data);
+    setShowSuccessModal(true);
+    
+    // Animate in
+    Animated.parallel([
+      Animated.spring(successModalScale, {
+        toValue: 1,
+        tension: 150,
+        friction: 8,
+        useNativeDriver: true,
+      }),
+      Animated.timing(successModalOpacity, {
+        toValue: 1,
+        duration: 300,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start();
+
+    // Auto hide after 4 seconds
+    setTimeout(() => {
+      closeSuccessModal();
+    }, 4000);
+  };
+
+  const closeSuccessModal = () => {
+    Animated.parallel([
+      Animated.timing(successModalScale, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+      Animated.timing(successModalOpacity, {
+        toValue: 0,
+        duration: 250,
+        easing: Easing.in(Easing.quad),
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowSuccessModal(false);
+      setSuccessModalData(null);
+      successModalScale.setValue(0);
+      successModalOpacity.setValue(0);
+    });
+  };
+
   // FAB Options Actions
   const handleFragileDelivery = () => {
     closeFabMenu();
@@ -310,19 +376,14 @@ export default function HomeScreen() {
       
       console.log('✅ Fragile package created successfully:', response);
       
-      Alert.alert(
-        'Fragile Items Scheduled! ⚠️',
-        `Your fragile items delivery has been scheduled with special handling.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
-        [
-          {
-            text: 'Schedule Another',
-            onPress: () => {
-              setTimeout(() => setShowFragileModal(true), 500);
-            }
-          },
-          { text: 'OK' }
-        ]
-      );
+      showSuccessPopup({
+        title: 'Fragile Items Scheduled!',
+        message: 'Your fragile items delivery has been scheduled with special handling.',
+        trackingNumber: response.tracking_number || 'Generated',
+        status: response.status || 'Pending Payment',
+        color: '#FF9500',
+        icon: 'alert-triangle'
+      });
       
     } catch (error: any) {
       console.error('❌ Error creating fragile package:', error);
@@ -352,19 +413,14 @@ export default function HomeScreen() {
       
       console.log('✅ Collect package created successfully:', response);
       
-      Alert.alert(
-        'Package Collection Scheduled! 📦',
-        `Your package collection request has been scheduled.\n\nTracking Code: ${response.tracking_number || 'Generated'}\n\nStatus: ${response.status || 'Pending Payment'}`,
-        [
-          {
-            text: 'Schedule Another',
-            onPress: () => {
-              setTimeout(() => setShowCollectModal(true), 500);
-            }
-          },
-          { text: 'OK' }
-        ]
-      );
+      showSuccessPopup({
+        title: 'Package Collection Scheduled!',
+        message: 'Your package collection request has been scheduled.',
+        trackingNumber: response.tracking_number || 'Generated',
+        status: response.status || 'Pending Payment',
+        color: '#10B981',
+        icon: 'package'
+      });
       
     } catch (error: any) {
       console.error('❌ Error creating collect package:', error);
@@ -510,6 +566,117 @@ export default function HomeScreen() {
     </Modal>
   );
 
+  const renderSuccessModal = () => (
+    <Modal
+      visible={showSuccessModal}
+      transparent
+      animationType="none"
+      onRequestClose={closeSuccessModal}
+    >
+      <View style={styles.successModalOverlay}>
+        <TouchableOpacity 
+          style={styles.successModalTouchable}
+          onPress={closeSuccessModal}
+          activeOpacity={1}
+        >
+          <Animated.View
+            style={[
+              styles.successModalContainer,
+              {
+                opacity: successModalOpacity,
+                transform: [{ scale: successModalScale }],
+              },
+            ]}
+          >
+            <LinearGradient
+              colors={[
+                `${successModalData?.color}15`,
+                `${successModalData?.color}25`,
+                `${successModalData?.color}15`,
+              ]}
+              style={[
+                styles.successModalContent,
+                {
+                  borderColor: `${successModalData?.color}40`,
+                  shadowColor: successModalData?.color,
+                }
+              ]}
+            >
+              <View style={styles.successModalHeader}>
+                <View 
+                  style={[
+                    styles.successModalIconContainer,
+                    { 
+                      backgroundColor: `${successModalData?.color}20`,
+                      shadowColor: successModalData?.color,
+                    }
+                  ]}
+                >
+                  <Feather 
+                    name={successModalData?.icon as any} 
+                    size={28} 
+                    color={successModalData?.color} 
+                  />
+                </View>
+                <TouchableOpacity 
+                  onPress={closeSuccessModal} 
+                  style={styles.successModalClose}
+                >
+                  <Feather name="x" size={20} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <Text style={[styles.successModalTitle, { color: successModalData?.color }]}>
+                {successModalData?.title}
+              </Text>
+              
+              <Text style={styles.successModalMessage}>
+                {successModalData?.message}
+              </Text>
+              
+              <View style={styles.successModalDetails}>
+                <Text style={styles.successModalDetailLabel}>Tracking Code:</Text>
+                <Text style={[styles.successModalDetailValue, { color: successModalData?.color }]}>
+                  {successModalData?.trackingNumber}
+                </Text>
+              </View>
+              
+              <View style={styles.successModalDetails}>
+                <Text style={styles.successModalDetailLabel}>Status:</Text>
+                <Text style={styles.successModalDetailValue}>
+                  {successModalData?.status}
+                </Text>
+              </View>
+
+              <View style={styles.successModalButtons}>
+                <TouchableOpacity 
+                  onPress={() => {
+                    closeSuccessModal();
+                    setTimeout(() => {
+                      if (successModalData?.icon === 'alert-triangle') {
+                        setShowFragileModal(true);
+                      } else if (successModalData?.icon === 'package') {
+                        setShowCollectModal(true);
+                      }
+                    }, 500);
+                  }}
+                  style={[
+                    styles.successModalButton,
+                    { backgroundColor: `${successModalData?.color}20` }
+                  ]}
+                >
+                  <Text style={[styles.successModalButtonText, { color: successModalData?.color }]}>
+                    Schedule Another
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        </TouchableOpacity>
+      </View>
+    </Modal>
+  );
+
   const fabIconRotation = fabRotation.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '45deg'],
@@ -626,6 +793,9 @@ export default function HomeScreen() {
 
       {/* Info Modal */}
       {renderInfoModal()}
+
+      {/* Success Modal */}
+      {renderSuccessModal()}
 
       {/* Package Creation Modal */}
       <PackageCreationModal
@@ -938,5 +1108,124 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+  },
+
+  // Success Modal Styles
+  successModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  successModalTouchable: {
+    flex: 1,
+    width: '100%',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  successModalContainer: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 24,
+    overflow: 'hidden',
+  },
+  successModalContent: {
+    padding: 28,
+    borderRadius: 24,
+    borderWidth: 2,
+    backgroundColor: 'rgba(26, 26, 46, 0.95)',
+    backdropFilter: 'blur(20px)',
+    shadowOffset: { width: 0, height: 20 },
+    shadowOpacity: 0.6,
+    shadowRadius: 30,
+    elevation: 25,
+  },
+  successModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  successModalIconContainer: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.4,
+    shadowRadius: 16,
+    elevation: 12,
+  },
+  successModalClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  successModalTitle: {
+    fontSize: 22,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 12,
+    textShadowColor: 'rgba(0, 0, 0, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+  },
+  successModalMessage: {
+    fontSize: 16,
+    color: '#ccc',
+    textAlign: 'center',
+    lineHeight: 24,
+    marginBottom: 24,
+    opacity: 0.9,
+  },
+  successModalDetails: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  successModalDetailLabel: {
+    fontSize: 14,
+    color: '#999',
+    fontWeight: '500',
+  },
+  successModalDetailValue: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+    maxWidth: '60%',
+    textAlign: 'right',
+  },
+  successModalButtons: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  successModalButton: {
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    minWidth: 160,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  successModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
