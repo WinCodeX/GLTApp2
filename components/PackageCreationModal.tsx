@@ -15,6 +15,7 @@ import {
   SafeAreaView,
   StatusBar,
   Keyboard,
+  Alert,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -39,8 +40,9 @@ interface PackageCreationModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
 }
 
+// UPDATED: New step titles with better labeling
 const STEP_TITLES = [
-  'Origin Agent',
+  'Sender Office',
   'Receiver Details', 
   'Delivery Method',
   'Destination',
@@ -50,9 +52,8 @@ const STEP_TITLES = [
 
 type SortOption = 'name' | 'location' | 'area';
 type SortDirection = 'asc' | 'desc';
-
-// Updated delivery type without fragile option (now handled by separate modal)
 type DeliveryType = 'doorstep' | 'agent';
+type PackageSize = 'small' | 'medium' | 'large';
 
 // Storage keys for caching
 const STORAGE_KEYS = {
@@ -62,8 +63,21 @@ const STORAGE_KEYS = {
   LAST_UPDATED: 'package_modal_last_updated'
 } as const;
 
-// Cache duration (24 hours)
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
+
+// NEW: Extended PackageData interface with size and notes
+interface ExtendedPackageData extends PackageData {
+  delivery_type: DeliveryType;
+  package_size?: PackageSize;
+  receiver_notes?: string;
+  rider_notes?: string;
+}
+
+// NEW: Interface for pending packages
+interface PendingPackage extends ExtendedPackageData {
+  id: string;
+  created_at: number;
+}
 
 // Custom hooks for better separation of concerns
 const useDataCache = () => {
@@ -150,8 +164,15 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // UPDATED: Form data without fragile option, defaulting to doorstep
-  const [packageData, setPackageData] = useState<PackageData & { delivery_type: DeliveryType }>({
+  // NEW: Multi-package states
+  const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
+  const [isCreatingMultiple, setIsCreatingMultiple] = useState(false);
+
+  // NEW: Package size and notes states
+  const [showLargePackageModal, setShowLargePackageModal] = useState(false);
+
+  // Form data with extended properties
+  const [packageData, setPackageData] = useState<ExtendedPackageData>({
     sender_name: '',
     sender_phone: '',
     receiver_name: '',
@@ -160,7 +181,10 @@ export default function PackageCreationModal({
     destination_area_id: '',
     origin_agent_id: '',
     destination_agent_id: '',
-    delivery_type: 'doorstep' as DeliveryType // Default to doorstep instead of fragile
+    delivery_type: 'doorstep' as DeliveryType,
+    package_size: 'medium' as PackageSize, // Default to medium
+    receiver_notes: '',
+    rider_notes: ''
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -232,6 +256,9 @@ export default function PackageCreationModal({
     [agents, packageData.destination_agent_id]
   );
 
+  // NEW: Calculate total packages (pending + current)
+  const totalPackages = pendingPackages.length + (currentStep === STEP_TITLES.length - 1 ? 1 : 0);
+
   useEffect(() => {
     if (visible) {
       console.log('📦 Modal opened, loading data...');
@@ -281,7 +308,6 @@ export default function PackageCreationModal({
         }
       }
       
-      // Fetch fresh data using the proper helper function
       console.log('🌐 Fetching fresh data from API using helper...');
       console.log('🔗 API Call: getPackageFormData()');
       
@@ -296,7 +322,6 @@ export default function PackageCreationModal({
         agentsLength: formData.agents?.length || 0
       });
       
-      // Validate the data before setting it
       const validation = validatePackageFormData(formData);
       if (!validation.isValid) {
         console.error('❌ Fresh data validation failed:', validation.issues);
@@ -304,12 +329,10 @@ export default function PackageCreationModal({
         return;
       }
       
-      // Set the data directly from helper
       setLocations(formData.locations);
       setAreas(formData.areas);
       setAgents(formData.agents);
       
-      // Save to cache
       await saveToCache({
         locations: formData.locations,
         areas: formData.areas,
@@ -322,23 +345,10 @@ export default function PackageCreationModal({
         agents: formData.agents.length
       });
       
-      if (formData.agents.length > 0) {
-        console.log('🔍 Sample agent structure:', JSON.stringify(formData.agents[0], null, 2));
-      }
-      if (formData.areas.length > 0) {
-        console.log('🔍 Sample area structure:', JSON.stringify(formData.areas[0], null, 2));
-      }
-      
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        stack: error.stack,
-        name: error.name
-      });
       setDataError(error.message || 'Failed to load data');
       
-      // Try to load cached data as fallback even if expired
       const cachedData = await loadFromCache();
       if (cachedData) {
         console.log('📋 Using expired cache as fallback...');
@@ -354,7 +364,6 @@ export default function PackageCreationModal({
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
-    // UPDATED: Default to doorstep delivery instead of fragile
     setPackageData({
       sender_name: '',
       sender_phone: '',
@@ -364,7 +373,10 @@ export default function PackageCreationModal({
       destination_area_id: '',
       origin_agent_id: '',
       destination_agent_id: '',
-      delivery_type: 'doorstep' as DeliveryType
+      delivery_type: 'doorstep' as DeliveryType,
+      package_size: 'medium' as PackageSize,
+      receiver_notes: '',
+      rider_notes: ''
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -375,20 +387,88 @@ export default function PackageCreationModal({
       destinationArea: ''
     });
     setSortConfig({ field: 'name', direction: 'asc' });
+    setShowLargePackageModal(false);
+  }, []);
+
+  // NEW: Reset only for new package (keep pending packages)
+  const resetFormForNewPackage = useCallback(() => {
+    setCurrentStep(0);
+    setPackageData({
+      sender_name: '',
+      sender_phone: '',
+      receiver_name: '',
+      receiver_phone: '',
+      origin_area_id: '',
+      destination_area_id: '',
+      origin_agent_id: '',
+      destination_agent_id: '',
+      delivery_type: 'doorstep' as DeliveryType,
+      package_size: 'medium' as PackageSize,
+      receiver_notes: '',
+      rider_notes: ''
+    });
+    setDeliveryLocation('');
+    setEstimatedCost(null);
+    setSearchQueries({
+      originAgent: '',
+      destinationAgent: '',
+      destinationArea: ''
+    });
+    setSortConfig({ field: 'name', direction: 'asc' });
+    setShowLargePackageModal(false);
   }, []);
 
   const closeModal = useCallback(() => {
-    Keyboard.dismiss();
-    Animated.timing(slideAnim, {
-      toValue: SCREEN_HEIGHT,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      onClose();
-    });
-  }, [slideAnim, onClose]);
+    // NEW: Show warning if there are pending packages
+    if (pendingPackages.length > 0) {
+      Alert.alert(
+        'Unsaved Packages',
+        `You have ${pendingPackages.length} unsaved package(s). If you close now, all progress will be lost. It's recommended to submit your packages first.`,
+        [
+          {
+            text: 'Continue Editing',
+            style: 'cancel'
+          },
+          {
+            text: 'Close and Lose Progress',
+            style: 'destructive',
+            onPress: () => {
+              setPendingPackages([]);
+              setIsCreatingMultiple(false);
+              Keyboard.dismiss();
+              Animated.timing(slideAnim, {
+                toValue: SCREEN_HEIGHT,
+                duration: 250,
+                useNativeDriver: true,
+              }).start(() => {
+                onClose();
+              });
+            }
+          }
+        ]
+      );
+    } else {
+      Keyboard.dismiss();
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        onClose();
+      });
+    }
+  }, [slideAnim, onClose, pendingPackages.length]);
 
-  // UPDATED: Cost calculation without fragile delivery pricing
+  // NEW: Package size cost calculation with pricing tiers
+  const calculateSizeCost = useCallback((size: PackageSize) => {
+    switch (size) {
+      case 'small': return 0; // No additional cost
+      case 'medium': return 50; // Additional 50 KES
+      case 'large': return 120; // Additional 120 KES
+      default: return 50;
+    }
+  }, []);
+
   const calculateCost = useCallback(() => {
     console.log('💰 Starting cost calculation...');
     
@@ -397,14 +477,6 @@ export default function PackageCreationModal({
       return;
     }
 
-    console.log('✅ Origin agent found:', {
-      agentId: selectedOriginAgent.id,
-      agentName: selectedOriginAgent.name,
-      agentArea: selectedOriginAgent.area,
-      agentAreaId: selectedOriginAgent.area?.id
-    });
-
-    console.log('🔍 Searching for origin area...');
     const originArea = areas.find(a => {
       return a.id === selectedOriginAgent.area?.id || 
              a.id == selectedOriginAgent.area?.id || 
@@ -413,121 +485,66 @@ export default function PackageCreationModal({
     
     if (!originArea) {
       console.log('❌ Origin area not found for cost calculation');
-      console.log('🔍 Available areas:', areas.map(a => ({ id: a.id, name: a.name })));
-      console.log('🔍 Looking for area with ID:', selectedOriginAgent.area?.id);
       return;
     }
-
-    console.log('✅ Origin area found:', {
-      areaId: originArea.id,
-      areaName: originArea.name,
-      locationId: originArea.location_id,
-      locationName: originArea.location?.name
-    });
 
     if (!selectedDestinationArea) {
       console.log('❌ Destination area not found for cost calculation');
       return;
     }
-
-    console.log('✅ Destination area found:', {
-      areaId: selectedDestinationArea.id,
-      areaName: selectedDestinationArea.name,
-      locationId: selectedDestinationArea.location_id,
-      locationName: selectedDestinationArea.location?.name
-    });
     
-    console.log('💰 Calculating cost with areas:', {
-      originAgent: selectedOriginAgent.name,
-      originArea: originArea.name,
-      originLocation: originArea.location?.name,
-      destinationArea: selectedDestinationArea.name,
-      destinationLocation: selectedDestinationArea.location?.name,
-      deliveryType: packageData.delivery_type
-    });
-    
-    // UPDATED: Area-based pricing logic without fragile delivery
     const isIntraArea = String(originArea.id) === String(selectedDestinationArea.id);
     const isIntraLocation = String(originArea.location_id) === String(selectedDestinationArea.location_id);
-    
-    console.log('🔍 Pricing logic checks:', {
-      originAreaId: originArea.id,
-      destinationAreaId: selectedDestinationArea.id,
-      originLocationId: originArea.location_id,
-      destinationLocationId: selectedDestinationArea.location_id,
-      isIntraArea,
-      isIntraLocation
-    });
     
     let baseCost = 0;
     
     if (packageData.delivery_type === 'agent') {
-      // Agent-to-Agent pricing
       if (isIntraArea) {
         baseCost = 120;
-        console.log('💰 Same area agent transfer: KES 120');
       } else if (isIntraLocation) {
         baseCost = 150;
-        console.log('💰 Same location, different areas agent transfer: KES 150');
       } else {
         baseCost = 180;
-        console.log('💰 Different locations agent transfer: KES 180');
       }
     } else {
-      // Agent-to-Doorstep pricing
       if (isIntraArea) {
         baseCost = 250;
-        console.log('💰 Same area doorstep delivery: KES 250');
       } else if (isIntraLocation) {
         baseCost = 300;
-        console.log('💰 Same location, different areas doorstep delivery: KES 300');
       } else {
         baseCost = 380;
-        console.log('💰 Different locations doorstep delivery: KES 380');
       }
     }
     
-    console.log('💰 Final cost calculation result:', {
-      isIntraArea,
-      isIntraLocation,
-      deliveryType: packageData.delivery_type,
-      baseCost
-    });
+    // NEW: Add package size cost for doorstep delivery
+    if (packageData.delivery_type === 'doorstep') {
+      const sizeCost = calculateSizeCost(packageData.package_size || 'medium');
+      baseCost += sizeCost;
+      console.log('💰 Added size cost:', {
+        size: packageData.package_size,
+        sizeCost,
+        totalCost: baseCost
+      });
+    }
     
     setEstimatedCost(baseCost);
-  }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type]);
+  }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type, packageData.package_size, calculateSizeCost]);
 
-  const updatePackageData = useCallback((field: keyof (PackageData & { delivery_type: DeliveryType }), value: string) => {
+  const updatePackageData = useCallback((field: keyof ExtendedPackageData, value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
-      // Auto-update origin_area_id when origin_agent_id changes
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
         if (selectedAgent && selectedAgent.area?.id) {
           updated.origin_area_id = selectedAgent.area.id;
-          console.log('🎯 Origin agent selected:', {
-            agentName: selectedAgent.name,
-            agentId: selectedAgent.id,
-            areaId: selectedAgent.area.id,
-            areaName: selectedAgent.area.name,
-            locationName: selectedAgent.area.location?.name
-          });
-          console.log('🎯 Updated origin_area_id to:', selectedAgent.area.id);
-        } else {
-          console.warn('⚠️ Selected agent has no area or area.id:', selectedAgent);
         }
       }
-      
-      // Debug the full package data state
-      console.log('📦 Package data updated:', {
-        field,
-        value,
-        origin_agent_id: updated.origin_agent_id,
-        origin_area_id: updated.origin_area_id,
-        destination_area_id: updated.destination_area_id,
-        delivery_type: updated.delivery_type
-      });
+
+      // NEW: Handle package size change for large packages
+      if (field === 'package_size' && value === 'large' && prev.package_size !== 'large') {
+        setTimeout(() => setShowLargePackageModal(true), 100);
+      }
       
       return updated;
     });
@@ -537,66 +554,34 @@ export default function PackageCreationModal({
     setSearchQueries(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  // Better sorting and filtering with detailed logging
   const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
-    console.log(`🔍 Starting filter for ${itemType}s:`, {
-      inputCount: items.length,
-      searchQuery,
-      hasSearchQuery: searchQuery.length > 0
-    });
+    if (items.length === 0) return [];
 
-    if (items.length === 0) {
-      console.warn(`⚠️ No ${itemType}s to filter`);
-      return [];
-    }
-
-    // Filter by search query
     const filtered = items.filter(item => {
       const searchLower = searchQuery.toLowerCase();
       if (itemType === 'agent') {
         const agent = item as Agent;
         const name = agent.name || '';
-        const phone = agent.phone || '';
         const areaName = agent.area?.name || '';
         const locationName = agent.area?.location?.name || '';
         
-        const matches = (
+        return (
           name.toLowerCase().includes(searchLower) ||
-          phone.toLowerCase().includes(searchLower) ||
           areaName.toLowerCase().includes(searchLower) ||
           locationName.toLowerCase().includes(searchLower)
         );
-        
-        if (searchQuery && matches) {
-          console.log(`✅ Agent match: ${name} (${areaName})`);
-        }
-        
-        return matches;
       } else {
         const area = item as Area;
         const name = area.name || '';
         const locationName = area.location?.name || '';
         
-        const matches = (
+        return (
           name.toLowerCase().includes(searchLower) ||
           locationName.toLowerCase().includes(searchLower)
         );
-        
-        if (searchQuery && matches) {
-          console.log(`✅ Area match: ${name} (${locationName})`);
-        }
-        
-        return matches;
       }
     });
 
-    console.log(`✅ Filtered ${itemType}s:`, {
-      filteredCount: filtered.length,
-      originalCount: items.length,
-      hasResults: filtered.length > 0
-    });
-
-    // Apply sorting
     const sorted = filtered.sort((a, b) => {
       let aValue = '';
       let bValue = '';
@@ -632,23 +617,13 @@ export default function PackageCreationModal({
       return sortConfig.direction === 'asc' ? comparison : -comparison;
     });
 
-    console.log(`🔄 Sorted ${itemType}s by ${sortConfig.field} (${sortConfig.direction}):`, sorted.length);
-
     return sorted;
   }, [sortConfig]);
 
-  // Better grouping with detailed logging
   const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
     const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
     
-    console.log(`📋 Starting grouping for ${itemType}s:`, {
-      sortedFilteredCount: sortedFiltered.length
-    });
-    
-    if (sortedFiltered.length === 0) {
-      console.warn(`⚠️ No ${itemType}s to group`);
-      return [];
-    }
+    if (sortedFiltered.length === 0) return [];
     
     const grouped = sortedFiltered.reduce((acc, item) => {
       let locationName = 'Unknown Location';
@@ -667,19 +642,12 @@ export default function PackageCreationModal({
       return acc;
     }, {} as Record<string, typeof items>);
 
-    const result = Object.entries(grouped)
+    return Object.entries(grouped)
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([locationName, items]) => ({
         locationName,
         items
       }));
-
-    console.log(`✅ Grouped ${itemType}s:`, {
-      groupCount: result.length,
-      groups: result.map(g => ({ location: g.locationName, count: g.items.length }))
-    });
-
-    return result;
   }, [applySortAndFilter]);
 
   const handleSortChange = useCallback((field: SortOption) => {
@@ -735,25 +703,39 @@ export default function PackageCreationModal({
     }
   }, [currentStep, packageData.delivery_type]);
 
+  // NEW: Add current package to pending list
+  const addAnotherPackage = useCallback(() => {
+    const newPendingPackage: PendingPackage = {
+      ...packageData,
+      delivery_location: deliveryLocation,
+      id: Date.now().toString() + Math.random().toString(36).substr(2, 9),
+      created_at: Date.now()
+    };
+    
+    setPendingPackages(prev => [...prev, newPendingPackage]);
+    setIsCreatingMultiple(true);
+    resetFormForNewPackage();
+  }, [packageData, deliveryLocation, resetFormForNewPackage]);
+
+  // NEW: Remove package from pending list
+  const removePendingPackage = useCallback((packageId: string) => {
+    setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
+  }, []);
+
+  // NEW: Submit all packages (pending + current)
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
-    console.log('📦 Starting package submission...');
-    console.log('📦 Current package data before submission:', packageData);
-    console.log('📦 Origin agent:', selectedOriginAgent);
-    console.log('📦 Delivery location:', deliveryLocation);
-
     setIsSubmitting(true);
     try {
-      // Ensure origin_area_id is properly set from the selected agent
+      // Prepare current package
       let finalOriginAreaId = packageData.origin_area_id;
       
       if (!finalOriginAreaId && selectedOriginAgent?.area?.id) {
         finalOriginAreaId = selectedOriginAgent.area.id;
-        console.log('🔧 Fixed missing origin_area_id from selected agent:', finalOriginAreaId);
       }
 
-      const finalPackageData = {
+      const currentPackageData = {
         ...packageData,
         origin_area_id: finalOriginAreaId,
         sender_name: 'Current User',
@@ -761,39 +743,39 @@ export default function PackageCreationModal({
         delivery_location: deliveryLocation
       };
 
-      console.log('📦 Final submission data:', finalPackageData);
-      
-      if (!finalPackageData.origin_area_id) {
-        console.error('❌ Missing origin_area_id in final submission');
-        Toast.show({
-          type: 'error',
-          text1: 'Missing Origin Area',
-          text2: 'Please select an origin agent first',
-          position: 'top',
-          visibilityTime: 4000,
-        });
-        setIsSubmitting(false);
-        return;
-      }
-      
-      const packageResponse = await createPackage(finalPackageData);
-      console.log('✅ Package created successfully:', packageResponse);
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Package Created Successfully!',
-        text2: `Tracking: ${packageResponse.tracking_code}`,
-        position: 'top',
-        visibilityTime: 4000,
-      });
-      
+      // Prepare all packages for submission
+      const allPackages = [
+        ...pendingPackages.map(pkg => ({
+          ...pkg,
+          sender_name: 'Current User',
+          sender_phone: '+254700000000'
+        })),
+        currentPackageData
+      ];
+
+      console.log(`📦 Submitting ${allPackages.length} packages...`);
+
+      // Submit all packages
+      const responses = await Promise.all(
+        allPackages.map(pkg => createPackage(pkg))
+      );
+
+      console.log('✅ All packages created successfully:', responses);
+
+      // Call the onSubmit callback with the current package (for the success modal)
+      await onSubmit(currentPackageData);
+
+      // Clear pending packages and close modal
+      setPendingPackages([]);
+      setIsCreatingMultiple(false);
       closeModal();
+      
     } catch (error: any) {
-      console.error('❌ Failed to submit package:', error);
+      console.error('❌ Failed to submit packages:', error);
       
       Toast.show({
         type: 'error',
-        text1: 'Failed to Create Package',
+        text1: 'Failed to Create Packages',
         text2: error.message,
         position: 'top',
         visibilityTime: 4000,
@@ -801,29 +783,23 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, closeModal]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, onSubmit, closeModal]);
 
   const retryDataLoad = useCallback(() => {
-    console.log('🔄 Retrying data load...');
     loadModalData();
   }, [loadModalData]);
 
   const handleClearCache = useCallback(async () => {
     try {
       await clearCache();
-      
       Toast.show({
         type: 'success',
         text1: 'Cache Cleared - Refreshing Data',
         position: 'top',
         visibilityTime: 2000,
       });
-      
       await loadModalData();
-      
     } catch (error) {
-      console.error('Error clearing cache:', error);
-      
       Toast.show({
         type: 'error',
         text1: 'Failed to Clear Cache',
@@ -903,9 +879,10 @@ export default function PackageCreationModal({
       </View>
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
+        {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length > 1 ? 's' : ''} pending`}
       </Text>
     </View>
-  ), [currentStep]);
+  ), [currentStep, pendingPackages.length]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.header}>
@@ -917,23 +894,79 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // Step 0: Origin Agent Selection
+  // NEW: Large Package Notes Modal
+  const renderLargePackageModal = useCallback(() => (
+    <Modal visible={showLargePackageModal} transparent animationType="fade">
+      <View style={styles.largePackageModalOverlay}>
+        <View style={styles.largePackageModalContainer}>
+          <LinearGradient
+            colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+            style={styles.largePackageModalContent}
+          >
+            <View style={styles.largePackageModalHeader}>
+              <Text style={styles.largePackageModalTitle}>Large Package - Special Instructions</Text>
+              <TouchableOpacity 
+                onPress={() => setShowLargePackageModal(false)} 
+                style={styles.largePackageModalClose}
+              >
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+            
+            <Text style={styles.largePackageModalSubtitle}>
+              Large packages require additional handling care. Please provide specific instructions:
+            </Text>
+            
+            <View style={styles.largePackageFormContainer}>
+              <Text style={styles.largePackageInputLabel}>Instructions for Receiver:</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="e.g., Handle with care, fragile contents, requires 2 people to carry..."
+                placeholderTextColor="#888"
+                value={packageData.receiver_notes}
+                onChangeText={(value) => updatePackageData('receiver_notes', value)}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+              
+              <Text style={styles.largePackageInputLabel}>Instructions for Delivery Rider:</Text>
+              <TextInput
+                style={[styles.input, styles.textArea]}
+                placeholder="e.g., Use freight elevator, call before delivery, requires assistance..."
+                placeholderTextColor="#888"
+                value={packageData.rider_notes}
+                onChangeText={(value) => updatePackageData('rider_notes', value)}
+                multiline
+                numberOfLines={3}
+                textAlignVertical="top"
+              />
+            </View>
+
+            <TouchableOpacity 
+              onPress={() => setShowLargePackageModal(false)} 
+              style={styles.largePackageModalButton}
+            >
+              <Text style={styles.largePackageModalButtonText}>Save Instructions</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  ), [showLargePackageModal, packageData.receiver_notes, packageData.rider_notes, updatePackageData]);
+
+  // Step 0: UPDATED - Sender Office Selection
   const renderOriginAgentSelection = useCallback(() => {
-    console.log('🎯 Rendering origin agent selection...');
-    console.log('🎯 Agents available:', agents.length);
-    console.log('🎯 Search query:', searchQueries.originAgent);
-    
     const groupedAgents = getGroupedItems(agents, searchQueries.originAgent, 'agent');
-    console.log('🎯 Grouped agents result:', groupedAgents.length, 'groups');
     
     return (
       <View style={styles.stepContent}>
-        <Text style={styles.stepTitle}>Select Origin Agent</Text>
-        <Text style={styles.stepSubtitle}>Which agent will collect the package?</Text>
+        <Text style={styles.stepTitle}>Select Sender Office</Text>
+        <Text style={styles.stepSubtitle}>Which office will collect the package?</Text>
         
         <View style={styles.dataInfoContainer}>
           <Text style={styles.dataInfoText}>
-            {agents.length} agents available
+            {agents.length} offices available
           </Text>
           {searchQueries.originAgent && (
             <Text style={styles.dataInfoText}>
@@ -945,7 +978,7 @@ export default function PackageCreationModal({
         {renderSearchAndSortHeader(
           searchQueries.originAgent,
           (value) => updateSearchQuery('originAgent', value),
-          'Search agents by name, area, or location...'
+          'Search offices by name, area, or location...'
         )}
         
         <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
@@ -959,8 +992,7 @@ export default function PackageCreationModal({
                 
                 {group.items.map((agent) => {
                   const agentData = agent as Agent;
-                  const agentName = agentData.name || 'Unknown Agent';
-                  const agentPhone = agentData.phone || '';
+                  const agentName = agentData.name || 'Unknown Office';
                   const agentId = agentData.id || '';
                   
                   const areaName = agentData.area?.name || 'Unknown Area';
@@ -986,7 +1018,6 @@ export default function PackageCreationModal({
                           <Text style={styles.selectionLocation}>
                             {areaName} • {locationName}
                           </Text>
-                          <Text style={styles.selectionPhone}>{agentPhone}</Text>
                         </View>
                         {packageData.origin_agent_id === agentId && (
                           <Feather name="check-circle" size={20} color="#10b981" />
@@ -1001,7 +1032,7 @@ export default function PackageCreationModal({
             <View style={styles.noResultsContainer}>
               <Feather name="search" size={48} color="#666" />
               <Text style={styles.noResultsTitle}>
-                {searchQueries.originAgent ? 'No agents found' : 'No agents available'}
+                {searchQueries.originAgent ? 'No offices found' : 'No offices available'}
               </Text>
               <Text style={styles.noResultsText}>
                 {searchQueries.originAgent 
@@ -1051,14 +1082,13 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  // UPDATED: Delivery method selection without fragile option
+  // UPDATED: Delivery method selection with new labels
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
       <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
       
       <View style={styles.deliveryOptions}>
-        {/* Doorstep Delivery - First option (now default) */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1069,7 +1099,7 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="home" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>🏠 Doorstep Delivery</Text>
+              <Text style={styles.deliveryOptionTitle}>🏠 Home Delivery</Text>
               <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address (RECOMMENDED)</Text>
             </View>
             {packageData.delivery_type === 'doorstep' && (
@@ -1078,7 +1108,6 @@ export default function PackageCreationModal({
           </View>
         </TouchableOpacity>
 
-        {/* Agent Delivery - Second option */}
         <TouchableOpacity
           style={[
             styles.deliveryOption,
@@ -1087,10 +1116,10 @@ export default function PackageCreationModal({
           onPress={() => updatePackageData('delivery_type', 'agent')}
         >
           <View style={styles.deliveryOptionContent}>
-            <Feather name="user" size={24} color="#fff" />
+            <Feather name="briefcase" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>👤 Agent Delivery</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Collect from destination agent</Text>
+              <Text style={styles.deliveryOptionTitle}>🏢 Office Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Collect from destination office</Text>
             </View>
             {packageData.delivery_type === 'agent' && (
               <Feather name="check-circle" size={20} color="#10b981" />
@@ -1099,6 +1128,63 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       </View>
 
+      {/* NEW: Package Size Selection for Home Delivery */}
+      {packageData.delivery_type === 'doorstep' && (
+        <View style={styles.packageSizeContainer}>
+          <Text style={styles.packageSizeTitle}>Package Size</Text>
+          
+          <View style={styles.packageSizeOptions}>
+            <TouchableOpacity
+              style={[
+                styles.packageSizeOption,
+                packageData.package_size === 'small' && styles.selectedPackageSizeOption
+              ]}
+              onPress={() => updatePackageData('package_size', 'small')}
+            >
+              <View style={styles.packageSizeContent}>
+                <Text style={styles.packageSizeLabel}>Small</Text>
+                <Text style={styles.packageSizeDescription}>Up to 2kg • Free</Text>
+              </View>
+              {packageData.package_size === 'small' && (
+                <Feather name="check-circle" size={16} color="#10b981" />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.packageSizeOption,
+                packageData.package_size === 'medium' && styles.selectedPackageSizeOption
+              ]}
+              onPress={() => updatePackageData('package_size', 'medium')}
+            >
+              <View style={styles.packageSizeContent}>
+                <Text style={styles.packageSizeLabel}>Medium</Text>
+                <Text style={styles.packageSizeDescription}>Up to 10kg • +KES 50</Text>
+              </View>
+              {packageData.package_size === 'medium' && (
+                <Feather name="check-circle" size={16} color="#10b981" />
+              )}
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.packageSizeOption,
+                packageData.package_size === 'large' && styles.selectedPackageSizeOption
+              ]}
+              onPress={() => updatePackageData('package_size', 'large')}
+            >
+              <View style={styles.packageSizeContent}>
+                <Text style={styles.packageSizeLabel}>Large</Text>
+                <Text style={styles.packageSizeDescription}>Up to 25kg • +KES 120</Text>
+              </View>
+              {packageData.package_size === 'large' && (
+                <Feather name="check-circle" size={16} color="#10b981" />
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
       <View style={styles.deliveryNote}>
         <Feather name="info" size={16} color="#7c3aed" />
         <Text style={styles.deliveryNoteText}>
@@ -1106,19 +1192,19 @@ export default function PackageCreationModal({
         </Text>
       </View>
     </View>
-  ), [packageData.delivery_type, updatePackageData]);
+  ), [packageData.delivery_type, packageData.package_size, updatePackageData]);
 
   const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
       return (
         <View style={styles.stepContent}>
-          <Text style={styles.stepTitle}>Select Destination Agent</Text>
-          <Text style={styles.stepSubtitle}>Which agent will handle final delivery?</Text>
+          <Text style={styles.stepTitle}>Select Receiving Office</Text>
+          <Text style={styles.stepSubtitle}>Which office will handle final delivery?</Text>
           
           {renderSearchAndSortHeader(
             searchQueries.destinationAgent,
             (value) => updateSearchQuery('destinationAgent', value),
-            'Search destination agents...'
+            'Search receiving offices...'
           )}
           
           <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
@@ -1131,8 +1217,7 @@ export default function PackageCreationModal({
                 
                 {group.items.map((agent) => {
                   const agentData = agent as Agent;
-                  const agentName = agentData.name || 'Unknown Agent';
-                  const agentPhone = agentData.phone || '';
+                  const agentName = agentData.name || 'Unknown Office';
                   const agentId = agentData.id || '';
                   
                   const areaName = agentData.area?.name || 'Unknown Area';
@@ -1158,7 +1243,6 @@ export default function PackageCreationModal({
                           <Text style={styles.selectionLocation}>
                             {areaName} • {locationName}
                           </Text>
-                          <Text style={styles.selectionPhone}>{agentPhone}</Text>
                         </View>
                         {packageData.destination_agent_id === agentId && (
                           <Feather name="check-circle" size={20} color="#10b981" />
@@ -1249,12 +1333,47 @@ export default function PackageCreationModal({
     </View>
   ), [deliveryLocation]);
 
+  // NEW: Enhanced confirmation with pending packages and size info
   const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
       <Text style={styles.stepTitle}>Confirm Package Details</Text>
-      <Text style={styles.stepSubtitle}>Review all information before submitting</Text>
+      <Text style={styles.stepSubtitle}>
+        {pendingPackages.length > 0 
+          ? `Review all ${totalPackages} package${totalPackages > 1 ? 's' : ''} before submitting`
+          : 'Review all information before submitting'
+        }
+      </Text>
       
+      {/* Show pending packages if any */}
+      {pendingPackages.length > 0 && (
+        <View style={styles.pendingPackagesContainer}>
+          <Text style={styles.pendingPackagesTitle}>Pending Packages ({pendingPackages.length})</Text>
+          {pendingPackages.map((pkg, index) => (
+            <View key={pkg.id} style={styles.pendingPackageItem}>
+              <View style={styles.pendingPackageHeader}>
+                <Text style={styles.pendingPackageNumber}>Package {index + 1}</Text>
+                <TouchableOpacity 
+                  onPress={() => removePendingPackage(pkg.id)}
+                  style={styles.removePendingPackageButton}
+                >
+                  <Feather name="trash-2" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.pendingPackageSummary}>
+                {pkg.receiver_name} • {pkg.delivery_type === 'doorstep' ? 'Home' : 'Office'} Delivery
+                {pkg.package_size && pkg.delivery_type === 'doorstep' && ` • ${pkg.package_size.charAt(0).toUpperCase() + pkg.package_size.slice(1)}`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      
+      {/* Current package confirmation */}
       <View style={styles.confirmationContainer}>
+        <Text style={styles.currentPackageTitle}>
+          {pendingPackages.length > 0 ? `Package ${pendingPackages.length + 1}` : 'Current Package'}
+        </Text>
+        
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Route</Text>
           <View style={styles.routeDisplay}>
@@ -1299,13 +1418,19 @@ export default function PackageCreationModal({
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
           <Text style={styles.confirmationDetail}>
-            {packageData.delivery_type === 'doorstep' ? 'Doorstep Delivery' : 'Agent Delivery'}
+            {packageData.delivery_type === 'doorstep' ? 'Home Delivery' : 'Office Delivery'}
           </Text>
+          
+          {/* Show package size for home delivery */}
+          {packageData.delivery_type === 'doorstep' && packageData.package_size && (
+            <Text style={styles.confirmationDetail}>
+              Package Size: {packageData.package_size.charAt(0).toUpperCase() + packageData.package_size.slice(1)}
+            </Text>
+          )}
           
           {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
             <View style={styles.agentInfo}>
-              <Text style={styles.confirmationDetail}>Destination Agent: {selectedDestinationAgent?.name}</Text>
-              <Text style={styles.confirmationSubDetail}>{selectedDestinationAgent?.phone}</Text>
+              <Text style={styles.confirmationDetail}>Receiving Office: {selectedDestinationAgent?.name}</Text>
             </View>
           )}
 
@@ -1315,6 +1440,24 @@ export default function PackageCreationModal({
               <Text style={styles.confirmationDetail}>{deliveryLocation}</Text>
             </View>
           )}
+
+          {/* Show large package notes */}
+          {packageData.package_size === 'large' && (packageData.receiver_notes || packageData.rider_notes) && (
+            <View style={styles.largePackageNotesInfo}>
+              {packageData.receiver_notes && (
+                <View>
+                  <Text style={styles.confirmationSubDetail}>Receiver Instructions:</Text>
+                  <Text style={styles.confirmationDetail}>{packageData.receiver_notes}</Text>
+                </View>
+              )}
+              {packageData.rider_notes && (
+                <View>
+                  <Text style={styles.confirmationSubDetail}>Rider Instructions:</Text>
+                  <Text style={styles.confirmationDetail}>{packageData.rider_notes}</Text>
+                </View>
+              )}
+            </View>
+          )}
         </View>
 
         <View style={styles.confirmationSection}>
@@ -1322,35 +1465,38 @@ export default function PackageCreationModal({
           {estimatedCost ? (
             <View style={styles.costDisplay}>
               <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
+              {packageData.delivery_type === 'doorstep' && packageData.package_size !== 'small' && (
+                <Text style={styles.costBreakdown}>
+                  Base cost + {packageData.package_size} package fee
+                </Text>
+              )}
             </View>
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
           )}
-          
-          {/* Debug information for cost calculation */}
-          {__DEV__ && selectedOriginAgent && (
-            <View style={styles.debugInfo}>
-              <Text style={styles.debugText}>
-                Debug: {selectedOriginAgent?.area?.name} → {selectedDestinationArea?.name}
-              </Text>
-              <Text style={styles.debugText}>
-                Same Area: {selectedOriginAgent?.area?.id === selectedDestinationArea?.id ? 'Yes' : 'No'}
-              </Text>
-              <Text style={styles.debugText}>
-                Same Location: {selectedOriginAgent?.area?.location_id === selectedDestinationArea?.location_id ? 'Yes' : 'No'}
-              </Text>
-              <Text style={styles.debugText}>
-                Delivery Type: {packageData.delivery_type}
-              </Text>
-              <Text style={styles.debugText}>
-                Origin Area ID: {packageData.origin_area_id}
-              </Text>
-            </View>
-          )}
         </View>
       </View>
+
+      {/* Add Another Package Button */}
+      {currentStep === STEP_TITLES.length - 1 && (
+        <View style={styles.addAnotherContainer}>
+          <TouchableOpacity 
+            onPress={addAnotherPackage}
+            style={styles.addAnotherButton}
+          >
+            <Feather name="plus" size={20} color="#7c3aed" />
+            <Text style={styles.addAnotherButtonText}>Add Another Package</Text>
+          </TouchableOpacity>
+          <Text style={styles.addAnotherNote}>
+            Note: If you close before submitting, all progress will be lost. Submit your packages first.
+          </Text>
+        </View>
+      )}
     </View>
-  ), [selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, deliveryLocation, estimatedCost]);
+  ), [
+    selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, 
+    deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep
+  ]);
 
   const renderCurrentStep = useCallback(() => {
     switch (currentStep) {
@@ -1375,7 +1521,6 @@ export default function PackageCreationModal({
       
       <View style={styles.spacer} />
       
-      {/* Debug cache clear button in development */}
       {__DEV__ && currentStep === 0 && (
         <TouchableOpacity onPress={handleClearCache} style={styles.debugButton}>
           <Text style={styles.debugButtonText}>Clear Cache</Text>
@@ -1416,7 +1561,10 @@ export default function PackageCreationModal({
                 styles.submitButtonText,
                 (!isCurrentStepValid() || isSubmitting) && styles.disabledButtonText
               ]}>
-                Create Package
+                {pendingPackages.length > 0 
+                  ? `Submit ${totalPackages} Package${totalPackages > 1 ? 's' : ''}`
+                  : 'Create Package'
+                }
               </Text>
               <Feather name="check" size={20} color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} />
             </>
@@ -1424,9 +1572,8 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       )}
     </View>
-  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache]);
+  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, pendingPackages.length, totalPackages]);
 
-  // MAIN CONTENT RENDERING
   const renderMainContent = useCallback(() => {
     if (isDataLoading) {
       return (
@@ -1434,7 +1581,7 @@ export default function PackageCreationModal({
           <ActivityIndicator size="large" color="#7c3aed" />
           <Text style={styles.loadingTitle}>Loading Package Data</Text>
           <Text style={styles.loadingSubtitle}>
-            Fetching locations, areas, and agents...
+            Fetching locations, areas, and offices...
           </Text>
         </View>
       );
@@ -1514,11 +1661,14 @@ export default function PackageCreationModal({
           </View>
         </KeyboardAvoidingView>
       </SafeAreaView>
+      
+      {/* Large Package Modal */}
+      {renderLargePackageModal()}
     </Modal>
   );
 }
 
-// Enhanced styles with updated delivery note
+// Enhanced styles with new package size and multi-package features
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1659,7 +1809,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   
-  // UPDATED: Delivery note for fragile reference
   deliveryNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1674,6 +1823,197 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#7c3aed',
     lineHeight: 18,
+  },
+  
+  // NEW: Package Size Styles
+  packageSizeContainer: {
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  packageSizeTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  packageSizeOptions: {
+    gap: 8,
+  },
+  packageSizeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 12,
+  },
+  selectedPackageSizeOption: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  packageSizeContent: {
+    flex: 1,
+  },
+  packageSizeLabel: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  packageSizeDescription: {
+    fontSize: 13,
+    color: '#888',
+  },
+  
+  // NEW: Large Package Modal Styles
+  largePackageModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  largePackageModalContainer: {
+    width: '100%',
+    maxWidth: 450,
+    borderRadius: 20,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  largePackageModalContent: {
+    padding: 24,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  largePackageModalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  largePackageModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#fff',
+    flex: 1,
+  },
+  largePackageModalClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  largePackageModalSubtitle: {
+    fontSize: 16,
+    color: '#ccc',
+    lineHeight: 22,
+    marginBottom: 20,
+  },
+  largePackageFormContainer: {
+    gap: 16,
+    marginBottom: 20,
+  },
+  largePackageInputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 6,
+  },
+  largePackageModalButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  largePackageModalButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  
+  // NEW: Pending Packages Styles
+  pendingPackagesContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  pendingPackagesTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 12,
+  },
+  pendingPackageItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  pendingPackageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  pendingPackageNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  removePendingPackageButton: {
+    padding: 4,
+  },
+  pendingPackageSummary: {
+    fontSize: 13,
+    color: '#888',
+  },
+  currentPackageTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 16,
+  },
+  
+  // NEW: Add Another Package Styles
+  addAnotherContainer: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  addAnotherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+    gap: 8,
+  },
+  addAnotherButtonText: {
+    fontSize: 16,
+    color: '#7c3aed',
+    fontWeight: '600',
+  },
+  addAnotherNote: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 16,
+    paddingHorizontal: 20,
   },
   
   searchAndSortContainer: {
@@ -1948,6 +2288,13 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
+  largePackageNotesInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
   costDisplay: {
     alignItems: 'flex-start',
   },
@@ -1955,6 +2302,11 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: '700',
     color: '#10b981',
+  },
+  costBreakdown: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
   },
   pricingError: {
     fontSize: 14,
