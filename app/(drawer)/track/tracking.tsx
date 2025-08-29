@@ -67,8 +67,9 @@ export default function PackageTracking() {
     switch (deliveryType) {
       case 'collection': return 'Collection';
       case 'fragile': return 'Fragile';
-      case 'doorstep': return 'Doorstep';
+      case 'doorstep': return 'Home';
       case 'office': return 'Office';
+      case 'agent': return 'Office';
       case 'mixed': return 'Mixed';
       default: return deliveryType.charAt(0).toUpperCase() + deliveryType.slice(1);
     }
@@ -103,6 +104,20 @@ export default function PackageTracking() {
       default: return 'package';
     }
   }, []);
+
+  // Get delivery type badge style with outline pattern (matching track.tsx)
+  const getDeliveryTypeBadgeStyle = useCallback((deliveryType: string) => {
+    const baseColor = getDeliveryTypeBadgeColor(deliveryType);
+    // Convert hex to rgba for outline effect
+    const colorMap: Record<string, { bg: string; border: string }> = {
+      '#f59e0b': { bg: 'rgba(245, 158, 11, 0.2)', border: 'rgba(245, 158, 11, 0.4)' }, // Collection
+      '#ef4444': { bg: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.4)' },   // Fragile  
+      '#3b82f6': { bg: 'rgba(59, 130, 246, 0.2)', border: 'rgba(59, 130, 246, 0.4)' }, // Home
+      '#8b5cf6': { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' }, // Office
+    };
+    
+    return colorMap[baseColor] || { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' };
+  }, [getDeliveryTypeBadgeColor]);
 
   // Get status description based on package type
   const getStatusDescription = useCallback((state: string, deliveryType: string): string => {
@@ -145,11 +160,11 @@ export default function PackageTracking() {
       
       case 'delivered':
         return deliveryType === 'doorstep' ? 
-          'Package delivered to your doorstep' :
+          'Package delivered to your home' :
           'Package delivered to destination area';
       
       case 'collected':
-        return deliveryType === 'office' ? 
+        return deliveryType === 'office' || deliveryType === 'agent' ? 
           'Package collected from our office' :
           'Package collected by recipient';
       
@@ -303,7 +318,8 @@ export default function PackageTracking() {
         // Load QR code
         setIsLoadingQR(true);
         try {
-          const qrResponse = await getPackageQRCode(packageData.id?.toString() || packageCode);
+          // Use package ID for QR code endpoint (not package code)
+          const qrResponse = await getPackageQRCode(packageData.id);
           if (qrResponse?.data) {
             setQrData(qrResponse.data);
             console.log('✅ QR code loaded for tracking');
@@ -674,14 +690,17 @@ export default function PackageTracking() {
                 <View style={styles.summaryBadges}>
                   <View style={[
                     styles.deliveryTypeBadge, 
-                    { backgroundColor: getDeliveryTypeBadgeColor(package_.delivery_type) }
+                    { 
+                      backgroundColor: getDeliveryTypeBadgeStyle(package_.delivery_type).bg,
+                      borderColor: getDeliveryTypeBadgeStyle(package_.delivery_type).border
+                    }
                   ]}>
                     <Feather 
                       name={getPackageTypeIcon(package_.delivery_type) as any} 
                       size={12} 
-                      color="#fff" 
+                      color={getDeliveryTypeBadgeColor(package_.delivery_type)} 
                     />
-                    <Text style={styles.badgeText}>
+                    <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(package_.delivery_type) }]}>
                       {getDeliveryTypeDisplay(package_.delivery_type)}
                     </Text>
                   </View>
@@ -904,6 +923,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    borderWidth: 1,
     gap: 4,
   },
   stateBadge: {
