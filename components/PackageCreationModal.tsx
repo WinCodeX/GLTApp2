@@ -50,7 +50,6 @@ const STEP_TITLES = [
   'Confirm Details'
 ];
 
-type SortOption = 'name' | 'location' | 'area';
 type SortDirection = 'asc' | 'desc';
 type DeliveryType = 'doorstep' | 'agent';
 type PackageSize = 'small' | 'medium' | 'large';
@@ -200,7 +199,7 @@ export default function PackageCreationModal({
   });
   
   const [sortConfig, setSortConfig] = useState<{
-    field: SortOption;
+    field: 'name' | 'location';
     direction: SortDirection;
   }>({
     field: 'name',
@@ -566,9 +565,8 @@ export default function PackageCreationModal({
     setSearchQueries(prev => ({ ...prev, [field]: value }));
   }, []);
 
-  const applySortAndFilter = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
-    if (items.length === 0) return [];
-
+  const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
+    // First filter the items based on search query
     const filtered = items.filter(item => {
       const searchLower = searchQuery.toLowerCase();
       if (itemType === 'agent') {
@@ -593,93 +591,80 @@ export default function PackageCreationModal({
         );
       }
     });
-
-    const sorted = filtered.sort((a, b) => {
-      let aValue = '';
-      let bValue = '';
+    
+    if (filtered.length === 0) return [];
+    
+    // Handle sorting based on field
+    if (sortConfig.field === 'name') {
+      // For name sorting: return flat list sorted by name only
+      const sorted = filtered.sort((a, b) => {
+        let aName = '';
+        let bName = '';
+        if (itemType === 'agent') {
+          aName = (a as Agent).name || '';
+          bName = (b as Agent).name || '';
+        } else {
+          aName = (a as Area).name || '';
+          bName = (b as Area).name || '';
+        }
+        const comparison = aName.localeCompare(bName, 'en', { sensitivity: 'base' });
+        return sortConfig.direction === 'asc' ? comparison : -comparison;
+      });
       
-      switch (sortConfig.field) {
-        case 'name':
-          if (itemType === 'agent') {
-            aValue = (a as Agent).name || '';
-            bValue = (b as Agent).name || '';
-          } else {
-            aValue = (a as Area).name || '';
-            bValue = (b as Area).name || '';
-          }
-          break;
-        case 'location':
-          if (itemType === 'agent') {
-            aValue = (a as Agent).area?.location?.name || '';
-            bValue = (b as Agent).area?.location?.name || '';
-          } else {
-            aValue = (a as Area).location?.name || '';
-            bValue = (b as Area).location?.name || '';
-          }
-          break;
-        case 'area':
-          if (itemType === 'agent') {
-            aValue = (a as Agent).area?.name || '';
-            bValue = (b as Agent).area?.name || '';
-          }
-          break;
-      }
-      
-      const comparison = aValue.localeCompare(bValue);
-      return sortConfig.direction === 'asc' ? comparison : -comparison;
-    });
+      // Return as a single group with no location header
+      return [{
+        locationName: 'All Items',
+        items: sorted
+      }];
+    } else {
+      // For location sorting: group by location and sort both groups and items within groups
+      const grouped = filtered.reduce((acc, item) => {
+        let locationName = 'Unknown Location';
+        if (itemType === 'agent') {
+          const agent = item as Agent;
+          locationName = agent.area?.location?.name || 'Unknown Location';
+        } else {
+          const area = item as Area;
+          locationName = area.location?.name || 'Unknown Location';
+        }
+        
+        if (!acc[locationName]) {
+          acc[locationName] = [];
+        }
+        acc[locationName].push(item);
+        return acc;
+      }, {} as Record<string, typeof items>);
 
-    return sorted;
+      // Sort locations alphabetically A-Z, with "Unknown Location" at the end
+      const sortedGroups = Object.entries(grouped)
+        .sort(([a], [b]) => {
+          if (a === 'Unknown Location') return 1;
+          if (b === 'Unknown Location') return -1;
+          const comparison = a.localeCompare(b, 'en', { sensitivity: 'base' });
+          return sortConfig.direction === 'asc' ? comparison : -comparison;
+        })
+        .map(([locationName, items]) => ({
+          locationName,
+          // Sort items within each location alphabetically by name
+          items: items.sort((a, b) => {
+            let aName = '';
+            let bName = '';
+            if (itemType === 'agent') {
+              aName = (a as Agent).name || '';
+              bName = (b as Agent).name || '';
+            } else {
+              aName = (a as Area).name || '';
+              bName = (b as Area).name || '';
+            }
+            return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
+          })
+        }));
+      
+      return sortedGroups;
+    }
   }, [sortConfig]);
 
-  const getGroupedItems = useCallback((items: Agent[] | Area[], searchQuery: string, itemType: 'agent' | 'area') => {
-    const sortedFiltered = applySortAndFilter(items, searchQuery, itemType);
-    
-    if (sortedFiltered.length === 0) return [];
-    
-    const grouped = sortedFiltered.reduce((acc, item) => {
-      let locationName = 'Unknown Location';
-      if (itemType === 'agent') {
-        const agent = item as Agent;
-        locationName = agent.area?.location?.name || 'Unknown Location';
-      } else {
-        const area = item as Area;
-        locationName = area.location?.name || 'Unknown Location';
-      }
-      
-      if (!acc[locationName]) {
-        acc[locationName] = [];
-      }
-      acc[locationName].push(item);
-      return acc;
-    }, {} as Record<string, typeof items>);
-
-    // Sort locations alphabetically A-Z, with "Unknown Location" at the end
-    return Object.entries(grouped)
-      .sort(([a], [b]) => {
-        if (a === 'Unknown Location') return 1;
-        if (b === 'Unknown Location') return -1;
-        return a.localeCompare(b, 'en', { sensitivity: 'base' });
-      })
-      .map(([locationName, items]) => ({
-        locationName,
-        // Sort items within each location alphabetically A-Z
-        items: items.sort((a, b) => {
-          let aName = '';
-          let bName = '';
-          if (itemType === 'agent') {
-            aName = (a as Agent).name || '';
-            bName = (b as Agent).name || '';
-          } else {
-            aName = (a as Area).name || '';
-            bName = (b as Area).name || '';
-          }
-          return aName.localeCompare(bName, 'en', { sensitivity: 'base' });
-        })
-      }));
-  }, [applySortAndFilter]);
-
-  const handleSortChange = useCallback((field: SortOption) => {
+  const handleSortChange = useCallback((field: 'name' | 'location') => {
     setSortConfig(prev => ({
       field,
       direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
@@ -878,7 +863,7 @@ export default function PackageCreationModal({
         <View style={styles.sortContainer}>
           <Text style={styles.sortLabel}>Sort by:</Text>
           <View style={styles.sortButtons}>
-            {(['name', 'location', 'area'] as SortOption[]).map((option) => (
+            {(['name', 'location'] as const).map((option) => (
               <TouchableOpacity
                 key={option}
                 style={[
@@ -1014,10 +999,13 @@ export default function PackageCreationModal({
           {groupedAgents.length > 0 ? (
             groupedAgents.map((group, groupIndex) => (
               <View key={groupIndex}>
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-                </View>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
                 
                 {group.items.map((agent) => {
                   const agentData = agent as Agent;
@@ -1239,10 +1227,13 @@ export default function PackageCreationModal({
           <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
             {getGroupedItems(agents, searchQueries.destinationAgent, 'agent').map((group, groupIndex) => (
               <View key={groupIndex}>
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-                </View>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
                 
                 {group.items.map((agent) => {
                   const agentData = agent as Agent;
@@ -1300,10 +1291,13 @@ export default function PackageCreationModal({
           <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
             {getGroupedItems(areas, searchQueries.destinationArea, 'area').map((group, groupIndex) => (
               <View key={groupIndex}>
-                <View style={styles.locationHeader}>
-                  <Text style={styles.locationHeaderText}>{group.locationName}</Text>
-                  <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
-                </View>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
                 
                 {group.items.map((area) => (
                   <TouchableOpacity
