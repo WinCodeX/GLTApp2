@@ -5,7 +5,7 @@ import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
 
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
-const LOCAL_BASE_2 = 'http://10.232.201.106:3000'; // Fixed to match your first working version
+const LOCAL_BASE_2 = 'http://10.21.135.106:3000'; // Fixed to match your first working version
 const PROD_BASE = 'https://glt-53x8.onrender.com'; // Using your production URL
 const FALLBACK_BASE = PROD_BASE; // Use production as fallback when no servers are reachable
 
