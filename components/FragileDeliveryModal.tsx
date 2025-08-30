@@ -28,7 +28,9 @@ import {
   type Area, 
   type Agent, 
   type Location as LocationType,
-  getPackageFormData 
+  getPackageFormData,
+  getAreas,
+  getAgents
 } from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -50,26 +52,25 @@ interface FragileDeliveryModalProps {
   currentLocation: LocationData | null;
 }
 
-// NEW: Enhanced Location/Area Selection Modal Component
-const LocationAreaSelectorModal: React.FC<{
+// NEW: Location Selection Modal with immediate search results
+const LocationSelectorModal: React.FC<{
   visible: boolean;
   onClose: () => void;
   onLocationSelect: (location: LocationData, area?: Area, agent?: Agent) => void;
   title: string;
   type: 'pickup' | 'delivery';
-  areas: Area[];
-  agents: Agent[];
   currentLocation?: LocationData | null;
-}> = ({ visible, onClose, onLocationSelect, title, type, areas, agents, currentLocation }) => {
+}> = ({ visible, onClose, onLocationSelect, title, type, currentLocation }) => {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedArea, setSelectedArea] = useState<Area | null>(null);
-  const [selectedAgent, setSelectedAgent] = useState<Agent | null>(null);
-  const [searchResults, setSearchResults] = useState<{areas: Area[], agents: Agent[]}>({areas: [], agents: []});
-  const [isSearching, setIsSearching] = useState(false);
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
+  // Load areas and agents immediately when modal opens
   useEffect(() => {
     if (visible) {
+      loadLocationData();
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
@@ -78,6 +79,23 @@ const LocationAreaSelectorModal: React.FC<{
     }
   }, [visible]);
 
+  const loadLocationData = async () => {
+    try {
+      setIsLoading(true);
+      const [areasData, agentsData] = await Promise.all([
+        getAreas(),
+        type === 'pickup' ? getAgents() : Promise.resolve([])
+      ]);
+      setAreas(areasData);
+      setAgents(agentsData);
+    } catch (error) {
+      console.error('Failed to load location data:', error);
+      Alert.alert('Error', 'Failed to load locations');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const closeModal = () => {
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
@@ -85,50 +103,33 @@ const LocationAreaSelectorModal: React.FC<{
       useNativeDriver: true,
     }).start(() => {
       onClose();
+      setSearchQuery('');
     });
   };
 
-  const handleSearch = async (query: string) => {
-    setSearchQuery(query);
-    if (query.length < 2) {
-      setSearchResults({areas: [], agents: []});
-      return;
-    }
-    
-    setIsSearching(true);
-    try {
-      const lowercaseQuery = query.toLowerCase();
-      
-      // Search areas by name and location
-      const filteredAreas = areas.filter(area => 
-        area.name.toLowerCase().includes(lowercaseQuery) ||
-        area.location?.name.toLowerCase().includes(lowercaseQuery)
-      );
-      
-      // Search agents by name and area
-      const filteredAgents = agents.filter(agent => 
-        agent.name.toLowerCase().includes(lowercaseQuery) ||
-        agent.area?.name.toLowerCase().includes(lowercaseQuery) ||
-        agent.area?.location?.name.toLowerCase().includes(lowercaseQuery)
-      );
-      
-      setSearchResults({
-        areas: filteredAreas,
-        agents: filteredAgents
-      });
-    } catch (error) {
-      console.error('Search error:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  // Filter areas and agents based on search
+  const filteredAreas = useMemo(() => {
+    if (!searchQuery) return areas;
+    const query = searchQuery.toLowerCase();
+    return areas.filter(area => 
+      area.name.toLowerCase().includes(query) ||
+      area.location?.name.toLowerCase().includes(query)
+    );
+  }, [areas, searchQuery]);
+
+  const filteredAgents = useMemo(() => {
+    if (!searchQuery || type === 'delivery') return agents;
+    const query = searchQuery.toLowerCase();
+    return agents.filter(agent => 
+      agent.name.toLowerCase().includes(query) ||
+      agent.area?.name.toLowerCase().includes(query) ||
+      agent.area?.location?.name.toLowerCase().includes(query)
+    );
+  }, [agents, searchQuery, type]);
 
   const handleAreaSelect = (area: Area) => {
-    setSelectedArea(area);
-    
-    // Create location data from area
     const locationData: LocationData = {
-      latitude: 0, // Placeholder - would need actual coordinates
+      latitude: 0,
       longitude: 0,
       address: `${area.name}, ${area.location?.name}`,
       name: area.name,
@@ -140,11 +141,8 @@ const LocationAreaSelectorModal: React.FC<{
   };
 
   const handleAgentSelect = (agent: Agent) => {
-    setSelectedAgent(agent);
-    
-    // Create location data from agent's area
     const locationData: LocationData = {
-      latitude: 0, // Placeholder - would need actual coordinates
+      latitude: 0,
       longitude: 0,
       address: `${agent.name} - ${agent.area?.name}, ${agent.area?.location?.name}`,
       name: agent.area?.name || 'Unknown Area',
@@ -181,10 +179,7 @@ const LocationAreaSelectorModal: React.FC<{
 
   const renderAreaItem = ({ item }: { item: Area }) => (
     <TouchableOpacity
-      style={[
-        styles.locationItem,
-        selectedArea?.id === item.id && styles.selectedLocationItem
-      ]}
+      style={styles.locationItem}
       onPress={() => handleAreaSelect(item)}
     >
       <View style={styles.locationIcon}>
@@ -197,18 +192,13 @@ const LocationAreaSelectorModal: React.FC<{
         <Text style={styles.locationAddress}>{item.location?.name}</Text>
         <Text style={styles.locationDescription}>Area</Text>
       </View>
-      {selectedArea?.id === item.id && (
-        <Feather name="check-circle" size={20} color="#f97316" />
-      )}
+      <Feather name="chevron-right" size={20} color="#f97316" />
     </TouchableOpacity>
   );
 
   const renderAgentItem = ({ item }: { item: Agent }) => (
     <TouchableOpacity
-      style={[
-        styles.locationItem,
-        selectedAgent?.id === item.id && styles.selectedLocationItem
-      ]}
+      style={styles.locationItem}
       onPress={() => handleAgentSelect(item)}
     >
       <View style={styles.locationIcon}>
@@ -221,9 +211,7 @@ const LocationAreaSelectorModal: React.FC<{
         <Text style={styles.locationAddress}>{item.area?.name} • {item.area?.location?.name}</Text>
         <Text style={styles.locationDescription}>Agent • {item.phone}</Text>
       </View>
-      {selectedAgent?.id === item.id && (
-        <Feather name="check-circle" size={20} color="#f97316" />
-      )}
+      <Feather name="chevron-right" size={20} color="#f97316" />
     </TouchableOpacity>
   );
 
@@ -257,37 +245,39 @@ const LocationAreaSelectorModal: React.FC<{
               <View style={styles.mapSearchContainer}>
                 <TextInput
                   style={styles.mapSearchInput}
-                  placeholder="Search for areas or agents..."
+                  placeholder="Search areas or agents..."
                   placeholderTextColor="#888"
                   value={searchQuery}
-                  onChangeText={handleSearch}
+                  onChangeText={setSearchQuery}
                 />
-                {isSearching && <ActivityIndicator size="small" color="#f97316" />}
               </View>
 
               {/* Results */}
               <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
-                {searchQuery.length > 0 ? (
+                {isLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#f97316" />
+                    <Text style={styles.loadingText}>Loading locations...</Text>
+                  </View>
+                ) : (
                   <View>
                     {/* Areas Section */}
-                    {searchResults.areas.length > 0 && (
-                      <View>
-                        <Text style={styles.sectionTitle}>Areas ({searchResults.areas.length})</Text>
-                        <FlatList
-                          data={searchResults.areas}
-                          keyExtractor={(item) => `area-${item.id}`}
-                          renderItem={renderAreaItem}
-                          scrollEnabled={false}
-                        />
-                      </View>
-                    )}
+                    <View>
+                      <Text style={styles.sectionTitle}>Areas ({filteredAreas.length})</Text>
+                      <FlatList
+                        data={filteredAreas}
+                        keyExtractor={(item) => `area-${item.id}`}
+                        renderItem={renderAreaItem}
+                        scrollEnabled={false}
+                      />
+                    </View>
                     
-                    {/* Agents Section */}
-                    {type === 'delivery' && searchResults.agents.length > 0 && (
+                    {/* Agents Section - Only for pickup */}
+                    {type === 'pickup' && filteredAgents.length > 0 && (
                       <View style={{ marginTop: 16 }}>
-                        <Text style={styles.sectionTitle}>Agents ({searchResults.agents.length})</Text>
+                        <Text style={styles.sectionTitle}>Agents ({filteredAgents.length})</Text>
                         <FlatList
-                          data={searchResults.agents}
+                          data={filteredAgents}
                           keyExtractor={(item) => `agent-${item.id}`}
                           renderItem={renderAgentItem}
                           scrollEnabled={false}
@@ -295,19 +285,13 @@ const LocationAreaSelectorModal: React.FC<{
                       </View>
                     )}
                     
-                    {searchResults.areas.length === 0 && searchResults.agents.length === 0 && (
+                    {filteredAreas.length === 0 && (type === 'delivery' || filteredAgents.length === 0) && (
                       <View style={styles.noResults}>
                         <Feather name="search" size={48} color="#666" />
                         <Text style={styles.noResultsText}>No locations found</Text>
                         <Text style={styles.noResultsSubtext}>Try a different search term</Text>
                       </View>
                     )}
-                  </View>
-                ) : (
-                  <View style={styles.noResults}>
-                    <Feather name="map-pin" size={48} color="#666" />
-                    <Text style={styles.noResultsText}>Start typing to search</Text>
-                    <Text style={styles.noResultsSubtext}>Search for areas or {type === 'delivery' ? 'agents' : 'locations'}</Text>
                   </View>
                 )}
               </ScrollView>
@@ -332,11 +316,6 @@ export default function FragileDeliveryModal({
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-  
-  // NEW: Package form data
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [isLoadingFormData, setIsLoadingFormData] = useState(false);
   
   // Location states with area/agent support
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
@@ -364,27 +343,6 @@ export default function FragileDeliveryModal({
     'Package Information',
     'Confirm Fragile Delivery'
   ];
-
-  // Load form data
-  useEffect(() => {
-    const loadFormData = async () => {
-      if (!visible) return;
-      
-      try {
-        setIsLoadingFormData(true);
-        const formData = await getPackageFormData();
-        setAreas(formData.areas || []);
-        setAgents(formData.agents || []);
-      } catch (error) {
-        console.error('Failed to load form data:', error);
-        setLocationError('Failed to load location data');
-      } finally {
-        setIsLoadingFormData(false);
-      }
-    };
-
-    loadFormData();
-  }, [visible]);
 
   // Enhanced keyboard handling
   useEffect(() => {
@@ -968,25 +926,21 @@ export default function FragileDeliveryModal({
       </Modal>
 
       {/* Enhanced Location Picker Modals */}
-      <LocationAreaSelectorModal
+      <LocationSelectorModal
         visible={showPickupMapModal}
         onClose={() => setShowPickupMapModal(false)}
         onLocationSelect={handlePickupLocationSelect}
         title="Select Pickup Location"
         type="pickup"
-        areas={areas}
-        agents={agents}
         currentLocation={pickupLocation}
       />
       
-      <LocationAreaSelectorModal
+      <LocationSelectorModal
         visible={showDeliveryMapModal}
         onClose={() => setShowDeliveryMapModal(false)}
         onLocationSelect={handleDeliveryLocationSelect}
         title="Select Delivery Location"
         type="delivery"
-        areas={areas}
-        agents={agents}
         currentLocation={deliveryLocation}
       />
     </>
@@ -1512,11 +1466,6 @@ const styles = StyleSheet.create({
     marginBottom: 12,
     gap: 12,
   },
-  selectedLocationItem: {
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-    borderWidth: 1,
-    borderColor: '#f97316',
-  },
   locationIcon: {
     width: 40,
     height: 40,
@@ -1547,5 +1496,10 @@ const styles = StyleSheet.create({
   locationDescription: {
     fontSize: 12,
     color: '#666',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
   },
 });
