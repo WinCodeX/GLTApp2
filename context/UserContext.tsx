@@ -6,6 +6,7 @@ import React, {
   useEffect,
 } from 'react';
 import { getUser } from '../lib/helpers/getUser';
+import { getBusinesses } from '../lib/business'; // Import the business functions
 
 type User = {
   // Core identity fields
@@ -63,20 +64,37 @@ type User = {
   confirmed_at?: string;
 };
 
+type Business = {
+  id: number;
+  name: string;
+  created_at?: string;
+  updated_at?: string;
+  // Add other business fields as needed
+};
+
+type BusinessData = {
+  owned: Business[];
+  joined: Business[];
+};
+
 type UserContextType = {
   user: User | null;
+  businesses: BusinessData;
   loading: boolean;
   error: string | null;
   refreshUser: () => Promise<void>;
+  refreshBusinesses: () => Promise<void>;
   // Helper functions
   getDisplayName: () => string;
   getUserPhone: () => string;
+  getBusinessDisplayName: () => string;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
+  const [businesses, setBusinesses] = useState<BusinessData>({ owned: [], joined: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -97,6 +115,17 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     } finally {
       setRefreshing(false);
       setLoading(false);
+    }
+  };
+
+  const refreshBusinesses = async () => {
+    try {
+      const businessData = await getBusinesses();
+      setBusinesses(businessData);
+    } catch (err) {
+      console.error('Failed to fetch businesses:', err);
+      setBusinesses({ owned: [], joined: [] });
+      // Don't set error for businesses unless it's critical
     }
   };
 
@@ -131,19 +160,41 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return '+254700000000'; // Default fallback
   };
 
+  // Helper function to get business display name
+  const getBusinessDisplayName = (): string => {
+    // First owned business name, fallback to user display name
+    if (businesses.owned.length > 0 && businesses.owned[0].name) {
+      return businesses.owned[0].name;
+    }
+    
+    // Fallback to user display name
+    return getDisplayName();
+  };
+
+  // Fetch both user and business data on mount
   useEffect(() => {
-    refreshUser();
+    const initializeData = async () => {
+      await Promise.all([
+        refreshUser(),
+        refreshBusinesses()
+      ]);
+    };
+
+    initializeData();
   }, []);
 
   return (
     <UserContext.Provider
       value={{ 
         user, 
+        businesses,
         loading, 
         error, 
         refreshUser,
+        refreshBusinesses,
         getDisplayName,
-        getUserPhone
+        getUserPhone,
+        getBusinessDisplayName
       }}
     >
       {children}
