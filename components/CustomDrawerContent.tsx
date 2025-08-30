@@ -30,7 +30,7 @@ const displayName =
   'You';
 
 // Fallback logic for phone
-const userPhone = user?.phone_number?.trim() || user?.phone?.trim() || '+254700000000';
+const userPhone = user?.phone_number?.trim() || user?.phone?.trim() || '+254712293377';
 
 const avatarSource = user?.avatar_url
   ? { uri: user.avatar_url }
