@@ -6,7 +6,7 @@ import React, {
   useEffect,
 } from 'react';
 import { getUser } from '../lib/helpers/getUser';
-import { getBusinesses } from '../lib/business'; // Import the business functions
+import { getBusinesses } from '../lib/helpers/business'; // Import the business functions
 
 type User = {
   // Core identity fields
