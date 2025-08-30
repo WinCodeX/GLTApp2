@@ -57,6 +57,7 @@ export default function PackageTracking() {
       case 'fragile': return '#ef4444'; // Red for fragile items
       case 'doorstep': return '#10b981'; // Green for doorstep
       case 'office': return '#3b82f6'; // Blue for office
+      case 'agent': return '#3b82f6'; // Blue for office (legacy)
       case 'mixed': return '#8b5cf6'; // Purple for mixed
       default: return colors.primary;
     }
@@ -101,6 +102,7 @@ export default function PackageTracking() {
       case 'fragile': return 'shield-alert';
       case 'doorstep': return 'home';
       case 'office': return 'building';
+      case 'agent': return 'building';
       default: return 'package';
     }
   }, []);
@@ -112,8 +114,8 @@ export default function PackageTracking() {
     const colorMap: Record<string, { bg: string; border: string }> = {
       '#f59e0b': { bg: 'rgba(245, 158, 11, 0.2)', border: 'rgba(245, 158, 11, 0.4)' }, // Collection
       '#ef4444': { bg: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.4)' },   // Fragile  
-      '#3b82f6': { bg: 'rgba(59, 130, 246, 0.2)', border: 'rgba(59, 130, 246, 0.4)' }, // Home
-      '#8b5cf6': { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' }, // Office
+      '#3b82f6': { bg: 'rgba(59, 130, 246, 0.2)', border: 'rgba(59, 130, 246, 0.4)' }, // Home/Office
+      '#8b5cf6': { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' }, // Mixed
     };
     
     return colorMap[baseColor] || { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' };
@@ -318,14 +320,22 @@ export default function PackageTracking() {
         // Load QR code
         setIsLoadingQR(true);
         try {
-          // Use package ID for QR code endpoint (not package code)
-          const qrResponse = await getPackageQRCode(packageData.id);
+          // Use package code for QR code endpoint (not package ID)
+          const qrResponse = await getPackageQRCode(packageCode);
           if (qrResponse?.data) {
             setQrData(qrResponse.data);
             console.log('✅ QR code loaded for tracking');
           }
         } catch (qrError) {
-          console.warn('⚠️ Failed to load QR code (non-critical):', qrError);
+          console.warn('⚠️ Failed to load QR code, creating fallback:', qrError);
+          // Create fallback QR data
+          setQrData({
+            qr_code_base64: null,
+            tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+            package_code: packageCode,
+            package_state: packageData.state,
+            route_description: packageData.route_description
+          });
         } finally {
           setIsLoadingQR(false);
         }
@@ -772,44 +782,69 @@ export default function PackageTracking() {
           </LinearGradient>
         </View>
 
-        {/* QR Code Card */}
-        {qrData && (
-          <View style={styles.qrCard}>
-            <LinearGradient
-              colors={['rgba(26, 26, 46, 0.8)', 'rgba(22, 33, 62, 0.8)']}
-              style={styles.qrGradient}
-            >
-              <View style={styles.qrHeader}>
-                <Feather name="qr-code" size={20} color={colors.primary} />
-                <Text style={styles.qrTitle}>QR Code</Text>
+        {/* QR Code Section */}
+        <View style={styles.qrCodeCard}>
+          <LinearGradient
+            colors={['rgba(26, 26, 46, 0.8)', 'rgba(22, 33, 62, 0.8)']}
+            style={styles.qrCodeGradient}
+          >
+            <View style={styles.qrCodeHeader}>
+              <Feather name="smartphone" size={20} color={colors.primary} />
+              <Text style={styles.qrCodeTitle}>QR Code for Tracking</Text>
+            </View>
+            
+            {isLoadingQR ? (
+              <View style={styles.qrCodeLoading}>
+                <ActivityIndicator size="large" color={colors.primary} />
+                <Text style={styles.qrCodeLoadingText}>Generating QR code...</Text>
               </View>
-              
-              <View style={styles.qrContent}>
-                {isLoadingQR ? (
-                  <ActivityIndicator size="large" color={colors.primary} />
-                ) : (
-                  <Image 
-                    source={{ uri: qrData.qr_code_url }} 
-                    style={styles.qrImage}
+            ) : qrData?.qr_code_base64 ? (
+              <View style={styles.qrCodeContainer}>
+                <View style={styles.qrCodeImageContainer}>
+                  <Image
+                    source={{ uri: qrData.qr_code_base64 }}
+                    style={styles.qrCodeImage}
                     resizeMode="contain"
                   />
-                )}
+                </View>
                 
-                <Text style={styles.qrDescription}>
-                  Scan this QR code to track your package
+                <Text style={styles.qrCodeInstructions}>
+                  Scan this QR code to track your package from any device
                 </Text>
                 
-                <TouchableOpacity 
-                  style={styles.trackingButton}
-                  onPress={handleOpenTrackingUrl}
-                >
+                <View style={styles.qrCodeActions}>
+                  <TouchableOpacity style={styles.qrCodeAction} onPress={handleOpenTrackingUrl}>
+                    <Feather name="external-link" size={16} color={colors.primary} />
+                    <Text style={styles.qrCodeActionText}>Open Tracking Page</Text>
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity style={styles.qrCodeAction} onPress={handleShareTracking}>
+                    <Feather name="share-2" size={16} color={colors.primary} />
+                    <Text style={styles.qrCodeActionText}>Share Tracking</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : qrData?.tracking_url ? (
+              <View style={styles.qrCodeFallback}>
+                <Feather name="link" size={48} color="#666" />
+                <Text style={styles.qrCodeFallbackTitle}>QR Code Unavailable</Text>
+                <Text style={styles.qrCodeFallbackSubtitle}>
+                  Use tracking code: {package_.code}
+                </Text>
+                
+                <TouchableOpacity style={styles.trackingUrlButton} onPress={handleOpenTrackingUrl}>
                   <Feather name="external-link" size={16} color="#fff" />
-                  <Text style={styles.trackingButtonText}>Open Tracking Page</Text>
+                  <Text style={styles.trackingUrlButtonText}>Open Tracking Page</Text>
                 </TouchableOpacity>
               </View>
-            </LinearGradient>
-          </View>
-        )}
+            ) : (
+              <View style={styles.qrCodeError}>
+                <Feather name="alert-circle" size={32} color="#ef4444" />
+                <Text style={styles.qrCodeErrorText}>Unable to generate QR code</Text>
+              </View>
+            )}
+          </LinearGradient>
+        </View>
 
         <View style={{ height: 40 }} />
       </ScrollView>
@@ -1110,63 +1145,137 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   
-  // QR card
-  qrCard: {
+  // QR Code card
+  qrCodeCard: {
     marginHorizontal: 20,
     marginBottom: 20,
     borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
   },
-  qrGradient: {
-    padding: 20,
+  qrCodeGradient: {
+    padding: 24,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    alignItems: 'center',
   },
-  qrHeader: {
+  qrCodeHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     marginBottom: 20,
   },
-  qrTitle: {
+  qrCodeTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
   },
-  qrContent: {
+  qrCodeLoading: {
     alignItems: 'center',
-    gap: 16,
+    paddingVertical: 40,
+    gap: 12,
   },
-  qrImage: {
-    width: 200,
-    height: 200,
+  qrCodeLoadingText: {
+    fontSize: 14,
+    color: '#888',
+  },
+  qrCodeContainer: {
+    alignItems: 'center',
+    width: '100%',
+  },
+  qrCodeImageContainer: {
+    padding: 16,
     backgroundColor: '#fff',
-    borderRadius: 8,
+    borderRadius: 16,
+    marginBottom: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 2,
   },
-  qrDescription: {
+  qrCodeImage: {
+    width: 160,
+    height: 160,
+  },
+  qrCodeInstructions: {
     fontSize: 14,
     color: '#888',
     textAlign: 'center',
-    lineHeight: 18,
+    lineHeight: 20,
+    marginBottom: 20,
+    paddingHorizontal: 20,
   },
-  trackingButton: {
+  qrCodeActions: {
+    flexDirection: 'row',
+    gap: 12,
+    width: '100%',
+  },
+  qrCodeAction: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.primary,
+    justifyContent: 'center',
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    gap: 6,
+  },
+  qrCodeActionText: {
+    fontSize: 14,
+    color: colors.primary,
+    fontWeight: '500',
+  },
+  
+  // QR Code fallback
+  qrCodeFallback: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  qrCodeFallbackTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#888',
+    marginTop: 8,
+  },
+  qrCodeFallbackSubtitle: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  trackingUrlButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 8,
+    backgroundColor: colors.primary,
     gap: 8,
   },
-  trackingButtonText: {
+  trackingUrlButtonText: {
     fontSize: 14,
-    fontWeight: '600',
     color: '#fff',
+    fontWeight: '600',
+  },
+  
+  // QR Code error
+  qrCodeError: {
+    alignItems: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  qrCodeErrorText: {
+    fontSize: 14,
+    color: '#ef4444',
+    textAlign: 'center',
   },
   
   // Loading states
