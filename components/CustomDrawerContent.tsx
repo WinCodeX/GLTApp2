@@ -23,6 +23,14 @@ export default function CustomDrawerContent(props: any) {
 const [showTrackDropdown, setShowTrackDropdown] = useState(false);
 const [showAccountDropdown, setShowAccountDropdown] = useState(false);
 const { user } = useUser();
+// Fallback logic for display name
+const displayName =
+  user?.owned_businesses?.[0]?.name || // first owned business
+  (user?.first_name && user.first_name.trim()) || // fallback to first_name
+  'You';
+
+// Fallback logic for phone
+const userPhone = user?.phone_number?.trim() || user?.phone?.trim() || '+254700000000';
 
 const avatarSource = user?.avatar_url
   ? { uri: user.avatar_url }
@@ -51,10 +59,10 @@ return (
   source={avatarSource}
   style={styles.avatar}
 />  
-      <View style={styles.accountInfo}>    
-        <Text style={styles.userName}>Xs</Text>    
-        <Text style={styles.userPhone}>+254 712 293 377</Text>    
-      </View>    
+      <View style={styles.accountInfo}>
+  <Text style={styles.userName}>{displayName}</Text>
+  <Text style={styles.userPhone}>{userPhone}</Text>
+</View>    
       <Feather    
         name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
         size={20}    
