@@ -21,6 +21,7 @@ import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import CollectDeliverModal from '../../components/CollectDeliverModal';
 import { createPackage, type PackageData } from '../../lib/helpers/packageHelpers';
+import { useUser } from '../../context/UserContext';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -61,7 +62,7 @@ const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   },
   send: {
     title: 'Send a Package',
-    description: 'There are 2 options - doorstep and office. The doorstep option will have the item delivered right to their location while the office option will be delivered to our office for the receiver to collect.'
+    description: 'There are 2 options - Home and Office. The Home option will have the item delivered right to their location while the Office option will be delivered to our office for the receiver to collect.'
   },
   collect: {
     title: 'Collect my Packages',
@@ -86,11 +87,8 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
-  // User info (this would come from authentication/user context in real app)
-  const [userInfo] = useState({
-    name: 'Current User',
-    phone: '+254700000000'
-  });
+  // Get user data from context
+  const { user, loading: userLoading, getDisplayName, getUserPhone } = useUser();
   
   const scrollX = useRef(new Animated.Value(0)).current;
   
@@ -324,12 +322,17 @@ export default function HomeScreen() {
 
   const handlePackageSubmit = async (packageData: PackageData) => {
     try {
+      if (!user) {
+        Alert.alert('Error', 'User data not available. Please log in again.');
+        return;
+      }
+
       console.log('📦 Creating package with data:', packageData);
       
       const enhancedPackageData = {
         ...packageData,
-        sender_name: userInfo.name,
-        sender_phone: userInfo.phone,
+        sender_name: getDisplayName(),
+        sender_phone: getUserPhone(),
       };
       
       const response = await createPackage(enhancedPackageData);
@@ -358,12 +361,17 @@ export default function HomeScreen() {
 
   const handleFragileSubmit = async (packageData: PackageData) => {
     try {
+      if (!user) {
+        Alert.alert('Error', 'User data not available. Please log in again.');
+        return;
+      }
+
       console.log('📦 Creating fragile delivery package:', packageData);
       
       const enhancedPackageData = {
         ...packageData,
-        sender_name: userInfo.name,
-        sender_phone: userInfo.phone,
+        sender_name: getDisplayName(),
+        sender_phone: getUserPhone(),
         delivery_type: 'fragile' as const,
       };
       
@@ -393,14 +401,19 @@ export default function HomeScreen() {
 
   const handleCollectSubmit = async (packageData: PackageData) => {
     try {
+      if (!user) {
+        Alert.alert('Error', 'User data not available. Please log in again.');
+        return;
+      }
+
       console.log('📦 Creating collect package:', packageData);
       
       const enhancedPackageData = {
         ...packageData,
-        sender_name: userInfo.name,
-        sender_phone: userInfo.phone,
-        receiver_name: userInfo.name, // Delivering to self
-        receiver_phone: userInfo.phone,
+        sender_name: getDisplayName(),
+        sender_phone: getUserPhone(),
+        receiver_name: getDisplayName(), // Delivering to self
+        receiver_phone: getUserPhone(),
         delivery_type: 'collection' as const,
       };
       
@@ -427,6 +440,18 @@ export default function HomeScreen() {
       throw error;
     }
   };
+
+  // Show loading if user data is still loading
+  if (userLoading) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <GLTHeader />
+        <View style={styles.loadingContainer}>
+          <Text style={styles.loadingText}>Loading user data...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
 
   const LocationTag = ({ location }) => (
     <LinearGradient
@@ -822,6 +847,17 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#0a0a0f' 
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  loadingText: {
+    color: '#fff',
+    fontSize: 16,
+    textAlign: 'center',
   },
   locationsContainer: { 
     paddingTop: 20, 
