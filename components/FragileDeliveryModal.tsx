@@ -1,4 +1,4 @@
-// components/FragileDeliveryModal.tsx - ENHANCED: Location search & multiple package creation
+// components/FragileDeliveryModal.tsx - ENHANCED: Multiple packages creation with AsyncStorage
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -20,6 +20,7 @@ import {
   Keyboard,
   FlatList,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
@@ -36,6 +37,9 @@ import {
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 24;
 
+// AsyncStorage key for fragile packages
+const FRAGILE_PACKAGES_KEY = 'fragile_packages_in_progress';
+
 interface LocationData {
   latitude: number;
   longitude: number;
@@ -44,15 +48,30 @@ interface LocationData {
   description?: string;
 }
 
+interface SavedFragilePackage {
+  id: string;
+  receiverName: string;
+  receiverPhone: string;
+  deliveryAddress: string;
+  itemDescription: string;
+  specialInstructions: string;
+  pickupLocation: LocationData | null;
+  deliveryLocation: LocationData | null;
+  selectedPickupArea: Area | null;
+  selectedDeliveryArea: Area | null;
+  selectedDeliveryAgent: Agent | null;
+  createdAt: string;
+}
+
 interface FragileDeliveryModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  onCreateAnother?: () => void; // NEW: Callback for creating another fragile delivery
+  onCreateAnother?: () => void;
   currentLocation: LocationData | null;
 }
 
-// NEW: Location Selection Modal with immediate search results
+// Location Selection Modal
 const LocationSelectorModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -67,7 +86,6 @@ const LocationSelectorModal: React.FC<{
   const [searchQuery, setSearchQuery] = useState('');
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
-  // Load areas and agents immediately when modal opens
   useEffect(() => {
     if (visible) {
       loadLocationData();
@@ -107,7 +125,6 @@ const LocationSelectorModal: React.FC<{
     });
   };
 
-  // Filter areas and agents based on search
   const filteredAreas = useMemo(() => {
     if (!searchQuery) return areas;
     const query = searchQuery.toLowerCase();
@@ -230,7 +247,6 @@ const LocationSelectorModal: React.FC<{
               colors={['#1a1a2e', '#2d3748', '#4a5568']}
               style={styles.mapGradient}
             >
-              {/* Header */}
               <View style={styles.mapHeader}>
                 <TouchableOpacity onPress={closeModal} style={styles.mapCloseButton}>
                   <Feather name="x" size={24} color="#fff" />
@@ -241,7 +257,6 @@ const LocationSelectorModal: React.FC<{
                 </TouchableOpacity>
               </View>
               
-              {/* Search */}
               <View style={styles.mapSearchContainer}>
                 <TextInput
                   style={styles.mapSearchInput}
@@ -252,7 +267,6 @@ const LocationSelectorModal: React.FC<{
                 />
               </View>
 
-              {/* Results */}
               <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
                 {isLoading ? (
                   <View style={styles.loadingContainer}>
@@ -261,7 +275,6 @@ const LocationSelectorModal: React.FC<{
                   </View>
                 ) : (
                   <View>
-                    {/* Areas Section */}
                     <View>
                       <Text style={styles.sectionTitle}>Areas ({filteredAreas.length})</Text>
                       <FlatList
@@ -272,7 +285,6 @@ const LocationSelectorModal: React.FC<{
                       />
                     </View>
                     
-                    {/* Agents Section - Only for pickup */}
                     {type === 'pickup' && filteredAgents.length > 0 && (
                       <View style={{ marginTop: 16 }}>
                         <Text style={styles.sectionTitle}>Agents ({filteredAgents.length})</Text>
@@ -307,7 +319,7 @@ export default function FragileDeliveryModal({
   visible,
   onClose,
   onSubmit,
-  onCreateAnother, // NEW: For creating multiple packages
+  onCreateAnother,
   currentLocation: initialLocation
 }: FragileDeliveryModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -317,7 +329,7 @@ export default function FragileDeliveryModal({
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
-  // Location states with area/agent support
+  // Location states
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
   const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(null);
   const [selectedPickupArea, setSelectedPickupArea] = useState<Area | null>(null);
@@ -333,7 +345,11 @@ export default function FragileDeliveryModal({
   const [itemDescription, setItemDescription] = useState('');
   const [specialInstructions, setSpecialInstructions] = useState('');
   
-  // Map modal states
+  // Multiple packages states
+  const [savedPackages, setSavedPackages] = useState<SavedFragilePackage[]>([]);
+  const [isCreatingMultiple, setIsCreatingMultiple] = useState(false);
+  
+  // Modal states
   const [showPickupMapModal, setShowPickupMapModal] = useState(false);
   const [showDeliveryMapModal, setShowDeliveryMapModal] = useState(false);
   
@@ -344,7 +360,41 @@ export default function FragileDeliveryModal({
     'Confirm Fragile Delivery'
   ];
 
-  // Enhanced keyboard handling
+  // AsyncStorage functions
+  const savePendingPackages = async (packages: SavedFragilePackage[]) => {
+    try {
+      await AsyncStorage.setItem(FRAGILE_PACKAGES_KEY, JSON.stringify(packages));
+    } catch (error) {
+      console.error('Failed to save pending packages:', error);
+    }
+  };
+
+  const loadPendingPackages = async (): Promise<SavedFragilePackage[]> => {
+    try {
+      const stored = await AsyncStorage.getItem(FRAGILE_PACKAGES_KEY);
+      return stored ? JSON.parse(stored) : [];
+    } catch (error) {
+      console.error('Failed to load pending packages:', error);
+      return [];
+    }
+  };
+
+  const clearPendingPackages = async () => {
+    try {
+      await AsyncStorage.removeItem(FRAGILE_PACKAGES_KEY);
+      setSavedPackages([]);
+    } catch (error) {
+      console.error('Failed to clear pending packages:', error);
+    }
+  };
+
+  // Load saved packages when modal opens
+  useEffect(() => {
+    if (visible) {
+      loadPendingPackages().then(setSavedPackages);
+    }
+  }, [visible]);
+
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -367,7 +417,6 @@ export default function FragileDeliveryModal({
     };
   }, []);
 
-  // Better modal height calculation
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
       const availableHeight = SCREEN_HEIGHT - keyboardHeight;
@@ -379,7 +428,9 @@ export default function FragileDeliveryModal({
 
   useEffect(() => {
     if (visible) {
-      resetForm();
+      if (!isCreatingMultiple) {
+        resetForm();
+      }
       requestLocationPermission();
       
       Animated.timing(slideAnim, {
@@ -388,7 +439,7 @@ export default function FragileDeliveryModal({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]);
+  }, [visible, isCreatingMultiple]);
 
   const resetForm = () => {
     setCurrentStep(0);
@@ -413,6 +464,7 @@ export default function FragileDeliveryModal({
       duration: 250,
       useNativeDriver: true,
     }).start(() => {
+      setIsCreatingMultiple(false);
       onClose();
     });
   }, [slideAnim, onClose]);
@@ -448,7 +500,6 @@ export default function FragileDeliveryModal({
     }
   };
 
-  // NEW: Enhanced location selection with area/agent support
   const handlePickupLocationSelect = (location: LocationData, area?: Area, agent?: Agent) => {
     setPickupLocation(location);
     if (area) setSelectedPickupArea(area);
@@ -487,23 +538,83 @@ export default function FragileDeliveryModal({
     }
   }, [currentStep]);
 
+  // Save current package and start another
+  const handleAddAnotherPackage = async () => {
+    if (!isStepValid(2)) return;
+
+    const currentPackage: SavedFragilePackage = {
+      id: Date.now().toString(),
+      receiverName,
+      receiverPhone,
+      deliveryAddress,
+      itemDescription,
+      specialInstructions,
+      pickupLocation,
+      deliveryLocation,
+      selectedPickupArea,
+      selectedDeliveryArea,
+      selectedDeliveryAgent,
+      createdAt: new Date().toISOString(),
+    };
+
+    const updatedPackages = [...savedPackages, currentPackage];
+    setSavedPackages(updatedPackages);
+    await savePendingPackages(updatedPackages);
+
+    // Reset form for next package
+    resetForm();
+    setIsCreatingMultiple(true);
+    setCurrentStep(1); // Skip location setup for subsequent packages
+  };
+
+  // Remove a saved package
+  const handleRemoveSavedPackage = async (packageId: string) => {
+    const updatedPackages = savedPackages.filter(pkg => pkg.id !== packageId);
+    setSavedPackages(updatedPackages);
+    await savePendingPackages(updatedPackages);
+  };
+
   const handleSubmit = async () => {
     if (!isStepValid(currentStep)) return;
 
     setIsSubmitting(true);
     try {
-      const packageData: PackageData = {
+      // Create array of all packages to submit
+      const packagesToSubmit: PackageData[] = [];
+
+      // Add saved packages
+      savedPackages.forEach(pkg => {
+        const packageData: PackageData = {
+          sender_name: 'Fragile Service',
+          sender_phone: '+254700000000',
+          receiver_name: pkg.receiverName,
+          receiver_phone: pkg.receiverPhone,
+          origin_area_id: pkg.selectedPickupArea?.id,
+          destination_area_id: pkg.selectedDeliveryArea?.id || pkg.selectedDeliveryAgent?.area?.id,
+          origin_agent_id: null,
+          destination_agent_id: pkg.selectedDeliveryAgent?.id || null,
+          delivery_type: 'fragile',
+          delivery_location: pkg.deliveryAddress,
+          package_description: `FRAGILE DELIVERY: ${pkg.itemDescription}${pkg.specialInstructions ? `\nSpecial Instructions: ${pkg.specialInstructions}` : ''}`,
+          pickup_location: pkg.pickupLocation?.address || '',
+          coordinates: pkg.pickupLocation && pkg.deliveryLocation ? {
+            pickup: pkg.pickupLocation,
+            delivery: pkg.deliveryLocation
+          } : undefined,
+        };
+        packagesToSubmit.push(packageData);
+      });
+
+      // Add current package
+      const currentPackageData: PackageData = {
         sender_name: 'Fragile Service',
         sender_phone: '+254700000000',
         receiver_name: receiverName,
         receiver_phone: receiverPhone,
-        
-        // NEW: Set area and agent IDs properly
         origin_area_id: selectedPickupArea?.id,
         destination_area_id: selectedDeliveryArea?.id || selectedDeliveryAgent?.area?.id,
         origin_agent_id: null,
         destination_agent_id: selectedDeliveryAgent?.id || null,
-        
         delivery_type: 'fragile',
         delivery_location: deliveryAddress,
         package_description: `FRAGILE DELIVERY: ${itemDescription}${specialInstructions ? `\nSpecial Instructions: ${specialInstructions}` : ''}`,
@@ -513,21 +624,21 @@ export default function FragileDeliveryModal({
           delivery: deliveryLocation
         } : undefined,
       };
+      packagesToSubmit.push(currentPackageData);
 
-      await onSubmit(packageData);
+      // Submit each package individually
+      for (const packageData of packagesToSubmit) {
+        await onSubmit(packageData);
+      }
+
+      // Clear saved packages after successful submission
+      await clearPendingPackages();
+      
       closeModal();
     } catch (error) {
-      console.error('Error submitting fragile delivery:', error);
+      console.error('Error submitting fragile deliveries:', error);
     } finally {
       setIsSubmitting(false);
-    }
-  };
-
-  // NEW: Handle creating another fragile delivery
-  const handleCreateAnother = () => {
-    resetForm();
-    if (onCreateAnother) {
-      onCreateAnother();
     }
   };
 
@@ -542,7 +653,7 @@ export default function FragileDeliveryModal({
         />
       </View>
       <Text style={styles.progressText}>
-        Step {currentStep + 1} of {STEP_TITLES.length}
+        Step {currentStep + 1} of {STEP_TITLES.length} • {savedPackages.length + 1} Packages
       </Text>
     </View>
   );
@@ -559,7 +670,7 @@ export default function FragileDeliveryModal({
 
   const renderLocationSetup = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>⚠️ Fragile Delivery Setup</Text>
+      <Text style={styles.stepTitle}>Fragile Delivery Setup</Text>
       <Text style={styles.stepSubtitle}>
         Set your pickup and delivery locations for fragile items
       </Text>
@@ -582,7 +693,7 @@ export default function FragileDeliveryModal({
       )}
       
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>📍 Pickup Location</Text>
+        <Text style={styles.locationLabel}>Pickup Location</Text>
         <TouchableOpacity 
           style={[styles.locationInput, pickupLocation && styles.locationInputSelected]}
           onPress={() => setShowPickupMapModal(true)}
@@ -595,7 +706,7 @@ export default function FragileDeliveryModal({
       </View>
       
       <View style={styles.locationSection}>
-        <Text style={styles.locationLabel}>🎯 Delivery Location</Text>
+        <Text style={styles.locationLabel}>Delivery Location</Text>
         <TouchableOpacity 
           style={[styles.locationInput, deliveryLocation && styles.locationInputSelected]}
           onPress={() => setShowDeliveryMapModal(true)}
@@ -693,6 +804,21 @@ export default function FragileDeliveryModal({
         />
       </View>
 
+      {isStepValid(2) && (
+        <View style={styles.addAnotherSection}>
+          <TouchableOpacity 
+            style={styles.addAnotherButton}
+            onPress={handleAddAnotherPackage}
+          >
+            <Feather name="plus-circle" size={20} color="#f97316" />
+            <Text style={styles.addAnotherButtonText}>Save & Add Another Package</Text>
+          </TouchableOpacity>
+          <Text style={styles.addAnotherDescription}>
+            Save this package and create another fragile delivery
+          </Text>
+        </View>
+      )}
+
       <View style={styles.fragileNotice}>
         <Feather name="info" size={16} color="#f97316" />
         <Text style={styles.fragileNoticeText}>
@@ -702,16 +828,42 @@ export default function FragileDeliveryModal({
     </View>
   );
 
+  const renderSavedPackageItem = (pkg: SavedFragilePackage, index: number) => (
+    <View key={pkg.id} style={styles.savedPackageItem}>
+      <View style={styles.savedPackageHeader}>
+        <Text style={styles.savedPackageTitle}>Package {index + 1}</Text>
+        <TouchableOpacity 
+          onPress={() => handleRemoveSavedPackage(pkg.id)}
+          style={styles.removeSavedPackage}
+        >
+          <Feather name="x" size={16} color="#ef4444" />
+        </TouchableOpacity>
+      </View>
+      <Text style={styles.savedPackageDetail}>{pkg.receiverName}</Text>
+      <Text style={styles.savedPackageSubDetail}>{pkg.itemDescription}</Text>
+    </View>
+  );
+
   const renderConfirmation = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>🎯 Confirm Fragile Delivery</Text>
+      <Text style={styles.stepTitle}>Confirm Fragile Deliveries</Text>
       <Text style={styles.stepSubtitle}>
-        Please review your fragile delivery details
+        Please review your fragile delivery details ({savedPackages.length + 1} packages)
       </Text>
       
       <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
+        
+        {/* Saved Packages */}
+        {savedPackages.length > 0 && (
+          <View style={styles.confirmationSection}>
+            <Text style={styles.confirmationSectionTitle}>Saved Packages ({savedPackages.length})</Text>
+            {savedPackages.map((pkg, index) => renderSavedPackageItem(pkg, index))}
+          </View>
+        )}
+
+        {/* Current Package */}
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>🗺️ Route</Text>
+          <Text style={styles.confirmationSectionTitle}>Current Package</Text>
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
               <Text style={styles.routeLabel}>From</Text>
@@ -733,17 +885,10 @@ export default function FragileDeliveryModal({
               )}
             </View>
           </View>
-        </View>
-
-        <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>👤 Receiver</Text>
+          
           <Text style={styles.confirmationDetail}>{receiverName}</Text>
           <Text style={styles.confirmationDetail}>{receiverPhone}</Text>
-        </View>
-
-        <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>📦 Package Details</Text>
-          <Text style={styles.confirmationDetail}>Item: {itemDescription}</Text>
+          <Text style={styles.confirmationSubDetail}>Item: {itemDescription}</Text>
           <Text style={styles.confirmationSubDetail}>Address: {deliveryAddress}</Text>
           {specialInstructions && (
             <Text style={styles.confirmationSubDetail}>
@@ -753,7 +898,7 @@ export default function FragileDeliveryModal({
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>⚠️ Fragile Service</Text>
+          <Text style={styles.confirmationSectionTitle}>Fragile Service</Text>
           <View style={styles.serviceFeatures}>
             <View style={styles.serviceFeature}>
               <Feather name="shield" size={16} color="#f97316" />
@@ -771,41 +916,35 @@ export default function FragileDeliveryModal({
         </View>
 
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>💰 Cost Breakdown</Text>
+          <Text style={styles.confirmationSectionTitle}>Total Cost</Text>
           <View style={styles.costBreakdown}>
-            <View style={styles.costLine}>
-              <Text style={styles.costLabel}>Fragile Service Fee</Text>
-              <Text style={styles.costValue}>KES 500</Text>
-            </View>
-            <View style={styles.costLine}>
-              <Text style={styles.costLabel}>Priority Handling</Text>
-              <Text style={styles.costValue}>KES 300</Text>
-            </View>
-            <View style={styles.costLine}>
-              <Text style={styles.costLabel}>Insurance</Text>
-              <Text style={styles.costValue}>KES 200</Text>
-            </View>
             <View style={[styles.costLine, styles.totalCostLine]}>
-              <Text style={styles.totalCostLabel}>Total Amount</Text>
-              <Text style={styles.totalCostValue}>KES 1,000</Text>
+              <Text style={styles.totalCostLabel}>
+                {savedPackages.length + 1} Fragile Package{savedPackages.length > 0 ? 's' : ''}
+              </Text>
+              <Text style={styles.totalCostValue}>
+                KES {((savedPackages.length + 1) * 1000).toLocaleString()}
+              </Text>
             </View>
           </View>
         </View>
 
-        {/* NEW: Add Another Package Section */}
-        <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>📋 Multiple Packages</Text>
-          <TouchableOpacity 
-            style={styles.addAnotherButton}
-            onPress={handleCreateAnother}
-          >
-            <Feather name="plus-circle" size={20} color="#f97316" />
-            <Text style={styles.addAnotherButtonText}>Add Another Fragile Delivery</Text>
-          </TouchableOpacity>
-          <Text style={styles.addAnotherDescription}>
-            Need to send multiple fragile packages? Create another delivery with the same care and handling.
-          </Text>
-        </View>
+        {/* Add Another Package */}
+        {isStepValid(2) && (
+          <View style={styles.confirmationSection}>
+            <Text style={styles.confirmationSectionTitle}>Add More Packages</Text>
+            <TouchableOpacity 
+              style={styles.addAnotherButton}
+              onPress={handleAddAnotherPackage}
+            >
+              <Feather name="plus-circle" size={20} color="#f97316" />
+              <Text style={styles.addAnotherButtonText}>Add Another Fragile Delivery</Text>
+            </TouchableOpacity>
+            <Text style={styles.addAnotherDescription}>
+              Need to send more fragile packages? Add another with the same care and handling.
+            </Text>
+          </View>
+        )}
       </ScrollView>
     </View>
   );
@@ -865,7 +1004,7 @@ export default function FragileDeliveryModal({
                 styles.submitButtonText,
                 (!isStepValid(currentStep) || isSubmitting) && styles.disabledButtonText
               ]}>
-                Schedule Fragile Delivery
+                Schedule {savedPackages.length + 1} Fragile Deliver{savedPackages.length > 0 ? 'ies' : 'y'}
               </Text>
               <Feather name="alert-triangle" size={20} color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#666"} />
             </>
@@ -925,7 +1064,6 @@ export default function FragileDeliveryModal({
         </View>
       </Modal>
 
-      {/* Enhanced Location Picker Modals */}
       <LocationSelectorModal
         visible={showPickupMapModal}
         onClose={() => setShowPickupMapModal(false)}
@@ -948,7 +1086,6 @@ export default function FragileDeliveryModal({
 }
 
 const styles = StyleSheet.create({
-  // Modal wrapper
   modalWrapper: {
     flex: 1,
     paddingTop: STATUS_BAR_HEIGHT,
@@ -971,8 +1108,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 20,
     overflow: 'hidden',
   },
-  
-  // Header
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -998,8 +1133,6 @@ const styles = StyleSheet.create({
   placeholder: {
     width: 40,
   },
-  
-  // Progress
   progressContainer: {
     paddingHorizontal: 20,
     paddingVertical: 10,
@@ -1020,8 +1153,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 6,
   },
-  
-  // Content structure
   contentWrapper: {
     flex: 1,
   },
@@ -1052,8 +1183,6 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     lineHeight: 20,
   },
-  
-  // Error/Loading banners
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1086,8 +1215,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#f97316',
   },
-  
-  // Location section
   locationSection: {
     marginBottom: 20,
   },
@@ -1118,8 +1245,6 @@ const styles = StyleSheet.create({
   locationTextSelected: {
     color: '#fff',
   },
-  
-  // Fragile info
   fragileInfo: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1143,8 +1268,6 @@ const styles = StyleSheet.create({
     color: '#f97316',
     lineHeight: 18,
   },
-  
-  // Form
   formContainer: {
     gap: 16,
     paddingVertical: 8,
@@ -1165,8 +1288,31 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingTop: 14,
   },
-  
-  // Fragile notice
+  addAnotherSection: {
+    marginTop: 20,
+    marginBottom: 10,
+  },
+  addAnotherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.3)',
+    marginBottom: 8,
+  },
+  addAnotherButtonText: {
+    fontSize: 16,
+    color: '#f97316',
+    fontWeight: '600',
+  },
+  addAnotherDescription: {
+    fontSize: 13,
+    color: '#888',
+    lineHeight: 16,
+  },
   fragileNotice: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1182,8 +1328,6 @@ const styles = StyleSheet.create({
     color: '#f97316',
     lineHeight: 18,
   },
-  
-  // Confirmation
   confirmationContainer: {
     flex: 1,
   },
@@ -1209,12 +1353,42 @@ const styles = StyleSheet.create({
     color: '#888',
     marginBottom: 6,
   },
-  
-  // Route display
+  savedPackageItem: {
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.2)',
+  },
+  savedPackageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  savedPackageTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f97316',
+  },
+  removeSavedPackage: {
+    padding: 4,
+  },
+  savedPackageDetail: {
+    fontSize: 14,
+    color: '#fff',
+    marginBottom: 2,
+  },
+  savedPackageSubDetail: {
+    fontSize: 12,
+    color: '#888',
+  },
   routeDisplay: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    marginBottom: 10,
   },
   routePoint: {
     flex: 1,
@@ -1237,8 +1411,6 @@ const styles = StyleSheet.create({
   routeArrow: {
     paddingHorizontal: 10,
   },
-  
-  // Service features
   serviceFeatures: {
     gap: 8,
   },
@@ -1251,8 +1423,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
   },
-  
-  // Cost breakdown
   costBreakdown: {
     gap: 8,
   },
@@ -1260,14 +1430,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  costLabel: {
-    fontSize: 14,
-    color: '#888',
-  },
-  costValue: {
-    fontSize: 14,
-    color: '#fff',
   },
   totalCostLine: {
     borderTopWidth: 1,
@@ -1285,31 +1447,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: '#f97316',
   },
-  
-  // NEW: Add another package button
-  addAnotherButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-    borderRadius: 8,
-    padding: 12,
-    gap: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.3)',
-    marginBottom: 8,
-  },
-  addAnotherButtonText: {
-    fontSize: 16,
-    color: '#f97316',
-    fontWeight: '600',
-  },
-  addAnotherDescription: {
-    fontSize: 13,
-    color: '#888',
-    lineHeight: 16,
-  },
-  
-  // Navigation container
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
