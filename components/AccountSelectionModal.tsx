@@ -59,13 +59,15 @@ export default function AccountSelectionModal({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   container: {
-    backgroundColor: colors.background,
+    backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
+    maxHeight: '90%',
+    minHeight: 200,
     paddingBottom: 40,
   },
   header: {
