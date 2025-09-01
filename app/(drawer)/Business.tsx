@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import Toast from 'react-native-toast-message';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
@@ -31,6 +32,7 @@ export default function Business({ navigation }: BusinessProps) {
     getUserPhone,
     getDisplayName,
     switchAccount,
+    removeAccount,
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -56,7 +58,7 @@ export default function Business({ navigation }: BusinessProps) {
     if (navigation?.goBack) {
       navigation.goBack();
     } else if (navigation?.navigate) {
-      navigation.navigate('index'); // fallback to home
+      navigation.navigate('index');
     }
   };
 
@@ -72,15 +74,52 @@ export default function Business({ navigation }: BusinessProps) {
 
   const handleAccountSwitch = async (accountIndex: number) => {
     if (accountIndex === currentAccountIndex) {
-      return; // Already current account
+      return;
     }
 
     try {
       await switchAccount(accountIndex);
-      // Navigation will be handled by UserContext/auth flow
+      Toast.show({
+        type: 'success',
+        text1: 'Account switched!',
+        text2: `Now using ${savedAccounts[accountIndex]?.display_name}`,
+      });
     } catch (error: any) {
+      console.error('Switch account error:', error);
       Alert.alert('Error', error.message || 'Failed to switch accounts');
     }
+  };
+
+  const handleAccountRemove = async (accountIndex: number, accountEmail: string) => {
+    if (accountIndex === currentAccountIndex) {
+      Alert.alert('Error', 'Cannot remove the currently active account');
+      return;
+    }
+
+    Alert.alert(
+      'Remove Account',
+      `Remove ${accountEmail}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeAccount(accountIndex);
+              Toast.show({
+                type: 'success',
+                text1: 'Account removed',
+                text2: `${accountEmail} has been removed`,
+              });
+            } catch (error: any) {
+              console.error('Remove account error:', error);
+              Alert.alert('Error', error.message || 'Failed to remove account');
+            }
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -160,58 +199,82 @@ export default function Business({ navigation }: BusinessProps) {
           </TouchableOpacity>
         </View>
 
-        {/* Account Management Section */}
+        {/* Account Management Section - Simple Display */}
         <View style={styles.accountsSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Account Management</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>See all</Text>
-            </TouchableOpacity>
+            <Text style={styles.sectionTitle}>SWITCH ACCOUNT ({savedAccounts.length}/3)</Text>
           </View>
 
-          {/* Current Accounts */}
-          {savedAccounts.slice(0, 2).map((account, index) => (
-            <View key={account.id} style={styles.accountCard}>
-              <Image 
-                source={account.avatar_url ? { uri: account.avatar_url } : avatarSource} 
-                style={styles.accountAvatar} 
-              />
-              <View style={styles.accountInfo}>
-                <Text style={styles.accountName}>{account.display_name}</Text>
-                <Text style={styles.accountType}>
-                  {index === currentAccountIndex ? 'Current account' : 'Suggested for you'}
-                </Text>
+          {/* Simple Account Cards */}
+          {savedAccounts.map((account, index) => {
+            const isCurrentAccount = index === currentAccountIndex;
+            const accountAvatar = account.avatar_url
+              ? { uri: account.avatar_url }
+              : require('../../assets/images/avatar_placeholder.png');
+
+            return (
+              <View key={account.id} style={styles.simpleAccountCard}>
+                <TouchableOpacity
+                  style={[
+                    styles.simpleAccountContent,
+                    isCurrentAccount && styles.currentAccountCard
+                  ]}
+                  onPress={() => handleAccountSwitch(index)}
+                  activeOpacity={0.8}
+                >
+                  <Image source={accountAvatar} style={styles.simpleAccountAvatar} />
+                  <View style={styles.simpleAccountInfo}>
+                    <Text style={[
+                      styles.simpleAccountName,
+                      isCurrentAccount && styles.currentAccountName
+                    ]}>
+                      {account.display_name}
+                    </Text>
+                    <Text style={[
+                      styles.simpleAccountEmail,
+                      isCurrentAccount && styles.currentAccountEmail
+                    ]}>
+                      {account.email}
+                    </Text>
+                    {isCurrentAccount && (
+                      <Text style={styles.currentLabel}>Current</Text>
+                    )}
+                  </View>
+                  {isCurrentAccount && (
+                    <View style={styles.checkmarkContainer}>
+                      <Feather name="check-circle" size={20} color="#fff" />
+                    </View>
+                  )}
+                </TouchableOpacity>
+                
+                {/* Remove button for non-current accounts */}
+                {!isCurrentAccount && savedAccounts.length > 1 && (
+                  <TouchableOpacity
+                    style={styles.removeButton}
+                    onPress={() => handleAccountRemove(index, account.email)}
+                  >
+                    <Feather name="x" size={16} color="#ff5555" />
+                  </TouchableOpacity>
+                )}
               </View>
-              <TouchableOpacity 
-                style={[
-                  styles.followButton,
-                  index === currentAccountIndex && styles.activeButton
-                ]}
-                onPress={() => handleAccountSwitch(index)}
-              >
-                <Text style={[
-                  styles.followButtonText,
-                  index === currentAccountIndex && styles.activeButtonText
-                ]}>
-                  {index === currentAccountIndex ? 'Active' : 'Switch'}
-                </Text>
-              </TouchableOpacity>
-            </View>
-          ))}
+            );
+          })}
         </View>
 
         {/* Add Account Section */}
-        <View style={styles.addAccountSection}>
-          <Text style={styles.addAccountTitle}>Add account</Text>
-          
-          <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
-            <Text style={styles.primaryButtonText}>Log into existing account</Text>
-          </TouchableOpacity>
+        {savedAccounts.length < 3 && (
+          <View style={styles.addAccountSection}>
+            <Text style={styles.addAccountTitle}>Add account</Text>
+            
+            <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
+              <Text style={styles.primaryButtonText}>Log into existing account</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity style={styles.secondaryButton} onPress={handleSignup}>
-            <Text style={styles.secondaryButtonText}>Create new account</Text>
-          </TouchableOpacity>
-        </View>
+            <TouchableOpacity style={styles.secondaryButton} onPress={handleSignup}>
+              <Text style={styles.secondaryButtonText}>Create new account</Text>
+            </TouchableOpacity>
+          </View>
+        )}
       </ScrollView>
 
       {/* Login Modal */}
@@ -241,7 +304,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 40, // Increased padding from status bar
+    paddingTop: 50, // Proper spacing from status bar
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -386,69 +449,93 @@ const styles = StyleSheet.create({
   },
   accountsSection: {
     paddingBottom: 24,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    marginHorizontal: 12,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
   },
   sectionHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
+    marginBottom: 16,
   },
   sectionTitle: {
-    color: '#fff',
-    fontSize: 16,
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 13,
     fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 1,
   },
-  seeAll: {
-    color: '#7c3aed',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  accountCard: {
+  // Simple account card display like in the image
+  simpleAccountCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    marginHorizontal: 12,
-    marginBottom: 8,
-    borderRadius: 12,
+    marginBottom: 12,
   },
-  accountAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    marginRight: 12,
+  simpleAccountContent: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
-  accountInfo: {
+  currentAccountCard: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: 'rgba(124, 58, 237, 0.6)',
+  },
+  simpleAccountAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    marginRight: 16,
+  },
+  simpleAccountInfo: {
     flex: 1,
   },
-  accountName: {
+  simpleAccountName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 2,
   },
-  accountType: {
-    color: 'rgba(255,255,255,0.6)',
+  currentAccountName: {
+    color: '#bd93f9',
+  },
+  simpleAccountEmail: {
+    color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 13,
   },
-  followButton: {
-    paddingHorizontal: 20,
-    paddingVertical: 8,
-    backgroundColor: '#7c3aed',
-    borderRadius: 8,
+  currentAccountEmail: {
+    color: 'rgba(189, 147, 249, 0.8)',
   },
-  activeButton: {
-    backgroundColor: '#10b981',
-  },
-  followButtonText: {
-    color: '#fff',
-    fontSize: 14,
+  currentLabel: {
+    color: '#bd93f9',
+    fontSize: 11,
     fontWeight: '600',
+    marginTop: 2,
+    textTransform: 'uppercase',
   },
-  activeButtonText: {
-    color: '#fff',
+  checkmarkContainer: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: '#bd93f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+  },
+  removeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 85, 85, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 85, 85, 0.3)',
   },
   addAccountSection: {
     padding: 20,
