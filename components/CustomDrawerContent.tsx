@@ -301,7 +301,7 @@ export default function CustomDrawerContent(props: any) {
 
         </View>    
       </DrawerContentScrollView>
-    </View>
+    
   );
 }
 
