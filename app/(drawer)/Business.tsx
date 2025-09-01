@@ -1,5 +1,5 @@
 // screens/Business.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
+import LoginModal from '../../components/LoginModal';
+import SignupModal from '../../components/SignupModal';
 
 interface BusinessProps {
   navigation: any;
@@ -26,41 +28,54 @@ export default function Business({ navigation }: BusinessProps) {
     currentAccountIndex,
     getBusinessDisplayName, 
     getUserPhone,
+    getDisplayName,
   } = useUser();
+
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSignupModal, setShowSignupModal] = useState(false);
 
   const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
+  const username = getDisplayName(); // Use this instead of hardcoded "winx3s"
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
     : require('../../assets/images/avatar_placeholder.png');
 
   const handleLogin = () => {
-    // Navigate to login screen
-    navigation.navigate('Login');
+    setShowLoginModal(true);
   };
 
   const handleSignup = () => {
-    // Navigate to signup screen  
-    navigation.navigate('Signup');
+    setShowSignupModal(true);
   };
 
   const handleGoBack = () => {
     navigation.goBack();
   };
 
+  const switchToSignup = () => {
+    setShowLoginModal(false);
+    setTimeout(() => setShowSignupModal(true), 300);
+  };
+
+  const switchToLogin = () => {
+    setShowSignupModal(false);
+    setTimeout(() => setShowLoginModal(true), 300);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header */}
+      {/* Header - Fixed positioning */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
-          <Text style={styles.username}>winx3s</Text>
+          <Text style={styles.username}>{username}</Text>
           <Feather name="chevron-down" size={20} color="#fff" />
         </View>
         
@@ -171,24 +186,19 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
       </ScrollView>
 
-      {/* Bottom Navigation */}
-      <View style={styles.bottomNav}>
-        <TouchableOpacity style={styles.navItem}>
-          <Feather name="home" size={24} color="#fff" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Feather name="search" size={24} color="rgba(255,255,255,0.6)" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Feather name="plus-square" size={24} color="rgba(255,255,255,0.6)" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Feather name="play" size={24} color="rgba(255,255,255,0.6)" />
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.navItem}>
-          <Image source={avatarSource} style={styles.navAvatar} />
-        </TouchableOpacity>
-      </View>
+      {/* Login Modal */}
+      <LoginModal
+        visible={showLoginModal}
+        onClose={() => setShowLoginModal(false)}
+        onSwitchToSignup={switchToSignup}
+      />
+
+      {/* Signup Modal */}
+      <SignupModal
+        visible={showSignupModal}
+        onClose={() => setShowSignupModal(false)}
+        onSwitchToLogin={switchToLogin}
+      />
     </SafeAreaView>
   );
 }
@@ -203,7 +213,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingTop: 16, // Added padding to push header down from status bar
+    paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
@@ -410,7 +421,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255,255,255,0.02)',
     marginHorizontal: 12,
     borderRadius: 16,
-    marginBottom: 20,
+    marginBottom: 40, // Added bottom margin since we removed bottom nav
   },
   addAccountTitle: {
     color: '#fff',
@@ -448,24 +459,5 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
-  },
-  bottomNav: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: '#1a1a2e',
-  },
-  navItem: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 8,
-  },
-  navAvatar: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
   },
 });
