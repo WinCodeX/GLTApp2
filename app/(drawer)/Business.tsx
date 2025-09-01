@@ -12,8 +12,8 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { useUser } from '../context/UserContext';
-import colors from '../theme/colors';
+import { useUser } from '../../context/UserContext';
+import colors from '../../theme/colors';
 
 interface BusinessProps {
   navigation: any;
