@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Updated with robust account switching
+// components/CustomDrawerContent.tsx - Simplified account switching
 import {
   Feather,
   FontAwesome5,
@@ -94,52 +94,6 @@ export default function CustomDrawerContent(props: any) {
     }
   };
 
-  const handleAccountRemove = async (accountIndex: number, accountEmail: string) => {
-    // Validate index before attempting removal
-    if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
-      console.error('❌ Invalid account index for removal:', { 
-        requestedIndex: accountIndex, 
-        availableAccounts: savedAccounts.length 
-      });
-      Alert.alert('Error', 'Invalid account selection');
-      return;
-    }
-
-    // Prevent removing current account
-    if (accountIndex === currentAccountIndex) {
-      Alert.alert('Error', 'Cannot remove the currently active account. Switch to another account first.');
-      return;
-    }
-
-    Alert.alert(
-      'Remove Account',
-      `Remove ${accountEmail}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              setShowAccountDropdown(false);
-              console.log('🗑️ Drawer removing account:', accountIndex);
-              await removeAccount(accountIndex);
-              
-              Toast.show({
-                type: 'success',
-                text1: 'Account removed',
-                text2: `${accountEmail} has been removed`,
-              });
-            } catch (error: any) {
-              console.error('❌ Drawer account removal error:', error);
-              Alert.alert('Error', error.message || 'Failed to remove account');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   const handleAddAccount = () => {
     setShowAccountDropdown(false);
     props.navigation.closeDrawer();
@@ -155,52 +109,22 @@ export default function CustomDrawerContent(props: any) {
       : require('../assets/images/avatar_placeholder.png');
 
     return (
-      <View key={`${account.id}-${index}`} style={styles.savedAccountContainer}>
-        <TouchableOpacity
-          style={[
-            styles.savedAccountItem,
-            isCurrentAccount && styles.currentAccountItem
-          ]}
-          onPress={() => handleAccountSwitch(index)}
-          activeOpacity={0.7}
-        >
-          <Image source={accountAvatar} style={styles.savedAccountAvatar} />
-          <View style={styles.savedAccountInfo}>
-            <Text style={[
-              styles.savedAccountName,
-              isCurrentAccount && styles.currentAccountText
-            ]}>
-              {account.display_name}
-            </Text>
-            <Text style={[
-              styles.savedAccountEmail,
-              isCurrentAccount && styles.currentAccountEmailText
-            ]}>
-              {account.email}
-            </Text>
-            {isCurrentAccount && (
-              <Text style={styles.currentAccountLabel}>Current</Text>
-            )}
+      <TouchableOpacity
+        key={`${account.id}-${index}`}
+        style={styles.savedAccountItem}
+        onPress={() => handleAccountSwitch(index)}
+        activeOpacity={0.7}
+      >
+        <Image source={accountAvatar} style={styles.savedAccountAvatar} />
+        <Text style={styles.savedAccountName}>
+          {account.display_name}
+        </Text>
+        {isCurrentAccount && (
+          <View style={styles.checkmarkContainer}>
+            <Feather name="check" size={14} color="#00ff00" />
           </View>
-          {isCurrentAccount ? (
-            <View style={styles.currentAccountBadge}>
-              <Feather name="check-circle" size={16} color="#fff" />
-            </View>
-          ) : (
-            <Text style={styles.switchText}>Tap to switch</Text>
-          )}
-        </TouchableOpacity>
-        
-        {/* Remove button for non-current accounts */}
-        {!isCurrentAccount && savedAccounts.length > 1 && (
-          <TouchableOpacity
-            style={styles.removeAccountButton}
-            onPress={() => handleAccountRemove(index, account.email)}
-          >
-            <Feather name="x" size={16} color="#ff5555" />
-          </TouchableOpacity>
         )}
-      </View>
+      </TouchableOpacity>
     );
   };
 
@@ -231,9 +155,9 @@ export default function CustomDrawerContent(props: any) {
 
           {showAccountDropdown && (    
             <View style={styles.accountDropdown}>
-              {/* Account Settings */}
+              {/* Account */}
               <DrawerItem    
-                label="Account Settings"    
+                label="Account"    
                 labelStyle={styles.label}    
                 icon={() => <Feather name="user" size={22} color="#fff" />}    
                 onPress={() => {
@@ -245,9 +169,6 @@ export default function CustomDrawerContent(props: any) {
               {/* Saved Accounts - Simple Display */}
               {savedAccounts.length > 0 && (
                 <View style={styles.savedAccountsSection}>
-                  <Text style={styles.savedAccountsTitle}>
-                    SWITCH ACCOUNT ({savedAccounts.length}/3)
-                  </Text>
                   {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
                 </View>
               )}
@@ -458,96 +379,37 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  // Enhanced Saved Accounts Styles - Simple Display
+  // Simplified Saved Accounts Styles
   savedAccountsSection: {
-    paddingTop: 8,
-    paddingBottom: 8,
-  },
-  savedAccountsTitle: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    fontWeight: '600',
-    paddingHorizontal: 16,
     paddingVertical: 8,
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  savedAccountContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
   },
   savedAccountItem: {
-    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  currentAccountItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    borderColor: 'rgba(124, 58, 237, 0.6)',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
   },
   savedAccountAvatar: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    marginRight: 12,
-  },
-  savedAccountInfo: {
-    flex: 1,
-  },
-  savedAccountName: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  savedAccountEmail: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 12,
-  },
-  currentAccountLabel: {
-    color: '#bd93f9',
-    fontSize: 10,
-    fontWeight: '600',
-    marginTop: 2,
-    textTransform: 'uppercase',
-  },
-  currentAccountText: {
-    color: '#bd93f9',
-  },
-  currentAccountEmailText: {
-    color: 'rgba(189, 147, 249, 0.8)',
-  },
-  currentAccountBadge: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#bd93f9',
+    marginRight: 12,
+  },
+  savedAccountName: {
+    flex: 1,
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  checkmarkContainer: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: 'rgba(0, 255, 0, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 8,
-  },
-  switchText: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 11,
-    fontStyle: 'italic',
-  },
-  removeAccountButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 85, 85, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 85, 85, 0.2)',
+    borderColor: '#00ff00',
   },
   addAccountButton: {
     flexDirection: 'row',
