@@ -1,10 +1,9 @@
-// components/AccountContent.tsx - Updated with fixed API imports
+// components/AccountContent.tsx - Updated to use AccountManager through UserContext
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import {
@@ -33,7 +32,7 @@ import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 import { registerStatusUpdater, checkServerStatus } from '../lib/netStatus';
 
-// ✅ FIXED: Import from the updated api.ts file
+// ✅ Import from the updated api.ts file
 import { 
   getFullAvatarUrl, 
   getApiBaseUrl, 
@@ -183,13 +182,24 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [usingCachedData, setUsingCachedData] = useState(false);
   const [lastServerCheck, setLastServerCheck] = useState<number>(0);
   
-  const { user, refreshUser, loading: userLoading, error: userError } = useUser();
+  // ✅ UPDATED: Use all UserContext methods including logout
+  const { 
+    user, 
+    businesses,
+    refreshUser, 
+    refreshBusinesses,
+    loading: userLoading, 
+    error: userError,
+    logout, // ✅ Use AccountManager-backed logout
+    getDisplayName,
+    getUserPhone,
+    getBusinessDisplayName
+  } = useUser();
+  
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [ownedBusinesses, setOwnedBusinesses] = useState([]);
-  const [joinedBusinesses, setJoinedBusinesses] = useState([]);
   const [selectedBusiness, setSelectedBusiness] = useState(null);
   const [inviteLink, setInviteLink] = useState(null);
   const [previewUri, setPreviewUri] = useState(null);
@@ -275,11 +285,11 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                 if (user && isScreenReady) {
                   setTimeout(() => {
                     try {
-                      loadBusinesses(true);
+                      refreshBusinesses();
                     } catch (refreshError) {
                       console.error('❌ Error refreshing data on reconnect:', refreshError);
                     }
-                  }, 500); // Small delay to avoid overwhelming the server
+                  }, 500);
                 }
               }
               break;
@@ -324,68 +334,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, []); // Only run once on mount
 
-  // ✅ Cache business data with enhanced error handling
-  const cacheBusinessData = useCallback(async (data: { owned: any[]; joined: any[] }) => {
-    try {
-      const cacheData: BusinessData = {
-        owned: data.owned || [],
-        joined: data.joined || [],
-        timestamp: Date.now(),
-      };
-      
-      await AsyncStorage.setItem(BUSINESS_CACHE_KEY, JSON.stringify(cacheData));
-      await AsyncStorage.setItem(CACHE_EXPIRY_KEY, (Date.now() + CACHE_DURATION).toString());
-      
-      console.log('💾 Business data cached successfully', {
-        owned: cacheData.owned.length,
-        joined: cacheData.joined.length,
-        networkStatus
-      });
-    } catch (error) {
-      console.error('❌ Failed to cache business data:', error);
-      // Don't throw - caching failures shouldn't crash the app
-    }
-  }, [networkStatus]);
-
-  // ✅ Load cached business data with intelligent expiry handling
-  const loadCachedBusinessData = useCallback(async (): Promise<BusinessData | null> => {
-    try {
-      const [cachedData, expiryTime] = await Promise.all([
-        AsyncStorage.getItem(BUSINESS_CACHE_KEY),
-        AsyncStorage.getItem(CACHE_EXPIRY_KEY),
-      ]);
-
-      if (!cachedData) {
-        console.log('💾 No cached business data found');
-        return null;
-      }
-
-      const parsed: BusinessData = JSON.parse(cachedData);
-      const expiry = expiryTime ? parseInt(expiryTime) : 0;
-      const isExpired = Date.now() > expiry;
-
-      // Use cached data if offline/server error OR if cache is still valid
-      if (shouldUseCachedData() || !isExpired) {
-        console.log('💾 Using cached business data', {
-          owned: parsed.owned?.length || 0,
-          joined: parsed.joined?.length || 0,
-          age: Math.round((Date.now() - parsed.timestamp) / 1000 / 60) + ' minutes',
-          expired: isExpired,
-          reason: shouldUseCachedData() ? 'network_issue' : 'cache_valid',
-          networkStatus
-        });
-
-        return parsed;
-      }
-
-      console.log('💾 Cached data expired and network available, will fetch fresh data');
-      return null;
-    } catch (error) {
-      console.error('❌ Failed to load cached business data:', error);
-      return null;
-    }
-  }, [shouldUseCachedData, networkStatus]);
-
   // ✅ Component initialization with crash protection
   useEffect(() => {
     let isMounted = true;
@@ -394,14 +342,12 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       try {
         console.log(`📱 AccountContent (${source}): Initializing...`);
         
-        // ✅ Small delay to ensure everything is mounted
         await new Promise(resolve => setTimeout(resolve, 50));
         
         if (isMounted) {
           console.log(`✅ AccountContent (${source}): Ready`);
           setIsScreenReady(true);
           
-          // ✅ Hide splash screen for admin version only (drawer manages its own)
           if (source === 'admin') {
             setTimeout(async () => {
               try {
@@ -429,7 +375,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // ✅ Check for user data and redirect if missing - with crash protection
+  // ✅ Check for user data and redirect if missing
   useEffect(() => {
     let isMounted = true;
     
@@ -437,53 +383,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       if (!isScreenReady || isRedirecting) return;
 
       try {
-        // Wait a bit for UserContext to load
         await new Promise(resolve => setTimeout(resolve, 200));
         
         if (!isMounted) return;
 
-        // Check if we have auth tokens first
-        const authToken = await SecureStore.getItemAsync('auth_token');
-        const userId = await SecureStore.getItemAsync('user_id');
-        
-        if (!authToken || !userId) {
-          console.log('❌ No auth tokens found, redirecting to login');
-          setIsRedirecting(true);
-          showToast.warning('Session expired', 'Please log in again');
-          router.replace('/login');
-          return;
-        }
-
         // Check if UserContext has user data
         if (!userLoading && !user) {
-          console.log('❌ No user data in context, checking storage...');
-          
-          // Try to get user data from AsyncStorage
-          const storedUserData = await AsyncStorage.getItem('user_data');
-          
-          if (!storedUserData) {
-            console.log('❌ No user data in storage either, redirecting to login');
-            setIsRedirecting(true);
-            showToast.error('User data missing', 'Please log in again to reload your profile');
-            
-            // Clear any stale auth tokens
-            await SecureStore.deleteItemAsync('auth_token');
-            await SecureStore.deleteItemAsync('user_id');
-            await SecureStore.deleteItemAsync('user_role');
-            
-            router.replace('/login');
-            return;
-          } else {
-            console.log('✅ Found user data in storage, refreshing user context...');
-            // Try to refresh user data from server only if connected
-            try {
-              if (isConnected()) {
-                await refreshUser();
-              }
-            } catch (refreshError) {
-              console.log('⚠️ Failed to refresh user from server, using stored data');
-            }
-          }
+          console.log('❌ No user data in context, redirecting to login');
+          setIsRedirecting(true);
+          showToast.error('User session invalid', 'Please log in again');
+          router.replace('/login');
+          return;
         }
 
         // If we have user data, proceed normally
@@ -513,179 +423,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return () => {
       isMounted = false;
     };
-  }, [isScreenReady, user, userLoading, refreshUser, router, source, isRedirecting, isConnected]);
-
-  // ✅ Clear all cached data helper with error handling
-  const clearAllCachedData = useCallback(async () => {
-    try {
-      console.log('🧹 Clearing all cached data...');
-      
-      // Clear business data from state
-      setOwnedBusinesses([]);
-      setJoinedBusinesses([]);
-      setSelectedBusiness(null);
-      setInviteLink(null);
-      setUsingCachedData(false);
-      
-      // Clear AsyncStorage (but keep essential items like changelog)
-      const keys = await AsyncStorage.getAllKeys();
-      const keysToRemove = keys.filter(key => 
-        !key.includes('changelog') && 
-        !key.includes('onboarding') &&
-        !key.includes('settings')
-      );
-      
-      if (keysToRemove.length > 0) {
-        await AsyncStorage.multiRemove(keysToRemove);
-        console.log('✅ Cleared AsyncStorage keys:', keysToRemove);
-      }
-      
-    } catch (error) {
-      console.error('❌ Error clearing cached data:', error);
-      // Don't throw - clearing cache failures shouldn't crash logout
-    }
-  }, []);
-
-  // ✅ Enhanced business loading with intelligent network handling and crash protection
-  const loadBusinesses = useCallback(async (forceRefresh = false) => {
-    try {
-      console.log('📊 Loading businesses...', { 
-        networkStatus, 
-        forceRefresh,
-        canMakeRequests: canMakeRequests(),
-        shouldUseCached: shouldUseCachedData()
-      });
-      
-      // Check changelog first
-      try {
-        const seen = await AsyncStorage.getItem(CHANGELOG_KEY);
-        if (!seen) setShowChangelog(true);
-      } catch (error) {
-        console.error('❌ Error checking changelog:', error);
-        // Don't fail business loading for changelog issues
-      }
-      
-      // Load cached data first for immediate UI feedback
-      if (!forceRefresh || shouldUseCachedData()) {
-        try {
-          const cachedData = await loadCachedBusinessData();
-          if (cachedData) {
-            setOwnedBusinesses(cachedData.owned || []);
-            setJoinedBusinesses(cachedData.joined || []);
-            setUsingCachedData(true);
-            
-            // If we can't make requests, stop here
-            if (!canMakeRequests()) {
-              return;
-            }
-            
-            // If not forcing refresh and cache is fresh, stop here
-            if (!forceRefresh) {
-              console.log('📊 Using fresh cached data, skipping network request');
-              return;
-            }
-          }
-        } catch (cacheError) {
-          console.error('❌ Error loading cached data:', cacheError);
-          // Continue to try network request
-        }
-      }
-
-      // Attempt to fetch fresh data if we can make requests
-      if (canMakeRequests()) {
-        try {
-          console.log('🌐 Fetching fresh business data...');
-          const data = await getBusinesses();
-          
-          if (data && user) {
-            setOwnedBusinesses(data?.owned || []);
-            setJoinedBusinesses(data?.joined || []);
-            setUsingCachedData(false);
-            
-            // Cache the fresh data
-            await cacheBusinessData(data);
-            
-            console.log('✅ Fresh businesses loaded:', {
-              owned: data?.owned?.length || 0,
-              joined: data?.joined?.length || 0,
-              networkStatus
-            });
-          }
-        } catch (fetchError) {
-          console.error('❌ Error fetching fresh business data:', fetchError);
-          
-          // Fallback to cached data if network request fails
-          if (!usingCachedData) {
-            try {
-              const cachedData = await loadCachedBusinessData();
-              if (cachedData) {
-                setOwnedBusinesses(cachedData.owned || []);
-                setJoinedBusinesses(cachedData.joined || []);
-                setUsingCachedData(true);
-                
-                showToast.warning('Connection Failed', 'Showing cached business data');
-              } else {
-                // No cached data and fetch failed
-                const errorMessage = networkStatus === 'server_error' 
-                  ? 'Server temporarily unavailable' 
-                  : 'Check your internet connection';
-                showToast.error('Failed to load businesses', errorMessage);
-                setOwnedBusinesses([]);
-                setJoinedBusinesses([]);
-              }
-            } catch (fallbackError) {
-              console.error('❌ Error loading fallback cached data:', fallbackError);
-              setOwnedBusinesses([]);
-              setJoinedBusinesses([]);
-              showToast.error('Failed to load businesses');
-            }
-          }
-        }
-      }
-      
-    } catch (error) {
-      console.error('❌ Error in loadBusinesses:', error);
-      
-      // Try to fallback to cached data on any error
-      try {
-        const cachedData = await loadCachedBusinessData();
-        if (cachedData) {
-          setOwnedBusinesses(cachedData.owned || []);
-          setJoinedBusinesses(cachedData.joined || []);
-          setUsingCachedData(true);
-          
-          showToast.warning('Error Loading Data', 'Showing cached business data');
-        } else {
-          setOwnedBusinesses([]);
-          setJoinedBusinesses([]);
-          showToast.error('Failed to load businesses');
-        }
-      } catch (cacheError) {
-        console.error('❌ Failed to load cached data as fallback:', cacheError);
-        setOwnedBusinesses([]);
-        setJoinedBusinesses([]);
-        showToast.error('Failed to load businesses');
-      }
-    }
-  }, [user, networkStatus, canMakeRequests, shouldUseCachedData, loadCachedBusinessData, cacheBusinessData, usingCachedData]);
-
-  // ✅ Load data only after screen is ready and user is validated
-  useEffect(() => {
-    if (isScreenReady && !screenError && !userError && user && !isRedirecting) {
-      console.log(`🔄 AccountContent (${source}) ready with user, loading data...`);
-      try {
-        loadBusinesses();
-      } catch (error) {
-        console.error('❌ Error initiating business load:', error);
-      }
-    } else if (isScreenReady && !user && !userLoading && !isRedirecting) {
-      // User data is missing and not loading - validation effect will handle redirect
-      console.log('🧹 No user found, clearing business data');
-      setOwnedBusinesses([]);
-      setJoinedBusinesses([]);
-      setUsingCachedData(false);
-    }
-  }, [isScreenReady, screenError, userError, loadBusinesses, source, user, userLoading, isRedirecting]);
+  }, [isScreenReady, user, userLoading, router, source, isRedirecting]);
 
   // ✅ Enhanced refresh handler with intelligent network awareness
   const onRefresh = useCallback(async () => {
@@ -706,11 +444,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
       setRefreshing(true);
       
-      // First refresh user data, then businesses
+      // Refresh user data and businesses
       await refreshUser();
-      // Small delay to ensure user context is updated
       await new Promise(resolve => setTimeout(resolve, 100));
-      await loadBusinesses(true); // Force refresh
+      await refreshBusinesses();
     } catch (error) {
       console.error('❌ Refresh error:', error);
       const errorMessage = networkStatus === 'server_error' 
@@ -720,7 +457,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, loadBusinesses, user, networkStatus, canMakeRequests]);
+  }, [refreshUser, refreshBusinesses, user, networkStatus, canMakeRequests]);
 
   // ✅ Avatar picker with network awareness and crash protection
   const pickAndPreviewAvatar = useCallback(async () => {
@@ -766,7 +503,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
       const result = await uploadAvatar(previewUri);
       
-      // Check if we got a valid avatar URL back
       if (result?.avatar_url) {
         console.log('✅ New avatar URL received:', result.avatar_url);
         const fullUrl = getFullAvatarUrl(result.avatar_url);
@@ -790,26 +526,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [previewUri, refreshUser, networkStatus, isConnected]);
 
-  // ✅ Enhanced logout handler with proper cleanup and crash protection
+  // ✅ UPDATED: Use AccountManager-backed logout from UserContext
   const confirmLogout = useCallback(async () => {
     try {
-      console.log('🚪 Logging out...');
+      console.log('🚪 Logging out through UserContext...');
       
-      // Clear all cached data first
-      await clearAllCachedData();
-      
-      // Remove auth tokens
-      await SecureStore.deleteItemAsync('auth_token');
-      await SecureStore.deleteItemAsync('user_id');
-      await SecureStore.deleteItemAsync('user_role');
-      
-      // Clear any other auth-related storage
-      try {
-        await AsyncStorage.removeItem('user_data');
-        await AsyncStorage.removeItem('business_data');
-      } catch (storageError) {
-        console.log('Note: Some storage items may not exist:', storageError);
-      }
+      // Use the logout method from UserContext which handles AccountManager
+      await logout();
       
       showToast.info('Logged out successfully');
       setShowLogoutConfirm(false);
@@ -821,27 +544,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       console.error('❌ Logout error:', error);
       showToast.error('Logout failed');
     }
-  }, [router, clearAllCachedData]);
-
-  // ✅ Get display name with fallback and crash protection
-  const getDisplayName = useCallback(() => {
-    try {
-      // Priority: display_name -> first_name -> username -> fallback
-      if (user?.display_name && user.display_name.trim()) {
-        return user.display_name;
-      }
-      if (user?.first_name && user.first_name.trim()) {
-        return user.first_name;
-      }
-      if (user?.username && user.username.trim()) {
-        return user.username;
-      }
-      return 'User';
-    } catch (error) {
-      console.error('❌ Error getting display name:', error);
-      return 'User';
-    }
-  }, [user]);
+  }, [logout, router]);
 
   // ✅ Get network status display info with crash protection
   const getNetworkStatusInfo = useCallback(() => {
@@ -883,13 +586,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     try {
       const newStatus = await checkServerStatus();
       if (newStatus === 'online') {
-        loadBusinesses(true);
+        refreshBusinesses();
       }
     } catch (error) {
       console.error('❌ Error checking server status:', error);
       showToast.error('Status check failed', 'Please try again later');
     }
-  }, [loadBusinesses]);
+  }, [refreshBusinesses]);
 
   // ✅ Loading screen while initializing or redirecting
   if (!isScreenReady || isRedirecting) {
@@ -935,7 +638,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <Button mode="outlined" onPress={() => {
             try {
               setScreenError(null);
-              loadBusinesses();
+              refreshBusinesses();
             } catch (error) {
               console.error('❌ Error retrying:', error);
             }
@@ -977,7 +680,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   // ✅ Main content
   return (
     <View style={styles.container}>
-      {/* ✅ Suspense wrapper for lazy-loaded components */}
       <Suspense fallback={<View />}>
         {loading && <LoaderOverlay visible={true} />}
 
@@ -1009,7 +711,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <BusinessModal
             visible
             onClose={() => setShowBusinessModal(false)}
-            onCreate={loadBusinesses}
+            onCreate={refreshBusinesses}
           />
         )}
 
@@ -1017,7 +719,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <JoinBusinessModal
             visible
             onClose={() => setShowJoinModal(false)}
-            onJoin={loadBusinesses}
+            onJoin={refreshBusinesses}
           />
         )}
       </Suspense>
@@ -1144,7 +846,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               <Text style={styles.accountType}>Glt Account</Text>
               <Text style={styles.version}>v{CHANGELOG_VERSION}</Text>
             </View>
-            {/* ✅ FIXED: Use SafeAvatar component with proper URL handling */}
             <SafeAvatar
               size={60}
               avatarUrl={user?.avatar_url}
@@ -1243,8 +944,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <Text style={styles.userName}>Your Businesses</Text>
           
           <Text style={styles.teamLabel}>Owned:</Text>
-          {ownedBusinesses.length > 0 ? (
-            ownedBusinesses.map((biz) => (
+          {businesses.owned.length > 0 ? (
+            businesses.owned.map((biz) => (
               <TouchableOpacity 
                 key={biz.id} 
                 onPress={() => {
@@ -1271,8 +972,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           )}
 
           <Text style={styles.teamLabel}>Joined:</Text>
-          {joinedBusinesses.length > 0 ? (
-            joinedBusinesses.map((biz) => (
+          {businesses.joined.length > 0 ? (
+            businesses.joined.map((biz) => (
               <Text key={biz.id} style={styles.businessItem}>• {biz.name}</Text>
             ))
           ) : (
