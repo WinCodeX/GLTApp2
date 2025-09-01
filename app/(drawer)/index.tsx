@@ -87,8 +87,17 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
-  // Get user data from context (no loading state needed)
-  const { user, getDisplayName, getUserPhone } = useUser();
+  // ✅ UPDATED: Use UserContext which now uses AccountManager
+  const { 
+    user, 
+    currentAccount,
+    loading: userLoading,
+    error: userError,
+    getDisplayName, 
+    getUserPhone,
+    getCurrentToken,
+    getCurrentUserId,
+  } = useUser();
   
   const scrollX = useRef(new Animated.Value(0)).current;
   
@@ -101,6 +110,11 @@ export default function HomeScreen() {
   // Success modal animations
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
+
+  // ✅ Check user authentication status
+  const isUserAuthenticated = () => {
+    return !!(user && currentAccount && getCurrentToken() && getCurrentUserId());
+  };
 
   useEffect(() => {
     const locationTagWidth = 120;
@@ -265,13 +279,57 @@ export default function HomeScreen() {
     });
   };
 
-  // FAB Options Actions
-  const handleFragileDelivery = () => {
-    // Check if user data is available
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
-      return;
+  // ✅ UPDATED: Enhanced authentication check for package creation
+  const validateUserForPackageCreation = (): boolean => {
+    if (userLoading) {
+      Alert.alert('Please wait', 'User authentication is loading...');
+      return false;
     }
+
+    if (userError) {
+      Alert.alert('Authentication Error', 'Please refresh the app and try again.');
+      return false;
+    }
+
+    if (!isUserAuthenticated()) {
+      Alert.alert(
+        'Authentication Required', 
+        'Please ensure you are logged in to create packages. You may need to log in or switch to a valid account.',
+        [
+          { text: 'OK' }
+        ]
+      );
+      return false;
+    }
+
+    const token = getCurrentToken();
+    const userId = getCurrentUserId();
+    
+    if (!token || !userId) {
+      console.error('❌ Missing authentication data:', { hasToken: !!token, hasUserId: !!userId });
+      Alert.alert(
+        'Session Error', 
+        'Your session may have expired. Please log out and log back in.',
+        [
+          { text: 'OK' }
+        ]
+      );
+      return false;
+    }
+
+    console.log('✅ User authentication validated:', {
+      userId: userId,
+      email: user?.email,
+      currentAccountId: currentAccount?.id,
+      hasToken: !!token
+    });
+
+    return true;
+  };
+
+  // FAB Options Actions with enhanced validation
+  const handleFragileDelivery = () => {
+    if (!validateUserForPackageCreation()) return;
     
     closeFabMenu();
     setTimeout(() => {
@@ -280,10 +338,7 @@ export default function HomeScreen() {
   };
 
   const handleSendToSomeone = () => {
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
-      return;
-    }
+    if (!validateUserForPackageCreation()) return;
     
     closeFabMenu();
     setTimeout(() => {
@@ -292,10 +347,7 @@ export default function HomeScreen() {
   };
 
   const handleCollectAndDeliver = () => {
-    if (!user) {
-      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
-      return;
-    }
+    if (!validateUserForPackageCreation()) return;
     
     closeFabMenu();
     setTimeout(() => {
@@ -336,14 +388,19 @@ export default function HomeScreen() {
     },
   ];
 
+  // ✅ UPDATED: Enhanced package submission with AccountManager validation
   const handlePackageSubmit = async (packageData: PackageData) => {
     try {
-      if (!user) {
-        Alert.alert('Error', 'User data not available. Please log in again.');
-        return;
-      }
+      if (!validateUserForPackageCreation()) return;
 
       console.log('📦 Creating package with data:', packageData);
+      console.log('📦 Using account context:', {
+        userId: getCurrentUserId(),
+        email: user?.email,
+        accountId: currentAccount?.id,
+        displayName: getDisplayName(),
+        phone: getUserPhone()
+      });
       
       const enhancedPackageData = {
         ...packageData,
@@ -366,21 +423,31 @@ export default function HomeScreen() {
       
     } catch (error: any) {
       console.error('❌ Error creating package:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to create package. Please try again.',
-        [{ text: 'OK' }]
-      );
+      
+      // Handle specific authentication errors
+      if (error.message?.includes('Authentication') || 
+          error.message?.includes('expired') || 
+          error.message?.includes('401') ||
+          error.message?.includes('422')) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please log out and log back in, then try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          error.message || 'Failed to create package. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
       throw error;
     }
   };
 
   const handleFragileSubmit = async (packageData: PackageData) => {
     try {
-      if (!user) {
-        Alert.alert('Error', 'User data not available. Please log in again.');
-        return;
-      }
+      if (!validateUserForPackageCreation()) return;
 
       console.log('📦 Creating fragile delivery package:', packageData);
       
@@ -406,21 +473,30 @@ export default function HomeScreen() {
       
     } catch (error: any) {
       console.error('❌ Error creating fragile package:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to schedule fragile items delivery. Please try again.',
-        [{ text: 'OK' }]
-      );
+      
+      if (error.message?.includes('Authentication') || 
+          error.message?.includes('expired') || 
+          error.message?.includes('401') ||
+          error.message?.includes('422')) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please log out and log back in, then try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          error.message || 'Failed to schedule fragile items delivery. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
       throw error;
     }
   };
 
   const handleCollectSubmit = async (packageData: PackageData) => {
     try {
-      if (!user) {
-        Alert.alert('Error', 'User data not available. Please log in again.');
-        return;
-      }
+      if (!validateUserForPackageCreation()) return;
 
       console.log('📦 Creating collect package:', packageData);
       
@@ -448,11 +524,23 @@ export default function HomeScreen() {
       
     } catch (error: any) {
       console.error('❌ Error creating collect package:', error);
-      Alert.alert(
-        'Error',
-        error.message || 'Failed to schedule package collection. Please try again.',
-        [{ text: 'OK' }]
-      );
+      
+      if (error.message?.includes('Authentication') || 
+          error.message?.includes('expired') || 
+          error.message?.includes('401') ||
+          error.message?.includes('422')) {
+        Alert.alert(
+          'Session Expired',
+          'Your session has expired. Please log out and log back in, then try again.',
+          [{ text: 'OK' }]
+        );
+      } else {
+        Alert.alert(
+          'Error',
+          error.message || 'Failed to schedule package collection. Please try again.',
+          [{ text: 'OK' }]
+        );
+      }
       throw error;
     }
   };
@@ -1021,12 +1109,12 @@ const styles = StyleSheet.create({
     zIndex: 1001,
   },
   fabOptionWrapper: {
-    marginBottom: 20, // Increased spacing for glow effect
+    marginBottom: 20,
     alignItems: 'flex-end',
   },
   fabOptionContainer: {
     borderRadius: 20,
-    overflow: 'visible', // Changed to visible for glow effect
+    overflow: 'visible',
   },
   fabOptionBackground: {
     paddingVertical: 18,
