@@ -128,13 +128,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         if (currentAccountData) {
           const accountIndex = parseInt(currentAccountData);
           setCurrentAccountIndex(accountIndex);
-          
-          if (accounts[accountIndex]) {
-            setUser(accounts[accountIndex].userData);
-          }
-        } else if (accounts.length > 0) {
-          setUser(accounts[0].userData);
-          setCurrentAccountIndex(0);
         }
       }
     } catch (error) {
@@ -154,33 +147,62 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
+  // RESTORED: Original API validation flow
   const refreshUser = async () => {
-    if (savedAccounts.length === 0) return;
-    
     try {
-      const currentAccount = savedAccounts[currentAccountIndex];
-      if (!currentAccount) return;
-
-      // Set the auth token for the current account
-      await SecureStore.setItemAsync('auth_token', currentAccount.token);
-      await SecureStore.setItemAsync('user_id', currentAccount.id);
-
-      const fetchedUser = await getUser();
-      if (fetchedUser) {
-        setUser(fetchedUser);
-        
-        // Update the saved account data
-        const updatedAccounts = [...savedAccounts];
-        updatedAccounts[currentAccountIndex] = {
-          ...updatedAccounts[currentAccountIndex],
-          userData: fetchedUser
-        };
-        setSavedAccounts(updatedAccounts);
-        await saveSavedAccounts(updatedAccounts);
+      console.log('🔄 Refreshing user data from API...');
+      
+      // Check if we have auth tokens
+      const authToken = await SecureStore.getItemAsync('auth_token');
+      const userId = await SecureStore.getItemAsync('user_id');
+      
+      if (!authToken || !userId) {
+        console.log('❌ No auth tokens found');
+        setUser(null);
+        setError('Authentication required');
+        return;
       }
-    } catch (err) {
-      console.error('Failed to refresh user:', err);
-      setError('Failed to refresh user data.');
+
+      // Make API call to validate and refresh user data
+      const fetchedUser = await getUser();
+      
+      if (fetchedUser) {
+        console.log('✅ User data refreshed from API:', fetchedUser.email);
+        setUser(fetchedUser);
+        setError(null);
+        
+        // Update saved account data if this user exists in saved accounts
+        const updatedAccounts = [...savedAccounts];
+        const currentAccountData = updatedAccounts[currentAccountIndex];
+        
+        if (currentAccountData && currentAccountData.id === fetchedUser.id) {
+          updatedAccounts[currentAccountIndex] = {
+            ...currentAccountData,
+            userData: fetchedUser
+          };
+          setSavedAccounts(updatedAccounts);
+          await saveSavedAccounts(updatedAccounts);
+        }
+      } else {
+        console.log('❌ No user data returned from API');
+        setUser(null);
+        setError('Failed to load user data');
+      }
+    } catch (err: any) {
+      console.error('❌ Failed to refresh user:', err);
+      setUser(null);
+      
+      // Handle 401 unauthorized - clear tokens and redirect will be handled by API interceptor
+      if (err.response?.status === 401) {
+        setError('Session expired');
+        // Clear current user data
+        await SecureStore.deleteItemAsync('auth_token');
+        await SecureStore.deleteItemAsync('user_id');
+        await SecureStore.deleteItemAsync('user_role');
+        await AsyncStorage.removeItem('user_data');
+      } else {
+        setError('Failed to load user data');
+      }
     }
   };
 
@@ -236,17 +258,20 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       await SecureStore.setItemAsync('auth_token', account.token);
       await SecureStore.setItemAsync('user_id', account.id);
       
-      // Update current user and index
-      setUser(account.userData);
+      // Update current account index
       setCurrentAccountIndex(accountIndex);
       await AsyncStorage.setItem('current_account_index', accountIndex.toString());
       
-      // Refresh user data and businesses for the switched account
-      await Promise.all([refreshUser(), refreshBusinesses()]);
+      // IMPORTANT: Refresh user data from API to validate the account
+      setLoading(true);
+      await refreshUser();
+      await refreshBusinesses();
+      setLoading(false);
       
       console.log('Switched to account:', account.email);
     } catch (error) {
       console.error('Failed to switch account:', error);
+      setLoading(false);
       throw error;
     }
   };
@@ -266,8 +291,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         setCurrentAccountIndex(0);
         await SecureStore.deleteItemAsync('auth_token');
         await SecureStore.deleteItemAsync('user_id');
+        await SecureStore.deleteItemAsync('user_role');
         await AsyncStorage.removeItem('current_account_index');
         await AsyncStorage.removeItem('saved_accounts');
+        await AsyncStorage.removeItem('user_data');
       } else {
         // If we removed the current account, switch to the first one
         const newCurrentIndex = accountIndex === currentAccountIndex 
@@ -322,31 +349,52 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return getDisplayName();
   };
 
-  // Initialize data on mount
+  // RESTORED: Original initialization flow with API validation
   useEffect(() => {
     const initializeData = async () => {
+      console.log('🚀 UserContext: Initializing...');
       setLoading(true);
+      
       try {
+        // First, load saved accounts
         await loadSavedAccounts();
-        // After loading accounts, refresh businesses
-        await refreshBusinesses();
+        
+        // Then, validate current session with API call (this is the key part that was missing)
+        const authToken = await SecureStore.getItemAsync('auth_token');
+        const userId = await SecureStore.getItemAsync('user_id');
+        
+        if (authToken && userId) {
+          console.log('🔑 Found auth tokens, validating with server...');
+          // This will make the API call to /api/v1/me
+          await refreshUser();
+          
+          // Only load businesses if user validation succeeded
+          if (user) {
+            await refreshBusinesses();
+          }
+        } else {
+          console.log('❌ No auth tokens found');
+          setUser(null);
+          setError('Authentication required');
+        }
       } catch (error) {
-        console.error('Failed to initialize data:', error);
-        setError('Failed to load user data');
+        console.error('❌ Failed to initialize user data:', error);
+        setError('Failed to initialize');
       } finally {
         setLoading(false);
       }
     };
 
     initializeData();
-  }, []);
+  }, []); // Only run once on mount
 
-  // Refresh businesses when user changes
+  // Load businesses when user changes (after successful API validation)
   useEffect(() => {
-    if (user) {
+    if (user && !loading) {
+      console.log('👤 User validated, loading businesses...');
       refreshBusinesses();
     }
-  }, [user]);
+  }, [user, loading]);
 
   return (
     <UserContext.Provider
