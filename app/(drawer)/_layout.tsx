@@ -14,7 +14,9 @@ import { ColorValue } from 'react-native';
 
 import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import AccountManagementModal from '@/components/AccountManagementModal';
+import AccountSelectionModal from '@/components/AccountSelectionModal';
+import LoginModal from '@/components/LoginModal';
+import SignupModal from '@/components/SignupModal';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
@@ -33,7 +35,9 @@ export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [isLoading, setIsLoading] = useState(true);
   const [shouldRedirect, setShouldRedirect] = useState<string | null>(null);
-  const [showAccountModal, setShowAccountModal] = useState(false);
+  const [showAccountSelectionModal, setShowAccountSelectionModal] = useState(false);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSignupModal, setShowSignupModal] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -162,7 +166,34 @@ export default function DrawerLayout() {
 
   // Handler for opening the add account modal
   const handleAddAccount = () => {
-    setShowAccountModal(true);
+    setShowAccountSelectionModal(true);
+  };
+
+  // Modal transition handlers
+  const handleCloseAllModals = () => {
+    setShowAccountSelectionModal(false);
+    setShowLoginModal(false);
+    setShowSignupModal(false);
+  };
+
+  const handleOpenLogin = () => {
+    setShowAccountSelectionModal(false);
+    setShowLoginModal(true);
+  };
+
+  const handleOpenSignup = () => {
+    setShowAccountSelectionModal(false);
+    setShowSignupModal(true);
+  };
+
+  const handleSwitchToSignup = () => {
+    setShowLoginModal(false);
+    setShowSignupModal(true);
+  };
+
+  const handleSwitchToLogin = () => {
+    setShowSignupModal(false);
+    setShowLoginModal(true);
   };
 
   if (isLoading) {
@@ -205,10 +236,24 @@ export default function DrawerLayout() {
         }}
       />
       
-      {/* Account Management Modal at root level */}
-      <AccountManagementModal
-        visible={showAccountModal}
-        onClose={() => setShowAccountModal(false)}
+      {/* Simple Account Modals */}
+      <AccountSelectionModal
+        visible={showAccountSelectionModal}
+        onClose={handleCloseAllModals}
+        onLogin={handleOpenLogin}
+        onSignup={handleOpenSignup}
+      />
+      
+      <LoginModal
+        visible={showLoginModal}
+        onClose={handleCloseAllModals}
+        onSwitchToSignup={handleSwitchToSignup}
+      />
+      
+      <SignupModal
+        visible={showSignupModal}
+        onClose={handleCloseAllModals}
+        onSwitchToLogin={handleSwitchToLogin}
       />
     </>
   );
