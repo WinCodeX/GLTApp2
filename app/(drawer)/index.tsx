@@ -87,8 +87,8 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
-  // Get user data from context
-  const { user, loading: userLoading, getDisplayName, getUserPhone } = useUser();
+  // Get user data from context (no loading state needed)
+  const { user, getDisplayName, getUserPhone } = useUser();
   
   const scrollX = useRef(new Animated.Value(0)).current;
   
@@ -267,6 +267,12 @@ export default function HomeScreen() {
 
   // FAB Options Actions
   const handleFragileDelivery = () => {
+    // Check if user data is available
+    if (!user) {
+      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
+      return;
+    }
+    
     closeFabMenu();
     setTimeout(() => {
       setShowFragileModal(true);
@@ -274,6 +280,11 @@ export default function HomeScreen() {
   };
 
   const handleSendToSomeone = () => {
+    if (!user) {
+      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
+      return;
+    }
+    
     closeFabMenu();
     setTimeout(() => {
       setShowPackageModal(true);
@@ -281,6 +292,11 @@ export default function HomeScreen() {
   };
 
   const handleCollectAndDeliver = () => {
+    if (!user) {
+      Alert.alert('Authentication Required', 'Please ensure you are logged in to create packages.');
+      return;
+    }
+    
     closeFabMenu();
     setTimeout(() => {
       setShowCollectModal(true);
@@ -440,18 +456,6 @@ export default function HomeScreen() {
       throw error;
     }
   };
-
-  // Show loading if user data is still loading
-  if (userLoading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <GLTHeader />
-        <View style={styles.loadingContainer}>
-          <Text style={styles.loadingText}>Loading user data...</Text>
-        </View>
-      </SafeAreaView>
-    );
-  }
 
   const LocationTag = ({ location }) => (
     <LinearGradient
@@ -847,17 +851,6 @@ const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#0a0a0f' 
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-  },
-  loadingText: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
   },
   locationsContainer: { 
     paddingTop: 20, 
