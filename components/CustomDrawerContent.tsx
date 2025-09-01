@@ -192,8 +192,11 @@ export default function CustomDrawerContent(props: any) {
                   icon={() => <Feather name="plus" size={22} color="#fff" />}    
                   onPress={() => {
                     setShowAccountDropdown(false);
-                    // Use the callback from props instead of managing modal state here
-                    props.onAddAccount?.();
+                    // Close drawer first, then open modal
+                    props.navigation.closeDrawer();
+                    setTimeout(() => {
+                      props.onAddAccount?.();
+                    }, 300); // Small delay to let drawer close
                   }}    
                 />
               )}
@@ -301,7 +304,7 @@ export default function CustomDrawerContent(props: any) {
 
         </View>    
       </DrawerContentScrollView>
-    
+    </View>
   );
 }
 
