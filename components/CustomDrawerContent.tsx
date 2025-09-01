@@ -9,6 +9,7 @@ import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Image,
@@ -93,7 +94,7 @@ export default function CustomDrawerContent(props: any & CustomDrawerContentProp
       props.onAddAccount();
     } else {
       setTimeout(() => {
-        props.navigation.navigate('Business');
+        router.push('/Business');
       }, 300);
     }
   };
