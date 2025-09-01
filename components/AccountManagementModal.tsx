@@ -1,26 +1,24 @@
 // components/AccountManagementModal.tsx
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   Modal,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
-  Animated,
-  PanResponder,
-  Dimensions,
+  KeyboardAvoidingView,
+  Platform,
   ActivityIndicator,
+  ScrollView,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Button, TextInput } from 'react-native-paper';
-import { AntDesign, Feather } from '@expo/vector-icons';
+import { AntDesign, Feather, MaterialCommunityIcons } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import { useGoogleAuth } from '../lib/useGoogleAuth';
 import { useUser } from '../context/UserContext';
-
-const { height: screenHeight } = Dimensions.get('window');
+import colors from '../theme/colors';
 
 interface AccountManagementModalProps {
   visible: boolean;
@@ -46,70 +44,6 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  // Animation states
-  const slideAnim = useRef(new Animated.Value(screenHeight)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
-
-  // Pan responder for swipe to dismiss
-  const panResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return gestureState.dy > 0 && Math.abs(gestureState.dy) > Math.abs(gestureState.dx);
-      },
-      onPanResponderMove: (_, gestureState) => {
-        if (gestureState.dy > 0) {
-          slideAnim.setValue(gestureState.dy);
-        }
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        if (gestureState.dy > 100) {
-          handleClose();
-        } else {
-          Animated.spring(slideAnim, {
-            toValue: 0,
-            useNativeDriver: true,
-          }).start();
-        }
-      },
-    })
-  ).current;
-
-  React.useEffect(() => {
-    if (visible) {
-      Animated.parallel([
-        Animated.timing(overlayOpacity, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.spring(slideAnim, {
-          toValue: 0,
-          tension: 100,
-          friction: 8,
-          useNativeDriver: true,
-        }),
-      ]).start();
-    }
-  }, [visible]);
-
-  const handleClose = () => {
-    Animated.parallel([
-      Animated.timing(overlayOpacity, {
-        toValue: 0,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-      Animated.timing(slideAnim, {
-        toValue: screenHeight,
-        duration: 250,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      resetForm();
-      onClose();
-    });
-  };
-
   const resetForm = () => {
     setEmail('');
     setPassword('');
@@ -121,6 +55,11 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
     setIsLogin(true);
     setIsLoading(false);
     setIsGoogleLoading(false);
+  };
+
+  const handleClose = () => {
+    resetForm();
+    onClose();
   };
 
   const handleGoogleAuthSuccess = async (googleUser: any, isNewUser: boolean) => {
@@ -263,51 +202,30 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
     }
   };
 
-  if (!visible) return null;
-
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      onRequestClose={handleClose}
-    >
-      <View style={styles.container}>
-        <Animated.View 
-          style={[styles.overlay, { opacity: overlayOpacity }]}
-        >
-          <TouchableOpacity 
-            style={styles.overlayTouchable}
-            onPress={handleClose}
-            activeOpacity={1}
-          />
-        </Animated.View>
+    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.overlay}
+      >
+        <View style={styles.sheet}>
+          {/* Drag Handle */}
+          <TouchableOpacity onPress={handleClose} style={styles.dragHandleContainer}>
+            <MaterialCommunityIcons name="chevron-down" size={30} color="#bbb" />
+          </TouchableOpacity>
 
-        <Animated.View
-          style={[
-            styles.modalContainer,
-            { transform: [{ translateY: slideAnim }] },
-          ]}
-          {...panResponder.panHandlers}
-        >
-          <LinearGradient
-            colors={['#1a1a2e', '#16213e', '#0f172a']}
-            style={styles.modalContent}
-          >
-            {/* Drag Handle */}
-            <View style={styles.dragHandle} />
+          {/* Header */}
+          <View style={styles.header}>
+            <Text style={styles.title}>
+              {isLogin ? 'Add Account' : 'Create Account'}
+            </Text>
+            <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
+              <Feather name="x" size={20} color="#fff" />
+            </TouchableOpacity>
+          </View>
 
-            {/* Header */}
-            <View style={styles.header}>
-              <Text style={styles.title}>
-                {isLogin ? 'Add Account' : 'Create Account'}
-              </Text>
-              <TouchableOpacity onPress={handleClose} style={styles.closeButton}>
-                <Feather name="x" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-
-            {/* Form */}
+          {/* Scrollable Form */}
+          <ScrollView style={styles.formContainer} showsVerticalScrollIndicator={false}>
             <View style={styles.form}>
               <TextInput
                 label="Email"
@@ -318,9 +236,9 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                 mode="outlined"
                 style={styles.input}
                 textColor="#f8f8f2"
-                placeholderTextColor="#ccc"
+                placeholderTextColor="#888"
                 outlineColor="#44475a"
-                activeOutlineColor="#bd93f9"
+                activeOutlineColor={colors.primary}
                 disabled={isLoading || isGoogleLoading}
               />
 
@@ -334,9 +252,9 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                       mode="outlined"
                       style={[styles.input, styles.halfInput]}
                       textColor="#f8f8f2"
-                      placeholderTextColor="#ccc"
+                      placeholderTextColor="#888"
                       outlineColor="#44475a"
-                      activeOutlineColor="#bd93f9"
+                      activeOutlineColor={colors.primary}
                       disabled={isLoading || isGoogleLoading}
                     />
                     <TextInput
@@ -346,9 +264,9 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                       mode="outlined"
                       style={[styles.input, styles.halfInput]}
                       textColor="#f8f8f2"
-                      placeholderTextColor="#ccc"
+                      placeholderTextColor="#888"
                       outlineColor="#44475a"
-                      activeOutlineColor="#bd93f9"
+                      activeOutlineColor={colors.primary}
                       disabled={isLoading || isGoogleLoading}
                     />
                   </View>
@@ -361,9 +279,9 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                     mode="outlined"
                     style={styles.input}
                     textColor="#f8f8f2"
-                    placeholderTextColor="#ccc"
+                    placeholderTextColor="#888"
                     outlineColor="#44475a"
-                    activeOutlineColor="#bd93f9"
+                    activeOutlineColor={colors.primary}
                     disabled={isLoading || isGoogleLoading}
                   />
                 </>
@@ -377,16 +295,16 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                 mode="outlined"
                 style={styles.input}
                 textColor="#f8f8f2"
-                placeholderTextColor="#ccc"
+                placeholderTextColor="#888"
                 outlineColor="#44475a"
-                activeOutlineColor="#bd93f9"
+                activeOutlineColor={colors.primary}
                 disabled={isLoading || isGoogleLoading}
                 right={
                   <TextInput.Icon
                     icon={showPassword ? 'eye-off' : 'eye'}
                     onPress={() => setShowPassword(!showPassword)}
                     forceTextInputFocus={false}
-                    color="#aaa"
+                    iconColor="#aaa"
                   />
                 }
               />
@@ -400,16 +318,16 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                   mode="outlined"
                   style={styles.input}
                   textColor="#f8f8f2"
-                  placeholderTextColor="#ccc"
+                  placeholderTextColor="#888"
                   outlineColor="#44475a"
-                  activeOutlineColor="#bd93f9"
+                  activeOutlineColor={colors.primary}
                   disabled={isLoading || isGoogleLoading}
                   right={
                     <TextInput.Icon
                       icon={showConfirm ? 'eye-off' : 'eye'}
                       onPress={() => setShowConfirm(!showConfirm)}
                       forceTextInputFocus={false}
-                      color="#aaa"
+                      iconColor="#aaa"
                     />
                   }
                 />
@@ -437,28 +355,21 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
               </TouchableOpacity>
 
               {/* Submit Button */}
-              <LinearGradient
-                colors={['#7c3aed', '#3b82f6', '#10b981']}
-                style={[styles.submitButtonGradient, isLoading && styles.disabledBtn]}
+              <Button
+                mode="contained"
+                onPress={handleSubmit}
+                style={[styles.submitButton, isLoading && styles.disabledBtn]}
+                labelStyle={styles.submitButtonText}
+                disabled={isLoading || isGoogleLoading}
+                loading={isLoading}
               >
-                <Button
-                  mode="contained"
-                  onPress={handleSubmit}
-                  style={styles.submitButton}
-                  labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-                  disabled={isLoading || isGoogleLoading}
-                >
-                  {isLoading 
-                    ? (isLogin ? 'Adding Account...' : 'Creating Account...') 
-                    : (isLogin ? 'Add Account' : 'Create Account')
-                  }
-                </Button>
-              </LinearGradient>
+                {isLogin ? 'Add Account' : 'Create Account'}
+              </Button>
 
               {/* Toggle Mode */}
               <Button
                 onPress={() => setIsLogin(!isLogin)}
-                textColor="#bd93f9"
+                textColor={colors.primary}
                 style={styles.toggleButton}
                 disabled={isLoading || isGoogleLoading}
               >
@@ -468,82 +379,64 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
                 }
               </Button>
             </View>
-          </LinearGradient>
-        </Animated.View>
-      </View>
+          </ScrollView>
+        </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
     flex: 1,
     justifyContent: 'flex-end',
-  },
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
-  overlayTouchable: {
-    flex: 1,
+  sheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    maxHeight: '90%',
+    minHeight: '60%',
   },
-  modalContainer: {
-    maxHeight: screenHeight * 0.85,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -5 },
-    shadowOpacity: 0.3,
-    shadowRadius: 10,
-    elevation: 20,
-  },
-  modalContent: {
-    paddingTop: 12,
-    paddingHorizontal: 20,
-    paddingBottom: 30,
-    minHeight: 400,
-  },
-  dragHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 16,
+  dragHandleContainer: {
+    alignItems: 'center',
+    paddingVertical: 12,
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 24,
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   title: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: 'bold',
-    color: '#fff',
-    textShadowColor: 'rgba(124, 58, 237, 0.5)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 4,
+    color: '#f8f8f2',
   },
   closeButton: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
+  formContainer: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
   form: {
+    paddingVertical: 16,
     gap: 16,
+    paddingBottom: 40,
   },
   input: {
-    backgroundColor: 'rgba(30, 30, 47, 0.8)',
-    borderRadius: 12,
+    backgroundColor: '#2a2a3d',
+    borderRadius: 8,
   },
   row: {
     flexDirection: 'row',
@@ -557,34 +450,33 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     fontWeight: '500',
+    marginTop: 8,
   },
   googleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(32, 32, 42, 0.9)',
-    paddingVertical: 14,
-    paddingHorizontal: 24,
-    borderRadius: 12,
+    backgroundColor: '#4285F4',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
     justifyContent: 'center',
-    gap: 10,
+    gap: 8,
     marginTop: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.2)',
   },
   googleText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
-  submitButtonGradient: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 8,
-  },
   submitButton: {
-    backgroundColor: 'transparent',
-    elevation: 0,
-    shadowOpacity: 0,
+    backgroundColor: colors.primary,
+    marginTop: 8,
+    paddingVertical: 4,
+  },
+  submitButtonText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
   },
   toggleButton: {
     marginTop: 8,
