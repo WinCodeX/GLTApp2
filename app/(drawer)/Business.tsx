@@ -9,6 +9,7 @@ import {
   Image,
   SafeAreaView,
   StatusBar,
+  Alert,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -29,6 +30,7 @@ export default function Business({ navigation }: BusinessProps) {
     getBusinessDisplayName, 
     getUserPhone,
     getDisplayName,
+    switchAccount,
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -36,7 +38,7 @@ export default function Business({ navigation }: BusinessProps) {
 
   const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
-  const username = getDisplayName(); // Use this instead of hardcoded "winx3s"
+  const username = getDisplayName();
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
@@ -51,7 +53,11 @@ export default function Business({ navigation }: BusinessProps) {
   };
 
   const handleGoBack = () => {
-    navigation.goBack();
+    if (navigation?.goBack) {
+      navigation.goBack();
+    } else if (navigation?.navigate) {
+      navigation.navigate('index'); // fallback to home
+    }
   };
 
   const switchToSignup = () => {
@@ -64,11 +70,24 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
+  const handleAccountSwitch = async (accountIndex: number) => {
+    if (accountIndex === currentAccountIndex) {
+      return; // Already current account
+    }
+
+    try {
+      await switchAccount(accountIndex);
+      // Navigation will be handled by UserContext/auth flow
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to switch accounts');
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header - Fixed positioning */}
+      {/* Header - Fixed positioning with proper spacing */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
@@ -163,8 +182,17 @@ export default function Business({ navigation }: BusinessProps) {
                   {index === currentAccountIndex ? 'Current account' : 'Suggested for you'}
                 </Text>
               </View>
-              <TouchableOpacity style={styles.followButton}>
-                <Text style={styles.followButtonText}>
+              <TouchableOpacity 
+                style={[
+                  styles.followButton,
+                  index === currentAccountIndex && styles.activeButton
+                ]}
+                onPress={() => handleAccountSwitch(index)}
+              >
+                <Text style={[
+                  styles.followButtonText,
+                  index === currentAccountIndex && styles.activeButtonText
+                ]}>
                   {index === currentAccountIndex ? 'Active' : 'Switch'}
                 </Text>
               </TouchableOpacity>
@@ -213,7 +241,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 16, // Added padding to push header down from status bar
+    paddingTop: 40, // Increased padding from status bar
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -411,17 +439,23 @@ const styles = StyleSheet.create({
     backgroundColor: '#7c3aed',
     borderRadius: 8,
   },
+  activeButton: {
+    backgroundColor: '#10b981',
+  },
   followButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
+  },
+  activeButtonText: {
+    color: '#fff',
   },
   addAccountSection: {
     padding: 20,
     backgroundColor: 'rgba(255,255,255,0.02)',
     marginHorizontal: 12,
     borderRadius: 16,
-    marginBottom: 40, // Added bottom margin since we removed bottom nav
+    marginBottom: 40,
   },
   addAccountTitle: {
     color: '#fff',
@@ -431,12 +465,12 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   primaryButton: {
-    backgroundColor: '#1877f2',
+    backgroundColor: '#7c3aed',
     paddingVertical: 12,
     borderRadius: 25,
     alignItems: 'center',
     marginBottom: 12,
-    shadowColor: '#1877f2',
+    shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
