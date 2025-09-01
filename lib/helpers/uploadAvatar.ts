@@ -1,22 +1,25 @@
-// lib/helpers/uploadAvatar.ts
+// lib/helpers/uploadAvatar.ts - Updated to use AccountManager
 import api from "../api";
-import * as SecureStore from "expo-secure-store";
 import { Platform } from "react-native";
+import { accountManager } from "../AccountManager";
 
 export const uploadAvatar = async (uri: string) => {
   try {
-    console.log('Starting avatar upload process...');
+    console.log('🔄 Starting avatar upload process...');
     
-    // Get and validate auth tokens
-    const token = await SecureStore.getItemAsync("auth_token");
-    const userId = await SecureStore.getItemAsync("user_id");
+    // Get current account data from AccountManager
+    const currentAccount = accountManager.getCurrentAccount();
     
-    if (!token || !userId) {
-      console.error('No auth tokens found for avatar upload');
-      throw new Error('Authentication required. Please log in again.');
+    if (!currentAccount) {
+      console.error('❌ No current account found for avatar upload');
+      throw new Error('No active account. Please log in again.');
     }
     
-    console.log('Auth tokens validated for user:', userId);
+    console.log('✅ Using account for upload:', {
+      email: currentAccount.email,
+      userId: currentAccount.id,
+      hasToken: !!currentAccount.token
+    });
 
     // Create form data
     const form = new FormData();
@@ -26,32 +29,37 @@ export const uploadAvatar = async (uri: string) => {
       type: Platform.OS === "ios" ? "image/jpeg" : "image/jpg",
     } as any);
 
-    console.log('Uploading avatar for user:', userId);
+    console.log('📤 Uploading avatar for user:', currentAccount.id);
 
-    // Make API request with enhanced headers
+    // Make API request - the API instance will automatically use the current account's token
     const res = await api.put("/api/v1/me/avatar", form, {
       headers: {
-        Authorization: `Bearer ${token}`,
         "Content-Type": "multipart/form-data",
         // Add user context for server validation
-        "X-User-ID": userId,
+        "X-User-ID": currentAccount.id,
+        "X-User-Email": currentAccount.email,
       },
     });
 
-    console.log('Avatar upload successful:', res.data);
+    console.log('✅ Avatar upload successful:', res.data);
     return res.data;
 
   } catch (error: any) {
-    console.error('Avatar upload failed:', error);
+    console.error('❌ Avatar upload failed:', error);
     
     // Handle authentication errors
     if (error.response?.status === 401 || error.response?.status === 422) {
-      console.log('Authentication failed, clearing tokens');
+      console.log('🔐 Authentication failed during upload');
       
-      // Clear potentially invalid tokens
-      await SecureStore.deleteItemAsync('auth_token').catch(() => {});
-      await SecureStore.deleteItemAsync('user_id').catch(() => {});
-      await SecureStore.deleteItemAsync('user_role').catch(() => {});
+      const currentAccount = accountManager.getCurrentAccount();
+      if (currentAccount) {
+        console.log('🗑️ Removing invalid account:', currentAccount.email);
+        try {
+          await accountManager.removeAccount(currentAccount.id);
+        } catch (removeError) {
+          console.error('❌ Failed to remove invalid account:', removeError);
+        }
+      }
       
       throw new Error('Session expired. Please log in again.');
     }
