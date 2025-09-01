@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { Dimensions, View } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 
 import { Drawer } from 'expo-router/drawer';
 import {
@@ -20,6 +19,7 @@ import SignupModal from '@/components/SignupModal';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
+import { accountManager } from '@/lib/AccountManager';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -45,7 +45,7 @@ export default function DrawerLayout() {
 
     async function init() {
       try {
-        console.log('DrawerLayout: Starting offline-first authentication check...');
+        console.log('DrawerLayout: Starting AccountManager-based authentication check...');
         
         await SplashScreen.preventAutoHideAsync();
         
@@ -55,22 +55,24 @@ export default function DrawerLayout() {
           console.warn('Bootstrap warning (non-critical):', bootstrapError);
         }
         
-        const authToken = await SecureStore.getItemAsync('auth_token');
-        const userId = await SecureStore.getItemAsync('user_id');
-        const role = await SecureStore.getItemAsync('user_role');
-
-        console.log('Stored auth check:', { 
-          hasToken: !!authToken, 
-          hasUserId: !!userId, 
-          role 
+        // Initialize AccountManager
+        await accountManager.initialize();
+        
+        // Check for existing accounts
+        const currentAccount = accountManager.getCurrentAccount();
+        
+        console.log('AccountManager check:', { 
+          hasCurrentAccount: !!currentAccount,
+          totalAccounts: accountManager.getAllAccounts().length,
+          role: currentAccount?.role
         });
 
         if (!isMounted) return;
 
-        if (authToken && userId) {
-          console.log('Found stored credentials - redirecting immediately');
+        if (currentAccount) {
+          console.log('Found current account - redirecting immediately');
           
-          if (role === 'admin') {
+          if (currentAccount.role === 'admin') {
             console.log('Admin role detected, redirecting to /admin');
             setShouldRedirect('/admin');
           } else {
@@ -78,9 +80,10 @@ export default function DrawerLayout() {
             setShouldRedirect(null);
           }
           
-          verifyTokenInBackground(authToken);
+          // Verify token in background without blocking UI
+          verifyTokenInBackground(currentAccount.token, currentAccount.id);
         } else {
-          console.log('No stored credentials found, redirecting to /login');
+          console.log('No current account found, redirecting to /login');
           setShouldRedirect('/login');
         }
         
@@ -89,19 +92,14 @@ export default function DrawerLayout() {
       } catch (error) {
         console.error('Critical initialization error:', error);
         if (isMounted) {
-          try {
-            const authToken = await SecureStore.getItemAsync('auth_token');
-            const userId = await SecureStore.getItemAsync('user_id');
-            
-            if (authToken && userId) {
-              console.log('Error during init but found tokens - staying authenticated');
-              setShouldRedirect(null);
-            } else {
-              console.log('Error during init and no tokens - redirecting to login');
-              setShouldRedirect('/login');
-            }
-          } catch (tokenError) {
-            console.error('Failed to check tokens after error:', tokenError);
+          // Fallback check
+          const hasAnyAccounts = accountManager.hasAccounts();
+          
+          if (hasAnyAccounts) {
+            console.log('Error during init but found accounts - staying authenticated');
+            setShouldRedirect(null);
+          } else {
+            console.log('Error during init and no accounts - redirecting to login');
             setShouldRedirect('/login');
           }
           
@@ -110,25 +108,27 @@ export default function DrawerLayout() {
       }
     }
 
-    async function verifyTokenInBackground(token: string) {
+    async function verifyTokenInBackground(token: string, userId: string) {
       try {
-        console.log('Background: Verifying token with server...');
+        console.log('Background: Verifying token with server for user:', userId);
         await api.get('/api/v1/me');
         console.log('Background: Token verified successfully');
       } catch (verifyError) {
         console.warn('Background: Token verification failed (non-critical):', verifyError);
-        if (verifyError?.response?.status === 401) {
-          console.log('Background: Token is invalid (401), clearing...');
+        if (verifyError?.response?.status === 401 || verifyError?.response?.status === 422) {
+          console.log('Background: Token is invalid, removing account');
           try {
-            await SecureStore.deleteItemAsync('auth_token');
-            await SecureStore.deleteItemAsync('user_id');
-            await SecureStore.deleteItemAsync('user_role');
-            
-            if (isMounted && !shouldRedirect) {
-              setShouldRedirect('/login');
+            const currentAccount = accountManager.getCurrentAccount();
+            if (currentAccount && currentAccount.id === userId) {
+              await accountManager.removeAccount(currentAccount.id);
+              
+              // Check if we still have accounts
+              if (!accountManager.hasAccounts() && isMounted && !shouldRedirect) {
+                setShouldRedirect('/login');
+              }
             }
-          } catch (clearError) {
-            console.error('Failed to clear invalid tokens:', clearError);
+          } catch (removeError) {
+            console.error('Failed to remove invalid account:', removeError);
           }
         }
       }
