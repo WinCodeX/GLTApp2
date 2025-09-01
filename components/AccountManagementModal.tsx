@@ -203,7 +203,13 @@ export default function AccountManagementModal({ visible, onClose }: AccountMana
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={handleClose}>
+    <Modal 
+      visible={visible} 
+      animationType="slide" 
+      transparent 
+      onRequestClose={handleClose}
+      presentationStyle="overFullScreen"
+    >
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.overlay}
@@ -393,11 +399,16 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
   },
   sheet: {
-    backgroundColor: colors.background,
+    backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '90%',
     minHeight: '60%',
+    elevation: 50,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: -5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
   dragHandleContainer: {
     alignItems: 'center',
@@ -435,8 +446,8 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
   },
   input: {
-    backgroundColor: '#2a2a3d',
-    borderRadius: 8,
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
   },
   row: {
     flexDirection: 'row',
@@ -451,17 +462,25 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginTop: 8,
+    backgroundColor: 'rgba(255, 85, 85, 0.1)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 85, 85, 0.2)',
   },
   googleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#4285F4',
+    backgroundColor: 'rgba(66, 133, 244, 0.9)',
     paddingVertical: 12,
     paddingHorizontal: 16,
-    borderRadius: 8,
+    borderRadius: 12,
     justifyContent: 'center',
     gap: 8,
     marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(66, 133, 244, 0.3)',
   },
   googleText: {
     color: '#fff',
@@ -472,6 +491,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
     marginTop: 8,
     paddingVertical: 4,
+    borderRadius: 12,
   },
   submitButtonText: {
     color: '#fff',
@@ -480,6 +500,8 @@ const styles = StyleSheet.create({
   },
   toggleButton: {
     marginTop: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 8,
   },
   disabledBtn: {
     opacity: 0.6,
