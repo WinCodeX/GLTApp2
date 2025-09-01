@@ -19,12 +19,9 @@ import {
 } from 'react-native';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
-import AccountManagementModal from './AccountManagementModal'; // Import the modal
-
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
-  const [showAccountModal, setShowAccountModal] = useState(false);
   
   const { 
     user, 
@@ -143,9 +140,8 @@ export default function CustomDrawerContent(props: any) {
   };
 
   return (
-    <>
-      <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
-        <View style={styles.container}>
+    <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
+      <View style={styles.container}>
 
           {/* Main Account Section */}    
           <TouchableOpacity    
@@ -196,7 +192,8 @@ export default function CustomDrawerContent(props: any) {
                   icon={() => <Feather name="plus" size={22} color="#fff" />}    
                   onPress={() => {
                     setShowAccountDropdown(false);
-                    setShowAccountModal(true);
+                    // Use the callback from props instead of managing modal state here
+                    props.onAddAccount?.();
                   }}    
                 />
               )}
@@ -304,13 +301,7 @@ export default function CustomDrawerContent(props: any) {
 
         </View>    
       </DrawerContentScrollView>
-      
-      {/* Account Management Modal */}
-      <AccountManagementModal
-        visible={showAccountModal}
-        onClose={() => setShowAccountModal(false)}
-      />
-    </>
+    </View>
   );
 }
 
