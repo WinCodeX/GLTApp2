@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Simplified account switching
+// components/CustomDrawerContent.tsx - Updated to use AccountManager
 import {
   Feather,
   FontAwesome5,
@@ -22,25 +22,26 @@ import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
 
-export default function CustomDrawerContent(props: any) {
+interface CustomDrawerContentProps {
+  onAddAccount?: () => void;
+}
+
+export default function CustomDrawerContent(props: any & CustomDrawerContentProps) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   
   const { 
     user, 
     businesses, 
-    savedAccounts,
-    currentAccountIndex,
+    accounts,
+    currentAccount,
     getBusinessDisplayName, 
     getUserPhone,
     switchAccount,
     removeAccount
   } = useUser();
 
-  // Use the helper function from context that handles business name fallback
   const displayName = getBusinessDisplayName();
-  
-  // Use the helper function for phone
   const userPhone = getUserPhone();
 
   const avatarSource = user?.avatar_url
@@ -57,19 +58,9 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
   ];
 
-  const handleAccountSwitch = async (accountIndex: number) => {
-    if (accountIndex === currentAccountIndex) {
+  const handleAccountSwitch = async (accountId: string) => {
+    if (!currentAccount || accountId === currentAccount.id) {
       setShowAccountDropdown(false);
-      return;
-    }
-
-    // Validate index before attempting switch
-    if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
-      console.error('❌ Invalid account index in drawer:', { 
-        requestedIndex: accountIndex, 
-        availableAccounts: savedAccounts.length 
-      });
-      Alert.alert('Error', 'Invalid account selection');
       return;
     }
 
@@ -77,19 +68,19 @@ export default function CustomDrawerContent(props: any) {
       setShowAccountDropdown(false);
       props.navigation.closeDrawer();
       
-      console.log('🔄 Drawer switching to account:', accountIndex);
-      await switchAccount(accountIndex);
+      console.log('Drawer switching to account:', accountId);
+      await switchAccount(accountId);
       
-      const switchedAccount = savedAccounts[accountIndex];
+      const switchedAccount = accounts.find(acc => acc.id === accountId);
       if (switchedAccount) {
         Toast.show({
           type: 'success',
-          text1: 'Account switched!',
+          text1: 'Account switched',
           text2: `Now using ${switchedAccount.display_name}`,
         });
       }
     } catch (error: any) {
-      console.error('❌ Drawer account switch error:', error);
+      console.error('Drawer account switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch accounts');
     }
   };
@@ -97,22 +88,27 @@ export default function CustomDrawerContent(props: any) {
   const handleAddAccount = () => {
     setShowAccountDropdown(false);
     props.navigation.closeDrawer();
-    setTimeout(() => {
-      props.navigation.navigate('Business');
-    }, 300);
+    
+    if (props.onAddAccount) {
+      props.onAddAccount();
+    } else {
+      setTimeout(() => {
+        props.navigation.navigate('Business');
+      }, 300);
+    }
   };
 
-  const renderSavedAccount = (account: SavedAccount, index: number) => {
-    const isCurrentAccount = index === currentAccountIndex;
+  const renderSavedAccount = (account: any) => {
+    const isCurrentAccount = currentAccount?.id === account.id;
     const accountAvatar = account.avatar_url
       ? { uri: account.avatar_url }
       : require('../assets/images/avatar_placeholder.png');
 
     return (
       <TouchableOpacity
-        key={`${account.id}-${index}`}
+        key={account.id}
         style={styles.savedAccountItem}
-        onPress={() => handleAccountSwitch(index)}
+        onPress={() => handleAccountSwitch(account.id)}
         activeOpacity={0.7}
       >
         <Image source={accountAvatar} style={styles.savedAccountAvatar} />
@@ -167,14 +163,14 @@ export default function CustomDrawerContent(props: any) {
               />
               
               {/* Saved Accounts - Simple Display */}
-              {savedAccounts.length > 0 && (
+              {accounts.length > 0 && (
                 <View style={styles.savedAccountsSection}>
-                  {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
+                  {accounts.map(account => renderSavedAccount(account))}
                 </View>
               )}
 
               {/* Add Account Button (only if less than 3 accounts) */}
-              {savedAccounts.length < 3 && (
+              {accounts.length < 3 && (
                 <TouchableOpacity
                   style={styles.addAccountButton}
                   onPress={handleAddAccount}
@@ -378,8 +374,6 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 20,
   },
-
-  // Simplified Saved Accounts Styles
   savedAccountsSection: {
     paddingVertical: 8,
   },
