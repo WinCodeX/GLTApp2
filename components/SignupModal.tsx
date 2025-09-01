@@ -1,4 +1,4 @@
-// components/SignupModal.tsx
+// components/SignupModal.tsx - Fixed with proper AsyncStorage persistence
 import React, { useState } from 'react';
 import {
   Modal,
@@ -12,6 +12,8 @@ import {
 import { Feather, AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import { useUser } from '../context/UserContext';
 import { useGoogleAuth } from '../lib/useGoogleAuth';
@@ -36,38 +38,53 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleGoogleAuthSuccess = async (googleUser: any) => {
+  const handleGoogleAuthSuccess = async (railsUser: any, isNewUser: boolean) => {
     try {
       setIsGoogleLoading(true);
-      
-      const response = await api.post('/api/v1/google_login', {
-        user: {
-          email: googleUser.email,
-          first_name: googleUser.given_name,
-          last_name: googleUser.family_name,
-          avatar_url: googleUser.picture,
-          provider: 'google',
-          uid: googleUser.id,
-        },
+      console.log('🔐 Processing Google signup for modal:', railsUser.email);
+
+      const user = railsUser;
+      const roles = user?.roles || [];
+      const role = roles.includes('admin') ? 'admin' : 'client';
+
+      // Save complete user data - same as signup.tsx
+      const userData = {
+        id: user.id,
+        email: user.email,
+        username: user.username || null,
+        first_name: user.first_name || null,
+        last_name: user.last_name || null,
+        display_name: user.display_name || user.first_name || null,
+        phone: user.phone_number || null,
+        avatar_url: user.avatar_url || user.google_image_url || null,
+        role: role,
+        roles: roles,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        provider: 'google',
+      };
+
+      // Save user data to AsyncStorage
+      await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+      console.log('✅ Google user data saved to AsyncStorage');
+
+      // Add account using UserContext
+      await addAccount(userData, 'google_oauth_token');
+
+      Toast.show({
+        type: 'success',
+        text1: 'Account Created!',
+        text2: `Welcome, ${user.display_name || user.first_name}!`,
       });
-
-      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
-      const user = response?.data?.user;
-
-      if (token && user) {
-        await addAccount(user, token);
-        Toast.show({
-          type: 'success',
-          text1: 'Account Created!',
-          text2: `Welcome, ${user.display_name || user.first_name}!`,
-        });
-        handleClose();
-      }
+      
+      handleClose();
     } catch (error: any) {
+      console.error('❌ Google signup error in modal:', error);
+      setErrorMsg('Google authentication failed');
       Toast.show({
         type: 'error',
         text1: 'Failed to create account',
-        text2: error.response?.data?.error || 'Google authentication failed',
+        text2: error.message || 'Google authentication failed',
       });
     } finally {
       setIsGoogleLoading(false);
@@ -91,12 +108,14 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
     setIsLoading(true);
 
     try {
+      console.log('🔐 Modal signup attempt for:', email);
+      
       const response = await api.post('/api/v1/signup', {
         user: {
           email,
+          phone_number: phone,
           first_name: firstName,
           last_name: lastName,
-          phone_number: phone,
           password,
           password_confirmation: confirmPassword,
         },
@@ -104,24 +123,64 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
 
       const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
       const user = response?.data?.user;
+      const userId = user?.id;
 
-      if (token && user) {
-        await addAccount(user, token);
+      if (token && userId && user) {
+        console.log('✅ Modal signup successful for:', user.email);
+
+        // Determine user role
+        const roles = user?.roles || [];
+        const role = roles.includes('admin') ? 'admin' : 'client';
+
+        // Save complete user data - same as signup.tsx
+        const userData = {
+          id: user.id,
+          email: user.email,
+          username: user.username || null,
+          first_name: user.first_name || null,
+          last_name: user.last_name || null,
+          display_name: user.display_name || user.first_name || null,
+          phone: user.phone_number || null,
+          avatar_url: user.avatar_url || null,
+          role: role,
+          roles: roles,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+        };
+
+        // Save user data to AsyncStorage
+        await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+        console.log('✅ User data saved to AsyncStorage');
+
+        // Add account using UserContext
+        await addAccount(userData, token);
+
         Toast.show({
           type: 'success',
           text1: 'Account Created!',
           text2: `Welcome, ${user.display_name || user.first_name || user.email}!`,
         });
+        
         handleClose();
       } else {
-        setErrorMsg('Account creation failed');
+        const message = 'Signup failed: Server response incomplete';
+        setErrorMsg(message);
+        console.error('❌ Modal signup failed:', { hasToken: !!token, hasUserId: !!userId, hasUser: !!user });
       }
     } catch (error: any) {
+      console.error('❌ Modal signup error:', error);
+      
+      let errorMessage = 'Please try again';
+      
       if (error?.response?.status === 422) {
-        setErrorMsg(error?.response?.data?.error || 'Invalid input');
-      } else {
-        setErrorMsg('Signup failed. Please try again.');
+        errorMessage = error?.response?.data?.error || 'Invalid input';
+      } else if (error?.code === 'NETWORK_ERROR' || error?.message === 'Network Error') {
+        errorMessage = 'Network error - check your connection';
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
       }
+
+      setErrorMsg(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -130,10 +189,15 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
   const handleGoogleSignup = async () => {
     if (isGoogleLoading || !request) return;
 
+    setErrorMsg('');
     setIsGoogleLoading(true);
+    
     try {
+      console.log('🚀 Modal Google signup...');
       await promptAsync();
     } catch (error) {
+      console.error('❌ Modal Google signup error:', error);
+      setErrorMsg('Google signup failed');
       Toast.show({
         type: 'error',
         text1: 'Google signup error',
@@ -182,7 +246,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
             <TextInput
               style={styles.input}
               placeholder="Email"
-              placeholderTextColor="#888"
+              placeholderTextColor="#ccc"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -194,7 +258,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
               <TextInput
                 style={[styles.input, styles.halfInput]}
                 placeholder="First name"
-                placeholderTextColor="#888"
+                placeholderTextColor="#ccc"
                 value={firstName}
                 onChangeText={setFirstName}
                 editable={!isLoading && !isGoogleLoading}
@@ -202,7 +266,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
               <TextInput
                 style={[styles.input, styles.halfInput]}
                 placeholder="Last name"
-                placeholderTextColor="#888"
+                placeholderTextColor="#ccc"
                 value={lastName}
                 onChangeText={setLastName}
                 editable={!isLoading && !isGoogleLoading}
@@ -212,7 +276,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
             <TextInput
               style={styles.input}
               placeholder="Phone (optional)"
-              placeholderTextColor="#888"
+              placeholderTextColor="#ccc"
               value={phone}
               onChangeText={setPhone}
               keyboardType="phone-pad"
@@ -223,7 +287,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
               <TextInput
                 style={[styles.input, styles.passwordInput]}
                 placeholder="Password"
-                placeholderTextColor="#888"
+                placeholderTextColor="#ccc"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -236,7 +300,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
                 <Feather 
                   name={showPassword ? 'eye-off' : 'eye'} 
                   size={20} 
-                  color="#888" 
+                  color="#aaa" 
                 />
               </TouchableOpacity>
             </View>
@@ -245,7 +309,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
               <TextInput
                 style={[styles.input, styles.passwordInput]}
                 placeholder="Confirm password"
-                placeholderTextColor="#888"
+                placeholderTextColor="#ccc"
                 value={confirmPassword}
                 onChangeText={setConfirmPassword}
                 secureTextEntry={!showConfirmPassword}
@@ -258,7 +322,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
                 <Feather 
                   name={showConfirmPassword ? 'eye-off' : 'eye'} 
                   size={20} 
-                  color="#888" 
+                  color="#aaa" 
                 />
               </TouchableOpacity>
             </View>
@@ -266,7 +330,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
             {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
             <TouchableOpacity 
-              style={styles.googleButton}
+              style={[styles.googleButton, (!request || isLoading || isGoogleLoading) && styles.disabledButton]}
               onPress={handleGoogleSignup}
               disabled={isLoading || isGoogleLoading || !request}
             >
@@ -282,7 +346,7 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
 
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
-              style={styles.signupButtonGradient}
+              style={[styles.signupButtonGradient, (isLoading || isGoogleLoading) && styles.disabledButton]}
             >
               <TouchableOpacity 
                 style={styles.signupButton}
@@ -300,7 +364,10 @@ export default function SignupModal({ visible, onClose, onSwitchToLogin }: Signu
 
           {/* Footer */}
           <View style={styles.footer}>
-            <TouchableOpacity onPress={onSwitchToLogin}>
+            <TouchableOpacity 
+              onPress={onSwitchToLogin}
+              disabled={isLoading || isGoogleLoading}
+            >
               <Text style={styles.switchText}>Already have an account? Log in</Text>
             </TouchableOpacity>
           </View>
@@ -336,7 +403,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
+    color: '#f8f8f2',
   },
   form: {
     padding: 20,
@@ -379,6 +446,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     marginBottom: 12,
+    fontWeight: '500',
   },
   googleButton: {
     flexDirection: 'row',
@@ -424,5 +492,8 @@ const styles = StyleSheet.create({
     color: '#bd93f9',
     fontSize: 14,
     fontWeight: '500',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });
