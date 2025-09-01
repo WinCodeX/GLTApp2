@@ -33,7 +33,7 @@ export default function Business({ navigation }: BusinessProps) {
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
-    : require('../assets/images/avatar_placeholder.png');
+    : require('../../assets/images/avatar_placeholder.png');
 
   const handleLogin = () => {
     // Navigate to login screen
