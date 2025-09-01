@@ -9,7 +9,7 @@ import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
-import { useRouter } from 'expo-router';
+import { router } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Image,
@@ -30,6 +30,8 @@ interface CustomDrawerContentProps {
 export default function CustomDrawerContent(props: any & CustomDrawerContentProps) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  
+  const router = useRouter();
   
   const { 
     user, 
@@ -93,9 +95,8 @@ export default function CustomDrawerContent(props: any & CustomDrawerContentProp
     if (props.onAddAccount) {
       props.onAddAccount();
     } else {
-      setTimeout(() => {
-        router.push('/Business');
-      }, 300);
+      // Try immediate navigation instead of setTimeout
+      router.push('/(drawer)/Business');
     }
   };
 
