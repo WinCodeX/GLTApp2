@@ -17,6 +17,7 @@ import {
   View,
   Alert,
 } from 'react-native';
+import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
 
@@ -62,8 +63,16 @@ export default function CustomDrawerContent(props: any) {
     }
 
     try {
-      await switchAccount(accountIndex);
       setShowAccountDropdown(false);
+      props.navigation.closeDrawer();
+      
+      await switchAccount(accountIndex);
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Account switched!',
+        text2: `Now using ${savedAccounts[accountIndex]?.display_name}`,
+      });
     } catch (error: any) {
       Alert.alert('Error', error.message || 'Failed to switch accounts');
     }
@@ -80,7 +89,14 @@ export default function CustomDrawerContent(props: any) {
           style: 'destructive',
           onPress: async () => {
             try {
+              setShowAccountDropdown(false);
               await removeAccount(accountIndex);
+              
+              Toast.show({
+                type: 'success',
+                text1: 'Account removed',
+                text2: `${accountEmail} has been removed`,
+              });
             } catch (error: any) {
               Alert.alert('Error', error.message || 'Failed to remove account');
             }
@@ -112,6 +128,7 @@ export default function CustomDrawerContent(props: any) {
             isCurrentAccount && styles.currentAccountItem
           ]}
           onPress={() => handleAccountSwitch(index)}
+          activeOpacity={0.7}
         >
           <Image source={accountAvatar} style={styles.savedAccountAvatar} />
           <View style={styles.savedAccountInfo}>
@@ -127,11 +144,16 @@ export default function CustomDrawerContent(props: any) {
             ]}>
               {account.email}
             </Text>
+            {isCurrentAccount && (
+              <Text style={styles.currentAccountLabel}>Current</Text>
+            )}
           </View>
-          {isCurrentAccount && (
+          {isCurrentAccount ? (
             <View style={styles.currentAccountBadge}>
               <Feather name="check-circle" size={16} color="#fff" />
             </View>
+          ) : (
+            <Text style={styles.switchText}>Tap to switch</Text>
           )}
         </TouchableOpacity>
         
@@ -176,7 +198,7 @@ export default function CustomDrawerContent(props: any) {
             <View style={styles.accountDropdown}>
               {/* Current Account Details */}
               <DrawerItem    
-                label="Account"    
+                label="Account Settings"    
                 labelStyle={styles.label}    
                 icon={() => <Feather name="user" size={22} color="#fff" />}    
                 onPress={() => {
@@ -188,7 +210,9 @@ export default function CustomDrawerContent(props: any) {
               {/* Saved Accounts */}
               {savedAccounts.length > 0 && (
                 <View style={styles.savedAccountsSection}>
-                  <Text style={styles.savedAccountsTitle}>Accounts ({savedAccounts.length}/3)</Text>
+                  <Text style={styles.savedAccountsTitle}>
+                    Switch Account ({savedAccounts.length}/3)
+                  </Text>
                   {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
                 </View>
               )}
@@ -429,8 +453,8 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   currentAccountItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: 'rgba(124, 58, 237, 0.4)',
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    borderColor: 'rgba(124, 58, 237, 0.6)',
   },
   savedAccountAvatar: {
     width: 32,
@@ -451,6 +475,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 12,
   },
+  currentAccountLabel: {
+    color: '#bd93f9',
+    fontSize: 10,
+    fontWeight: '600',
+    marginTop: 2,
+  },
   currentAccountText: {
     color: '#bd93f9',
   },
@@ -465,6 +495,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
+  },
+  switchText: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 11,
+    fontStyle: 'italic',
   },
   removeAccountButton: {
     width: 32,
