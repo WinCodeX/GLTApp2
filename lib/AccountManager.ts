@@ -139,10 +139,10 @@ export class AccountManager {
     account.lastUsed = Date.now();
     this.accountGroup.currentAccountId = accountId;
     
-    // Update SecureStore with current account's auth data
-    await SecureStore.setItemAsync('auth_token', account.token);
-    await SecureStore.setItemAsync('user_id', account.id);
-    await SecureStore.setItemAsync('user_role', account.role);
+    // Update SecureStore with current account's auth data - ensure all values are strings
+    await SecureStore.setItemAsync('auth_token', String(account.token || ''));
+    await SecureStore.setItemAsync('user_id', String(account.id || ''));
+    await SecureStore.setItemAsync('user_role', String(account.role || ''));
     
     await this.persist();
     console.log('✅ AccountManager: Current account set');
