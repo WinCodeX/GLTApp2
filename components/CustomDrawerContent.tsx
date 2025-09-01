@@ -19,9 +19,12 @@ import {
 } from 'react-native';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
+import AccountSelectionModal from './AccountSelectionModal';
+
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [showAccountSelectionModal, setShowAccountSelectionModal] = useState(false);
   
   const { 
     user, 
@@ -89,6 +92,24 @@ export default function CustomDrawerContent(props: any) {
     );
   };
 
+  const handleAddAccount = () => {
+    setShowAccountDropdown(false);
+    props.navigation.closeDrawer();
+    setTimeout(() => {
+      setShowAccountSelectionModal(true);
+    }, 300);
+  };
+
+  const handleLogin = () => {
+    // Handle login navigation/logic here
+    props.onAddAccount?.('login');
+  };
+
+  const handleSignup = () => {
+    // Handle signup navigation/logic here  
+    props.onAddAccount?.('signup');
+  };
+
   const renderSavedAccount = (account: any, index: number) => {
     const isCurrentAccount = index === currentAccountIndex;
     const accountAvatar = account.avatar_url
@@ -140,171 +161,173 @@ export default function CustomDrawerContent(props: any) {
   };
 
   return (
-    <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
-      <View style={styles.container}>
+    <>
+      <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
+        <View style={styles.container}>
 
-          {/* Main Account Section */}    
-          <TouchableOpacity    
-            onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
-            style={styles.accountHeader}    
-          >    
-            <Image
-              source={avatarSource}
-              style={styles.avatar}
-            />  
-            <View style={styles.accountInfo}>
-              <Text style={styles.userName}>{displayName}</Text>
-              <Text style={styles.userPhone}>{userPhone}</Text>
-            </View>    
-            <Feather    
-              name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
-              size={20}    
-              color="#fff"    
-            />    
-          </TouchableOpacity>    
-
-          {showAccountDropdown && (    
-            <View style={styles.accountDropdown}>
-              {/* Current Account Details */}
-              <DrawerItem    
-                label="Account"    
-                labelStyle={styles.label}    
-                icon={() => <Feather name="user" size={22} color="#fff" />}    
-                onPress={() => {
-                  setShowAccountDropdown(false);
-                  props.navigation.navigate('account');
-                }}    
-              />
-              
-              {/* Saved Accounts */}
-              {savedAccounts.length > 0 && (
-                <View style={styles.savedAccountsSection}>
-                  <Text style={styles.savedAccountsTitle}>Accounts ({savedAccounts.length}/3)</Text>
-                  {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
-                </View>
-              )}
-
-              {/* Add Account Button (only if less than 3 accounts) */}
-              {savedAccounts.length < 3 && (
-                <DrawerItem    
-                  label="Add Account"    
-                  labelStyle={styles.label}    
-                  icon={() => <Feather name="plus" size={22} color="#fff" />}    
-                  onPress={() => {
-                    setShowAccountDropdown(false);
-                    // Close drawer first, then open modal
-                    props.navigation.closeDrawer();
-                    setTimeout(() => {
-                      props.onAddAccount?.();
-                    }, 300); // Small delay to let drawer close
-                  }}    
-                />
-              )}
-              
-              {/* Switch Business (if multiple businesses) */}
-              {businesses.owned.length > 1 && (
-                <DrawerItem    
-                  label="Switch Business"    
-                  labelStyle={styles.label}    
-                  icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
-                  onPress={() => {
-                    setShowAccountDropdown(false);
-                    props.navigation.navigate('businessSelection');
-                  }}    
-                />
-              )}    
-            </View>    
-          )}    
-
-          {/* Track a Package */}    
-          <TouchableOpacity
-            style={styles.customItem}
-            onPress={() => setShowTrackDropdown((prev) => !prev)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.trackHeader}>
-              <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-              <Text style={styles.trackLabel}>Track a package</Text>
-              <Feather
-                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={colors.primary}
-              />
-            </View>
-          </TouchableOpacity>
-          
-          {showTrackDropdown &&    
-            trackingStatuses.map((item) => (    
-              <DrawerItem    
-                key={item.key}    
-                label={item.label}    
-                labelStyle={styles.subLabel}    
-                icon={() => (    
-                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
-                )}    
-                style={styles.subItem}    
-                onPress={() =>    
-                  props.navigation.navigate({    
-                    name: 'track',    
-                    params: { status: item.key },    
-                    merge: true,    
-                  })    
-                }    
+            {/* Main Account Section */}    
+            <TouchableOpacity    
+              onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
+              style={styles.accountHeader}    
+            >    
+              <Image
+                source={avatarSource}
+                style={styles.avatar}
+              />  
+              <View style={styles.accountInfo}>
+                <Text style={styles.userName}>{displayName}</Text>
+                <Text style={styles.userPhone}>{userPhone}</Text>
+              </View>    
+              <Feather    
+                name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
+                size={20}    
+                color="#fff"    
               />    
-            ))}    
+            </TouchableOpacity>    
 
-          {/* General Navigation */}    
-          <DrawerItem    
-            label="Talk to a rep"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('support')}    
-          />    
-          <DrawerItem    
-            label="FAQs"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('faqs')}    
-          />    
-          <DrawerItem    
-            label="History"    
-            labelStyle={styles.label}    
-            icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('history')}    
-          />    
+            {showAccountDropdown && (    
+              <View style={styles.accountDropdown}>
+                {/* Current Account Details */}
+                <DrawerItem    
+                  label="Account"    
+                  labelStyle={styles.label}    
+                  icon={() => <Feather name="user" size={22} color="#fff" />}    
+                  onPress={() => {
+                    setShowAccountDropdown(false);
+                    props.navigation.navigate('account');
+                  }}    
+                />
+                
+                {/* Saved Accounts */}
+                {savedAccounts.length > 0 && (
+                  <View style={styles.savedAccountsSection}>
+                    <Text style={styles.savedAccountsTitle}>Accounts ({savedAccounts.length}/3)</Text>
+                    {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
+                  </View>
+                )}
 
-          {/* Contacts ABOVE Settings */}    
-          <DrawerItem    
-            label="Contacts"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('contact')}    
-          />    
+                {/* Add Account Button (only if less than 3 accounts) */}
+                {savedAccounts.length < 3 && (
+                  <DrawerItem    
+                    label="Add Account"    
+                    labelStyle={styles.label}    
+                    icon={() => <Feather name="plus" size={22} color="#fff" />}    
+                    onPress={handleAddAccount}    
+                  />
+                )}
+                
+                {/* Switch Business (if multiple businesses) */}
+                {businesses.owned.length > 1 && (
+                  <DrawerItem    
+                    label="Switch Business"    
+                    labelStyle={styles.label}    
+                    icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
+                    onPress={() => {
+                      setShowAccountDropdown(false);
+                      props.navigation.navigate('businessSelection');
+                    }}    
+                  />
+                )}    
+              </View>    
+            )}    
 
-          {/* Settings */}    
-          <DrawerItem    
-            label="Settings"    
-            labelStyle={styles.label}    
-            icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('settings')}    
-          />    
+            {/* Track a Package */}    
+            <TouchableOpacity
+              style={styles.customItem}
+              onPress={() => setShowTrackDropdown((prev) => !prev)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.trackHeader}>
+                <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+                <Text style={styles.trackLabel}>Track a package</Text>
+                <Feather
+                  name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={colors.primary}
+                />
+              </View>
+            </TouchableOpacity>
+            
+            {showTrackDropdown &&    
+              trackingStatuses.map((item) => (    
+                <DrawerItem    
+                  key={item.key}    
+                  label={item.label}    
+                  labelStyle={styles.subLabel}    
+                  icon={() => (    
+                    <Feather name={item.icon as any} size={20} color={colors.primary} />    
+                  )}    
+                  style={styles.subItem}    
+                  onPress={() =>    
+                    props.navigation.navigate({    
+                      name: 'track',    
+                      params: { status: item.key },    
+                      merge: true,    
+                    })    
+                  }    
+                />    
+              ))}    
 
-          {/* Invite Friends BELOW Settings */}    
-          <DrawerItem    
-            label="Invite Friends"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('invite')}    
-          />    
+            {/* General Navigation */}    
+            <DrawerItem    
+              label="Talk to a rep"    
+              labelStyle={styles.label}    
+              icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('support')}    
+            />    
+            <DrawerItem    
+              label="FAQs"    
+              labelStyle={styles.label}    
+              icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('faqs')}    
+            />    
+            <DrawerItem    
+              label="History"    
+              labelStyle={styles.label}    
+              icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('history')}    
+            />    
 
-          {/* Footer Icon */}    
-          <View style={styles.footerIcon}>    
-            <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+            {/* Contacts ABOVE Settings */}    
+            <DrawerItem    
+              label="Contacts"    
+              labelStyle={styles.label}    
+              icon={() => <Feather name="user" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('contact')}    
+            />    
+
+            {/* Settings */}    
+            <DrawerItem    
+              label="Settings"    
+              labelStyle={styles.label}    
+              icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('settings')}    
+            />    
+
+            {/* Invite Friends BELOW Settings */}    
+            <DrawerItem    
+              label="Invite Friends"    
+              labelStyle={styles.label}    
+              icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
+              onPress={() => props.navigation.navigate('invite')}    
+            />    
+
+            {/* Footer Icon */}    
+            <View style={styles.footerIcon}>    
+              <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+            </View>    
+
           </View>    
+        </DrawerContentScrollView>
 
-        </View>    
-      </DrawerContentScrollView>
-    
+        {/* Account Selection Modal */}
+        <AccountSelectionModal
+          visible={showAccountSelectionModal}
+          onClose={() => setShowAccountSelectionModal(false)}
+          onLogin={handleLogin}
+          onSignup={handleSignup}
+        />
+    </>
   );
 }
 
