@@ -1,4 +1,4 @@
-// components/LoginModal.tsx
+// components/LoginModal.tsx - Fixed with proper AsyncStorage persistence
 import React, { useState } from 'react';
 import {
   Modal,
@@ -12,6 +12,8 @@ import {
 import { Feather, AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import Toast from 'react-native-toast-message';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import api from '../lib/api';
 import { useUser } from '../context/UserContext';
 import { useGoogleAuth } from '../lib/useGoogleAuth';
@@ -31,38 +33,53 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
 
-  const handleGoogleAuthSuccess = async (googleUser: any) => {
+  const handleGoogleAuthSuccess = async (railsUser: any, isNewUser: boolean) => {
     try {
       setIsGoogleLoading(true);
-      
-      const response = await api.post('/api/v1/google_login', {
-        user: {
-          email: googleUser.email,
-          first_name: googleUser.given_name,
-          last_name: googleUser.family_name,
-          avatar_url: googleUser.picture,
-          provider: 'google',
-          uid: googleUser.id,
-        },
+      console.log('🔐 Processing Google login for modal:', railsUser.email);
+
+      const user = railsUser;
+      const roles = user?.roles || [];
+      const role = roles.includes('admin') ? 'admin' : 'client';
+
+      // Save complete user data for account screen - same as login.tsx
+      const userData = {
+        id: user.id,
+        email: user.email,
+        username: user.username || null,
+        first_name: user.first_name || null,
+        last_name: user.last_name || null,
+        display_name: user.display_name || user.first_name || null,
+        phone: user.phone_number || null,
+        avatar_url: user.avatar_url || user.google_image_url || null,
+        role: role,
+        roles: roles,
+        created_at: user.created_at,
+        updated_at: user.updated_at,
+        provider: 'google',
+      };
+
+      // Save user data to AsyncStorage
+      await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+      console.log('✅ Google user data saved to AsyncStorage');
+
+      // Add account using UserContext
+      await addAccount(userData, 'google_oauth_token');
+
+      Toast.show({
+        type: 'success',
+        text1: 'Account Added!',
+        text2: `Welcome back, ${user.display_name || user.first_name}!`,
       });
-
-      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
-      const user = response?.data?.user;
-
-      if (token && user) {
-        await addAccount(user, token);
-        Toast.show({
-          type: 'success',
-          text1: 'Account Added!',
-          text2: `Welcome back, ${user.display_name || user.first_name}!`,
-        });
-        handleClose();
-      }
+      
+      handleClose();
     } catch (error: any) {
+      console.error('❌ Google login error in modal:', error);
+      setErrorMsg('Google authentication failed');
       Toast.show({
         type: 'error',
         text1: 'Failed to add account',
-        text2: error.response?.data?.error || 'Google authentication failed',
+        text2: error.message || 'Google authentication failed',
       });
     } finally {
       setIsGoogleLoading(false);
@@ -81,30 +98,74 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
     setIsLoading(true);
 
     try {
+      console.log('🔐 Modal login attempt for:', email);
+      
       const response = await api.post('/api/v1/login', {
         user: { email, password },
       });
 
       const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
       const user = response?.data?.user;
+      const userId = user?.id;
 
-      if (token && user) {
-        await addAccount(user, token);
+      if (token && userId && user) {
+        console.log('✅ Modal login successful for:', user.email);
+
+        // Determine user role
+        const roles = user?.roles || [];
+        const role = roles.includes('admin') ? 'admin' : 'client';
+
+        // Save complete user data - same as login.tsx
+        const userData = {
+          id: user.id,
+          email: user.email,
+          username: user.username || null,
+          first_name: user.first_name || null,
+          last_name: user.last_name || null,
+          display_name: user.display_name || user.first_name || null,
+          phone: user.phone_number || null,
+          avatar_url: user.avatar_url || null,
+          role: role,
+          roles: roles,
+          created_at: user.created_at,
+          updated_at: user.updated_at,
+        };
+
+        // Save user data to AsyncStorage
+        await AsyncStorage.setItem('user_data', JSON.stringify(userData));
+        console.log('✅ User data saved to AsyncStorage');
+
+        // Add account using UserContext
+        await addAccount(userData, token);
+
         Toast.show({
           type: 'success',
           text1: 'Account Added!',
           text2: `Welcome back, ${user.display_name || user.first_name || user.email}!`,
         });
+        
         handleClose();
       } else {
-        setErrorMsg('Authentication failed');
+        const message = 'Login failed: Server response incomplete';
+        setErrorMsg(message);
+        console.error('❌ Modal login failed:', { hasToken: !!token, hasUserId: !!userId, hasUser: !!user });
       }
     } catch (error: any) {
+      console.error('❌ Modal login error:', error);
+      
+      let errorMessage = 'Please try again';
+      
       if (error?.response?.status === 401) {
-        setErrorMsg('Invalid email or password');
-      } else {
-        setErrorMsg('Login failed. Please try again.');
+        errorMessage = 'Invalid email or password';
+      } else if (error?.response?.status === 422) {
+        errorMessage = 'Please check your email and password';
+      } else if (error?.code === 'NETWORK_ERROR' || error?.message === 'Network Error') {
+        errorMessage = 'Network error - check your connection';
+      } else if (error?.response?.data?.message) {
+        errorMessage = error.response.data.message;
       }
+
+      setErrorMsg(errorMessage);
     } finally {
       setIsLoading(false);
     }
@@ -113,10 +174,15 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
   const handleGoogleLogin = async () => {
     if (isGoogleLoading || !request) return;
 
+    setErrorMsg('');
     setIsGoogleLoading(true);
+    
     try {
+      console.log('🚀 Modal Google login...');
       await promptAsync();
     } catch (error) {
+      console.error('❌ Modal Google login error:', error);
+      setErrorMsg('Google login failed');
       Toast.show({
         type: 'error',
         text1: 'Google login error',
@@ -160,7 +226,7 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
             <TextInput
               style={styles.input}
               placeholder="Username, email or mobile number"
-              placeholderTextColor="#888"
+              placeholderTextColor="#ccc"
               value={email}
               onChangeText={setEmail}
               keyboardType="email-address"
@@ -172,7 +238,7 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
               <TextInput
                 style={[styles.input, styles.passwordInput]}
                 placeholder="Password"
-                placeholderTextColor="#888"
+                placeholderTextColor="#ccc"
                 value={password}
                 onChangeText={setPassword}
                 secureTextEntry={!showPassword}
@@ -185,7 +251,7 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
                 <Feather 
                   name={showPassword ? 'eye-off' : 'eye'} 
                   size={20} 
-                  color="#888" 
+                  color="#aaa" 
                 />
               </TouchableOpacity>
             </View>
@@ -193,7 +259,7 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
             {errorMsg ? <Text style={styles.error}>{errorMsg}</Text> : null}
 
             <TouchableOpacity 
-              style={styles.googleButton}
+              style={[styles.googleButton, (!request || isLoading || isGoogleLoading) && styles.disabledButton]}
               onPress={handleGoogleLogin}
               disabled={isLoading || isGoogleLoading || !request}
             >
@@ -209,7 +275,7 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
 
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
-              style={styles.loginButtonGradient}
+              style={[styles.loginButtonGradient, (isLoading || isGoogleLoading) && styles.disabledButton]}
             >
               <TouchableOpacity 
                 style={styles.loginButton}
@@ -224,14 +290,20 @@ export default function LoginModal({ visible, onClose, onSwitchToSignup }: Login
               </TouchableOpacity>
             </LinearGradient>
 
-            <TouchableOpacity style={styles.forgotPassword}>
+            <TouchableOpacity 
+              style={styles.forgotPassword}
+              disabled={isLoading || isGoogleLoading}
+            >
               <Text style={styles.forgotPasswordText}>Forgot password?</Text>
             </TouchableOpacity>
           </View>
 
           {/* Footer */}
           <View style={styles.footer}>
-            <TouchableOpacity onPress={onSwitchToSignup}>
+            <TouchableOpacity 
+              onPress={onSwitchToSignup}
+              disabled={isLoading || isGoogleLoading}
+            >
               <Text style={styles.switchText}>Create new account</Text>
             </TouchableOpacity>
           </View>
@@ -267,7 +339,7 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
+    color: '#f8f8f2',
   },
   form: {
     padding: 20,
@@ -301,6 +373,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 14,
     marginBottom: 12,
+    fontWeight: '500',
   },
   googleButton: {
     flexDirection: 'row',
@@ -354,5 +427,8 @@ const styles = StyleSheet.create({
     color: '#bd93f9',
     fontSize: 14,
     fontWeight: '500',
+  },
+  disabledButton: {
+    opacity: 0.6,
   },
 });
