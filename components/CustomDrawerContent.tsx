@@ -15,14 +15,27 @@ import {
   Text,
   TouchableOpacity,
   View,
+  Alert,
 } from 'react-native';
-import { useUser } from '../context/UserContext'; // adjust path if different
+import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
+import AccountManagementModal from './AccountManagementModal'; // Import the modal
 
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
-  const { user, businesses, getBusinessDisplayName, getUserPhone } = useUser();
+  const [showAccountModal, setShowAccountModal] = useState(false);
+  
+  const { 
+    user, 
+    businesses, 
+    savedAccounts,
+    currentAccountIndex,
+    getBusinessDisplayName, 
+    getUserPhone,
+    switchAccount,
+    removeAccount
+  } = useUser();
 
   // Use the helper function from context that handles business name fallback
   const displayName = getBusinessDisplayName();
@@ -32,7 +45,7 @@ export default function CustomDrawerContent(props: any) {
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
-    : require('../assets/images/avatar_placeholder.png'); // fallback to a local image
+    : require('../assets/images/avatar_placeholder.png');
 
   const trackingStatuses = [
     { label: 'Pending', key: 'pending', icon: 'clock' },
@@ -44,147 +57,260 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
   ];
 
-  return (
-    <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
-      <View style={styles.container}>
+  const handleAccountSwitch = async (accountIndex: number) => {
+    if (accountIndex === currentAccountIndex) {
+      setShowAccountDropdown(false);
+      return;
+    }
 
-        {/* Account Section */}    
-        <TouchableOpacity    
-          onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
-          style={styles.accountHeader}    
-        >    
-          <Image
-            source={avatarSource}
-            style={styles.avatar}
-          />  
-          <View style={styles.accountInfo}>
-            <Text style={styles.userName}>{displayName}</Text>
-            <Text style={styles.userPhone}>{userPhone}</Text>
-          </View>    
-          <Feather    
-            name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
-            size={20}    
-            color="#fff"    
-          />    
-        </TouchableOpacity>    
+    try {
+      await switchAccount(accountIndex);
+      setShowAccountDropdown(false);
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to switch accounts');
+    }
+  };
 
-        {showAccountDropdown && (    
-          <View style={styles.accountDropdown}>    
-            <DrawerItem    
-              label="Account"    
-              labelStyle={styles.label}    
-              icon={() => <Feather name="user" size={22} color="#fff" />}    
-              onPress={() => props.navigation.navigate('account')}    
-            />    
-            <DrawerItem    
-              label="Add Account"    
-              labelStyle={styles.label}    
-              icon={() => <Feather name="plus" size={22} color="#fff" />}    
-              onPress={() => {}}    
-            />
-            {/* Show business switching if user has multiple businesses */}
-            {businesses.owned.length > 1 && (
-              <DrawerItem    
-                label="Switch Business"    
-                labelStyle={styles.label}    
-                icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
-                onPress={() => {
-                  // Navigate to business selection or show modal
-                  // props.navigation.navigate('businessSelection')
-                }}    
-              />
-            )}    
-          </View>    
-        )}    
+  const handleAccountRemove = async (accountIndex: number, accountEmail: string) => {
+    Alert.alert(
+      'Remove Account',
+      `Are you sure you want to remove ${accountEmail}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Remove',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await removeAccount(accountIndex);
+            } catch (error: any) {
+              Alert.alert('Error', error.message || 'Failed to remove account');
+            }
+          },
+        },
+      ]
+    );
+  };
 
-        {/* Track a Package */}    
+  const renderSavedAccount = (account: any, index: number) => {
+    const isCurrentAccount = index === currentAccountIndex;
+    const accountAvatar = account.avatar_url
+      ? { uri: account.avatar_url }
+      : require('../assets/images/avatar_placeholder.png');
+
+    return (
+      <View key={account.id} style={styles.savedAccountContainer}>
         <TouchableOpacity
-          style={styles.customItem}
-          onPress={() => setShowTrackDropdown((prev) => !prev)}
-          activeOpacity={0.7}
+          style={[
+            styles.savedAccountItem,
+            isCurrentAccount && styles.currentAccountItem
+          ]}
+          onPress={() => handleAccountSwitch(index)}
         >
-          <View style={styles.trackHeader}>
-            <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-            <Text style={styles.trackLabel}>Track a package</Text>
-            <Feather
-              name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={colors.primary}
-            />
+          <Image source={accountAvatar} style={styles.savedAccountAvatar} />
+          <View style={styles.savedAccountInfo}>
+            <Text style={[
+              styles.savedAccountName,
+              isCurrentAccount && styles.currentAccountText
+            ]}>
+              {account.display_name}
+            </Text>
+            <Text style={[
+              styles.savedAccountEmail,
+              isCurrentAccount && styles.currentAccountEmailText
+            ]}>
+              {account.email}
+            </Text>
           </View>
+          {isCurrentAccount && (
+            <View style={styles.currentAccountBadge}>
+              <Feather name="check-circle" size={16} color="#fff" />
+            </View>
+          )}
         </TouchableOpacity>
         
-        {showTrackDropdown &&    
-          trackingStatuses.map((item) => (    
-            <DrawerItem    
-              key={item.key}    
-              label={item.label}    
-              labelStyle={styles.subLabel}    
-              icon={() => (    
-                <Feather name={item.icon as any} size={20} color={colors.primary} />    
-              )}    
-              style={styles.subItem}    
-              onPress={() =>    
-                props.navigation.navigate({    
-                  name: 'track',    
-                  params: { status: item.key },    
-                  merge: true,    
-                })    
-              }    
+        {/* Remove button for non-current accounts */}
+        {!isCurrentAccount && savedAccounts.length > 1 && (
+          <TouchableOpacity
+            style={styles.removeAccountButton}
+            onPress={() => handleAccountRemove(index, account.email)}
+          >
+            <Feather name="x" size={16} color="#ff5555" />
+          </TouchableOpacity>
+        )}
+      </View>
+    );
+  };
+
+  return (
+    <>
+      <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
+        <View style={styles.container}>
+
+          {/* Main Account Section */}    
+          <TouchableOpacity    
+            onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
+            style={styles.accountHeader}    
+          >    
+            <Image
+              source={avatarSource}
+              style={styles.avatar}
+            />  
+            <View style={styles.accountInfo}>
+              <Text style={styles.userName}>{displayName}</Text>
+              <Text style={styles.userPhone}>{userPhone}</Text>
+            </View>    
+            <Feather    
+              name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
+              size={20}    
+              color="#fff"    
             />    
-          ))}    
+          </TouchableOpacity>    
 
-        {/* General Navigation */}    
-        <DrawerItem    
-          label="Talk to a rep"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('support')}    
-        />    
-        <DrawerItem    
-          label="FAQs"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('faqs')}    
-        />    
-        <DrawerItem    
-          label="History"    
-          labelStyle={styles.label}    
-          icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('history')}    
-        />    
+          {showAccountDropdown && (    
+            <View style={styles.accountDropdown}>
+              {/* Current Account Details */}
+              <DrawerItem    
+                label="Account Settings"    
+                labelStyle={styles.label}    
+                icon={() => <Feather name="user" size={22} color="#fff" />}    
+                onPress={() => {
+                  setShowAccountDropdown(false);
+                  props.navigation.navigate('account');
+                }}    
+              />
+              
+              {/* Saved Accounts */}
+              {savedAccounts.length > 0 && (
+                <View style={styles.savedAccountsSection}>
+                  <Text style={styles.savedAccountsTitle}>Accounts ({savedAccounts.length}/3)</Text>
+                  {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
+                </View>
+              )}
 
-        {/* Contacts ABOVE Settings */}    
-        <DrawerItem    
-          label="Contacts"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('contact')}    
-        />    
+              {/* Add Account Button (only if less than 3 accounts) */}
+              {savedAccounts.length < 3 && (
+                <DrawerItem    
+                  label="Add Account"    
+                  labelStyle={styles.label}    
+                  icon={() => <Feather name="plus" size={22} color="#fff" />}    
+                  onPress={() => {
+                    setShowAccountDropdown(false);
+                    setShowAccountModal(true);
+                  }}    
+                />
+              )}
+              
+              {/* Switch Business (if multiple businesses) */}
+              {businesses.owned.length > 1 && (
+                <DrawerItem    
+                  label="Switch Business"    
+                  labelStyle={styles.label}    
+                  icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
+                  onPress={() => {
+                    // Navigate to business selection or show modal
+                    // props.navigation.navigate('businessSelection')
+                  }}    
+                />
+              )}    
+            </View>    
+          )}    
 
-        {/* Settings */}    
-        <DrawerItem    
-          label="Settings"    
-          labelStyle={styles.label}    
-          icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('settings')}    
-        />    
+          {/* Track a Package */}    
+          <TouchableOpacity
+            style={styles.customItem}
+            onPress={() => setShowTrackDropdown((prev) => !prev)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.trackHeader}>
+              <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+              <Text style={styles.trackLabel}>Track a package</Text>
+              <Feather
+                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={colors.primary}
+              />
+            </View>
+          </TouchableOpacity>
+          
+          {showTrackDropdown &&    
+            trackingStatuses.map((item) => (    
+              <DrawerItem    
+                key={item.key}    
+                label={item.label}    
+                labelStyle={styles.subLabel}    
+                icon={() => (    
+                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
+                )}    
+                style={styles.subItem}    
+                onPress={() =>    
+                  props.navigation.navigate({    
+                    name: 'track',    
+                    params: { status: item.key },    
+                    merge: true,    
+                  })    
+                }    
+              />    
+            ))}    
 
-        {/* Invite Friends BELOW Settings */}    
-        <DrawerItem    
-          label="Invite Friends"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('invite')}    
-        />    
+          {/* General Navigation */}    
+          <DrawerItem    
+            label="Talk to a rep"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('support')}    
+          />    
+          <DrawerItem    
+            label="FAQs"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('faqs')}    
+          />    
+          <DrawerItem    
+            label="History"    
+            labelStyle={styles.label}    
+            icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('history')}    
+          />    
 
-        {/* Footer Icon */}    
-        <View style={styles.footerIcon}>    
-          <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+          {/* Contacts ABOVE Settings */}    
+          <DrawerItem    
+            label="Contacts"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="user" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('contact')}    
+          />    
+
+          {/* Settings */}    
+          <DrawerItem    
+            label="Settings"    
+            labelStyle={styles.label}    
+            icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('settings')}    
+          />    
+
+          {/* Invite Friends BELOW Settings */}    
+          <DrawerItem    
+            label="Invite Friends"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('invite')}    
+          />    
+
+          {/* Footer Icon */}    
+          <View style={styles.footerIcon}>    
+            <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+          </View>    
+
         </View>    
-
-      </View>    
-    </DrawerContentScrollView>
+      </DrawerContentScrollView>
+      
+      {/* Account Management Modal */}
+      <AccountManagementModal
+        visible={showAccountModal}
+        onClose={() => setShowAccountModal(false)}
+      />
+    </>
   );
 }
 
@@ -275,5 +401,85 @@ const styles = StyleSheet.create({
     marginTop: 'auto',
     alignSelf: 'center',
     marginBottom: 20,
+  },
+
+  // Saved Accounts Styles
+  savedAccountsSection: {
+    paddingTop: 8,
+    paddingBottom: 8,
+  },
+  savedAccountsTitle: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 13,
+    fontWeight: '500',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  savedAccountContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  savedAccountItem: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  currentAccountItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  savedAccountAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    marginRight: 12,
+  },
+  savedAccountInfo: {
+    flex: 1,
+  },
+  savedAccountName: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  savedAccountEmail: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 12,
+  },
+  currentAccountText: {
+    color: '#bd93f9',
+  },
+  currentAccountEmailText: {
+    color: 'rgba(189, 147, 249, 0.8)',
+  },
+  currentAccountBadge: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#bd93f9',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+  },
+  removeAccountButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 85, 85, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 85, 85, 0.2)',
   },
 });
