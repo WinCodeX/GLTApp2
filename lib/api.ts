@@ -1,25 +1,24 @@
+// lib/api.ts - Updated to use AccountManager
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
 import { router } from 'expo-router';
-import * as SecureStore from 'expo-secure-store';
 import Toast from 'react-native-toast-message';
+import { accountManager } from './AccountManager';
 
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
-const LOCAL_BASE_2 = 'http://10.21.135.106:3000'; // Fixed to match your first working version
-const PROD_BASE = 'https://glt-53x8.onrender.com'; // Using your production URL
-const FALLBACK_BASE = PROD_BASE; // Use production as fallback when no servers are reachable
+const LOCAL_BASE_2 = 'http://10.21.135.106:3000';
+const PROD_BASE = 'https://glt-53x8.onrender.com';
+const FALLBACK_BASE = PROD_BASE;
 
 let resolvedBaseUrl: string | null = null;
 let isResolvingBaseUrl = false;
 
-// ✅ FIXED: Export API_BASE_URL for compatibility with avatar components
+// Export API_BASE_URL for compatibility
 export const API_BASE_URL = (() => {
-  // Return the resolved URL if available, otherwise return a sensible default
   if (resolvedBaseUrl) {
     return `${resolvedBaseUrl}/api/v1`;
   }
   
-  // Default based on environment while base URL is being resolved
   const isDev = __DEV__;
   if (isDev) {
     return `${LOCAL_BASE_1}/api/v1`;
@@ -28,14 +27,13 @@ export const API_BASE_URL = (() => {
   }
 })();
 
-// ✅ FIXED: Safe function to get current API base URL
+// Safe function to get current API base URL
 export const getApiBaseUrl = (): string => {
   try {
     if (resolvedBaseUrl) {
       return `${resolvedBaseUrl}/api/v1`;
     }
     
-    // Fallback to environment-appropriate default
     const isDev = __DEV__;
     if (isDev) {
       return `${LOCAL_BASE_1}/api/v1`;
@@ -48,14 +46,13 @@ export const getApiBaseUrl = (): string => {
   }
 };
 
-// ✅ FIXED: Safe function to get base domain for avatar URLs
+// Safe function to get base domain for avatar URLs
 export const getBaseDomain = (): string => {
   try {
     if (resolvedBaseUrl) {
       return resolvedBaseUrl;
     }
     
-    // Fallback to environment-appropriate default
     const isDev = __DEV__;
     if (isDev) {
       return LOCAL_BASE_1;
@@ -68,25 +65,21 @@ export const getBaseDomain = (): string => {
   }
 };
 
-// ✅ FIXED: Safe avatar URL helper that works with dynamic base URLs
+// Safe avatar URL helper
 export const getFullAvatarUrl = (avatarUrl: string | null | undefined): string | null => {
   if (!avatarUrl) return null;
   
   try {
-    // If it's already a full URL, return as-is
     if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://')) {
       return avatarUrl;
     }
     
-    // Get the current base domain
     const baseUrl = getBaseDomain();
     
-    // If it's a relative URL starting with /, combine with base URL
     if (avatarUrl.startsWith('/')) {
       return `${baseUrl}${avatarUrl}`;
     }
     
-    // If it's just a path fragment, build the full URL
     return `${baseUrl}/${avatarUrl}`;
     
   } catch (error) {
@@ -101,7 +94,6 @@ const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean>
     
     const response = await axios.get(`${baseUrl}/api/v1/ping`, {
       timeout,
-      // Don't use the main api instance to avoid interceptor loops
       headers: { 'Content-Type': 'application/json' }
     });
     
@@ -116,16 +108,13 @@ const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean>
 };
 
 const getBaseUrl = async (): Promise<string> => {
-  // If already resolved, return immediately
   if (resolvedBaseUrl) {
     console.log(`📍 Using cached base URL: ${resolvedBaseUrl}`);
     return resolvedBaseUrl;
   }
 
-  // Prevent multiple concurrent resolutions
   if (isResolvingBaseUrl) {
     console.log('⏳ Base URL resolution already in progress...');
-    // Wait for the current resolution to complete (max 10 seconds)
     let waitTime = 0;
     while (isResolvingBaseUrl && !resolvedBaseUrl && waitTime < 10000) {
       await new Promise(resolve => setTimeout(resolve, 200));
@@ -137,15 +126,13 @@ const getBaseUrl = async (): Promise<string> => {
   isResolvingBaseUrl = true;
   console.log('🚀 Starting base URL resolution...');
 
-  // Try in order of preference: local servers first (for development), then production
   const bases = [LOCAL_BASE_1, LOCAL_BASE_2, PROD_BASE];
 
   try {
-    // Test connections sequentially to prioritize local development servers
     for (const base of bases) {
       if (await testConnection(base, 2000)) {
         resolvedBaseUrl = base;
-        console.log(`🎯 Selected base URL: ${resolvedBaseUrl} ${base.includes('localhost') || base.includes('192.168') || base.includes('10.') ? '(local dev server)' : '(production)'}`);
+        console.log(`🎯 Selected base URL: ${resolvedBaseUrl}`);
         break;
       }
     }
@@ -153,8 +140,6 @@ const getBaseUrl = async (): Promise<string> => {
     if (!resolvedBaseUrl) {
       resolvedBaseUrl = FALLBACK_BASE;
       console.log(`⚠️ No servers reachable, using fallback: ${resolvedBaseUrl}`);
-    } else {
-      console.log(`🎯 Selected base URL: ${resolvedBaseUrl}`);
     }
   } catch (error) {
     console.error('❌ Error during base URL resolution:', error);
@@ -168,21 +153,21 @@ const getBaseUrl = async (): Promise<string> => {
 
 // Create the main API instance
 const api = axios.create({
-  baseURL: PROD_BASE, // Start with production URL
+  baseURL: PROD_BASE,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Request interceptor
+// Request interceptor - Updated to use AccountManager
 api.interceptors.request.use(
   async (config) => {
     try {
-      // Get authentication token
-      const token = await SecureStore.getItemAsync('auth_token');
+      // Get authentication data from AccountManager
+      const currentAccount = accountManager.getCurrentAccount();
 
-      // Only resolve base URL if we haven't already or if explicitly requested
+      // Resolve base URL if needed
       if (!resolvedBaseUrl) {
         const baseUrl = await getBaseUrl();
         config.baseURL = baseUrl;
@@ -190,12 +175,19 @@ api.interceptors.request.use(
         config.baseURL = resolvedBaseUrl;
       }
 
-      // Add auth header if token exists
-      if (token && config.headers) {
-        config.headers.Authorization = `Bearer ${token}`;
+      // Add auth header if we have a current account
+      if (currentAccount && config.headers) {
+        config.headers.Authorization = `Bearer ${currentAccount.token}`;
+        
+        // Add additional context headers for better server-side validation
+        config.headers['X-User-ID'] = currentAccount.id;
+        config.headers['X-User-Email'] = currentAccount.email;
+        
+        console.log(`📡 Making authenticated request for ${currentAccount.email} to: ${config.baseURL}${config.url}`);
+      } else {
+        console.log(`📡 Making unauthenticated request to: ${config.baseURL}${config.url}`);
       }
 
-      console.log(`📡 Making request to: ${config.baseURL}${config.url}`);
       return config;
     } catch (error) {
       console.error('❌ Request interceptor error:', error);
@@ -210,34 +202,53 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor
+// Response interceptor - Updated to handle AccountManager
 api.interceptors.response.use(
   (response) => {
-    console.log(`✅ Request successful: ${response.config.method?.toUpperCase()} ${response.config.url}`);
+    const currentAccount = accountManager.getCurrentAccount();
+    const accountInfo = currentAccount ? ` (${currentAccount.email})` : ' (unauthenticated)';
+    console.log(`✅ Request successful${accountInfo}: ${response.config.method?.toUpperCase()} ${response.config.url}`);
     return response;
   },
   async (error) => {
     const config = error.config;
     const status = error.response?.status;
+    const currentAccount = accountManager.getCurrentAccount();
+    const accountInfo = currentAccount ? ` (${currentAccount.email})` : ' (unauthenticated)';
 
-    console.error(`❌ Request failed: ${config?.method?.toUpperCase()} ${config?.url} - Status: ${status}`);
+    console.error(`❌ Request failed${accountInfo}: ${config?.method?.toUpperCase()} ${config?.url} - Status: ${status}`);
 
-    // Handle 401 Unauthorized
-    if (status === 401) {
-      console.log('🔐 Unauthorized - clearing auth token');
-      await SecureStore.deleteItemAsync('auth_token');
-      await SecureStore.deleteItemAsync('user_id');
-      await SecureStore.deleteItemAsync('user_role');
+    // Handle 401/422 Unauthorized
+    if (status === 401 || status === 422) {
+      console.log('🔐 Authentication failed - handling account cleanup');
       
-      Toast.show({ 
-        type: 'error', 
-        text1: 'Session expired',
-        text2: 'Please log in again'
-      });
+      if (currentAccount) {
+        console.log('🗑️ Removing invalid account:', currentAccount.email);
+        try {
+          await accountManager.removeAccount(currentAccount.id);
+        } catch (removeError) {
+          console.error('❌ Failed to remove invalid account:', removeError);
+        }
+      }
       
-      setTimeout(() => {
-        router.replace('/login');
-      }, 2000);
+      // Show toast and redirect if no accounts remain
+      if (!accountManager.hasAccounts()) {
+        Toast.show({ 
+          type: 'error', 
+          text1: 'Session expired',
+          text2: 'Please log in again'
+        });
+        
+        setTimeout(() => {
+          router.replace('/login');
+        }, 2000);
+      } else {
+        Toast.show({ 
+          type: 'warning', 
+          text1: 'Account session expired',
+          text2: 'Switched to another account'
+        });
+      }
       
       return Promise.reject(error);
     }
@@ -263,9 +274,6 @@ api.interceptors.response.use(
             visibilityTime: 4000,
           });
         } else {
-          // Connected to internet but server unreachable
-          console.log('📡 Internet connected but server unreachable');
-          
           Toast.show({
             type: 'error',
             text1: 'Server Unreachable',
@@ -282,45 +290,35 @@ api.interceptors.response.use(
   }
 );
 
-// Export a function to manually refresh the base URL
+// Helper functions
 export const refreshBaseUrl = async (): Promise<string> => {
   console.log('🔄 Manually refreshing base URL...');
   resolvedBaseUrl = null;
-  isResolvingBaseUrl = false; // Reset the flag
+  isResolvingBaseUrl = false;
   const newBaseUrl = await getBaseUrl();
-  
-  // ✅ FIXED: Update the API instance baseURL when URL changes
   api.defaults.baseURL = newBaseUrl;
-  
   return newBaseUrl;
 };
 
-// Export a function to get current base URL without making requests
 export const getCurrentBaseUrl = (): string | null => {
   return resolvedBaseUrl;
 };
 
-// ✅ FIXED: Function to get current resolved base URL for components
 export const getCurrentApiBaseUrl = (): string => {
   return getApiBaseUrl();
 };
 
-// Function to initialize API (call this when app starts, not during module load)
 export const initializeApi = async (): Promise<void> => {
   try {
     console.log('🏁 Initializing API...');
     const baseUrl = await getBaseUrl();
-    
-    // ✅ FIXED: Update the API instance baseURL after resolution
     api.defaults.baseURL = baseUrl;
-    
     console.log('✅ API initialization complete with base URL:', baseUrl);
   } catch (error) {
     console.error('❌ API initialization failed:', error);
   }
 };
 
-// ✅ FIXED: Helper to update resolved base URL (for when servers come online)
 export const updateResolvedBaseUrl = (newBaseUrl: string): void => {
   try {
     resolvedBaseUrl = newBaseUrl;
