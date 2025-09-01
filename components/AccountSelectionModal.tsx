@@ -1,14 +1,21 @@
 // components/AccountSelectionModal.tsx
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 import {
   Modal,
   View,
   Text,
   StyleSheet,
   TouchableOpacity,
+  Animated,
+  Dimensions,
+  Platform,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import colors from '../theme/colors';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface AccountSelectionModalProps {
   visible: boolean;
@@ -23,63 +30,115 @@ export default function AccountSelectionModal({
   onLogin, 
   onSignup 
 }: AccountSelectionModalProps) {
+  const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  useEffect(() => {
+    if (visible) {
+      // Animate modal sliding up
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible, slideAnim]);
+
+  const closeModal = () => {
+    // Animate modal sliding down, then call onClose
+    Animated.timing(slideAnim, {
+      toValue: SCREEN_HEIGHT,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
+    });
+  };
+
+  const handleLogin = () => {
+    closeModal();
+    setTimeout(() => onLogin(), 100); // Small delay to ensure modal is closed
+  };
+
+  const handleSignup = () => {
+    closeModal();
+    setTimeout(() => onSignup(), 100);
+  };
+
   return (
-    <Modal 
-      visible={visible} 
-      animationType="slide" 
-      transparent 
-      onRequestClose={onClose}
-    >
-      <View style={styles.overlay}>
-        <View style={styles.container}>
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>Add account</Text>
-            <TouchableOpacity onPress={onClose} style={styles.closeButton}>
-              <Feather name="x" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
+    <Modal visible={visible} transparent animationType="none" onRequestClose={closeModal}>
+      <StatusBar barStyle="light-content" backgroundColor="transparent" translucent />
+      <SafeAreaView style={styles.safeArea}>
+        <View style={styles.overlay}>
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              { 
+                transform: [{ translateY: slideAnim }]
+              }
+            ]}
+          >
+            <LinearGradient
+              colors={['#1a1a2e', '#16213e']}
+              style={styles.modalContent}
+            >
+              {/* Header */}
+              <View style={styles.header}>
+                <Text style={styles.title}>Add account</Text>
+                <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
 
-          {/* Options */}
-          <View style={styles.optionsContainer}>
-            <TouchableOpacity style={styles.primaryButton} onPress={onLogin}>
-              <Text style={styles.primaryButtonText}>Log into existing account</Text>
-            </TouchableOpacity>
+              {/* Options */}
+              <View style={styles.optionsContainer}>
+                <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
+                  <Text style={styles.primaryButtonText}>Log into existing account</Text>
+                </TouchableOpacity>
 
-            <TouchableOpacity style={styles.secondaryButton} onPress={onSignup}>
-              <Text style={styles.secondaryButtonText}>Create new account</Text>
-            </TouchableOpacity>
-          </View>
+                <TouchableOpacity style={styles.secondaryButton} onPress={handleSignup}>
+                  <Text style={styles.secondaryButtonText}>Create new account</Text>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </Animated.View>
         </View>
-      </View>
+      </SafeAreaView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
+  safeArea: {
+    flex: 1,
+    backgroundColor: 'transparent',
+  },
   overlay: {
     flex: 1,
-    justifyContent: 'flex-end',
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
   },
-  container: {
-    backgroundColor: '#1a1a2e',
+  modalContainer: {
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
-    maxHeight: '90%',
-    minHeight: 200,
-    paddingBottom: 40,
+    overflow: 'hidden',
+  },
+  modalContent: {
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    paddingBottom: Platform.OS === 'ios' ? 34 : 20, // Account for home indicator
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: 20,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   title: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '600',
     color: '#fff',
   },
@@ -100,6 +159,11 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     borderRadius: 12,
     alignItems: 'center',
+    shadowColor: '#1877f2',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
   },
   primaryButtonText: {
     color: '#fff',
