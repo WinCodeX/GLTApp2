@@ -9,7 +9,7 @@ import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
-import { router } from 'expo-router';
+import { useRouter } from 'expo-router';
 import React, { useState } from 'react';
 import {
   Image,
