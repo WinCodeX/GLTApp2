@@ -1,4 +1,4 @@
-// context/UserContext.tsx - Fixed with robust account management and AsyncStorage persistence
+// context/UserContext.tsx - Updated to use AccountManager
 import React, {
   createContext,
   ReactNode,
@@ -9,7 +9,7 @@ import React, {
 import { getUser } from '../lib/helpers/getUser';
 import { getBusinesses } from '../lib/helpers/business';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as SecureStore from 'expo-secure-store';
+import { accountManager, AccountData } from '../lib/AccountManager';
 
 type User = {
   // Core identity fields
@@ -79,31 +79,34 @@ type BusinessData = {
   joined: Business[];
 };
 
-type SavedAccount = {
-  id: string;
-  email: string;
-  display_name: string;
-  avatar_url?: string | null;
-  token: string;
-  userData: User;
-};
-
 type UserContextType = {
+  // Current user data
   user: User | null;
   businesses: BusinessData;
-  savedAccounts: SavedAccount[];
-  currentAccountIndex: number;
   loading: boolean;
   error: string | null;
+  
+  // Account management
+  accounts: AccountData[];
+  currentAccount: AccountData | null;
+  
+  // Core methods
   refreshUser: () => Promise<void>;
   refreshBusinesses: () => Promise<void>;
   addAccount: (userData: User, token: string) => Promise<void>;
-  switchAccount: (accountIndex: number) => Promise<void>;
-  removeAccount: (accountIndex: number) => Promise<void>;
+  switchAccount: (accountId: string) => Promise<void>;
+  removeAccount: (accountId: string) => Promise<void>;
+  logout: () => Promise<void>;
+  
   // Helper functions
   getDisplayName: () => string;
   getUserPhone: () => string;
   getBusinessDisplayName: () => string;
+  
+  // Auth helpers - these now pull from AccountManager
+  getCurrentToken: () => string | null;
+  getCurrentUserId: () => string | null;
+  getCurrentRole: () => string | null;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
@@ -111,335 +114,202 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [businesses, setBusinesses] = useState<BusinessData>({ owned: [], joined: [] });
-  const [savedAccounts, setSavedAccounts] = useState<SavedAccount[]>([]);
-  const [currentAccountIndex, setCurrentAccountIndex] = useState(0);
+  const [accounts, setAccounts] = useState<AccountData[]>([]);
+  const [currentAccount, setCurrentAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // ENHANCED: Load saved accounts with better error handling
-  const loadSavedAccounts = async () => {
+  // Sync with AccountManager
+  const syncWithAccountManager = () => {
+    const allAccounts = accountManager.getAllAccounts();
+    const current = accountManager.getCurrentAccount();
+    
+    setAccounts(allAccounts);
+    setCurrentAccount(current);
+    setUser(current?.userData || null);
+    
+    console.log('🔄 UserContext: Synced with AccountManager', {
+      accounts: allAccounts.length,
+      currentAccount: current?.email
+    });
+  };
+
+  // Initialize AccountManager and sync data
+  const initializeAccountManager = async () => {
     try {
-      const savedAccountsData = await AsyncStorage.getItem('saved_accounts');
-      const currentAccountData = await AsyncStorage.getItem('current_account_index');
+      console.log('🚀 UserContext: Initializing AccountManager...');
+      await accountManager.initialize();
+      syncWithAccountManager();
       
-      if (savedAccountsData) {
-        const accounts = JSON.parse(savedAccountsData);
-        console.log('📱 Loaded saved accounts:', accounts.length);
-        setSavedAccounts(accounts);
-        
-        if (currentAccountData) {
-          const accountIndex = parseInt(currentAccountData);
-          // Validate the index before setting it
-          if (accountIndex >= 0 && accountIndex < accounts.length) {
-            setCurrentAccountIndex(accountIndex);
-            console.log('✅ Set current account index:', accountIndex);
-          } else {
-            console.log('⚠️ Invalid stored account index, resetting to 0');
-            setCurrentAccountIndex(0);
-            await AsyncStorage.setItem('current_account_index', '0');
-          }
-        }
-      } else {
-        console.log('📱 No saved accounts found');
-        setSavedAccounts([]);
-        setCurrentAccountIndex(0);
+      // If no current account but we have auth tokens, something is wrong
+      const current = accountManager.getCurrentAccount();
+      if (!current && accountManager.hasAccounts()) {
+        console.log('⚠️ UserContext: No current account but accounts exist, clearing all');
+        await accountManager.clearAllAccounts();
+        syncWithAccountManager();
       }
+      
     } catch (error) {
-      console.error('❌ Failed to load saved accounts:', error);
-      setSavedAccounts([]);
-      setCurrentAccountIndex(0);
+      console.error('❌ UserContext: Failed to initialize AccountManager:', error);
+      setError('Failed to initialize account system');
     }
   };
 
-  // ENHANCED: Save accounts with validation
-  const saveSavedAccounts = async (accounts: SavedAccount[], currentIndex?: number) => {
-    try {
-      // Validate accounts array
-      if (!Array.isArray(accounts)) {
-        console.error('❌ Invalid accounts array provided to saveSavedAccounts');
-        return;
-      }
-
-      await AsyncStorage.setItem('saved_accounts', JSON.stringify(accounts));
-      console.log('💾 Saved accounts to storage:', accounts.length);
-      
-      if (currentIndex !== undefined) {
-        // Validate index before saving
-        if (currentIndex >= 0 && currentIndex < accounts.length) {
-          await AsyncStorage.setItem('current_account_index', currentIndex.toString());
-          console.log('💾 Saved current account index:', currentIndex);
-        } else {
-          console.log('⚠️ Invalid current index provided, not saving');
-        }
-      }
-    } catch (error) {
-      console.error('❌ Failed to save accounts:', error);
-      throw new Error('Failed to save account data');
-    }
-  };
-
-  // ENHANCED: Robust user refresh with better error handling
+  // Refresh user data from API
   const refreshUser = async () => {
     try {
-      console.log('🔄 Refreshing user data from API...');
-      
-      // Check if we have auth tokens
-      const authToken = await SecureStore.getItemAsync('auth_token');
-      const userId = await SecureStore.getItemAsync('user_id');
-      
-      if (!authToken || !userId) {
-        console.log('❌ No auth tokens found');
+      const currentAcc = accountManager.getCurrentAccount();
+      if (!currentAcc) {
+        console.log('❌ UserContext: No current account for refresh');
         setUser(null);
-        setError('Authentication required');
+        setError('No active account');
         return;
       }
 
-      // Make API call to validate and refresh user data
+      console.log('🔄 UserContext: Refreshing user data for:', currentAcc.email);
+      
       const fetchedUser = await getUser();
       
       if (fetchedUser) {
-        console.log('✅ User data refreshed from API:', fetchedUser.email);
-        setUser(fetchedUser);
+        console.log('✅ UserContext: User data refreshed:', fetchedUser.email);
+        
+        // Update AccountManager with fresh user data
+        await accountManager.updateAccount(currentAcc.id, fetchedUser);
+        
+        // Sync with updated data
+        syncWithAccountManager();
         setError(null);
         
-        // Save user data to AsyncStorage for persistence
-        await AsyncStorage.setItem('user_data', JSON.stringify(fetchedUser));
-        
-        // Update saved account data if this user exists in saved accounts
-        if (savedAccounts.length > 0 && currentAccountIndex < savedAccounts.length) {
-          const updatedAccounts = [...savedAccounts];
-          const currentAccountData = updatedAccounts[currentAccountIndex];
-          
-          if (currentAccountData && currentAccountData.id === fetchedUser.id) {
-            updatedAccounts[currentAccountIndex] = {
-              ...currentAccountData,
-              userData: fetchedUser,
-              display_name: fetchedUser.display_name || fetchedUser.first_name || fetchedUser.email,
-              avatar_url: fetchedUser.avatar_url
-            };
-            setSavedAccounts(updatedAccounts);
-            await saveSavedAccounts(updatedAccounts);
-          }
-        }
       } else {
-        console.log('❌ No user data returned from API');
+        console.log('❌ UserContext: No user data returned from API');
         setUser(null);
         setError('Failed to load user data');
       }
     } catch (err: any) {
-      console.error('❌ Failed to refresh user:', err);
-      setUser(null);
+      console.error('❌ UserContext: Failed to refresh user:', err);
       
-      // Handle 401 unauthorized
-      if (err.response?.status === 401) {
+      // Handle authentication errors
+      if (err.response?.status === 401 || err.response?.status === 422) {
+        console.log('🚪 UserContext: Authentication failed, logging out');
         setError('Session expired');
-        await SecureStore.deleteItemAsync('auth_token');
-        await SecureStore.deleteItemAsync('user_id');
-        await SecureStore.deleteItemAsync('user_role');
-        await AsyncStorage.removeItem('user_data');
+        await logout();
       } else {
         setError('Failed to load user data');
       }
     }
   };
 
+  // Refresh businesses
   const refreshBusinesses = async () => {
     try {
       const businessData = await getBusinesses();
       setBusinesses(businessData);
     } catch (err) {
-      console.error('Failed to fetch businesses:', err);
+      console.error('❌ UserContext: Failed to fetch businesses:', err);
       setBusinesses({ owned: [], joined: [] });
     }
   };
 
-  // ENHANCED: Robust addAccount with proper validation and persistence
+  // Add new account
   const addAccount = async (userData: User, token: string) => {
     try {
-      console.log('➕ Adding account:', userData.email);
+      console.log('➕ UserContext: Adding account:', userData.email);
       
-      // Validate inputs
-      if (!userData || !userData.id || !userData.email || !token) {
-        throw new Error('Invalid user data or token provided');
-      }
-
-      // Check if account already exists
-      const existingAccountIndex = savedAccounts.findIndex(acc => acc.id === userData.id);
-      if (existingAccountIndex !== -1) {
-        console.log('🔄 Account already exists, updating and switching to it');
-        await switchAccount(existingAccountIndex);
-        return;
-      }
-
-      if (savedAccounts.length >= 3) {
-        throw new Error('Maximum of 3 accounts allowed');
-      }
-
-      const newAccount: SavedAccount = {
-        id: userData.id,
-        email: userData.email,
-        display_name: userData.display_name || userData.first_name || userData.email,
-        avatar_url: userData.avatar_url,
-        token: token,
-        userData: userData
-      };
-
-      // Update state first, then persist
-      const updatedAccounts = [...savedAccounts, newAccount];
-      setSavedAccounts(updatedAccounts);
+      await accountManager.addAccount(userData, token);
+      syncWithAccountManager();
       
-      // Save to AsyncStorage
-      await saveSavedAccounts(updatedAccounts);
-
-      // Switch to the new account - use the correct index
-      const newAccountIndex = updatedAccounts.length - 1;
-      console.log('🔄 Switching to new account at index:', newAccountIndex);
+      // Refresh data for new account
+      await refreshUser();
+      await refreshBusinesses();
       
-      // Update auth tokens
-      await SecureStore.setItemAsync('auth_token', token);
-      await SecureStore.setItemAsync('user_id', userData.id);
-      
-      const roles = userData.roles || [];
-      const role = roles.includes('admin') ? 'admin' : 'client';
-      await SecureStore.setItemAsync('user_role', role);
-      
-      // Update current account index
-      setCurrentAccountIndex(newAccountIndex);
-      await AsyncStorage.setItem('current_account_index', newAccountIndex.toString());
-      
-      // Set user data
-      setUser(userData);
-      setError(null);
-      
-      console.log('✅ Account added and switched successfully:', newAccount.email);
+      console.log('✅ UserContext: Account added successfully');
     } catch (error) {
-      console.error('❌ Failed to add account:', error);
+      console.error('❌ UserContext: Failed to add account:', error);
       throw error;
     }
   };
 
-  // ENHANCED: Robust switchAccount with proper validation
-  const switchAccount = async (accountIndex: number) => {
+  // Switch account
+  const switchAccount = async (accountId: string) => {
     try {
-      console.log('🔄 Switching to account index:', accountIndex);
+      console.log('🔄 UserContext: Switching to account:', accountId);
       
-      // Validate account index against current savedAccounts array
-      if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
-        console.error('❌ Invalid account index:', { 
-          requestedIndex: accountIndex, 
-          availableAccounts: savedAccounts.length 
-        });
-        throw new Error(`Invalid account index: ${accountIndex}. Available accounts: ${savedAccounts.length}`);
-      }
-
-      const account = savedAccounts[accountIndex];
+      await accountManager.setCurrentAccount(accountId);
+      syncWithAccountManager();
       
-      if (!account) {
-        throw new Error('Account not found at the specified index');
-      }
-
-      console.log('🔄 Switching to account:', account.email);
+      // Reset businesses to force fresh load
+      setBusinesses({ owned: [], joined: [] });
       
-      // Update secure store with new account's token
-      await SecureStore.setItemAsync('auth_token', account.token);
-      await SecureStore.setItemAsync('user_id', account.id);
-      
-      // Determine and save role
-      const roles = account.userData.roles || [];
-      const role = roles.includes('admin') ? 'admin' : 'client';
-      await SecureStore.setItemAsync('user_role', role);
-      
-      // Update current account index
-      setCurrentAccountIndex(accountIndex);
-      await AsyncStorage.setItem('current_account_index', accountIndex.toString());
-      
-      // Set user data from saved account
-      setUser(account.userData);
-      setError(null);
-      
-      // Try to refresh user data from API if possible
+      // Try to refresh data from API
       try {
-        setLoading(true);
         await refreshUser();
         await refreshBusinesses();
       } catch (apiError) {
-        console.warn('⚠️ Could not refresh from API, using cached data');
-      } finally {
-        setLoading(false);
+        console.warn('⚠️ UserContext: Could not refresh from API, using cached data');
       }
       
-      console.log('✅ Successfully switched to account:', account.email);
+      console.log('✅ UserContext: Account switched successfully');
     } catch (error) {
-      console.error('❌ Failed to switch account:', error);
-      setLoading(false);
+      console.error('❌ UserContext: Failed to switch account:', error);
       throw error;
     }
   };
 
-  // ENHANCED: Robust removeAccount with proper validation
-  const removeAccount = async (accountIndex: number) => {
+  // Remove account
+  const removeAccount = async (accountId: string) => {
     try {
-      console.log('🗑️ Removing account at index:', accountIndex);
+      console.log('🗑️ UserContext: Removing account:', accountId);
       
-      // Validate account index
-      if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
-        console.error('❌ Invalid account index for removal:', { 
-          requestedIndex: accountIndex, 
-          availableAccounts: savedAccounts.length 
-        });
-        throw new Error(`Invalid account index: ${accountIndex}. Available accounts: ${savedAccounts.length}`);
-      }
-
-      const accountToRemove = savedAccounts[accountIndex];
-      if (!accountToRemove) {
-        throw new Error('Account not found at the specified index');
-      }
-
-      console.log('🗑️ Removing account:', accountToRemove.email);
-
-      // Create updated accounts array
-      const updatedAccounts = savedAccounts.filter((_, index) => index !== accountIndex);
-      setSavedAccounts(updatedAccounts);
-
-      if (updatedAccounts.length === 0) {
-        // No accounts left, clear everything
-        console.log('🧹 No accounts left, clearing all data');
-        setUser(null);
-        setCurrentAccountIndex(0);
+      await accountManager.removeAccount(accountId);
+      syncWithAccountManager();
+      
+      // If no accounts left, clear all data
+      if (!accountManager.hasAccounts()) {
         setBusinesses({ owned: [], joined: [] });
-        
-        await SecureStore.deleteItemAsync('auth_token');
-        await SecureStore.deleteItemAsync('user_id');
-        await SecureStore.deleteItemAsync('user_role');
-        await AsyncStorage.removeItem('current_account_index');
-        await AsyncStorage.removeItem('saved_accounts');
-        await AsyncStorage.removeItem('user_data');
-      } else {
-        // Save updated accounts list
-        await saveSavedAccounts(updatedAccounts);
-        
-        // If we removed the current account, switch to another one
-        if (accountIndex === currentAccountIndex) {
-          console.log('🔄 Removed current account, switching to first available');
-          const newCurrentIndex = 0; // Always switch to first account
-          await switchAccount(newCurrentIndex);
-        } else if (accountIndex < currentAccountIndex) {
-          // Adjust current index if we removed an account before it
-          const newCurrentIndex = currentAccountIndex - 1;
-          setCurrentAccountIndex(newCurrentIndex);
-          await AsyncStorage.setItem('current_account_index', newCurrentIndex.toString());
-        }
-        // If accountIndex > currentAccountIndex, no adjustment needed
+        setError(null);
       }
       
-      console.log('✅ Account removed successfully');
+      console.log('✅ UserContext: Account removed successfully');
     } catch (error) {
-      console.error('❌ Failed to remove account:', error);
+      console.error('❌ UserContext: Failed to remove account:', error);
       throw error;
     }
   };
 
-  // Helper function to get display name with fallback logic
+  // Complete logout
+  const logout = async () => {
+    try {
+      console.log('🚪 UserContext: Logging out...');
+      
+      await accountManager.clearAllAccounts();
+      
+      // Reset all state
+      setUser(null);
+      setBusinesses({ owned: [], joined: [] });
+      setAccounts([]);
+      setCurrentAccount(null);
+      setError(null);
+      
+      // Clear additional cached data
+      const cacheKeys = [
+        'user_data',
+        'business_data',
+        'cached_business_data',
+        'business_cache_expiry'
+      ];
+      
+      await Promise.all(
+        cacheKeys.map(key => AsyncStorage.removeItem(key).catch(() => {}))
+      );
+      
+      console.log('✅ UserContext: Logout completed');
+    } catch (error) {
+      console.error('❌ UserContext: Logout failed:', error);
+      throw error;
+    }
+  };
+
+  // Helper functions
   const getDisplayName = (): string => {
     if (!user) return 'User';
     
@@ -452,10 +322,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     if (user.username && user.username.trim()) {
       return user.username;
     }
-    return 'You';
+    return 'User';
   };
 
-  // Helper function to get user phone with fallback
   const getUserPhone = (): string => {
     if (!user) return '+254700000000';
     
@@ -468,7 +337,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return '+254700000000';
   };
 
-  // Helper function to get business display name
   const getBusinessDisplayName = (): string => {
     if (businesses.owned.length > 0 && businesses.owned[0].name) {
       return businesses.owned[0].name;
@@ -476,84 +344,84 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return getDisplayName();
   };
 
-  // ENHANCED: Robust initialization with proper error handling
+  // Auth helper functions that delegate to AccountManager
+  const getCurrentToken = (): string | null => {
+    return accountManager.getCurrentToken();
+  };
+
+  const getCurrentUserId = (): string | null => {
+    return accountManager.getCurrentUserId();
+  };
+
+  const getCurrentRole = (): string | null => {
+    return accountManager.getCurrentRole();
+  };
+
+  // Initialize on mount
   useEffect(() => {
-    const initializeData = async () => {
-      console.log('🚀 UserContext: Initializing...');
+    const initialize = async () => {
+      console.log('🚀 UserContext: Starting initialization...');
       setLoading(true);
       
       try {
-        // First, load saved accounts
-        await loadSavedAccounts();
+        await initializeAccountManager();
         
-        // Then, validate current session
-        const authToken = await SecureStore.getItemAsync('auth_token');
-        const userId = await SecureStore.getItemAsync('user_id');
-        
-        if (authToken && userId) {
-          console.log('🔑 Found auth tokens, validating with server...');
-          
-          // Try to load user data from AsyncStorage first for immediate UI
-          try {
-            const storedUserData = await AsyncStorage.getItem('user_data');
-            if (storedUserData) {
-              const parsedUser = JSON.parse(storedUserData);
-              console.log('📱 Loaded user from AsyncStorage:', parsedUser.email);
-              setUser(parsedUser);
-              setError(null);
-            }
-          } catch (storageError) {
-            console.warn('⚠️ Could not load user from AsyncStorage:', storageError);
-          }
-          
-          // Then validate with API call
+        // If we have a current account, try to refresh data
+        const current = accountManager.getCurrentAccount();
+        if (current) {
+          console.log('🔑 UserContext: Found current account, refreshing data');
           try {
             await refreshUser();
             await refreshBusinesses();
-          } catch (apiError) {
-            console.warn('⚠️ API validation failed, using cached data:', apiError);
+          } catch (refreshError) {
+            console.warn('⚠️ UserContext: Could not refresh data, using cached');
           }
         } else {
-          console.log('❌ No auth tokens found');
-          setUser(null);
+          console.log('❌ UserContext: No current account found');
           setError('Authentication required');
         }
+        
       } catch (error) {
-        console.error('❌ Failed to initialize user data:', error);
+        console.error('❌ UserContext: Initialization failed:', error);
         setError('Failed to initialize');
       } finally {
         setLoading(false);
       }
     };
 
-    initializeData();
+    initialize();
   }, []); // Only run once on mount
-
-  // Load businesses when user changes (after successful validation)
-  useEffect(() => {
-    if (user && !loading) {
-      console.log('👤 User validated, loading businesses...');
-      refreshBusinesses();
-    }
-  }, [user, loading]);
 
   return (
     <UserContext.Provider
       value={{ 
+        // Current user data
         user, 
         businesses,
-        savedAccounts,
-        currentAccountIndex,
         loading, 
         error, 
+        
+        // Account management
+        accounts,
+        currentAccount,
+        
+        // Core methods
         refreshUser,
         refreshBusinesses,
         addAccount,
         switchAccount,
         removeAccount,
+        logout,
+        
+        // Helper functions
         getDisplayName,
         getUserPhone,
-        getBusinessDisplayName
+        getBusinessDisplayName,
+        
+        // Auth helpers
+        getCurrentToken,
+        getCurrentUserId,
+        getCurrentRole,
       }}
     >
       {children}
