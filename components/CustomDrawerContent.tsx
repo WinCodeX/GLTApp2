@@ -171,7 +171,7 @@ export default function CustomDrawerContent(props: any) {
             <View style={styles.accountDropdown}>
               {/* Current Account Details */}
               <DrawerItem    
-                label="Account Settings"    
+                label="Account"    
                 labelStyle={styles.label}    
                 icon={() => <Feather name="user" size={22} color="#fff" />}    
                 onPress={() => {
@@ -208,8 +208,8 @@ export default function CustomDrawerContent(props: any) {
                   labelStyle={styles.label}    
                   icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
                   onPress={() => {
-                    // Navigate to business selection or show modal
-                    // props.navigation.navigate('businessSelection')
+                    setShowAccountDropdown(false);
+                    props.navigation.navigate('businessSelection');
                   }}    
                 />
               )}    
