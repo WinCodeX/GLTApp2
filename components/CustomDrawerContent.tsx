@@ -1,3 +1,4 @@
+// components/CustomDrawerContent.tsx - Updated with robust account switching
 import {
   Feather,
   FontAwesome5,
@@ -62,26 +63,57 @@ export default function CustomDrawerContent(props: any) {
       return;
     }
 
+    // Validate index before attempting switch
+    if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
+      console.error('❌ Invalid account index in drawer:', { 
+        requestedIndex: accountIndex, 
+        availableAccounts: savedAccounts.length 
+      });
+      Alert.alert('Error', 'Invalid account selection');
+      return;
+    }
+
     try {
       setShowAccountDropdown(false);
       props.navigation.closeDrawer();
       
+      console.log('🔄 Drawer switching to account:', accountIndex);
       await switchAccount(accountIndex);
       
-      Toast.show({
-        type: 'success',
-        text1: 'Account switched!',
-        text2: `Now using ${savedAccounts[accountIndex]?.display_name}`,
-      });
+      const switchedAccount = savedAccounts[accountIndex];
+      if (switchedAccount) {
+        Toast.show({
+          type: 'success',
+          text1: 'Account switched!',
+          text2: `Now using ${switchedAccount.display_name}`,
+        });
+      }
     } catch (error: any) {
+      console.error('❌ Drawer account switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch accounts');
     }
   };
 
   const handleAccountRemove = async (accountIndex: number, accountEmail: string) => {
+    // Validate index before attempting removal
+    if (accountIndex < 0 || accountIndex >= savedAccounts.length) {
+      console.error('❌ Invalid account index for removal:', { 
+        requestedIndex: accountIndex, 
+        availableAccounts: savedAccounts.length 
+      });
+      Alert.alert('Error', 'Invalid account selection');
+      return;
+    }
+
+    // Prevent removing current account
+    if (accountIndex === currentAccountIndex) {
+      Alert.alert('Error', 'Cannot remove the currently active account. Switch to another account first.');
+      return;
+    }
+
     Alert.alert(
       'Remove Account',
-      `Are you sure you want to remove ${accountEmail}?`,
+      `Remove ${accountEmail}?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -90,6 +122,7 @@ export default function CustomDrawerContent(props: any) {
           onPress: async () => {
             try {
               setShowAccountDropdown(false);
+              console.log('🗑️ Drawer removing account:', accountIndex);
               await removeAccount(accountIndex);
               
               Toast.show({
@@ -98,6 +131,7 @@ export default function CustomDrawerContent(props: any) {
                 text2: `${accountEmail} has been removed`,
               });
             } catch (error: any) {
+              console.error('❌ Drawer account removal error:', error);
               Alert.alert('Error', error.message || 'Failed to remove account');
             }
           },
@@ -114,14 +148,14 @@ export default function CustomDrawerContent(props: any) {
     }, 300);
   };
 
-  const renderSavedAccount = (account: any, index: number) => {
+  const renderSavedAccount = (account: SavedAccount, index: number) => {
     const isCurrentAccount = index === currentAccountIndex;
     const accountAvatar = account.avatar_url
       ? { uri: account.avatar_url }
       : require('../assets/images/avatar_placeholder.png');
 
     return (
-      <View key={account.id} style={styles.savedAccountContainer}>
+      <View key={`${account.id}-${index}`} style={styles.savedAccountContainer}>
         <TouchableOpacity
           style={[
             styles.savedAccountItem,
@@ -178,6 +212,7 @@ export default function CustomDrawerContent(props: any) {
           <TouchableOpacity    
             onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
             style={styles.accountHeader}    
+            activeOpacity={0.8}
           >    
             <Image
               source={avatarSource}
@@ -196,7 +231,7 @@ export default function CustomDrawerContent(props: any) {
 
           {showAccountDropdown && (    
             <View style={styles.accountDropdown}>
-              {/* Current Account Details */}
+              {/* Account Settings */}
               <DrawerItem    
                 label="Account Settings"    
                 labelStyle={styles.label}    
@@ -207,11 +242,11 @@ export default function CustomDrawerContent(props: any) {
                 }}    
               />
               
-              {/* Saved Accounts */}
+              {/* Saved Accounts - Simple Display */}
               {savedAccounts.length > 0 && (
                 <View style={styles.savedAccountsSection}>
                   <Text style={styles.savedAccountsTitle}>
-                    Switch Account ({savedAccounts.length}/3)
+                    SWITCH ACCOUNT ({savedAccounts.length}/3)
                   </Text>
                   {savedAccounts.map((account, index) => renderSavedAccount(account, index))}
                 </View>
@@ -219,12 +254,13 @@ export default function CustomDrawerContent(props: any) {
 
               {/* Add Account Button (only if less than 3 accounts) */}
               {savedAccounts.length < 3 && (
-                <DrawerItem    
-                  label="Add Account"    
-                  labelStyle={styles.label}    
-                  icon={() => <Feather name="plus" size={22} color="#fff" />}    
-                  onPress={handleAddAccount}    
-                />
+                <TouchableOpacity
+                  style={styles.addAccountButton}
+                  onPress={handleAddAccount}
+                >
+                  <Feather name="plus" size={18} color="#fff" />
+                  <Text style={styles.addAccountText}>Add Account</Text>
+                </TouchableOpacity>
               )}
               
               {/* Switch Business (if multiple businesses) */}
@@ -299,7 +335,7 @@ export default function CustomDrawerContent(props: any) {
             onPress={() => props.navigation.navigate('history')}    
           />    
 
-          {/* Contacts ABOVE Settings */}    
+          {/* Contacts */}    
           <DrawerItem    
             label="Contacts"    
             labelStyle={styles.label}    
@@ -315,7 +351,7 @@ export default function CustomDrawerContent(props: any) {
             onPress={() => props.navigation.navigate('settings')}    
           />    
 
-          {/* Invite Friends BELOW Settings */}    
+          {/* Invite Friends */}    
           <DrawerItem    
             label="Invite Friends"    
             labelStyle={styles.label}    
@@ -422,19 +458,19 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
 
-  // Saved Accounts Styles
+  // Enhanced Saved Accounts Styles - Simple Display
   savedAccountsSection: {
     paddingTop: 8,
     paddingBottom: 8,
   },
   savedAccountsTitle: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 13,
-    fontWeight: '500',
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '600',
     paddingHorizontal: 16,
     paddingVertical: 8,
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 1,
   },
   savedAccountContainer: {
     flexDirection: 'row',
@@ -480,6 +516,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     marginTop: 2,
+    textTransform: 'uppercase',
   },
   currentAccountText: {
     color: '#bd93f9',
@@ -511,5 +548,23 @@ const styles = StyleSheet.create({
     marginLeft: 8,
     borderWidth: 1,
     borderColor: 'rgba(255, 85, 85, 0.2)',
+  },
+  addAccountButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    marginHorizontal: 8,
+    marginVertical: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    borderStyle: 'dashed',
+  },
+  addAccountText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+    marginLeft: 12,
   },
 });
