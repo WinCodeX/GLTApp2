@@ -176,9 +176,15 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                   <Text style={styles.inputLabel}>
                     Categories * ({selectedCategories.length}/5)
                   </Text>
-                  <View style={styles.categoriesContainer}>
-                    {memoizedCategories}
-                  </View>
+                  <ScrollView 
+                    style={styles.categoriesScrollContainer}
+                    showsVerticalScrollIndicator={true}
+                    nestedScrollEnabled={true}
+                  >
+                    <View style={styles.categoriesContainer}>
+                      {memoizedCategories}
+                    </View>
+                  </ScrollView>
                   <Text style={styles.helpText}>
                     Select up to 5 categories that best describe your business
                   </Text>
@@ -234,9 +240,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '80%',
+    width: '90%',
+    maxWidth: 450,
+    maxHeight: '75%',
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -273,7 +279,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   formContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   inputGroup: {
     marginBottom: 18,
@@ -301,16 +307,19 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 3,
   },
+  categoriesScrollContainer: {
+    height: 100,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.2)',
+    marginBottom: 4,
+  },
   categoriesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 10,
     padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.2)',
-    maxHeight: 120,
   },
   categoryItem: {
     flexDirection: 'row',
@@ -345,6 +354,8 @@ const styles = StyleSheet.create({
   actionContainer: {
     flexDirection: 'row',
     gap: 12,
+    marginTop: 8,
+    paddingBottom: 4,
   },
   primaryButton: {
     flex: 1,
