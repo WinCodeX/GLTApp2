@@ -1,4 +1,4 @@
-// context/UserContext.tsx - Updated to use AccountManager
+// context/UserContext.tsx - Fixed with proper cache management
 import React, {
   createContext,
   ReactNode,
@@ -91,8 +91,9 @@ type UserContextType = {
   currentAccount: AccountData | null;
   
   // Core methods
-  refreshUser: () => Promise<void>;
-  refreshBusinesses: () => Promise<void>;
+  refreshUser: (forceClearCache?: boolean) => Promise<void>;
+  refreshBusinesses: (forceClearCache?: boolean) => Promise<void>;
+  clearUserCache: () => Promise<void>;
   addAccount: (userData: User, token: string) => Promise<void>;
   switchAccount: (accountId: string) => Promise<void>;
   removeAccount: (accountId: string) => Promise<void>;
@@ -134,6 +135,31 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
+  // Clear all user-related cache
+  const clearUserCache = async () => {
+    try {
+      console.log('🗑️ UserContext: Clearing all user cache...');
+      
+      const cacheKeys = [
+        'user_data',
+        'user_cache_expiry',
+        'avatar_cache',
+        'avatar_cache_expiry',
+        'business_data',
+        'cached_business_data',
+        'business_cache_expiry',
+      ];
+      
+      await Promise.all(
+        cacheKeys.map(key => AsyncStorage.removeItem(key).catch(() => {}))
+      );
+      
+      console.log('✅ UserContext: Cache cleared successfully');
+    } catch (error) {
+      console.error('❌ UserContext: Failed to clear cache:', error);
+    }
+  };
+
   // Initialize AccountManager and sync data
   const initializeAccountManager = async () => {
     try {
@@ -146,6 +172,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       if (!current && accountManager.hasAccounts()) {
         console.log('⚠️ UserContext: No current account but accounts exist, clearing all');
         await accountManager.clearAllAccounts();
+        await clearUserCache();
         syncWithAccountManager();
       }
       
@@ -155,8 +182,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Refresh user data from API
-  const refreshUser = async () => {
+  // Refresh user data from API with optional cache clearing
+  const refreshUser = async (forceClearCache: boolean = false) => {
     try {
       const currentAcc = accountManager.getCurrentAccount();
       if (!currentAcc) {
@@ -168,10 +195,20 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
 
       console.log('🔄 UserContext: Refreshing user data for:', currentAcc.email);
       
+      // Clear cache if requested (important for avatar updates)
+      if (forceClearCache) {
+        console.log('🗑️ UserContext: Force clearing user cache before refresh');
+        await clearUserCache();
+      }
+      
       const fetchedUser = await getUser();
       
       if (fetchedUser) {
-        console.log('✅ UserContext: User data refreshed:', fetchedUser.email);
+        console.log('✅ UserContext: User data refreshed:', {
+          email: fetchedUser.email,
+          avatarUrl: fetchedUser.avatar_url,
+          timestamp: new Date().toISOString()
+        });
         
         // Update AccountManager with fresh user data
         await accountManager.updateAccount(currentAcc.id, fetchedUser);
@@ -199,11 +236,27 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Refresh businesses
-  const refreshBusinesses = async () => {
+  // Refresh businesses with optional cache clearing
+  const refreshBusinesses = async (forceClearCache: boolean = false) => {
     try {
+      if (forceClearCache) {
+        console.log('🗑️ UserContext: Force clearing business cache before refresh');
+        const businessCacheKeys = [
+          'business_data',
+          'cached_business_data', 
+          'business_cache_expiry'
+        ];
+        await Promise.all(
+          businessCacheKeys.map(key => AsyncStorage.removeItem(key).catch(() => {}))
+        );
+      }
+      
       const businessData = await getBusinesses();
       setBusinesses(businessData);
+      console.log('✅ UserContext: Businesses refreshed:', {
+        owned: businessData.owned.length,
+        joined: businessData.joined.length
+      });
     } catch (err) {
       console.error('❌ UserContext: Failed to fetch businesses:', err);
       setBusinesses({ owned: [], joined: [] });
@@ -218,9 +271,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       await accountManager.addAccount(userData, token);
       syncWithAccountManager();
       
-      // Refresh data for new account
-      await refreshUser();
-      await refreshBusinesses();
+      // Clear cache and refresh data for new account
+      await clearUserCache();
+      await refreshUser(true);
+      await refreshBusinesses(true);
       
       console.log('✅ UserContext: Account added successfully');
     } catch (error) {
@@ -237,13 +291,14 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       await accountManager.setCurrentAccount(accountId);
       syncWithAccountManager();
       
-      // Reset businesses to force fresh load
+      // Clear cache and reset data for account switch
+      await clearUserCache();
       setBusinesses({ owned: [], joined: [] });
       
       // Try to refresh data from API
       try {
-        await refreshUser();
-        await refreshBusinesses();
+        await refreshUser(true);
+        await refreshBusinesses(true);
       } catch (apiError) {
         console.warn('⚠️ UserContext: Could not refresh from API, using cached data');
       }
@@ -263,8 +318,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       await accountManager.removeAccount(accountId);
       syncWithAccountManager();
       
-      // If no accounts left, clear all data
+      // If no accounts left, clear all data and cache
       if (!accountManager.hasAccounts()) {
+        await clearUserCache();
         setBusinesses({ owned: [], joined: [] });
         setError(null);
       }
@@ -282,6 +338,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       console.log('🚪 UserContext: Logging out...');
       
       await accountManager.clearAllAccounts();
+      await clearUserCache();
       
       // Reset all state
       setUser(null);
@@ -289,18 +346,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       setAccounts([]);
       setCurrentAccount(null);
       setError(null);
-      
-      // Clear additional cached data
-      const cacheKeys = [
-        'user_data',
-        'business_data',
-        'cached_business_data',
-        'business_cache_expiry'
-      ];
-      
-      await Promise.all(
-        cacheKeys.map(key => AsyncStorage.removeItem(key).catch(() => {}))
-      );
       
       console.log('✅ UserContext: Logout completed');
     } catch (error) {
@@ -408,6 +453,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         // Core methods
         refreshUser,
         refreshBusinesses,
+        clearUserCache,
         addAccount,
         switchAccount,
         removeAccount,
