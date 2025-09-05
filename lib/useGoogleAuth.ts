@@ -1,10 +1,15 @@
-// lib/useGoogleAuth.ts - Rewritten for Rails Web OAuth (Expo-Crypto Secure)
+// lib/useGoogleAuth.ts - Fixed for expo-auth-session OAuth 2.0 flow
+import { useEffect } from 'react';
+import {
+  makeRedirectUri,
+  useAuthRequest,
+  exchangeCodeAsync,
+  AuthRequestConfig,
+  DiscoveryDocument,
+} from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
-import { useCallback, useRef } from 'react';
-import * as SecureStore from 'expo-secure-store';
-import * as Crypto from 'expo-crypto';
-import Toast from 'react-native-toast-message';
 import { getCurrentApiBaseUrl } from '@/lib/api';
+import { Platform } from 'react-native';
 
 WebBrowser.maybeCompleteAuthSession();
 
@@ -22,184 +27,127 @@ interface AuthSuccessUser {
   roles: string[];
   avatar_url?: string;
   google_image_url?: string;
+  token?: string; // JWT token from your Rails backend
 }
 
 export function useGoogleAuth(onAuthSuccess: (user: AuthSuccessUser, isNewUser?: boolean) => void) {
-  const processingRef = useRef(false);
+  // Get your Rails server base URL (without /api/v1)
+  const getBaseUrl = () => {
+    const apiUrl = getCurrentApiBaseUrl();
+    return apiUrl.replace('/api/v1', '');
+  };
 
-  // ==========================================
-  // 🌐 WEB OAUTH WITH RAILS JWT BACKEND
-  // ==========================================
+  // OAuth configuration for expo-auth-session
+  const config: AuthRequestConfig = {
+    clientId: "google", // This can be any string for expo-auth-session
+    scopes: ['openid', 'profile', 'email'],
+    additionalParameters: {},
+    customParameters: {
+      prompt: 'select_account',
+    },
+    redirectUri: makeRedirectUri({
+      scheme: 'betoauthexample', // Your app scheme
+      path: 'auth',
+    }),
+  };
 
-  const signInWithGoogle = useCallback(async () => {
-    if (processingRef.current) {
-      console.log('⏳ Authentication already in progress');
-      return;
+  // Discovery document pointing to your Rails OAuth endpoints
+  const discovery: DiscoveryDocument = {
+    authorizationEndpoint: `${getBaseUrl()}/api/auth/authorize`,
+    tokenEndpoint: `${getBaseUrl()}/api/auth/token`,
+  };
+
+  // Use expo-auth-session hook
+  const [request, response, promptAsync] = useAuthRequest(config, discovery);
+
+  // Handle OAuth response
+  useEffect(() => {
+    if (response?.type === 'success') {
+      handleAuthResponse(response);
+    } else if (response?.type === 'error') {
+      console.error('OAuth error:', response.error);
+    } else if (response?.type === 'cancel') {
+      console.log('OAuth cancelled by user');
     }
+  }, [response]);
 
-    processingRef.current = true;
-
+  const handleAuthResponse = async (authResponse: any) => {
     try {
-      console.log('🌐 Starting Rails Google OAuth flow...');
+      console.log('🔄 Exchanging authorization code for tokens...');
       
-      // Get your Rails server base URL
-      const baseUrl = getCurrentApiBaseUrl().replace('/api/v1', ''); // Remove API path
-      console.log('🔗 Using base URL:', baseUrl);
-      
-      // Create a unique state parameter for security
-      const state = await generateSecureState();
-      
-      // Construct the OAuth URL to your Rails server
-      // This goes to the initialization endpoint that sets up state
-      const oauthUrl = `${baseUrl}/api/v1/auth/google_oauth2/init?state=${state}&mobile=true`;
-      console.log('🚀 Opening OAuth URL:', oauthUrl);
-      
-      // Open the web browser to your Rails OAuth endpoint
-      const result = await WebBrowser.openAuthSessionAsync(
-        oauthUrl,
-        `${baseUrl}/oauth/mobile/success`, // Your Rails success redirect URL
+      // Exchange authorization code for tokens using your Rails backend
+      const tokenResponse = await exchangeCodeAsync(
         {
-          showInRecents: false,
-          createTask: false,
-        }
+          clientId: config.clientId!,
+          code: authResponse.params.code,
+          redirectUri: config.redirectUri!,
+          extraParams: {
+            platform: Platform.OS, // Tell backend if this is native or web
+          },
+          codeVerifier: request?.codeVerifier, // PKCE verification
+        },
+        discovery
       );
 
-      console.log('📋 WebBrowser result:', result.type);
+      console.log('✅ Token exchange successful');
 
-      if (result.type === 'success') {
-        // Extract data from the success URL
-        const url = result.url;
-        console.log('✅ OAuth success URL:', url);
+      // The response from your Rails backend should include user data and tokens
+      if (tokenResponse.accessToken) {
+        // For web: tokens are set as HTTP-only cookies
+        // For native: tokens are returned in the response
         
-        // Parse the success URL to extract token and user data
-        await handleOAuthSuccess(url, onAuthSuccess);
-        
-      } else if (result.type === 'cancel') {
-        console.log('❌ OAuth cancelled by user');
-        Toast.show({
-          type: 'info',
-          text1: 'Cancelled',
-          text2: 'Google sign-in was cancelled'
-        });
-      } else if (result.type === 'dismiss') {
-        console.log('❌ OAuth dismissed');
-        Toast.show({
-          type: 'info',
-          text1: 'Dismissed',
-          text2: 'Google sign-in was dismissed'
-        });
+        // Check if user data is included in the token response
+        const userData = (tokenResponse as any).user;
+        const isNewUser = (tokenResponse as any).is_new_user;
+
+        if (userData) {
+          // Add the token to user data for AccountManager
+          const userWithToken = {
+            ...userData,
+            token: tokenResponse.accessToken,
+          };
+
+          console.log('🎉 Authentication successful for:', userData.email);
+          onAuthSuccess(userWithToken, isNewUser);
+        } else {
+          // If no user data in token response, fetch from session endpoint
+          await fetchUserSession();
+        }
+      } else {
+        throw new Error('No access token received');
       }
-
-    } catch (error: any) {
-      console.error('❌ OAuth error:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Sign-in Error',
-        text2: error.message || 'Failed to open Google sign-in'
-      });
-    } finally {
-      processingRef.current = false;
+    } catch (error) {
+      console.error('❌ Error handling auth response:', error);
+      throw error;
     }
-  }, [onAuthSuccess]);
-
-  // ==========================================
-  // 🔧 HELPER FUNCTIONS (REACT NATIVE COMPATIBLE)
-  // ==========================================
-
-  const generateSecureState = async (): Promise<string> => {
-    // Cryptographically secure random state generation using Expo-Crypto
-    const randomBytes = await Crypto.getRandomBytesAsync(32);
-    return Array.from(randomBytes, byte => byte.toString(16).padStart(2, '0')).join('');
   };
 
-  const handleOAuthSuccess = async (
-    successUrl: string, 
-    onAuthSuccess: (user: AuthSuccessUser, isNewUser?: boolean) => void
-  ) => {
+  const fetchUserSession = async () => {
     try {
-      console.log('🔍 Parsing OAuth success URL...');
-      
-      // Parse URL parameters
-      const url = new URL(successUrl);
-      const token = url.searchParams.get('token');
-      const userParam = url.searchParams.get('user');
-      const isNewUser = url.searchParams.get('is_new_user') === 'true';
-      const error = url.searchParams.get('error');
-
-      if (error) {
-        console.error('❌ OAuth error from server:', error);
-        Toast.show({
-          type: 'error',
-          text1: 'Authentication Failed',
-          text2: decodeURIComponent(error)
-        });
-        return;
-      }
-
-      if (!token || !userParam) {
-        console.error('❌ Missing token or user data in success URL');
-        Toast.show({
-          type: 'error',
-          text1: 'Authentication Failed',
-          text2: 'Invalid response from server'
-        });
-        return;
-      }
-
-      // Parse user data
-      const user: AuthSuccessUser = JSON.parse(decodeURIComponent(userParam));
-      
-      console.log('✅ OAuth success - User:', user.email);
-
-      // Store authentication data
-      await SecureStore.setItemAsync('auth_token', token);
-      await SecureStore.setItemAsync('user_id', user.id.toString());
-      await SecureStore.setItemAsync('user_role', user.primary_role);
-      await SecureStore.setItemAsync('user_data', JSON.stringify(user));
-
-      // Show success message
-      Toast.show({
-        type: 'success',
-        text1: 'Welcome!',
-        text2: isNewUser 
-          ? `Account created for ${user.display_name}` 
-          : `Welcome back, ${user.display_name}!`
+      const response = await fetch(`${getBaseUrl()}/api/auth/session`, {
+        method: 'GET',
+        credentials: 'include', // Include cookies for web
+        headers: {
+          'Content-Type': 'application/json',
+        },
       });
 
-      // Call success callback
-      onAuthSuccess(user, isNewUser);
-
-    } catch (error: any) {
-      console.error('❌ Error handling OAuth success:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Authentication Error',
-        text2: 'Failed to process authentication response'
-      });
+      if (response.ok) {
+        const userData = await response.json();
+        console.log('📋 Fetched user session:', userData.email);
+        onAuthSuccess(userData, false);
+      } else {
+        throw new Error('Failed to fetch user session');
+      }
+    } catch (error) {
+      console.error('❌ Error fetching user session:', error);
+      throw error;
     }
   };
 
-  // ==========================================
-  // 🔄 ALTERNATIVE: FALLBACK TO TOKEN-BASED
-  // ==========================================
-
-  const signInWithGoogleToken = useCallback(async () => {
-    // This is a fallback method if the web OAuth doesn't work
-    // You can implement this to still use the google-id-token approach
-    console.log('🔄 Fallback: Token-based authentication not implemented');
-    Toast.show({
-      type: 'info',
-      text1: 'Alternative Method',
-      text2: 'Please use the web-based Google sign-in'
-    });
-  }, []);
-
+  // Return the promptAsync function and request object
   return {
-    promptAsync: signInWithGoogle,
-    signInWithGoogle,
-    signInWithGoogleToken, // Fallback method
-    request: { available: true }, // Mock request object for compatibility
-    redirectUri: null, // Not using custom redirects
-    isProcessing: processingRef.current,
+    promptAsync,
+    request,
   };
 }
