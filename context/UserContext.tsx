@@ -1,4 +1,4 @@
-// context/UserContext.tsx - Fixed with proper cache management
+// context/UserContext.tsx - Fixed with proper cache management and selected business state
 import React, {
   createContext,
   ReactNode,
@@ -83,6 +83,7 @@ type UserContextType = {
   // Current user data
   user: User | null;
   businesses: BusinessData;
+  selectedBusiness: Business | null;
   loading: boolean;
   error: string | null;
   
@@ -98,6 +99,9 @@ type UserContextType = {
   switchAccount: (accountId: string) => Promise<void>;
   removeAccount: (accountId: string) => Promise<void>;
   logout: () => Promise<void>;
+  
+  // Business selection
+  setSelectedBusiness: (business: Business | null) => void;
   
   // Helper functions
   getDisplayName: () => string;
@@ -115,10 +119,22 @@ const UserContext = createContext<UserContextType | undefined>(undefined);
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
   const [businesses, setBusinesses] = useState<BusinessData>({ owned: [], joined: [] });
+  const [selectedBusiness, setSelectedBusinessState] = useState<Business | null>(null);
   const [accounts, setAccounts] = useState<AccountData[]>([]);
   const [currentAccount, setCurrentAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Auto-select first business when businesses change
+  useEffect(() => {
+    if (businesses.owned.length > 0 && !selectedBusiness) {
+      console.log('🔄 UserContext: Auto-selecting first business:', businesses.owned[0].name);
+      setSelectedBusinessState(businesses.owned[0]);
+    } else if (businesses.owned.length === 0 && selectedBusiness) {
+      console.log('🔄 UserContext: No businesses available, clearing selection');
+      setSelectedBusinessState(null);
+    }
+  }, [businesses.owned, selectedBusiness]);
 
   // Sync with AccountManager
   const syncWithAccountManager = () => {
@@ -148,6 +164,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         'business_data',
         'cached_business_data',
         'business_cache_expiry',
+        'selected_business', // Add selected business to cache clearing
       ];
       
       await Promise.all(
@@ -176,10 +193,49 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         syncWithAccountManager();
       }
       
+      // Try to restore selected business from cache
+      await restoreSelectedBusiness();
+      
     } catch (error) {
       console.error('❌ UserContext: Failed to initialize AccountManager:', error);
       setError('Failed to initialize account system');
     }
+  };
+
+  // Restore selected business from cache
+  const restoreSelectedBusiness = async () => {
+    try {
+      const cached = await AsyncStorage.getItem('selected_business');
+      if (cached) {
+        const business = JSON.parse(cached);
+        console.log('🔄 UserContext: Restored selected business from cache:', business.name);
+        setSelectedBusinessState(business);
+      }
+    } catch (error) {
+      console.error('❌ UserContext: Failed to restore selected business:', error);
+    }
+  };
+
+  // Save selected business to cache
+  const saveSelectedBusiness = async (business: Business | null) => {
+    try {
+      if (business) {
+        await AsyncStorage.setItem('selected_business', JSON.stringify(business));
+        console.log('💾 UserContext: Saved selected business to cache:', business.name);
+      } else {
+        await AsyncStorage.removeItem('selected_business');
+        console.log('🗑️ UserContext: Removed selected business from cache');
+      }
+    } catch (error) {
+      console.error('❌ UserContext: Failed to save selected business:', error);
+    }
+  };
+
+  // Enhanced setSelectedBusiness with caching
+  const setSelectedBusiness = (business: Business | null) => {
+    console.log('🔄 UserContext: Setting selected business:', business?.name || 'None');
+    setSelectedBusinessState(business);
+    saveSelectedBusiness(business);
   };
 
   // Refresh user data from API with optional cache clearing
@@ -257,6 +313,18 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         owned: businessData.owned.length,
         joined: businessData.joined.length
       });
+
+      // Validate current selected business still exists
+      if (selectedBusiness) {
+        const stillExists = [...businessData.owned, ...businessData.joined].some(
+          b => b.id === selectedBusiness.id
+        );
+        if (!stillExists) {
+          console.log('⚠️ UserContext: Selected business no longer exists, clearing selection');
+          setSelectedBusiness(null);
+        }
+      }
+      
     } catch (err) {
       console.error('❌ UserContext: Failed to fetch businesses:', err);
       setBusinesses({ owned: [], joined: [] });
@@ -294,6 +362,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       // Clear cache and reset data for account switch
       await clearUserCache();
       setBusinesses({ owned: [], joined: [] });
+      setSelectedBusiness(null); // Clear selected business on account switch
       
       // Try to refresh data from API
       try {
@@ -322,6 +391,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       if (!accountManager.hasAccounts()) {
         await clearUserCache();
         setBusinesses({ owned: [], joined: [] });
+        setSelectedBusiness(null);
         setError(null);
       }
       
@@ -343,6 +413,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       // Reset all state
       setUser(null);
       setBusinesses({ owned: [], joined: [] });
+      setSelectedBusiness(null);
       setAccounts([]);
       setCurrentAccount(null);
       setError(null);
@@ -382,7 +453,11 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return '+254700000000';
   };
 
+  // Updated to use selectedBusiness
   const getBusinessDisplayName = (): string => {
+    if (selectedBusiness && selectedBusiness.name) {
+      return selectedBusiness.name;
+    }
     if (businesses.owned.length > 0 && businesses.owned[0].name) {
       return businesses.owned[0].name;
     }
@@ -443,6 +518,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         // Current user data
         user, 
         businesses,
+        selectedBusiness,
         loading, 
         error, 
         
@@ -458,6 +534,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         switchAccount,
         removeAccount,
         logout,
+        
+        // Business selection
+        setSelectedBusiness,
         
         // Helper functions
         getDisplayName,
