@@ -1,5 +1,5 @@
-// components/BusinessModal.tsx - Enhanced create business modal
-import React, { useState } from 'react';
+// components/BusinessModal.tsx - Optimized with category selection
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -23,10 +23,34 @@ interface BusinessModalProps {
   onCreate: () => void;
 }
 
+const BUSINESS_CATEGORIES = [
+  'Technology', 'Retail', 'Food & Beverage', 'Healthcare', 'Education',
+  'Finance', 'Real Estate', 'Manufacturing', 'Transportation', 'Entertainment',
+  'Consulting', 'Construction', 'Agriculture', 'Tourism', 'Fashion',
+  'Beauty & Wellness', 'Legal Services', 'Marketing', 'Sports & Fitness', 'Non-Profit'
+];
+
 export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
   const [businessName, setBusinessName] = useState('');
-  const [description, setDescription] = useState('');
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+
+  const handleCategoryToggle = (category: string) => {
+    setSelectedCategories(prev => {
+      if (prev.includes(category)) {
+        return prev.filter(c => c !== category);
+      } else if (prev.length < 5) {
+        return [...prev, category];
+      } else {
+        Toast.show({
+          type: 'warning',
+          text1: 'Maximum Categories',
+          text2: 'You can select up to 5 categories only',
+        });
+        return prev;
+      }
+    });
+  };
 
   const handleCreate = async () => {
     if (!businessName.trim()) {
@@ -34,11 +58,16 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       return;
     }
 
+    if (selectedCategories.length === 0) {
+      Alert.alert('Error', 'Please select at least one category');
+      return;
+    }
+
     setLoading(true);
     try {
       await createBusiness({
         name: businessName.trim(),
-        description: description.trim(),
+        categories: selectedCategories,
       });
 
       Toast.show({
@@ -48,7 +77,7 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       });
 
       setBusinessName('');
-      setDescription('');
+      setSelectedCategories([]);
       onCreate();
     } catch (error: any) {
       console.error('Create business error:', error);
@@ -64,13 +93,41 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
   const handleClose = () => {
     if (!loading) {
       setBusinessName('');
-      setDescription('');
+      setSelectedCategories([]);
       onClose();
     }
   };
 
+  const memoizedCategories = useMemo(() => 
+    BUSINESS_CATEGORIES.map(category => (
+      <TouchableOpacity
+        key={category}
+        style={[
+          styles.categoryItem,
+          selectedCategories.includes(category) && styles.selectedCategory
+        ]}
+        onPress={() => handleCategoryToggle(category)}
+        disabled={loading}
+      >
+        <Text style={[
+          styles.categoryText,
+          selectedCategories.includes(category) && styles.selectedCategoryText
+        ]}>
+          {category}
+        </Text>
+        {selectedCategories.includes(category) && (
+          <Feather name="check" size={14} color="#fff" />
+        )}
+      </TouchableOpacity>
+    )), [selectedCategories, loading]);
+
   return (
-    <Modal visible={visible} transparent animationType="fade">
+    <Modal 
+      visible={visible} 
+      transparent 
+      animationType="fade"
+      statusBarTranslucent
+    >
       <KeyboardAvoidingView 
         style={styles.modalOverlay}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -85,15 +142,15 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
             activeOpacity={1}
             onPress={() => {}}
           >
-            <ScrollView showsVerticalScrollIndicator={false}>
+            <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
               {/* Header */}
               <View style={styles.modalHeader}>
                 <View style={styles.headerIcon}>
-                  <Feather name="briefcase" size={28} color="#7c3aed" />
+                  <Feather name="briefcase" size={24} color="#7c3aed" />
                 </View>
                 <Text style={styles.modalTitle}>Create New Business</Text>
                 <Text style={styles.modalSubtitle}>
-                  Start your business and invite team members to collaborate
+                  Start your business and invite team members
                 </Text>
               </View>
 
@@ -116,20 +173,14 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                 </View>
 
                 <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Description (Optional)</Text>
-                  <TextInput
-                    style={[styles.input, styles.textArea]}
-                    value={description}
-                    onChangeText={setDescription}
-                    placeholder="Brief description of your business"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                    multiline
-                    numberOfLines={3}
-                    maxLength={200}
-                    editable={!loading}
-                  />
-                  <Text style={styles.characterCount}>
-                    {description.length}/200
+                  <Text style={styles.inputLabel}>
+                    Categories * ({selectedCategories.length}/5)
+                  </Text>
+                  <View style={styles.categoriesContainer}>
+                    {memoizedCategories}
+                  </View>
+                  <Text style={styles.helpText}>
+                    Select up to 5 categories that best describe your business
                   </Text>
                 </View>
               </View>
@@ -147,10 +198,10 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                 <TouchableOpacity
                   style={[
                     styles.primaryButton,
-                    (!businessName.trim() || loading) && styles.disabledButton
+                    (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
                   ]}
                   onPress={handleCreate}
-                  disabled={!businessName.trim() || loading}
+                  disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
                 >
                   {loading ? (
                     <View style={styles.loadingContainer}>
@@ -176,17 +227,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20,
+    padding: 16,
   },
   modalContent: {
     backgroundColor: '#16213e',
-    borderRadius: 24,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
     width: '100%',
-    maxWidth: 450,
-    maxHeight: '85%',
-    padding: 28,
+    maxWidth: 400,
+    maxHeight: '80%',
+    padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
@@ -195,76 +246,111 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     alignItems: 'center',
-    marginBottom: 32,
+    marginBottom: 20,
   },
   headerIcon: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
-    borderWidth: 2,
+    marginBottom: 12,
+    borderWidth: 1.5,
     borderColor: 'rgba(124, 58, 237, 0.4)',
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   modalSubtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
+    fontSize: 14,
     textAlign: 'center',
-    lineHeight: 24,
-    paddingHorizontal: 8,
+    lineHeight: 20,
   },
   formContainer: {
-    marginBottom: 32,
+    marginBottom: 20,
   },
   inputGroup: {
-    marginBottom: 24,
+    marginBottom: 18,
   },
   inputLabel: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 6,
   },
   input: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    borderRadius: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '400',
-  },
-  textArea: {
-    height: 80,
-    textAlignVertical: 'top',
-    paddingTop: 14,
   },
   characterCount: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'right',
+    marginTop: 3,
+  },
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 10,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.2)',
+    maxHeight: 120,
+  },
+  categoryItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    gap: 6,
+  },
+  selectedCategory: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  categoryText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  selectedCategoryText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  helpText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
     marginTop: 4,
+    lineHeight: 16,
   },
   actionContainer: {
     flexDirection: 'row',
-    gap: 16,
+    gap: 12,
   },
   primaryButton: {
     flex: 1,
     backgroundColor: '#7c3aed',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
     alignItems: 'center',
     shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
@@ -274,21 +360,21 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
   },
   secondaryButton: {
     flex: 1,
     backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: 12,
+    paddingVertical: 14,
+    borderRadius: 10,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   secondaryButtonText: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '500',
   },
   disabledButton: {
