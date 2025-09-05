@@ -165,7 +165,7 @@ export default function JoinBusinessModal({ visible, onClose, onJoin }: JoinBusi
                       <Text style={styles.stepText}>3</Text>
                     </View>
                     <Text style={styles.instructionText}>
-                      Start collaborating with your team
+                      Start sending packages with your team
                     </Text>
                   </View>
                 </View>
@@ -220,9 +220,9 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '75%',
+    width: '90%',
+    maxWidth: 450,
+    maxHeight: '70%',
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
@@ -259,7 +259,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   formContainer: {
-    marginBottom: 20,
+    marginBottom: 16,
   },
   inputGroup: {
     marginBottom: 18,
@@ -341,6 +341,8 @@ const styles = StyleSheet.create({
   actionContainer: {
     flexDirection: 'row',
     gap: 12,
+    marginTop: 8,
+    paddingBottom: 4,
   },
   primaryButton: {
     flex: 1,
