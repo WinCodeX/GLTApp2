@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx
+// app/(drawer)/Business.tsx - Fixed undefined errors
 import React, { useState } from 'react';
 import {
   View,
@@ -24,10 +24,11 @@ interface BusinessProps {
 }
 
 export default function Business({ navigation }: BusinessProps) {
+  // ✅ Fixed: Use 'accounts' instead of 'savedAccounts' to match useUser hook
   const { 
     user, 
-    savedAccounts,
-    currentAccountIndex,
+    accounts = [], // ✅ Default to empty array if undefined
+    currentAccount,
     getBusinessDisplayName, 
     getUserPhone,
     getDisplayName,
@@ -38,9 +39,10 @@ export default function Business({ navigation }: BusinessProps) {
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
 
-  const displayName = getBusinessDisplayName();
-  const userPhone = getUserPhone();
-  const username = getDisplayName();
+  // ✅ Safe access with fallback values
+  const displayName = getBusinessDisplayName?.() || 'Unknown User';
+  const userPhone = getUserPhone?.() || 'No phone';
+  const username = getDisplayName?.() || 'User';
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
@@ -72,26 +74,29 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
-  const handleAccountSwitch = async (accountIndex: number) => {
-    if (accountIndex === currentAccountIndex) {
+  const handleAccountSwitch = async (accountId: string) => {
+    if (!currentAccount || accountId === currentAccount.id) {
       return;
     }
 
     try {
-      await switchAccount(accountIndex);
-      Toast.show({
-        type: 'success',
-        text1: 'Account switched!',
-        text2: `Now using ${savedAccounts[accountIndex]?.display_name}`,
-      });
+      await switchAccount?.(accountId);
+      const switchedAccount = accounts.find(acc => acc.id === accountId);
+      if (switchedAccount) {
+        Toast.show({
+          type: 'success',
+          text1: 'Account switched!',
+          text2: `Now using ${switchedAccount.display_name}`,
+        });
+      }
     } catch (error: any) {
       console.error('Switch account error:', error);
       Alert.alert('Error', error.message || 'Failed to switch accounts');
     }
   };
 
-  const handleAccountRemove = async (accountIndex: number, accountEmail: string) => {
-    if (accountIndex === currentAccountIndex) {
+  const handleAccountRemove = async (accountId: string, accountEmail: string) => {
+    if (currentAccount && accountId === currentAccount.id) {
       Alert.alert('Error', 'Cannot remove the currently active account');
       return;
     }
@@ -106,7 +111,7 @@ export default function Business({ navigation }: BusinessProps) {
           style: 'destructive',
           onPress: async () => {
             try {
-              await removeAccount(accountIndex);
+              await removeAccount?.(accountId);
               Toast.show({
                 type: 'success',
                 text1: 'Account removed',
@@ -162,7 +167,8 @@ export default function Business({ navigation }: BusinessProps) {
 
           <View style={styles.statsContainer}>
             <View style={styles.stat}>
-              <Text style={styles.statNumber}>{savedAccounts.length}</Text>
+              {/* ✅ Fixed: Safe access to accounts.length */}
+              <Text style={styles.statNumber}>{accounts.length}</Text>
               <Text style={styles.statLabel}>accounts</Text>
             </View>
             <View style={styles.stat}>
@@ -202,12 +208,13 @@ export default function Business({ navigation }: BusinessProps) {
         {/* Account Management Section - Simple Display */}
         <View style={styles.accountsSection}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>SWITCH ACCOUNT ({savedAccounts.length}/3)</Text>
+            {/* ✅ Fixed: Safe access to accounts.length */}
+            <Text style={styles.sectionTitle}>SWITCH ACCOUNT ({accounts.length}/3)</Text>
           </View>
 
-          {/* Simple Account Cards */}
-          {savedAccounts.map((account, index) => {
-            const isCurrentAccount = index === currentAccountIndex;
+          {/* ✅ Fixed: Safe rendering of accounts */}
+          {accounts.length > 0 && accounts.map((account) => {
+            const isCurrentAccount = currentAccount?.id === account.id;
             const accountAvatar = account.avatar_url
               ? { uri: account.avatar_url }
               : require('../../assets/images/avatar_placeholder.png');
@@ -219,7 +226,7 @@ export default function Business({ navigation }: BusinessProps) {
                     styles.simpleAccountContent,
                     isCurrentAccount && styles.currentAccountCard
                   ]}
-                  onPress={() => handleAccountSwitch(index)}
+                  onPress={() => handleAccountSwitch(account.id)}
                   activeOpacity={0.8}
                 >
                   <Image source={accountAvatar} style={styles.simpleAccountAvatar} />
@@ -228,13 +235,13 @@ export default function Business({ navigation }: BusinessProps) {
                       styles.simpleAccountName,
                       isCurrentAccount && styles.currentAccountName
                     ]}>
-                      {account.display_name}
+                      {account.display_name || 'Unknown Account'}
                     </Text>
                     <Text style={[
                       styles.simpleAccountEmail,
                       isCurrentAccount && styles.currentAccountEmail
                     ]}>
-                      {account.email}
+                      {account.email || 'No email'}
                     </Text>
                     {isCurrentAccount && (
                       <Text style={styles.currentLabel}>Current</Text>
@@ -248,10 +255,10 @@ export default function Business({ navigation }: BusinessProps) {
                 </TouchableOpacity>
                 
                 {/* Remove button for non-current accounts */}
-                {!isCurrentAccount && savedAccounts.length > 1 && (
+                {!isCurrentAccount && accounts.length > 1 && (
                   <TouchableOpacity
                     style={styles.removeButton}
-                    onPress={() => handleAccountRemove(index, account.email)}
+                    onPress={() => handleAccountRemove(account.id, account.email || 'Unknown')}
                   >
                     <Feather name="x" size={16} color="#ff5555" />
                   </TouchableOpacity>
@@ -262,7 +269,8 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
 
         {/* Add Account Section */}
-        {savedAccounts.length < 3 && (
+        {/* ✅ Fixed: Safe access to accounts.length */}
+        {accounts.length < 3 && (
           <View style={styles.addAccountSection}>
             <Text style={styles.addAccountTitle}>Add account</Text>
             
@@ -304,7 +312,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 16,
-    paddingTop: 50, // Proper spacing from status bar
+    paddingTop: 50,
     paddingBottom: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
@@ -465,7 +473,6 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
-  // Simple account card display like in the image
   simpleAccountCard: {
     flexDirection: 'row',
     alignItems: 'center',
