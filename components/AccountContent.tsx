@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Updated to use AccountManager through UserContext
+// components/AccountContent.tsx - Simplified without cached data indicators
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -20,7 +20,7 @@ import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
 import * as SplashScreen from 'expo-splash-screen';
 import Toast from 'react-native-toast-message';
 
-// ✅ Lazy load heavy components to prevent blocking
+// Lazy load heavy components to prevent blocking
 const AvatarPreviewModal = React.lazy(() => import('./AvatarPreviewModal'));
 const BusinessModal = React.lazy(() => import('./BusinessModal'));
 const ChangelogModal = React.lazy(() => import('./ChangelogModal'));
@@ -30,9 +30,8 @@ const LoaderOverlay = React.lazy(() => import('./LoaderOverlay'));
 import { useUser } from '../context/UserContext';
 import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
-import { registerStatusUpdater, checkServerStatus } from '../lib/netStatus';
 
-// ✅ Import from the updated api.ts file
+// Import from the updated api.ts file
 import { 
   getFullAvatarUrl, 
   getApiBaseUrl, 
@@ -40,7 +39,7 @@ import {
   getCurrentApiBaseUrl 
 } from '../lib/api';
 
-// ✅ Safe Avatar Component with error handling and updated API functions
+// Safe Avatar Component with error handling and updated API functions
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
@@ -57,7 +56,14 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   onPress 
 }) => {
   const [hasError, setHasError] = useState(false);
+  const [imageKey, setImageKey] = useState(Date.now()); // Force reload on avatar change
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
+  
+  // Reset error state when avatarUrl changes
+  useEffect(() => {
+    setHasError(false);
+    setImageKey(Date.now()); // Force reload
+  }, [avatarUrl]);
   
   // Debug avatar URL
   useEffect(() => {
@@ -66,11 +72,12 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         raw: avatarUrl,
         full: fullAvatarUrl,
         hasError,
+        imageKey,
         apiBaseUrl: getCurrentApiBaseUrl(),
         baseDomain: getBaseDomain()
       });
     }
-  }, [avatarUrl, fullAvatarUrl, hasError]);
+  }, [avatarUrl, fullAvatarUrl, hasError, imageKey]);
   
   // Use fallback if no URL or error occurred
   if (!fullAvatarUrl || hasError) {
@@ -90,10 +97,11 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       <Avatar.Image
         size={size}
         source={{ 
-          uri: fullAvatarUrl,
-          // Add cache headers for better performance
+          uri: `${fullAvatarUrl}?v=${imageKey}`, // Add version parameter to force reload
           headers: {
-            'Cache-Control': 'max-age=3600'
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
           }
         }}
         style={style}
@@ -109,20 +117,9 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   );
 };
 
-// ✅ Constants
+// Constants
 const CHANGELOG_KEY = 'changelog_seen';
 const CHANGELOG_VERSION = '1.0.0';
-const BUSINESS_CACHE_KEY = 'cached_business_data';
-const CACHE_EXPIRY_KEY = 'business_cache_expiry';
-const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
-
-type NetworkStatus = 'online' | 'offline' | 'server_error';
-
-interface BusinessData {
-  owned: any[];
-  joined: any[];
-  timestamp: number;
-}
 
 interface AccountContentProps {
   source: 'admin' | 'drawer';
@@ -130,7 +127,7 @@ interface AccountContentProps {
   title?: string;
 }
 
-// ✅ Centralized toast helper with consistent styling
+// Centralized toast helper with consistent styling
 const showToast = {
   success: (text1: string, text2?: string) => {
     Toast.show({
@@ -174,15 +171,12 @@ const showToast = {
 };
 
 export default function AccountContent({ source, onBack, title = 'Account' }: AccountContentProps) {
-  // ✅ Initialize component state
+  // Initialize component state
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
-  const [networkStatus, setNetworkStatus] = useState<NetworkStatus>('online');
-  const [usingCachedData, setUsingCachedData] = useState(false);
-  const [lastServerCheck, setLastServerCheck] = useState<number>(0);
   
-  // ✅ UPDATED: Use all UserContext methods including logout
+  // Use all UserContext methods including logout
   const { 
     user, 
     businesses,
@@ -190,7 +184,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     refreshBusinesses,
     loading: userLoading, 
     error: userError,
-    logout, // ✅ Use AccountManager-backed logout
+    logout,
     getDisplayName,
     getUserPhone,
     getBusinessDisplayName
@@ -208,7 +202,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
 
-  // ✅ Debug avatar URL whenever user changes
+  // Debug avatar URL whenever user changes
   useEffect(() => {
     if (user?.avatar_url) {
       const fullUrl = getFullAvatarUrl(user.avatar_url);
@@ -222,119 +216,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [user?.avatar_url]);
 
-  // ✅ Network connectivity helpers with defensive programming
-  const isConnected = useCallback(() => {
-    try {
-      return networkStatus === 'online';
-    } catch (error) {
-      console.error('❌ Error checking connection status:', error);
-      return false; // Fail safely
-    }
-  }, [networkStatus]);
-
-  const canMakeRequests = useCallback(() => {
-    try {
-      return networkStatus !== 'offline';
-    } catch (error) {
-      console.error('❌ Error checking request capability:', error);
-      return false; // Fail safely
-    }
-  }, [networkStatus]);
-
-  const shouldUseCachedData = useCallback(() => {
-    try {
-      return networkStatus !== 'online';
-    } catch (error) {
-      console.error('❌ Error checking cache preference:', error);
-      return true; // Fail safely to cached data
-    }
-  }, [networkStatus]);
-
-  // ✅ Advanced network status monitoring with crash protection
-  useEffect(() => {
-    let isMonitoring = true;
-
-    const handleStatusUpdate = (status: NetworkStatus) => {
-      try {
-        if (!isMonitoring) return;
-
-        console.log(`🌐 Network status changed: ${networkStatus} → ${status}`);
-        const previousStatus = networkStatus;
-        setNetworkStatus(status);
-        setLastServerCheck(Date.now());
-
-        // Provide intelligent user feedback based on status transitions
-        if (previousStatus !== status) {
-          switch (status) {
-            case 'offline':
-              if (previousStatus === 'online') {
-                showToast.warning('Connection Lost', 'Working offline with cached data');
-              }
-              break;
-            
-            case 'server_error':
-              if (previousStatus === 'online') {
-                showToast.error('Server Unavailable', 'Using cached data while server reconnects');
-              }
-              break;
-            
-            case 'online':
-              if (previousStatus !== 'online') {
-                showToast.success('Connection Restored', 'Syncing latest data...');
-                // Automatically refresh data when connection is restored
-                if (user && isScreenReady) {
-                  setTimeout(() => {
-                    try {
-                      refreshBusinesses();
-                    } catch (refreshError) {
-                      console.error('❌ Error refreshing data on reconnect:', refreshError);
-                    }
-                  }, 500);
-                }
-              }
-              break;
-          }
-        }
-      } catch (error) {
-        console.error('❌ Error in network status handler:', error);
-        // Don't let network status errors crash the app
-      }
-    };
-
-    try {
-      // Register status updater with error handling
-      registerStatusUpdater(handleStatusUpdate);
-
-      // Perform initial status check with timeout
-      const initialCheck = async () => {
-        try {
-          const status = await Promise.race([
-            checkServerStatus(),
-            new Promise<NetworkStatus>((_, reject) => 
-              setTimeout(() => reject(new Error('Initial status check timeout')), 10000)
-            )
-          ]);
-          handleStatusUpdate(status);
-        } catch (error) {
-          console.error('❌ Initial network status check failed:', error);
-          // Default to offline to be safe
-          handleStatusUpdate('offline');
-        }
-      };
-
-      initialCheck();
-    } catch (error) {
-      console.error('❌ Error setting up network monitoring:', error);
-      // Default to offline mode if monitoring setup fails
-      setNetworkStatus('offline');
-    }
-
-    return () => {
-      isMonitoring = false;
-    };
-  }, []); // Only run once on mount
-
-  // ✅ Component initialization with crash protection
+  // Component initialization with crash protection
   useEffect(() => {
     let isMounted = true;
     
@@ -375,7 +257,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // ✅ Check for user data and redirect if missing
+  // Check for user data and redirect if missing
   useEffect(() => {
     let isMounted = true;
     
@@ -403,8 +285,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             email: user.email,
             hasDisplayName: !!user.display_name,
             hasFirstName: !!user.first_name,
-            avatarUrl: user.avatar_url,
-            networkStatus
+            avatarUrl: user.avatar_url
           });
         }
 
@@ -425,7 +306,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [isScreenReady, user, userLoading, router, source, isRedirecting]);
 
-  // ✅ Enhanced refresh handler with intelligent network awareness
+  // Enhanced refresh handler - always fetches fresh data
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
@@ -433,41 +314,26 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         return;
       }
 
-      if (!canMakeRequests()) {
-        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-        const message = networkStatus === 'offline' 
-          ? 'Cannot refresh while offline' 
-          : 'Server is temporarily unavailable';
-        showToast.info(title, message);
-        return;
-      }
-
       setRefreshing(true);
+      console.log('🔄 Manual refresh triggered - fetching fresh data');
       
-      // Refresh user data and businesses
+      // Always refresh user data and businesses from server
       await refreshUser();
       await new Promise(resolve => setTimeout(resolve, 100));
       await refreshBusinesses();
+      
+      showToast.success('Data refreshed');
     } catch (error) {
       console.error('❌ Refresh error:', error);
-      const errorMessage = networkStatus === 'server_error' 
-        ? 'Server temporarily unavailable' 
-        : 'Check your connection';
-      showToast.error('Failed to refresh data', errorMessage);
+      showToast.error('Failed to refresh data', 'Please check your connection');
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, refreshBusinesses, user, networkStatus, canMakeRequests]);
+  }, [refreshUser, refreshBusinesses, user]);
 
-  // ✅ Avatar picker with network awareness and crash protection
+  // Avatar picker
   const pickAndPreviewAvatar = useCallback(async () => {
     try {
-      if (!isConnected()) {
-        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-        showToast.info(title, 'Avatar upload requires server connection');
-        return;
-      }
-
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
         showToast.error('Photo access denied');
@@ -486,20 +352,15 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       console.error('❌ Error picking avatar:', error);
       showToast.error('Failed to select image');
     }
-  }, [networkStatus, isConnected]);
+  }, []);
 
-  // ✅ Enhanced avatar upload with proper URL handling
+  // Enhanced avatar upload with proper refresh
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
-      if (!isConnected()) {
-        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-        showToast.error(title, 'Cannot upload while server is unavailable');
-        return;
-      }
-
       setLoading(true);
+      console.log('📸 Starting avatar upload...');
       
       const result = await uploadAvatar(previewUri);
       
@@ -511,22 +372,20 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
       showToast.success('Avatar updated!');
       
-      // Refresh user data to get the new avatar URL
+      // Force refresh user data to get the new avatar URL and clear any cache
+      console.log('🔄 Refreshing user data after avatar upload...');
       await refreshUser();
       
     } catch (error) {
       console.error('❌ Error uploading avatar:', error);
-      const errorMessage = networkStatus === 'server_error' 
-        ? 'Server temporarily unavailable' 
-        : 'Check your connection and try again';
-      showToast.error('Upload failed', errorMessage);
+      showToast.error('Upload failed', 'Please try again');
     } finally {
       setPreviewUri(null);
       setLoading(false);
     }
-  }, [previewUri, refreshUser, networkStatus, isConnected]);
+  }, [previewUri, refreshUser]);
 
-  // ✅ UPDATED: Use AccountManager-backed logout from UserContext
+  // Use AccountManager-backed logout from UserContext
   const confirmLogout = useCallback(async () => {
     try {
       console.log('🚪 Logging out through UserContext...');
@@ -546,55 +405,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [logout, router]);
 
-  // ✅ Get network status display info with crash protection
-  const getNetworkStatusInfo = useCallback(() => {
-    try {
-      switch (networkStatus) {
-        case 'offline':
-          return {
-            icon: 'wifi-off',
-            color: '#ff6b6b',
-            text: 'Offline Mode - Showing cached data',
-            bgColor: 'rgba(255, 107, 107, 0.1)',
-            borderColor: 'rgba(255, 107, 107, 0.5)'
-          };
-        case 'server_error':
-          return {
-            icon: 'server-network-off',
-            color: '#ffa726',
-            text: 'Server Unavailable - Using cached data',
-            bgColor: 'rgba(255, 167, 38, 0.1)',
-            borderColor: 'rgba(255, 167, 38, 0.5)'
-          };
-        default:
-          return usingCachedData ? {
-            icon: 'cached',
-            color: '#4caf50',
-            text: 'Showing cached data',
-            bgColor: 'rgba(76, 175, 80, 0.1)',
-            borderColor: 'rgba(76, 175, 80, 0.5)'
-          } : null;
-      }
-    } catch (error) {
-      console.error('❌ Error getting network status info:', error);
-      return null;
-    }
-  }, [networkStatus, usingCachedData]);
-
-  // ✅ Manual server status check with crash protection
-  const handleRetryServerCheck = useCallback(async () => {
-    try {
-      const newStatus = await checkServerStatus();
-      if (newStatus === 'online') {
-        refreshBusinesses();
-      }
-    } catch (error) {
-      console.error('❌ Error checking server status:', error);
-      showToast.error('Status check failed', 'Please try again later');
-    }
-  }, [refreshBusinesses]);
-
-  // ✅ Loading screen while initializing or redirecting
+  // Loading screen while initializing or redirecting
   if (!isScreenReady || isRedirecting) {
     return (
       <View style={styles.loadingContainer}>
@@ -614,7 +425,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // ✅ Error screen
+  // Error screen
   if (screenError || userError) {
     return (
       <View style={styles.container}>
@@ -657,7 +468,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // ✅ Show loading if user data is still loading
+  // Show loading if user data is still loading
   if (userLoading || !user) {
     return (
       <View style={styles.loadingContainer}>
@@ -675,9 +486,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  const statusInfo = getNetworkStatusInfo();
-
-  // ✅ Main content
+  // Main content
   return (
     <View style={styles.container}>
       <Suspense fallback={<View />}>
@@ -738,23 +547,13 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
                   mode="contained" 
                   onPress={async () => {
                     try {
-                      if (!isConnected()) {
-                        const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-                        showToast.error(title, 'Cannot generate invite while server is unavailable');
-                        return;
-                      }
-
                       const res = await createInvite(selectedBusiness.id);
                       setInviteLink(res?.code || 'No code');
                     } catch (error) {
                       console.error('❌ Error creating invite:', error);
-                      const errorMessage = networkStatus === 'server_error' 
-                        ? 'Server temporarily unavailable' 
-                        : 'Please try again';
-                      showToast.error('Failed to create invite', errorMessage);
+                      showToast.error('Failed to create invite', 'Please try again');
                     }
                   }}
-                  disabled={!isConnected()}
                 >
                   Generate Link
                 </Button>
@@ -816,28 +615,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           />
         }
       >
-        {/* Enhanced Network Status Indicator */}
-        {statusInfo && (
-          <View style={[styles.statusCard, { backgroundColor: statusInfo.bgColor, borderColor: statusInfo.borderColor }]}>
-            <MaterialCommunityIcons 
-              name={statusInfo.icon} 
-              size={20} 
-              color={statusInfo.color} 
-            />
-            <Text style={[styles.statusText, { color: statusInfo.color }]}>
-              {statusInfo.text}
-            </Text>
-            {networkStatus === 'server_error' && (
-              <TouchableOpacity 
-                style={styles.retryButton}
-                onPress={handleRetryServerCheck}
-              >
-                <MaterialCommunityIcons name="refresh" size={16} color={statusInfo.color} />
-              </TouchableOpacity>
-            )}
-          </View>
-        )}
-
         {/* User Profile Card */}
         <View style={styles.identityCard}>
           <View style={styles.identityRow}>
@@ -898,41 +675,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
             <Button 
               mode="outlined" 
-              onPress={() => {
-                try {
-                  if (!isConnected()) {
-                    const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-                    showToast.info(title, 'Cannot create business while server is unavailable');
-                    return;
-                  }
-                  setShowBusinessModal(true);
-                } catch (error) {
-                  console.error('❌ Error opening business modal:', error);
-                }
-              }}
+              onPress={() => setShowBusinessModal(true)}
               buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor={isConnected() ? "#764ba2" : "#999"}
-              disabled={!isConnected()}
+              textColor="#764ba2"
             >
               Create
             </Button>
             <Button 
               mode="outlined" 
-              onPress={() => {
-                try {
-                  if (!isConnected()) {
-                    const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-                    showToast.info(title, 'Cannot join business while server is unavailable');
-                    return;
-                  }
-                  setShowJoinModal(true);
-                } catch (error) {
-                  console.error('❌ Error opening join modal:', error);
-                }
-              }}
+              onPress={() => setShowJoinModal(true)}
               buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor={isConnected() ? "#764ba2" : "#999"}
-              disabled={!isConnected()}
+              textColor="#764ba2"
             >
               Join
             </Button>
@@ -948,21 +701,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             businesses.owned.map((biz) => (
               <TouchableOpacity 
                 key={biz.id} 
-                onPress={() => {
-                  try {
-                    if (!isConnected()) {
-                      const title = networkStatus === 'offline' ? 'Offline Mode' : 'Server Unavailable';
-                      showToast.info(title, 'Cannot generate invite while server is unavailable');
-                      return;
-                    }
-                    setSelectedBusiness(biz);
-                  } catch (error) {
-                    console.error('❌ Error selecting business:', error);
-                  }
-                }}
-                disabled={!isConnected()}
+                onPress={() => setSelectedBusiness(biz)}
               >
-                <Text style={[styles.businessItem, !isConnected() && { opacity: 0.6 }]}>
+                <Text style={styles.businessItem}>
                   • {biz.name}
                 </Text>
               </TouchableOpacity>
@@ -1076,27 +817,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 20,
-  },
-  statusCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 16,
-    marginTop: 16,
-    marginBottom: 8,
-    borderRadius: 12,
-    padding: 12,
-    borderWidth: 1,
-  },
-  statusText: {
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
-    flex: 1,
-  },
-  retryButton: {
-    padding: 4,
-    marginLeft: 8,
   },
   infoCard: {
     backgroundColor: '#1a1a2e',
