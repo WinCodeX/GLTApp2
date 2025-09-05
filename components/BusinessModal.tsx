@@ -1,120 +1,302 @@
+// components/BusinessModal.tsx - Enhanced create business modal
 import React, { useState } from 'react';
 import {
-  Modal,
   View,
   Text,
-  TextInput,
   StyleSheet,
   TouchableOpacity,
+  Modal,
+  TextInput,
+  Alert,
   KeyboardAvoidingView,
   Platform,
+  ScrollView,
+  ActivityIndicator,
 } from 'react-native';
-import { Button } from 'react-native-paper';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import colors from '../theme/colors';
-import { createBusiness } from '../lib/helpers/business'; // ✅ Import helper
+import { createBusiness } from '../lib/helpers/business';
 
-type Props = {
+interface BusinessModalProps {
   visible: boolean;
   onClose: () => void;
-  onCreate: (name: string) => void;
-};
+  onCreate: () => void;
+}
 
-export default function BusinessModal({ visible, onClose, onCreate }: Props) {
-  const [name, setName] = useState('');
-  const [submitting, setSubmitting] = useState(false);
+export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
+  const [businessName, setBusinessName] = useState('');
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(false);
 
   const handleCreate = async () => {
-    const trimmed = name.trim();
-    if (!trimmed || submitting) return;
+    if (!businessName.trim()) {
+      Alert.alert('Error', 'Please enter a business name');
+      return;
+    }
 
-    setSubmitting(true);
+    setLoading(true);
     try {
-      await createBusiness(trimmed);        // 🔥 Call API
-      Toast.show({ type: 'successToast', text1: 'Business created!' });
-      onCreate(trimmed);                    // ✅ Refresh parent state
-      setName('');
-      onClose();                            // ✅ Close modal
-    } catch {
-      // Toast is shown in helper already
+      await createBusiness({
+        name: businessName.trim(),
+        description: description.trim(),
+      });
+
+      Toast.show({
+        type: 'success',
+        text1: 'Business Created',
+        text2: `${businessName} has been created successfully`,
+      });
+
+      setBusinessName('');
+      setDescription('');
+      onCreate();
+    } catch (error: any) {
+      console.error('Create business error:', error);
+      Alert.alert(
+        'Creation Failed',
+        error.message || 'Failed to create business. Please try again.'
+      );
     } finally {
-      setSubmitting(false);
+      setLoading(false);
+    }
+  };
+
+  const handleClose = () => {
+    if (!loading) {
+      setBusinessName('');
+      setDescription('');
+      onClose();
     }
   };
 
   return (
-    <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.overlay}
+    <Modal visible={visible} transparent animationType="fade">
+      <KeyboardAvoidingView 
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <View style={styles.sheet}>
-          <TouchableOpacity onPress={onClose} style={styles.dragHandleContainer}>
-            <MaterialCommunityIcons name="chevron-down" size={30} color="#bbb" />
-          </TouchableOpacity>
-
-          <Text style={styles.title}>Create New Business</Text>
-
-          <TextInput
-            placeholder="Business Name"
-            placeholderTextColor="#888"
-            value={name}
-            onChangeText={setName}
-            style={styles.input}
-            editable={!submitting}
-          />
-
-          <Button
-            mode="contained"
-            onPress={handleCreate}
-            style={styles.button}
-            loading={submitting}
-            disabled={submitting}
+        <TouchableOpacity 
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={handleClose}
+        >
+          <TouchableOpacity 
+            style={styles.modalContent}
+            activeOpacity={1}
+            onPress={() => {}}
           >
-            Create
-          </Button>
-        </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.headerIcon}>
+                  <Feather name="briefcase" size={28} color="#7c3aed" />
+                </View>
+                <Text style={styles.modalTitle}>Create New Business</Text>
+                <Text style={styles.modalSubtitle}>
+                  Start your business and invite team members to collaborate
+                </Text>
+              </View>
+
+              {/* Form */}
+              <View style={styles.formContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Business Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={businessName}
+                    onChangeText={setBusinessName}
+                    placeholder="Enter business name"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    maxLength={50}
+                    editable={!loading}
+                  />
+                  <Text style={styles.characterCount}>
+                    {businessName.length}/50
+                  </Text>
+                </View>
+
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Description (Optional)</Text>
+                  <TextInput
+                    style={[styles.input, styles.textArea]}
+                    value={description}
+                    onChangeText={setDescription}
+                    placeholder="Brief description of your business"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    multiline
+                    numberOfLines={3}
+                    maxLength={200}
+                    editable={!loading}
+                  />
+                  <Text style={styles.characterCount}>
+                    {description.length}/200
+                  </Text>
+                </View>
+              </View>
+
+              {/* Actions */}
+              <View style={styles.actionContainer}>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, loading && styles.disabledButton]}
+                  onPress={handleClose}
+                  disabled={loading}
+                >
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    (!businessName.trim() || loading) && styles.disabledButton
+                  ]}
+                  onPress={handleCreate}
+                  disabled={!businessName.trim() || loading}
+                >
+                  {loading ? (
+                    <View style={styles.loadingContainer}>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={styles.primaryButtonText}>Creating...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Create Business</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </TouchableOpacity>
+        </TouchableOpacity>
       </KeyboardAvoidingView>
     </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
+  modalOverlay: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.1)',
-  },
-  sheet: {
-    backgroundColor: colors.background,
-    padding: 20,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    maxHeight: '90%',
-  },
-  dragHandleContainer: {
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
+  },
+  modalContent: {
+    backgroundColor: '#16213e',
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    width: '100%',
+    maxWidth: 450,
+    maxHeight: '85%',
+    padding: 28,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 10,
+  },
+  modalHeader: {
+    alignItems: 'center',
+    marginBottom: 32,
+  },
+  headerIcon: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  modalTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    textAlign: 'center',
     marginBottom: 8,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#f8f8f2',
-    marginBottom: 10,
+  modalSubtitle: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
     textAlign: 'center',
+    lineHeight: 24,
+    paddingHorizontal: 8,
+  },
+  formContainer: {
+    marginBottom: 32,
+  },
+  inputGroup: {
+    marginBottom: 24,
+  },
+  inputLabel: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
   },
   input: {
-    backgroundColor: '#2a2a3d',
-    color: '#fff',
-    padding: 10,
-    borderRadius: 6,
-    marginBottom: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: '#444',
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '400',
   },
-  button: {
-    backgroundColor: colors.primary,
-    marginTop: 12,
+  textArea: {
+    height: 80,
+    textAlignVertical: 'top',
+    paddingTop: 14,
+  },
+  characterCount: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 12,
+    textAlign: 'right',
+    marginTop: 4,
+  },
+  actionContainer: {
+    flexDirection: 'row',
+    gap: 16,
+  },
+  primaryButton: {
+    flex: 1,
+    backgroundColor: '#7c3aed',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  primaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  secondaryButton: {
+    flex: 1,
+    backgroundColor: 'transparent',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  secondaryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
 });
