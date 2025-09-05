@@ -1,5 +1,5 @@
-// components/BusinessModal.tsx - Optimized with category selection
-import React, { useState, useMemo } from 'react';
+// components/BusinessModal.tsx - Enhanced with dropdown category selection
+import React, { useState, useCallback } from 'react';
 import {
   View,
   Text,
@@ -30,12 +30,90 @@ const BUSINESS_CATEGORIES = [
   'Beauty & Wellness', 'Legal Services', 'Marketing', 'Sports & Fitness', 'Non-Profit'
 ];
 
+// Category Selection Modal Component
+const CategorySelectionModal = ({ 
+  visible, 
+  onClose, 
+  selectedCategories, 
+  onCategoryToggle 
+}: {
+  visible: boolean;
+  onClose: () => void;
+  selectedCategories: string[];
+  onCategoryToggle: (category: string) => void;
+}) => {
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="slide"
+      onRequestClose={onClose}
+    >
+      <View style={styles.categoryModalOverlay}>
+        <TouchableOpacity 
+          style={styles.categoryModalBackdrop} 
+          onPress={onClose}
+          activeOpacity={1}
+        />
+        <View style={styles.categoryModalContent}>
+          {/* Handle Bar */}
+          <View style={styles.modalHandle} />
+          
+          {/* Header */}
+          <View style={styles.categoryModalHeader}>
+            <Text style={styles.categoryModalTitle}>Select Business Categories</Text>
+            <Text style={styles.categoryModalSubtitle}>
+              Choose up to 5 categories ({selectedCategories.length}/5)
+            </Text>
+          </View>
+
+          {/* Categories List */}
+          <ScrollView style={styles.categoriesList} showsVerticalScrollIndicator={false}>
+            {BUSINESS_CATEGORIES.map((category) => {
+              const isSelected = selectedCategories.includes(category);
+              return (
+                <TouchableOpacity
+                  key={category}
+                  style={[
+                    styles.categoryListItem,
+                    isSelected && styles.selectedCategoryListItem
+                  ]}
+                  onPress={() => onCategoryToggle(category)}
+                >
+                  <Text style={[
+                    styles.categoryListText,
+                    isSelected && styles.selectedCategoryListText
+                  ]}>
+                    {category}
+                  </Text>
+                  {isSelected && (
+                    <Feather name="check" size={18} color="#7c3aed" />
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+
+          {/* Done Button */}
+          <TouchableOpacity 
+            style={styles.categoryDoneButton} 
+            onPress={onClose}
+          >
+            <Text style={styles.categoryDoneButtonText}>Done</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
   const [businessName, setBusinessName] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
-  const handleCategoryToggle = (category: string) => {
+  const handleCategoryToggle = useCallback((category: string) => {
     setSelectedCategories(prev => {
       if (prev.includes(category)) {
         return prev.filter(c => c !== category);
@@ -50,7 +128,7 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
         return prev;
       }
     });
-  };
+  }, []);
 
   const handleCreate = async () => {
     if (!businessName.trim()) {
@@ -98,132 +176,129 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
     }
   };
 
-  const memoizedCategories = useMemo(() => 
-    BUSINESS_CATEGORIES.map(category => (
-      <TouchableOpacity
-        key={category}
-        style={[
-          styles.categoryItem,
-          selectedCategories.includes(category) && styles.selectedCategory
-        ]}
-        onPress={() => handleCategoryToggle(category)}
-        disabled={loading}
-      >
-        <Text style={[
-          styles.categoryText,
-          selectedCategories.includes(category) && styles.selectedCategoryText
-        ]}>
-          {category}
-        </Text>
-        {selectedCategories.includes(category) && (
-          <Feather name="check" size={14} color="#fff" />
-        )}
-      </TouchableOpacity>
-    )), [selectedCategories, loading]);
+  const getCategoryDisplayText = () => {
+    if (selectedCategories.length === 0) return 'Choose categories';
+    if (selectedCategories.length === 1) return selectedCategories[0];
+    return `${selectedCategories.length} categories selected`;
+  };
 
   return (
-    <Modal 
-      visible={visible} 
-      transparent 
-      animationType="fade"
-      statusBarTranslucent
-    >
-      <KeyboardAvoidingView 
-        style={styles.modalOverlay}
-        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+    <>
+      <Modal 
+        visible={visible} 
+        transparent 
+        animationType="fade"
+        statusBarTranslucent
       >
-        <TouchableOpacity 
+        <KeyboardAvoidingView 
           style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={handleClose}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         >
           <TouchableOpacity 
-            style={styles.modalContent}
+            style={styles.modalOverlay}
             activeOpacity={1}
-            onPress={() => {}}
+            onPress={handleClose}
           >
-            <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-              {/* Header */}
-              <View style={styles.modalHeader}>
-                <View style={styles.headerIcon}>
-                  <Feather name="briefcase" size={24} color="#7c3aed" />
-                </View>
-                <Text style={styles.modalTitle}>Create New Business</Text>
-                <Text style={styles.modalSubtitle}>
-                  Start your business and invite team members
-                </Text>
-              </View>
-
-              {/* Form */}
-              <View style={styles.formContainer}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Business Name *</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={businessName}
-                    onChangeText={setBusinessName}
-                    placeholder="Enter business name"
-                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                    maxLength={50}
-                    editable={!loading}
-                  />
-                  <Text style={styles.characterCount}>
-                    {businessName.length}/50
+            <TouchableOpacity 
+              style={styles.modalContent}
+              activeOpacity={1}
+              onPress={() => {}}
+            >
+              <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+                {/* Header */}
+                <View style={styles.modalHeader}>
+                  <View style={styles.headerIcon}>
+                    <Feather name="briefcase" size={24} color="#7c3aed" />
+                  </View>
+                  <Text style={styles.modalTitle}>Create New Business</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Start your business and invite team members
                   </Text>
                 </View>
 
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>
-                    Categories * ({selectedCategories.length}/5)
-                  </Text>
-                  <ScrollView 
-                    style={styles.categoriesScrollContainer}
-                    showsVerticalScrollIndicator={true}
-                    nestedScrollEnabled={true}
+                {/* Form */}
+                <View style={styles.formContainer}>
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>Business Name *</Text>
+                    <TextInput
+                      style={styles.input}
+                      value={businessName}
+                      onChangeText={setBusinessName}
+                      placeholder="Enter business name"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      maxLength={50}
+                      editable={!loading}
+                    />
+                    <Text style={styles.characterCount}>
+                      {businessName.length}/50
+                    </Text>
+                  </View>
+
+                  <View style={styles.inputGroup}>
+                    <Text style={styles.inputLabel}>
+                      Categories * ({selectedCategories.length}/5)
+                    </Text>
+                    <TouchableOpacity
+                      style={styles.categoryDropdown}
+                      onPress={() => setShowCategoryModal(true)}
+                      disabled={loading}
+                    >
+                      <Text style={[
+                        styles.categoryDropdownText,
+                        selectedCategories.length === 0 && styles.categoryPlaceholder
+                      ]}>
+                        {getCategoryDisplayText()}
+                      </Text>
+                      <Feather name="chevron-down" size={20} color="rgba(255, 255, 255, 0.7)" />
+                    </TouchableOpacity>
+                    <Text style={styles.helpText}>
+                      Select up to 5 categories that best describe your business
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Actions */}
+                <View style={styles.actionContainer}>
+                  <TouchableOpacity
+                    style={[styles.secondaryButton, loading && styles.disabledButton]}
+                    onPress={handleClose}
+                    disabled={loading}
                   >
-                    <View style={styles.categoriesContainer}>
-                      {memoizedCategories}
-                    </View>
-                  </ScrollView>
-                  <Text style={styles.helpText}>
-                    Select up to 5 categories that best describe your business
-                  </Text>
+                    <Text style={styles.secondaryButtonText}>Cancel</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.primaryButton,
+                      (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
+                    ]}
+                    onPress={handleCreate}
+                    disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
+                  >
+                    {loading ? (
+                      <View style={styles.loadingContainer}>
+                        <ActivityIndicator size="small" color="#fff" />
+                        <Text style={styles.primaryButtonText}>Creating...</Text>
+                      </View>
+                    ) : (
+                      <Text style={styles.primaryButtonText}>Create Business</Text>
+                    )}
+                  </TouchableOpacity>
                 </View>
-              </View>
-
-              {/* Actions */}
-              <View style={styles.actionContainer}>
-                <TouchableOpacity
-                  style={[styles.secondaryButton, loading && styles.disabledButton]}
-                  onPress={handleClose}
-                  disabled={loading}
-                >
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
-                  ]}
-                  onPress={handleCreate}
-                  disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
-                >
-                  {loading ? (
-                    <View style={styles.loadingContainer}>
-                      <ActivityIndicator size="small" color="#fff" />
-                      <Text style={styles.primaryButtonText}>Creating...</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.primaryButtonText}>Create Business</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
+              </ScrollView>
+            </TouchableOpacity>
           </TouchableOpacity>
-        </TouchableOpacity>
-      </KeyboardAvoidingView>
-    </Modal>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Category Selection Modal */}
+      <CategorySelectionModal
+        visible={showCategoryModal}
+        onClose={() => setShowCategoryModal(false)}
+        selectedCategories={selectedCategories}
+        onCategoryToggle={handleCategoryToggle}
+      />
+    </>
   );
 }
 
@@ -233,17 +308,17 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 24,
+    padding: 32,
   },
   modalContent: {
     backgroundColor: '#16213e',
-    borderRadius: 20,
+    borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '85%',
-    maxWidth: 420,
-    maxHeight: '70%',
-    padding: 20,
+    width: '100%',
+    maxWidth: 400,
+    maxHeight: '75%',
+    padding: 24,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
@@ -252,116 +327,95 @@ const styles = StyleSheet.create({
   },
   modalHeader: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 24,
   },
   headerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
-    borderWidth: 1.5,
+    marginBottom: 16,
+    borderWidth: 2,
     borderColor: 'rgba(124, 58, 237, 0.4)',
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   modalSubtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
+    fontSize: 15,
     textAlign: 'center',
-    lineHeight: 20,
+    lineHeight: 22,
   },
   formContainer: {
-    marginBottom: 16,
+    marginBottom: 24,
   },
   inputGroup: {
-    marginBottom: 18,
+    marginBottom: 20,
   },
   inputLabel: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 15,
     fontWeight: '600',
-    marginBottom: 6,
+    marginBottom: 8,
   },
   input: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '400',
   },
   characterCount: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 11,
+    fontSize: 12,
     textAlign: 'right',
-    marginTop: 3,
+    marginTop: 4,
   },
-  categoriesScrollContainer: {
-    height: 100,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 10,
+  categoryDropdown: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.2)',
-    marginBottom: 4,
-  },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    padding: 12,
-  },
-  categoryItem: {
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.2)',
-    gap: 6,
+    justifyContent: 'space-between',
   },
-  selectedCategory: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
-  },
-  categoryText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  selectedCategoryText: {
+  categoryDropdownText: {
     color: '#fff',
-    fontWeight: '600',
+    fontSize: 16,
+    flex: 1,
+  },
+  categoryPlaceholder: {
+    color: 'rgba(255, 255, 255, 0.5)',
   },
   helpText: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 12,
-    marginTop: 4,
-    lineHeight: 16,
+    fontSize: 13,
+    marginTop: 6,
+    lineHeight: 18,
   },
   actionContainer: {
     flexDirection: 'row',
-    gap: 12,
-    marginTop: 12,
-    paddingBottom: 8,
+    gap: 16,
   },
   primaryButton: {
     flex: 1,
     backgroundColor: '#7c3aed',
     paddingVertical: 16,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
@@ -371,21 +425,21 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
   },
   secondaryButton: {
     flex: 1,
     backgroundColor: 'transparent',
     paddingVertical: 16,
-    borderRadius: 10,
+    borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   secondaryButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '500',
   },
   disabledButton: {
@@ -395,5 +449,88 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
+  },
+  
+  // Category Modal Styles
+  categoryModalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  categoryModalBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  categoryModalContent: {
+    backgroundColor: '#fff',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingTop: 12,
+    paddingHorizontal: 24,
+    paddingBottom: 32,
+    maxHeight: '70%',
+  },
+  modalHandle: {
+    width: 40,
+    height: 4,
+    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  categoryModalHeader: {
+    marginBottom: 24,
+  },
+  categoryModalTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: '#1a1a1a',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  categoryModalSubtitle: {
+    fontSize: 15,
+    color: 'rgba(26, 26, 26, 0.7)',
+    textAlign: 'center',
+  },
+  categoriesList: {
+    flex: 1,
+    marginBottom: 24,
+  },
+  categoryListItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 4,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+  },
+  selectedCategoryListItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.05)',
+  },
+  categoryListText: {
+    fontSize: 16,
+    color: '#1a1a1a',
+    fontWeight: '500',
+  },
+  selectedCategoryListText: {
+    color: '#7c3aed',
+    fontWeight: '600',
+  },
+  categoryDoneButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 6,
+  },
+  categoryDoneButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });
