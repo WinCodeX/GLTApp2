@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Clean version with direct navigation
+// components/CustomDrawerContent.tsx - Clean version with business management
 import {
   Feather,
   FontAwesome5,
@@ -22,23 +22,22 @@ import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
 
-// ✅ Removed onAddAccount prop - no longer needed
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
-  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
   
   const { 
     user, 
     businesses, 
-    accounts,
     currentAccount,
-    getBusinessDisplayName, 
+    selectedBusiness,
+    setSelectedBusiness,
     getUserPhone,
-    switchAccount,
-    removeAccount
+    getDisplayName
   } = useUser();
 
-  const displayName = getBusinessDisplayName();
+  // Use selected business name or fallback to user display name
+  const displayName = selectedBusiness?.name || getDisplayName();
   const userPhone = getUserPhone();
 
   const avatarSource = user?.avatar_url
@@ -55,46 +54,35 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
   ];
 
-  const handleAccountSwitch = async (accountId: string) => {
-    if (!currentAccount || accountId === currentAccount.id) {
-      setShowAccountDropdown(false);
-      return;
-    }
-
+  const handleBusinessSwitch = async (business: any) => {
     try {
-      setShowAccountDropdown(false);
+      setShowBusinessDropdown(false);
       props.navigation.closeDrawer();
       
-      console.log('Drawer switching to account:', accountId);
-      await switchAccount(accountId);
+      console.log('Drawer switching to business:', business.name);
+      setSelectedBusiness?.(business);
       
-      const switchedAccount = accounts.find(acc => acc.id === accountId);
-      if (switchedAccount) {
-        Toast.show({
-          type: 'success',
-          text1: 'Account switched',
-          text2: `Now using ${switchedAccount.display_name}`,
-        });
-      }
+      Toast.show({
+        type: 'success',
+        text1: 'Business selected',
+        text2: `Now using ${business.name}`,
+      });
     } catch (error: any) {
-      console.error('Drawer account switch error:', error);
-      Alert.alert('Error', error.message || 'Failed to switch accounts');
+      console.error('Drawer business switch error:', error);
+      Alert.alert('Error', error.message || 'Failed to switch business');
     }
   };
 
-  // ✅ Fixed: Direct navigation to business route
-  const handleAddAccount = () => {
-    setShowAccountDropdown(false);
+  const handleBusinessManagement = () => {
+    setShowBusinessDropdown(false);
     props.navigation.closeDrawer();
     
-    console.log('Navigating to business screen...');
+    console.log('Navigating to business management...');
     
     try {
-      // Navigate directly to business route (lowercase to match drawer registration)
       props.navigation.navigate('business');
     } catch (error) {
       console.error('Navigation error:', error);
-      // Fallback: try with uppercase if lowercase fails
       try {
         props.navigation.navigate('Business');
       } catch (fallbackError) {
@@ -104,24 +92,28 @@ export default function CustomDrawerContent(props: any) {
     }
   };
 
-  const renderSavedAccount = (account: any) => {
-    const isCurrentAccount = currentAccount?.id === account.id;
-    const accountAvatar = account.avatar_url
-      ? { uri: account.avatar_url }
-      : require('../assets/images/avatar_placeholder.png');
+  const renderBusinessItem = (business: any, isOwned: boolean = true) => {
+    const isSelectedBusiness = selectedBusiness?.id === business.id;
 
     return (
       <TouchableOpacity
-        key={account.id}
-        style={styles.savedAccountItem}
-        onPress={() => handleAccountSwitch(account.id)}
+        key={business.id}
+        style={styles.businessItem}
+        onPress={() => handleBusinessSwitch(business)}
         activeOpacity={0.7}
       >
-        <Image source={accountAvatar} style={styles.savedAccountAvatar} />
-        <Text style={styles.savedAccountName}>
-          {account.display_name}
-        </Text>
-        {isCurrentAccount && (
+        <View style={styles.businessIcon}>
+          <Feather name="briefcase" size={16} color="#fff" />
+        </View>
+        <View style={styles.businessInfo}>
+          <Text style={styles.businessName}>
+            {business.name}
+          </Text>
+          <Text style={styles.businessType}>
+            {isOwned ? 'Owned' : 'Joined'}
+          </Text>
+        </View>
+        {isSelectedBusiness && (
           <View style={styles.checkmarkContainer}>
             <Feather name="check" size={14} color="#00ff00" />
           </View>
@@ -134,161 +126,152 @@ export default function CustomDrawerContent(props: any) {
     <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
       <View style={styles.container}>
 
-          {/* Main Account Section */}    
-          <TouchableOpacity    
-            onPress={() => setShowAccountDropdown(!showAccountDropdown)}    
-            style={styles.accountHeader}    
-            activeOpacity={0.8}
-          >    
-            <Image
-              source={avatarSource}
-              style={styles.avatar}
-            />  
-            <View style={styles.accountInfo}>
-              <Text style={styles.userName}>{displayName}</Text>
-              <Text style={styles.userPhone}>{userPhone}</Text>
-            </View>    
-            <Feather    
-              name={showAccountDropdown ? 'chevron-up' : 'chevron-down'}    
-              size={20}    
-              color="#fff"    
-            />    
-          </TouchableOpacity>    
-
-          {showAccountDropdown && (    
-            <View style={styles.accountDropdown}>
-              {/* Account */}
-              <DrawerItem    
-                label="Account"    
-                labelStyle={styles.label}    
-                icon={() => <Feather name="user" size={22} color="#fff" />}    
-                onPress={() => {
-                  setShowAccountDropdown(false);
-                  props.navigation.navigate('account');
-                }}    
-              />
-              
-              {/* Saved Accounts - Simple Display */}
-              {accounts.length > 0 && (
-                <View style={styles.savedAccountsSection}>
-                  {accounts.map(account => renderSavedAccount(account))}
-                </View>
-              )}
-
-              {/* Add Account Button (only if less than 3 accounts) */}
-              {accounts.length < 3 && (
-                <TouchableOpacity
-                  style={styles.addAccountButton}
-                  onPress={handleAddAccount}
-                >
-                  <Feather name="plus" size={18} color="#fff" />
-                  <Text style={styles.addAccountText}>Add Account</Text>
-                </TouchableOpacity>
-              )}
-              
-              {/* Switch Business (if multiple businesses) */}
-              {businesses.owned.length > 1 && (
-                <DrawerItem    
-                  label="Switch Business"    
-                  labelStyle={styles.label}    
-                  icon={() => <Feather name="briefcase" size={22} color="#fff" />}    
-                  onPress={() => {
-                    setShowAccountDropdown(false);
-                    props.navigation.navigate('businessSelection');
-                  }}    
-                />
-              )}    
-            </View>    
-          )}    
-
-          {/* Track a Package */}    
-          <TouchableOpacity
-            style={styles.customItem}
-            onPress={() => setShowTrackDropdown((prev) => !prev)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.trackHeader}>
-              <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-              <Text style={styles.trackLabel}>Track a package</Text>
-              <Feather
-                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={colors.primary}
-              />
-            </View>
-          </TouchableOpacity>
-          
-          {showTrackDropdown &&    
-            trackingStatuses.map((item) => (    
-              <DrawerItem    
-                key={item.key}    
-                label={item.label}    
-                labelStyle={styles.subLabel}    
-                icon={() => (    
-                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
-                )}    
-                style={styles.subItem}    
-                onPress={() =>    
-                  props.navigation.navigate({    
-                    name: 'track',    
-                    params: { status: item.key },    
-                    merge: true,    
-                  })    
-                }    
-              />    
-            ))}    
-
-          {/* General Navigation */}    
-          <DrawerItem    
-            label="Talk to a rep"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('support')}    
-          />    
-          <DrawerItem    
-            label="FAQs"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('faqs')}    
-          />    
-          <DrawerItem    
-            label="History"    
-            labelStyle={styles.label}    
-            icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('history')}    
-          />    
-
-          {/* Contacts */}    
-          <DrawerItem    
-            label="Contacts"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('contact')}    
-          />    
-
-          {/* Settings */}    
-          <DrawerItem    
-            label="Settings"    
-            labelStyle={styles.label}    
-            icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('settings')}    
-          />    
-
-          {/* Invite Friends */}    
-          <DrawerItem    
-            label="Invite Friends"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('invite')}    
-          />    
-
-          {/* Footer Icon */}    
-          <View style={styles.footerIcon}>    
-            <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+        {/* Main Business/Account Section */}    
+        <TouchableOpacity    
+          onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
+          style={styles.accountHeader}    
+          activeOpacity={0.8}
+        >    
+          <Image
+            source={avatarSource}
+            style={styles.avatar}
+          />  
+          <View style={styles.accountInfo}>
+            <Text style={styles.userName}>{displayName}</Text>
+            <Text style={styles.userPhone}>{userPhone}</Text>
           </View>    
+          <Feather    
+            name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
+            size={20}    
+            color="#fff"    
+          />    
+        </TouchableOpacity>    
 
+        {showBusinessDropdown && (    
+          <View style={styles.accountDropdown}>
+            {/* Account */}
+            <DrawerItem    
+              label="Account"    
+              labelStyle={styles.label}    
+              icon={() => <Feather name="user" size={22} color="#fff" />}    
+              onPress={() => {
+                setShowBusinessDropdown(false);
+                props.navigation.navigate('account');
+              }}    
+            />
+            
+            {/* Business Listings */}
+            {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
+              <View style={styles.businessesSection}>
+                <Text style={styles.sectionTitle}>Your Businesses</Text>
+                
+                {/* Owned Businesses */}
+                {businesses.owned.map(business => renderBusinessItem(business, true))}
+                
+                {/* Joined Businesses */}
+                {businesses.joined.map(business => renderBusinessItem(business, false))}
+              </View>
+            )}
+
+            {/* Business Management Button */}
+            <TouchableOpacity
+              style={styles.businessButton}
+              onPress={handleBusinessManagement}
+            >
+              <Feather name="briefcase" size={18} color="#fff" />
+              <Text style={styles.businessButtonText}>Business</Text>
+            </TouchableOpacity>
+          </View>    
+        )}    
+
+        {/* Track a Package */}    
+        <TouchableOpacity
+          style={styles.customItem}
+          onPress={() => setShowTrackDropdown((prev) => !prev)}
+          activeOpacity={0.7}
+        >
+          <View style={styles.trackHeader}>
+            <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+            <Text style={styles.trackLabel}>Track a package</Text>
+            <Feather
+              name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={colors.primary}
+            />
+          </View>
+        </TouchableOpacity>
+        
+        {showTrackDropdown &&    
+          trackingStatuses.map((item) => (    
+            <DrawerItem    
+              key={item.key}    
+              label={item.label}    
+              labelStyle={styles.subLabel}    
+              icon={() => (    
+                <Feather name={item.icon as any} size={20} color={colors.primary} />    
+              )}    
+              style={styles.subItem}    
+              onPress={() =>    
+                props.navigation.navigate({    
+                  name: 'track',    
+                  params: { status: item.key },    
+                  merge: true,    
+                })    
+              }    
+            />    
+          ))}    
+
+        {/* General Navigation */}    
+        <DrawerItem    
+          label="Talk to a rep"    
+          labelStyle={styles.label}    
+          icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('support')}    
+        />    
+        <DrawerItem    
+          label="FAQs"    
+          labelStyle={styles.label}    
+          icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('faqs')}    
+        />    
+        <DrawerItem    
+          label="History"    
+          labelStyle={styles.label}    
+          icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('history')}    
+        />    
+
+        {/* Contacts */}    
+        <DrawerItem    
+          label="Contacts"    
+          labelStyle={styles.label}    
+          icon={() => <Feather name="user" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('contact')}    
+        />    
+
+        {/* Settings */}    
+        <DrawerItem    
+          label="Settings"    
+          labelStyle={styles.label}    
+          icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('settings')}    
+        />    
+
+        {/* Invite Friends */}    
+        <DrawerItem    
+          label="Invite Friends"    
+          labelStyle={styles.label}    
+          icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
+          onPress={() => props.navigation.navigate('invite')}    
+        />    
+
+        {/* Footer Icon */}    
+        <View style={styles.footerIcon}>    
+          <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
         </View>    
-      </DrawerContentScrollView>
+
+      </View>    
+    </DrawerContentScrollView>
   );
 }
 
@@ -380,26 +363,45 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     marginBottom: 20,
   },
-  savedAccountsSection: {
+  businessesSection: {
     paddingVertical: 8,
   },
-  savedAccountItem: {
+  sectionTitle: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    letterSpacing: 0.5,
+  },
+  businessItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
-    paddingVertical: 8,
+    paddingVertical: 10,
   },
-  savedAccountAvatar: {
+  businessIcon: {
     width: 24,
     height: 24,
     borderRadius: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.8)',
+    alignItems: 'center',
+    justifyContent: 'center',
     marginRight: 12,
   },
-  savedAccountName: {
+  businessInfo: {
     flex: 1,
+  },
+  businessName: {
     color: 'white',
     fontSize: 14,
     fontWeight: '500',
+  },
+  businessType: {
+    color: 'rgba(255, 255, 255, 0.6)',
+    fontSize: 12,
+    marginTop: 2,
   },
   checkmarkContainer: {
     width: 20,
@@ -411,19 +413,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: '#00ff00',
   },
-  addAccountButton: {
+  businessButton: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     marginHorizontal: 8,
     marginVertical: 4,
     borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
     borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    borderStyle: 'dashed',
+    borderColor: 'rgba(124, 58, 237, 0.5)',
   },
-  addAccountText: {
+  businessButtonText: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '500',
