@@ -67,16 +67,30 @@ export class AccountManager {
     }
   }
 
-  // Save to storage
+  // Save to storage with proper type handling
   private async persist(): Promise<void> {
     try {
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(this.accountGroup));
+      // Ensure all data is properly serialized as strings
+      const dataToStore = {
+        accounts: this.accountGroup.accounts.map(account => ({
+          ...account,
+          lastUsed: String(account.lastUsed),
+          createdAt: String(account.createdAt)
+        })),
+        currentAccountId: this.accountGroup.currentAccountId,
+        version: String(this.accountGroup.version)
+      };
+
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToStore));
+      
       if (this.accountGroup.currentAccountId) {
-        await AsyncStorage.setItem(CURRENT_ACCOUNT_KEY, this.accountGroup.currentAccountId);
+        await AsyncStorage.setItem(CURRENT_ACCOUNT_KEY, String(this.accountGroup.currentAccountId));
       }
+      
       console.log('💾 AccountManager: Data persisted');
     } catch (error) {
       console.error('❌ AccountManager: Failed to persist:', error);
+      throw error;
     }
   }
 
@@ -92,11 +106,11 @@ export class AccountManager {
       const role = roles.includes('admin') ? 'admin' : 'client';
       
       const accountData: AccountData = {
-        id: userData.id,
-        email: userData.email,
-        display_name: userData.display_name || userData.first_name || userData.email,
+        id: String(userData.id),
+        email: String(userData.email),
+        display_name: String(userData.display_name || userData.first_name || userData.email),
         avatar_url: userData.avatar_url,
-        token: token,
+        token: String(token),
         role: role,
         userData: userData,
         lastUsed: Date.now(),
@@ -117,7 +131,7 @@ export class AccountManager {
       }
 
       // Set as current account
-      await this.setCurrentAccount(userData.id);
+      await this.setCurrentAccount(String(userData.id));
       await this.persist();
       
     } catch (error) {
@@ -199,7 +213,7 @@ export class AccountManager {
 
     const account = this.accountGroup.accounts[accountIndex];
     account.userData = userData;
-    account.display_name = userData.display_name || userData.first_name || userData.email;
+    account.display_name = String(userData.display_name || userData.first_name || userData.email);
     account.avatar_url = userData.avatar_url;
     account.lastUsed = Date.now();
 
