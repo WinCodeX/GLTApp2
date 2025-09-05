@@ -1,5 +1,5 @@
-// app/(drawer)/Business.tsx - Fixed undefined errors
-import React, { useState } from 'react';
+// app/(drawer)/Business.tsx - Enhanced with business management features
+import React, { useState, Suspense } from 'react';
 import {
   View,
   Text,
@@ -10,43 +10,59 @@ import {
   SafeAreaView,
   StatusBar,
   Alert,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
+import * as Clipboard from 'expo-clipboard';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
+import { createInvite } from '../../lib/helpers/business';
+
+// Lazy load business modals
+const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
+const JoinBusinessModal = React.lazy(() => import('../../components/JoinBusinessModal'));
 
 interface BusinessProps {
   navigation: any;
 }
 
 export default function Business({ navigation }: BusinessProps) {
-  // ✅ Fixed: Use 'accounts' instead of 'savedAccounts' to match useUser hook
   const { 
     user, 
-    accounts = [], // ✅ Default to empty array if undefined
+    accounts = [],
+    businesses,
     currentAccount,
     getBusinessDisplayName, 
     getUserPhone,
     getDisplayName,
     switchAccount,
     removeAccount,
+    refreshBusinesses,
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
+  const [showBusinessModal, setShowBusinessModal] = useState(false);
+  const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
+  const [selectedBusiness, setSelectedBusiness] = useState(null);
+  const [currentBusinessIndex, setCurrentBusinessIndex] = useState(0);
+  const [inviteLink, setInviteLink] = useState(null);
+  const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
 
-  // ✅ Safe access with fallback values
-  const displayName = getBusinessDisplayName?.() || 'Unknown User';
-  const userPhone = getUserPhone?.() || 'No phone';
-  const username = getDisplayName?.() || 'User';
+  const displayName = getBusinessDisplayName();
+  const userPhone = getUserPhone();
+  const username = getDisplayName();
 
   const avatarSource = user?.avatar_url
     ? { uri: user.avatar_url }
     : require('../../assets/images/avatar_placeholder.png');
+
+  const currentBusiness = businesses.owned[currentBusinessIndex] || businesses.owned[0];
 
   const handleLogin = () => {
     setShowLoginModal(true);
@@ -127,11 +143,101 @@ export default function Business({ navigation }: BusinessProps) {
     );
   };
 
+  // Business dropdown selection
+  const handleBusinessSelect = (businessIndex: number) => {
+    setCurrentBusinessIndex(businessIndex);
+    setShowBusinessDropdown(false);
+    Toast.show({
+      type: 'info',
+      text1: 'Business selected',
+      text2: businesses.owned[businessIndex]?.name,
+    });
+  };
+
+  // Share business functionality
+  const handleShareBusiness = () => {
+    if (currentBusiness) {
+      setSelectedBusiness(currentBusiness);
+    } else {
+      Toast.show({
+        type: 'warning',
+        text1: 'No business selected',
+        text2: 'Please select a business first',
+      });
+    }
+  };
+
+  // Generate invite link
+  const generateInviteLink = async () => {
+    if (!selectedBusiness) return;
+
+    try {
+      const result = await createInvite(selectedBusiness.id);
+      setInviteLink(result?.code || 'No code generated');
+      Toast.show({
+        type: 'success',
+        text1: 'Invite link generated',
+        text2: 'Copy and share with your team',
+      });
+    } catch (error) {
+      console.error('Error creating invite:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to create invite',
+        text2: 'Please try again',
+      });
+    }
+  };
+
+  // Copy invite link
+  const copyInviteLink = () => {
+    if (inviteLink) {
+      Clipboard.setStringAsync(inviteLink);
+      Toast.show({
+        type: 'success',
+        text1: 'Copied to clipboard!',
+        text2: 'Share this invite code',
+      });
+    }
+  };
+
+  // Handle creating new business
+  const handleCreateBusiness = () => {
+    setShowAddBusinessOptions(false);
+    setShowBusinessModal(true);
+  };
+
+  // Handle joining business
+  const handleJoinBusiness = () => {
+    setShowAddBusinessOptions(false);
+    setShowJoinModal(true);
+  };
+
+  // Handle business modal close with refresh
+  const handleBusinessModalClose = async () => {
+    setShowBusinessModal(false);
+    try {
+      await refreshBusinesses?.(true); // Force refresh after creating business
+    } catch (error) {
+      console.error('Error refreshing businesses:', error);
+    }
+  };
+
+  // Handle join modal close with refresh
+  const handleJoinModalClose = async () => {
+    setShowJoinModal(false);
+    try {
+      await refreshBusinesses?.(true); // Force refresh after joining business
+    } catch (error) {
+      console.error('Error refreshing businesses:', error);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header - Fixed positioning with proper spacing */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
@@ -167,24 +273,34 @@ export default function Business({ navigation }: BusinessProps) {
 
           <View style={styles.statsContainer}>
             <View style={styles.stat}>
-              {/* ✅ Fixed: Safe access to accounts.length */}
               <Text style={styles.statNumber}>{accounts.length}</Text>
               <Text style={styles.statLabel}>accounts</Text>
             </View>
             <View style={styles.stat}>
-              <Text style={styles.statNumber}>6</Text>
+              <Text style={styles.statNumber}>{businesses.owned.length}</Text>
               <Text style={styles.statLabel}>businesses</Text>
             </View>
             <View style={styles.stat}>
-              <Text style={styles.statNumber}>19</Text>
-              <Text style={styles.statLabel}>active</Text>
+              <Text style={styles.statNumber}>{businesses.joined.length}</Text>
+              <Text style={styles.statLabel}>joined</Text>
             </View>
           </View>
         </View>
 
-        {/* Current Account Info */}
-        <View style={styles.currentAccountSection}>
-          <Text style={styles.displayName}>{displayName}</Text>
+        {/* Current Business Info with Dropdown */}
+        <View style={styles.currentBusinessSection}>
+          {businesses.owned.length > 0 ? (
+            <TouchableOpacity 
+              style={styles.businessDropdownButton}
+              onPress={() => setShowBusinessDropdown(true)}
+            >
+              <Text style={styles.businessName}>{currentBusiness?.name || 'Select Business'}</Text>
+              <Feather name="chevron-down" size={20} color="#fff" />
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.businessName}>No businesses owned</Text>
+          )}
+          
           <Text style={styles.bio}>平凡を観察し、見えざるものを築く者。</Text>
           
           <View style={styles.contactInfo}>
@@ -192,27 +308,57 @@ export default function Business({ navigation }: BusinessProps) {
           </View>
         </View>
 
-        {/* Action Buttons */}
+        {/* Business Action Buttons */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity style={styles.editButton}>
-            <Text style={styles.editButtonText}>Edit profile</Text>
+          <TouchableOpacity 
+            style={styles.editButton}
+            disabled={!currentBusiness}
+            onPress={() => {
+              // Navigate to edit business screen
+              Toast.show({
+                type: 'info',
+                text1: 'Edit Business',
+                text2: 'Feature coming soon',
+              });
+            }}
+          >
+            <Text style={styles.editButtonText}>Edit Business</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.shareButton}>
-            <Text style={styles.shareButtonText}>Share profile</Text>
+          
+          <TouchableOpacity 
+            style={styles.shareButton}
+            disabled={!currentBusiness}
+            onPress={handleShareBusiness}
+          >
+            <Text style={styles.shareButtonText}>Share Business</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.moreButton}>
-            <Feather name="user-plus" size={18} color="#fff" />
+          
+          <TouchableOpacity 
+            style={styles.moreButton}
+            onPress={() => setShowAddBusinessOptions(true)}
+          >
+            <Feather name="plus" size={18} color="#fff" />
           </TouchableOpacity>
         </View>
 
-        {/* Account Management Section - Simple Display */}
+        {/* Add Business Button */}
+        <View style={styles.addBusinessSection}>
+          <TouchableOpacity 
+            style={styles.addBusinessButton}
+            onPress={() => setShowAddBusinessOptions(true)}
+          >
+            <Feather name="briefcase" size={20} color="#7c3aed" />
+            <Text style={styles.addBusinessText}>Add Another Business</Text>
+            <Feather name="chevron-right" size={20} color="#7c3aed" />
+          </TouchableOpacity>
+        </View>
+
+        {/* Account Management Section */}
         <View style={styles.accountsSection}>
           <View style={styles.sectionHeader}>
-            {/* ✅ Fixed: Safe access to accounts.length */}
             <Text style={styles.sectionTitle}>SWITCH ACCOUNT ({accounts.length}/3)</Text>
           </View>
 
-          {/* ✅ Fixed: Safe rendering of accounts */}
           {accounts.length > 0 && accounts.map((account) => {
             const isCurrentAccount = currentAccount?.id === account.id;
             const accountAvatar = account.avatar_url
@@ -254,7 +400,6 @@ export default function Business({ navigation }: BusinessProps) {
                   )}
                 </TouchableOpacity>
                 
-                {/* Remove button for non-current accounts */}
                 {!isCurrentAccount && accounts.length > 1 && (
                   <TouchableOpacity
                     style={styles.removeButton}
@@ -269,7 +414,6 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
 
         {/* Add Account Section */}
-        {/* ✅ Fixed: Safe access to accounts.length */}
         {accounts.length < 3 && (
           <View style={styles.addAccountSection}>
             <Text style={styles.addAccountTitle}>Add account</Text>
@@ -284,6 +428,133 @@ export default function Business({ navigation }: BusinessProps) {
           </View>
         )}
       </ScrollView>
+
+      {/* Business Dropdown Modal */}
+      {showBusinessDropdown && (
+        <Modal visible transparent animationType="fade">
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            onPress={() => setShowBusinessDropdown(false)}
+          >
+            <View style={styles.dropdownModal}>
+              <Text style={styles.dropdownTitle}>Select Business</Text>
+              {businesses.owned.map((business, index) => (
+                <TouchableOpacity
+                  key={business.id}
+                  style={[
+                    styles.dropdownItem,
+                    index === currentBusinessIndex && styles.selectedDropdownItem
+                  ]}
+                  onPress={() => handleBusinessSelect(index)}
+                >
+                  <Text style={[
+                    styles.dropdownItemText,
+                    index === currentBusinessIndex && styles.selectedDropdownItemText
+                  ]}>
+                    {business.name}
+                  </Text>
+                  {index === currentBusinessIndex && (
+                    <Feather name="check" size={16} color="#7c3aed" />
+                  )}
+                </TouchableOpacity>
+              ))}
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Add Business Options Modal */}
+      {showAddBusinessOptions && (
+        <Modal visible transparent animationType="fade">
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            onPress={() => setShowAddBusinessOptions(false)}
+          >
+            <View style={styles.optionsModal}>
+              <Text style={styles.optionsTitle}>Add Business</Text>
+              <Text style={styles.optionsSubtitle}>Choose an option</Text>
+              
+              <TouchableOpacity style={styles.optionButton} onPress={handleCreateBusiness}>
+                <Feather name="plus-circle" size={24} color="#7c3aed" />
+                <View style={styles.optionContent}>
+                  <Text style={styles.optionTitle}>Create New Business</Text>
+                  <Text style={styles.optionDescription}>Start a new business and invite team members</Text>
+                </View>
+              </TouchableOpacity>
+
+              <TouchableOpacity style={styles.optionButton} onPress={handleJoinBusiness}>
+                <Feather name="users" size={24} color="#7c3aed" />
+                <View style={styles.optionContent}>
+                  <Text style={styles.optionTitle}>Join Existing Business</Text>
+                  <Text style={styles.optionDescription}>Join a business using an invite code</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Share Business Modal */}
+      {selectedBusiness && (
+        <Modal visible transparent animationType="fade">
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            onPress={() => {
+              setSelectedBusiness(null);
+              setInviteLink(null);
+            }}
+          >
+            <View style={styles.inviteModal}>
+              <Text style={styles.modalText}>
+                Share "{selectedBusiness.name}"
+              </Text>
+
+              {!inviteLink ? (
+                <TouchableOpacity style={styles.generateButton} onPress={generateInviteLink}>
+                  <Text style={styles.generateButtonText}>Generate Invite Link</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.inviteLinkContainer}>
+                  <Text style={styles.inviteCode}>{inviteLink}</Text>
+                  <TouchableOpacity style={styles.copyButton} onPress={copyInviteLink}>
+                    <Feather name="copy" size={16} color="#fff" />
+                    <Text style={styles.copyButtonText}>Copy</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              <TouchableOpacity 
+                style={styles.closeButton}
+                onPress={() => {
+                  setSelectedBusiness(null);
+                  setInviteLink(null);
+                }}
+              >
+                <Text style={styles.closeButtonText}>Close</Text>
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Lazy loaded modals */}
+      <Suspense fallback={<View />}>
+        {showBusinessModal && (
+          <BusinessModal
+            visible={showBusinessModal}
+            onClose={handleBusinessModalClose}
+            onCreate={handleBusinessModalClose}
+          />
+        )}
+
+        {showJoinModal && (
+          <JoinBusinessModal
+            visible={showJoinModal}
+            onClose={handleJoinModalClose}
+            onJoin={handleJoinModalClose}
+          />
+        )}
+      </Suspense>
 
       {/* Login Modal */}
       <LoginModal
@@ -393,15 +664,26 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
   },
-  currentAccountSection: {
+  currentBusinessSection: {
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
-  displayName: {
+  businessDropdownButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    marginBottom: 8,
+  },
+  businessName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 6,
   },
   bio: {
     color: 'rgba(255,255,255,0.8)',
@@ -454,6 +736,28 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  addBusinessSection: {
+    paddingHorizontal: 20,
+    paddingBottom: 24,
+  },
+  addBusinessButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 16,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  addBusinessText: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 12,
   },
   accountsSection: {
     paddingBottom: 24,
@@ -587,5 +891,155 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '500',
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  dropdownModal: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 32,
+    padding: 20,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    maxWidth: 300,
+    width: '80%',
+  },
+  dropdownTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  dropdownItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    marginBottom: 8,
+  },
+  selectedDropdownItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  dropdownItemText: {
+    color: '#fff',
+    fontSize: 16,
+  },
+  selectedDropdownItemText: {
+    color: '#bd93f9',
+    fontWeight: '600',
+  },
+  optionsModal: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 32,
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+  },
+  optionsTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  optionsSubtitle: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  optionButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    marginBottom: 16,
+  },
+  optionContent: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  optionTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  optionDescription: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+  },
+  inviteModal: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 32,
+    padding: 24,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    alignItems: 'center',
+  },
+  modalText: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 24,
+  },
+  generateButton: {
+    backgroundColor: '#7c3aed',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    marginBottom: 16,
+  },
+  generateButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  inviteLinkContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  inviteCode: {
+    color: '#bd93f9',
+    fontSize: 18,
+    fontWeight: 'bold',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  copyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#7c3aed',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
+  },
+  copyButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  closeButton: {
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+  },
+  closeButtonText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 16,
   },
 });
