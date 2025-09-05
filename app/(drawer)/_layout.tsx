@@ -1,5 +1,6 @@
+// app/(drawer)/_layout.tsx - Clean version without modals
 import React, { useEffect, useState } from 'react';
-import { Dimensions, View } from 'react-native';
+import { Dimensions } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
 
@@ -13,9 +14,6 @@ import { ColorValue } from 'react-native';
 
 import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import AccountSelectionModal from '@/components/AccountSelectionModal';
-import LoginModal from '@/components/LoginModal';
-import SignupModal from '@/components/SignupModal';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
@@ -25,6 +23,7 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
   track: { name: 'map-pin', lib: Feather },
   account: { name: 'user', lib: Feather },
+  business: { name: 'briefcase', lib: Feather }, // ✅ Added business route
   Support: { name: 'message-circle', lib: Feather },
   FAQs: { name: 'help-circle', lib: Feather },
   History: { name: 'history', lib: MaterialIcons },
@@ -35,9 +34,6 @@ export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [isLoading, setIsLoading] = useState(true);
   const [shouldRedirect, setShouldRedirect] = useState<string | null>(null);
-  const [showAccountSelectionModal, setShowAccountSelectionModal] = useState(false);
-  const [showLoginModal, setShowLoginModal] = useState(false);
-  const [showSignupModal, setShowSignupModal] = useState(false);
   const router = useRouter();
 
   useEffect(() => {
@@ -164,38 +160,6 @@ export default function DrawerLayout() {
     }
   }, [isLoading, shouldRedirect, router]);
 
-  // Handler for opening the add account modal
-  const handleAddAccount = () => {
-    setShowAccountSelectionModal(true);
-  };
-
-  // Modal transition handlers
-  const handleCloseAllModals = () => {
-    setShowAccountSelectionModal(false);
-    setShowLoginModal(false);
-    setShowSignupModal(false);
-  };
-
-  const handleOpenLogin = () => {
-    setShowAccountSelectionModal(false);
-    setShowLoginModal(true);
-  };
-
-  const handleOpenSignup = () => {
-    setShowAccountSelectionModal(false);
-    setShowSignupModal(true);
-  };
-
-  const handleSwitchToSignup = () => {
-    setShowLoginModal(false);
-    setShowSignupModal(true);
-  };
-
-  const handleSwitchToLogin = () => {
-    setShowSignupModal(false);
-    setShowLoginModal(true);
-  };
-
   if (isLoading) {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
@@ -205,56 +169,31 @@ export default function DrawerLayout() {
   }
 
   return (
-    <>
-      <Drawer
-        drawerContent={(props) => 
-          <CustomDrawerContent 
-            {...props} 
-            onAddAccount={handleAddAccount}
-          />
-        }
-        screenOptions={({ route }) => {
-          const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
-          const IconComponent = iconData.lib;
+    <Drawer
+      drawerContent={(props) => 
+        <CustomDrawerContent {...props} />
+      }
+      screenOptions={({ route }) => {
+        const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
+        const IconComponent = iconData.lib;
 
-          return {
-            headerShown: false,
-            drawerStyle: {
-              backgroundColor: colors.background,
-              width: drawerWidth,
-            },
-            drawerActiveTintColor: colors.primary,
-            drawerInactiveTintColor: 'white',
-            drawerLabelStyle: {
-              fontSize: 16,
-              marginLeft: -10,
-            },
-            drawerIcon: ({ color }: { color: ColorValue }) => (
-              <IconComponent name={iconData.name} size={20} color={color} />
-            ),
-          };
-        }}
-      />
-      
-      {/* Simple Account Modals */}
-      <AccountSelectionModal
-        visible={showAccountSelectionModal}
-        onClose={handleCloseAllModals}
-        onLogin={handleOpenLogin}
-        onSignup={handleOpenSignup}
-      />
-      
-      <LoginModal
-        visible={showLoginModal}
-        onClose={handleCloseAllModals}
-        onSwitchToSignup={handleSwitchToSignup}
-      />
-      
-      <SignupModal
-        visible={showSignupModal}
-        onClose={handleCloseAllModals}
-        onSwitchToLogin={handleSwitchToLogin}
-      />
-    </>
+        return {
+          headerShown: false,
+          drawerStyle: {
+            backgroundColor: colors.background,
+            width: drawerWidth,
+          },
+          drawerActiveTintColor: colors.primary,
+          drawerInactiveTintColor: 'white',
+          drawerLabelStyle: {
+            fontSize: 16,
+            marginLeft: -10,
+          },
+          drawerIcon: ({ color }: { color: ColorValue }) => (
+            <IconComponent name={iconData.name} size={20} color={color} />
+          ),
+        };
+      }}
+    />
   );
 }
