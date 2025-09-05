@@ -33,15 +33,14 @@ interface BusinessProps {
 export default function Business({ navigation }: BusinessProps) {
   const { 
     user, 
-    accounts = [],
     businesses,
     currentAccount,
     getBusinessDisplayName, 
     getUserPhone,
     getDisplayName,
-    switchAccount,
-    removeAccount,
     refreshBusinesses,
+    selectedBusiness,
+    setSelectedBusiness,
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -49,7 +48,7 @@ export default function Business({ navigation }: BusinessProps) {
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
-  const [selectedBusiness, setSelectedBusiness] = useState(null);
+  const [selectedBusinessForShare, setSelectedBusinessForShare] = useState(null);
   const [currentBusinessIndex, setCurrentBusinessIndex] = useState(0);
   const [inviteLink, setInviteLink] = useState(null);
   const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
@@ -62,7 +61,7 @@ export default function Business({ navigation }: BusinessProps) {
     ? { uri: user.avatar_url }
     : require('../../assets/images/avatar_placeholder.png');
 
-  const currentBusiness = businesses.owned[currentBusinessIndex] || businesses.owned[0];
+  const currentBusiness = selectedBusiness || businesses.owned[currentBusinessIndex] || businesses.owned[0];
 
   const handleLogin = () => {
     setShowLoginModal(true);
@@ -73,7 +72,7 @@ export default function Business({ navigation }: BusinessProps) {
   };
 
   const handleGoBack = () => {
-    if (navigation?.goBack) {
+    if (navigation?.canGoBack && navigation.canGoBack()) {
       navigation.goBack();
     } else if (navigation?.navigate) {
       navigation.navigate('index');
@@ -90,74 +89,23 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
-  const handleAccountSwitch = async (accountId: string) => {
-    if (!currentAccount || accountId === currentAccount.id) {
-      return;
-    }
-
-    try {
-      await switchAccount?.(accountId);
-      const switchedAccount = accounts.find(acc => acc.id === accountId);
-      if (switchedAccount) {
-        Toast.show({
-          type: 'success',
-          text1: 'Account switched!',
-          text2: `Now using ${switchedAccount.display_name}`,
-        });
-      }
-    } catch (error: any) {
-      console.error('Switch account error:', error);
-      Alert.alert('Error', error.message || 'Failed to switch accounts');
-    }
-  };
-
-  const handleAccountRemove = async (accountId: string, accountEmail: string) => {
-    if (currentAccount && accountId === currentAccount.id) {
-      Alert.alert('Error', 'Cannot remove the currently active account');
-      return;
-    }
-
-    Alert.alert(
-      'Remove Account',
-      `Remove ${accountEmail}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await removeAccount?.(accountId);
-              Toast.show({
-                type: 'success',
-                text1: 'Account removed',
-                text2: `${accountEmail} has been removed`,
-              });
-            } catch (error: any) {
-              console.error('Remove account error:', error);
-              Alert.alert('Error', error.message || 'Failed to remove account');
-            }
-          },
-        },
-      ]
-    );
-  };
-
   // Business dropdown selection
   const handleBusinessSelect = (businessIndex: number) => {
+    const selectedBiz = businesses.owned[businessIndex];
     setCurrentBusinessIndex(businessIndex);
+    setSelectedBusiness?.(selectedBiz);
     setShowBusinessDropdown(false);
     Toast.show({
       type: 'info',
       text1: 'Business selected',
-      text2: businesses.owned[businessIndex]?.name,
+      text2: selectedBiz?.name,
     });
   };
 
   // Share business functionality
   const handleShareBusiness = () => {
     if (currentBusiness) {
-      setSelectedBusiness(currentBusiness);
+      setSelectedBusinessForShare(currentBusiness);
     } else {
       Toast.show({
         type: 'warning',
@@ -169,10 +117,10 @@ export default function Business({ navigation }: BusinessProps) {
 
   // Generate invite link
   const generateInviteLink = async () => {
-    if (!selectedBusiness) return;
+    if (!selectedBusinessForShare) return;
 
     try {
-      const result = await createInvite(selectedBusiness.id);
+      const result = await createInvite(selectedBusinessForShare.id);
       setInviteLink(result?.code || 'No code generated');
       Toast.show({
         type: 'success',
@@ -273,7 +221,7 @@ export default function Business({ navigation }: BusinessProps) {
 
           <View style={styles.statsContainer}>
             <View style={styles.stat}>
-              <Text style={styles.statNumber}>{accounts.length}</Text>
+              <Text style={styles.statNumber}>1</Text>
               <Text style={styles.statLabel}>accounts</Text>
             </View>
             <View style={styles.stat}>
@@ -352,81 +300,6 @@ export default function Business({ navigation }: BusinessProps) {
             <Feather name="chevron-right" size={20} color="#7c3aed" />
           </TouchableOpacity>
         </View>
-
-        {/* Account Management Section */}
-        <View style={styles.accountsSection}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>SWITCH ACCOUNT ({accounts.length}/3)</Text>
-          </View>
-
-          {accounts.length > 0 && accounts.map((account) => {
-            const isCurrentAccount = currentAccount?.id === account.id;
-            const accountAvatar = account.avatar_url
-              ? { uri: account.avatar_url }
-              : require('../../assets/images/avatar_placeholder.png');
-
-            return (
-              <View key={account.id} style={styles.simpleAccountCard}>
-                <TouchableOpacity
-                  style={[
-                    styles.simpleAccountContent,
-                    isCurrentAccount && styles.currentAccountCard
-                  ]}
-                  onPress={() => handleAccountSwitch(account.id)}
-                  activeOpacity={0.8}
-                >
-                  <Image source={accountAvatar} style={styles.simpleAccountAvatar} />
-                  <View style={styles.simpleAccountInfo}>
-                    <Text style={[
-                      styles.simpleAccountName,
-                      isCurrentAccount && styles.currentAccountName
-                    ]}>
-                      {account.display_name || 'Unknown Account'}
-                    </Text>
-                    <Text style={[
-                      styles.simpleAccountEmail,
-                      isCurrentAccount && styles.currentAccountEmail
-                    ]}>
-                      {account.email || 'No email'}
-                    </Text>
-                    {isCurrentAccount && (
-                      <Text style={styles.currentLabel}>Current</Text>
-                    )}
-                  </View>
-                  {isCurrentAccount && (
-                    <View style={styles.checkmarkContainer}>
-                      <Feather name="check-circle" size={20} color="#fff" />
-                    </View>
-                  )}
-                </TouchableOpacity>
-                
-                {!isCurrentAccount && accounts.length > 1 && (
-                  <TouchableOpacity
-                    style={styles.removeButton}
-                    onPress={() => handleAccountRemove(account.id, account.email || 'Unknown')}
-                  >
-                    <Feather name="x" size={16} color="#ff5555" />
-                  </TouchableOpacity>
-                )}
-              </View>
-            );
-          })}
-        </View>
-
-        {/* Add Account Section */}
-        {accounts.length < 3 && (
-          <View style={styles.addAccountSection}>
-            <Text style={styles.addAccountTitle}>Add account</Text>
-            
-            <TouchableOpacity style={styles.primaryButton} onPress={handleLogin}>
-              <Text style={styles.primaryButtonText}>Log into existing account</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity style={styles.secondaryButton} onPress={handleSignup}>
-              <Text style={styles.secondaryButtonText}>Create new account</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </ScrollView>
 
       {/* Business Dropdown Modal */}
@@ -475,18 +348,18 @@ export default function Business({ navigation }: BusinessProps) {
               <Text style={styles.optionsSubtitle}>Choose an option</Text>
               
               <TouchableOpacity style={styles.optionButton} onPress={handleCreateBusiness}>
-                <Feather name="plus-circle" size={24} color="#7c3aed" />
+                <Feather name="plus-circle" size={28} color="#7c3aed" />
                 <View style={styles.optionContent}>
-                  <Text style={styles.optionTitle}>Create New Business</Text>
-                  <Text style={styles.optionDescription}>Start a new business and invite team members</Text>
+                  <Text style={styles.optionTitle}>Create New</Text>
+                  <Text style={styles.optionDescription}>Start a new business</Text>
                 </View>
               </TouchableOpacity>
 
               <TouchableOpacity style={styles.optionButton} onPress={handleJoinBusiness}>
-                <Feather name="users" size={24} color="#7c3aed" />
+                <Feather name="users" size={28} color="#7c3aed" />
                 <View style={styles.optionContent}>
-                  <Text style={styles.optionTitle}>Join Existing Business</Text>
-                  <Text style={styles.optionDescription}>Join a business using an invite code</Text>
+                  <Text style={styles.optionTitle}>Join Existing</Text>
+                  <Text style={styles.optionDescription}>Join a business</Text>
                 </View>
               </TouchableOpacity>
             </View>
@@ -495,18 +368,18 @@ export default function Business({ navigation }: BusinessProps) {
       )}
 
       {/* Share Business Modal */}
-      {selectedBusiness && (
+      {selectedBusinessForShare && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
             style={styles.modalOverlay}
             onPress={() => {
-              setSelectedBusiness(null);
+              setSelectedBusinessForShare(null);
               setInviteLink(null);
             }}
           >
             <View style={styles.inviteModal}>
               <Text style={styles.modalText}>
-                Share "{selectedBusiness.name}"
+                Share "{selectedBusinessForShare.name}"
               </Text>
 
               {!inviteLink ? (
@@ -526,7 +399,7 @@ export default function Business({ navigation }: BusinessProps) {
               <TouchableOpacity 
                 style={styles.closeButton}
                 onPress={() => {
-                  setSelectedBusiness(null);
+                  setSelectedBusinessForShare(null);
                   setInviteLink(null);
                 }}
               >
@@ -759,139 +632,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 12,
   },
-  accountsSection: {
-    paddingBottom: 24,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    marginHorizontal: 12,
-    marginBottom: 16,
-    borderRadius: 16,
-    padding: 16,
-  },
-  sectionHeader: {
-    marginBottom: 16,
-  },
-  sectionTitle: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 1,
-  },
-  simpleAccountCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  simpleAccountContent: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  currentAccountCard: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: 'rgba(124, 58, 237, 0.6)',
-  },
-  simpleAccountAvatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 16,
-  },
-  simpleAccountInfo: {
-    flex: 1,
-  },
-  simpleAccountName: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  currentAccountName: {
-    color: '#bd93f9',
-  },
-  simpleAccountEmail: {
-    color: 'rgba(255, 255, 255, 0.6)',
-    fontSize: 13,
-  },
-  currentAccountEmail: {
-    color: 'rgba(189, 147, 249, 0.8)',
-  },
-  currentLabel: {
-    color: '#bd93f9',
-    fontSize: 11,
-    fontWeight: '600',
-    marginTop: 2,
-    textTransform: 'uppercase',
-  },
-  checkmarkContainer: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#bd93f9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 12,
-  },
-  removeButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 85, 85, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginLeft: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 85, 85, 0.3)',
-  },
-  addAccountSection: {
-    padding: 20,
-    backgroundColor: 'rgba(255,255,255,0.02)',
-    marginHorizontal: 12,
-    borderRadius: 16,
-    marginBottom: 40,
-  },
-  addAccountTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 20,
-  },
-  primaryButton: {
-    backgroundColor: '#7c3aed',
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: 'center',
-    marginBottom: 12,
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  primaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  secondaryButton: {
-    backgroundColor: 'transparent',
-    paddingVertical: 12,
-    borderRadius: 25,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.3)',
-  },
-  secondaryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
@@ -936,50 +676,53 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   optionsModal: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 32,
-    padding: 24,
-    borderRadius: 16,
+    backgroundColor: '#16213e',
+    marginHorizontal: 20,
+    padding: 32,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
+    width: '85%',
+    maxWidth: 400,
   },
   optionsTitle: {
     color: '#fff',
-    fontSize: 20,
+    fontSize: 24,
     fontWeight: '600',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   optionsSubtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
+    fontSize: 16,
     textAlign: 'center',
-    marginBottom: 24,
+    marginBottom: 32,
   },
   optionButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 16,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderRadius: 12,
+    paddingVertical: 20,
+    paddingHorizontal: 20,
+    backgroundColor: 'rgba(124, 58, 237, 0.15)',
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    marginBottom: 16,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    marginBottom: 20,
   },
   optionContent: {
     flex: 1,
-    marginLeft: 16,
+    marginLeft: 20,
   },
   optionTitle: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 18,
     fontWeight: '600',
-    marginBottom: 4,
+    marginBottom: 6,
   },
   optionDescription: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
+    fontSize: 15,
+    lineHeight: 22,
   },
   inviteModal: {
     backgroundColor: '#1a1a2e',
