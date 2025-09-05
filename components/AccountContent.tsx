@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Simplified without cached data indicators
+// components/AccountContent.tsx - User-focused only, no business management
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -7,7 +7,6 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import {
-  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -22,21 +21,16 @@ import Toast from 'react-native-toast-message';
 
 // Lazy load heavy components to prevent blocking
 const AvatarPreviewModal = React.lazy(() => import('./AvatarPreviewModal'));
-const BusinessModal = React.lazy(() => import('./BusinessModal'));
-const ChangelogModal = React.lazy(() => import('./ChangelogModal'));
-const JoinBusinessModal = React.lazy(() => import('./JoinBusinessModal'));
 const LoaderOverlay = React.lazy(() => import('./LoaderOverlay'));
 
 import { useUser } from '../context/UserContext';
-import { createInvite, getBusinesses } from '../lib/helpers/business';
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 
 // Import from the updated api.ts file
 import { 
   getFullAvatarUrl, 
-  getApiBaseUrl, 
-  getBaseDomain,
-  getCurrentApiBaseUrl 
+  getCurrentApiBaseUrl,
+  getBaseDomain
 } from '../lib/api';
 
 // Safe Avatar Component with error handling and updated API functions
@@ -118,7 +112,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
 };
 
 // Constants
-const CHANGELOG_KEY = 'changelog_seen';
 const CHANGELOG_VERSION = '1.0.0';
 
 interface AccountContentProps {
@@ -176,31 +169,23 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   
-  // Use all UserContext methods including logout
+  // Use UserContext methods with enhanced cache management
   const { 
     user, 
-    businesses,
     refreshUser, 
-    refreshBusinesses,
+    clearUserCache, // New method for cache management
     loading: userLoading, 
     error: userError,
     logout,
-    getDisplayName,
-    getUserPhone,
-    getBusinessDisplayName
+    getDisplayName
   } = useUser();
   
   const router = useRouter();
 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
-  const [selectedBusiness, setSelectedBusiness] = useState(null);
-  const [inviteLink, setInviteLink] = useState(null);
   const [previewUri, setPreviewUri] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
-  const [showChangelog, setShowChangelog] = useState(false);
-  const [showBusinessModal, setShowBusinessModal] = useState(false);
-  const [showJoinModal, setShowJoinModal] = useState(false);
 
   // Debug avatar URL whenever user changes
   useEffect(() => {
@@ -306,7 +291,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [isScreenReady, user, userLoading, router, source, isRedirecting]);
 
-  // Enhanced refresh handler - always fetches fresh data
+  // Enhanced refresh handler - always fetches fresh data and clears cache
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
@@ -315,12 +300,11 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       }
 
       setRefreshing(true);
-      console.log('🔄 Manual refresh triggered - fetching fresh data');
+      console.log('🔄 Manual refresh triggered - clearing cache and fetching fresh data');
       
-      // Always refresh user data and businesses from server
-      await refreshUser();
-      await new Promise(resolve => setTimeout(resolve, 100));
-      await refreshBusinesses();
+      // Force clear cache and refresh user data
+      await clearUserCache();
+      await refreshUser(true); // Force refresh with cache clearing
       
       showToast.success('Data refreshed');
     } catch (error) {
@@ -329,7 +313,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, refreshBusinesses, user]);
+  }, [refreshUser, clearUserCache, user]);
 
   // Avatar picker
   const pickAndPreviewAvatar = useCallback(async () => {
@@ -354,7 +338,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, []);
 
-  // Enhanced avatar upload with proper refresh
+  // Enhanced avatar upload with proper cache clearing and refresh
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
@@ -366,15 +350,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
       if (result?.avatar_url) {
         console.log('✅ New avatar URL received:', result.avatar_url);
-        const fullUrl = getFullAvatarUrl(result.avatar_url);
-        console.log('✅ Full avatar URL:', fullUrl);
+        
+        // Force clear all cache before refreshing
+        console.log('🗑️ Clearing avatar and user cache after upload...');
+        await clearUserCache();
+        
+        // Force refresh user data to get the new avatar URL
+        console.log('🔄 Force refreshing user data after avatar upload...');
+        await refreshUser(true);
+        
+        showToast.success('Avatar updated!');
       }
-      
-      showToast.success('Avatar updated!');
-      
-      // Force refresh user data to get the new avatar URL and clear any cache
-      console.log('🔄 Refreshing user data after avatar upload...');
-      await refreshUser();
       
     } catch (error) {
       console.error('❌ Error uploading avatar:', error);
@@ -383,7 +369,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setPreviewUri(null);
       setLoading(false);
     }
-  }, [previewUri, refreshUser]);
+  }, [previewUri, refreshUser, clearUserCache]);
 
   // Use AccountManager-backed logout from UserContext
   const confirmLogout = useCallback(async () => {
@@ -449,7 +435,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           <Button mode="outlined" onPress={() => {
             try {
               setScreenError(null);
-              refreshBusinesses();
+              onRefresh();
             } catch (error) {
               console.error('❌ Error retrying:', error);
             }
@@ -486,26 +472,11 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // Main content
+  // Main content - focused only on user account information
   return (
     <View style={styles.container}>
       <Suspense fallback={<View />}>
         {loading && <LoaderOverlay visible={true} />}
-
-        {showChangelog && (
-          <ChangelogModal 
-            visible 
-            onClose={() => {
-              try {
-                AsyncStorage.setItem(CHANGELOG_KEY, 'true');
-                setShowChangelog(false);
-              } catch (error) {
-                console.error('❌ Error closing changelog:', error);
-                setShowChangelog(false);
-              }
-            }} 
-          />
-        )}
 
         {previewUri && (
           <AvatarPreviewModal
@@ -515,75 +486,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             onConfirm={confirmUploadAvatar}
           />
         )}
-
-        {showBusinessModal && (
-          <BusinessModal
-            visible
-            onClose={() => setShowBusinessModal(false)}
-            onCreate={refreshBusinesses}
-          />
-        )}
-
-        {showJoinModal && (
-          <JoinBusinessModal
-            visible
-            onClose={() => setShowJoinModal(false)}
-            onJoin={refreshBusinesses}
-          />
-        )}
       </Suspense>
-
-      {/* Business invite modal */}
-      {selectedBusiness && (
-        <Modal visible transparent animationType="fade">
-          <View style={styles.modalOverlay}>
-            <View style={styles.inviteModal}>
-              <Text style={styles.modalText}>
-                Generate invite link for "{selectedBusiness.name}"?
-              </Text>
-
-              {!inviteLink ? (
-                <Button 
-                  mode="contained" 
-                  onPress={async () => {
-                    try {
-                      const res = await createInvite(selectedBusiness.id);
-                      setInviteLink(res?.code || 'No code');
-                    } catch (error) {
-                      console.error('❌ Error creating invite:', error);
-                      showToast.error('Failed to create invite', 'Please try again');
-                    }
-                  }}
-                >
-                  Generate Link
-                </Button>
-              ) : (
-                <>
-                  <Text selectable style={styles.code}>{inviteLink}</Text>
-                  <Button onPress={() => {
-                    try {
-                      Clipboard.setStringAsync(inviteLink);
-                      showToast.success('Copied to clipboard!');
-                    } catch (error) {
-                      console.error('❌ Error copying to clipboard:', error);
-                      showToast.error('Failed to copy');
-                    }
-                  }}>
-                    Copy
-                  </Button>
-                </>
-              )}
-
-              <Button onPress={() => {
-                setSelectedBusiness(null);
-                setInviteLink(null);
-              }}>
-                Close
-              </Button>
-            </View>
-          </View>
-        </Modal>
-      )}
 
       {/* Header with matching gradient */}
       <LinearGradient
@@ -667,59 +570,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               <MaterialCommunityIcons name="chevron-right" size={20} color="#888" />
             </View>
           </TouchableOpacity>
-        </View>
-
-        {/* Business Actions Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Business</Text>
-          <View style={{ flexDirection: 'row', gap: 10, marginTop: 12 }}>
-            <Button 
-              mode="outlined" 
-              onPress={() => setShowBusinessModal(true)}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor="#764ba2"
-            >
-              Create
-            </Button>
-            <Button 
-              mode="outlined" 
-              onPress={() => setShowJoinModal(true)}
-              buttonColor="rgba(118, 75, 162, 0.1)"
-              textColor="#764ba2"
-            >
-              Join
-            </Button>
-          </View>
-        </View>
-
-        {/* User Businesses Card */}
-        <View style={styles.identityCard}>
-          <Text style={styles.userName}>Your Businesses</Text>
-          
-          <Text style={styles.teamLabel}>Owned:</Text>
-          {businesses.owned.length > 0 ? (
-            businesses.owned.map((biz) => (
-              <TouchableOpacity 
-                key={biz.id} 
-                onPress={() => setSelectedBusiness(biz)}
-              >
-                <Text style={styles.businessItem}>
-                  • {biz.name}
-                </Text>
-              </TouchableOpacity>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
-
-          <Text style={styles.teamLabel}>Joined:</Text>
-          {businesses.joined.length > 0 ? (
-            businesses.joined.map((biz) => (
-              <Text key={biz.id} style={styles.businessItem}>• {biz.name}</Text>
-            ))
-          ) : (
-            <Text style={styles.businessItem}>None</Text>
-          )}
         </View>
 
         {/* Logout Card */}
@@ -895,16 +745,6 @@ const styles = StyleSheet.create({
     color: '#999', 
     marginTop: 4 
   },
-  teamLabel: { 
-    color: '#ccc', 
-    marginTop: 8, 
-    fontWeight: '600' 
-  },
-  businessItem: { 
-    color: '#fff', 
-    marginTop: 4, 
-    fontSize: 15 
-  },
   logoutCard: { 
     backgroundColor: '#1a1a2e', 
     margin: 16, 
@@ -962,33 +802,5 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     fontSize: 16,
     marginBottom: 20,
-  },
-  modalOverlay: { 
-    flex: 1, 
-    backgroundColor: 'rgba(0, 0, 0, 0.7)', 
-    justifyContent: 'center', 
-    alignItems: 'center' 
-  },
-  inviteModal: { 
-    backgroundColor: '#1a1a2e', 
-    margin: 32, 
-    padding: 20, 
-    borderRadius: 12, 
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(118, 75, 162, 0.4)',
-  },
-  modalText: { 
-    color: '#fff', 
-    fontSize: 16, 
-    marginBottom: 12, 
-    textAlign: 'center' 
-  },
-  code: { 
-    color: '#764ba2', 
-    fontSize: 18, 
-    fontWeight: 'bold', 
-    marginTop: 12, 
-    marginBottom: 12 
   },
 });
