@@ -1,4 +1,4 @@
-// lib/api.ts - Updated to use AccountManager
+// lib/api.ts - Updated to use AccountManager with proper JSON headers
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
 import { router } from 'expo-router';
@@ -94,7 +94,10 @@ const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean>
     
     const response = await axios.get(`${baseUrl}/api/v1/ping`, {
       timeout,
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 
+        'Content-Type': 'application/json',
+        'Accept': 'application/json' // CRITICAL: This tells the server to respond with JSON
+      }
     });
     
     if (response.status === 200) {
@@ -151,16 +154,17 @@ const getBaseUrl = async (): Promise<string> => {
   return resolvedBaseUrl;
 };
 
-// Create the main API instance
+// Create the main API instance with proper JSON headers
 const api = axios.create({
   baseURL: PROD_BASE,
   timeout: 15000,
   headers: {
     'Content-Type': 'application/json',
+    'Accept': 'application/json', // CRITICAL: This ensures JSON responses
   },
 });
 
-// Request interceptor - Updated to use AccountManager
+// Request interceptor - Updated to use AccountManager with proper JSON headers
 api.interceptors.request.use(
   async (config) => {
     try {
@@ -173,6 +177,12 @@ api.interceptors.request.use(
         config.baseURL = baseUrl;
       } else {
         config.baseURL = resolvedBaseUrl;
+      }
+
+      // CRITICAL: Ensure JSON headers are always present
+      if (config.headers) {
+        config.headers['Content-Type'] = 'application/json';
+        config.headers['Accept'] = 'application/json';
       }
 
       // Add auth header if we have a current account
@@ -193,6 +203,13 @@ api.interceptors.request.use(
       console.error('❌ Request interceptor error:', error);
       // Don't fail the request completely, use fallback
       config.baseURL = FALLBACK_BASE;
+      
+      // CRITICAL: Still ensure JSON headers even on error
+      if (config.headers) {
+        config.headers['Content-Type'] = 'application/json';
+        config.headers['Accept'] = 'application/json';
+      }
+      
       return config;
     }
   },
@@ -208,6 +225,13 @@ api.interceptors.response.use(
     const currentAccount = accountManager.getCurrentAccount();
     const accountInfo = currentAccount ? ` (${currentAccount.email})` : ' (unauthenticated)';
     console.log(`✅ Request successful${accountInfo}: ${response.config.method?.toUpperCase()} ${response.config.url}`);
+    
+    // Log response content type for debugging
+    const contentType = response.headers['content-type'];
+    if (contentType && !contentType.includes('json')) {
+      console.warn('⚠️ Non-JSON response detected:', contentType);
+    }
+    
     return response;
   },
   async (error) => {
@@ -217,6 +241,16 @@ api.interceptors.response.use(
     const accountInfo = currentAccount ? ` (${currentAccount.email})` : ' (unauthenticated)';
 
     console.error(`❌ Request failed${accountInfo}: ${config?.method?.toUpperCase()} ${config?.url} - Status: ${status}`);
+
+    // Log response content type for debugging HTML/JSON issues
+    if (error.response?.headers?.['content-type']) {
+      const contentType = error.response.headers['content-type'];
+      console.error(`❌ Error response content-type: ${contentType}`);
+      
+      if (contentType.includes('text/html')) {
+        console.error('🚨 Server returned HTML instead of JSON! Check your API endpoint and headers.');
+      }
+    }
 
     // Handle 401/422 Unauthorized
     if (status === 401 || status === 422) {
