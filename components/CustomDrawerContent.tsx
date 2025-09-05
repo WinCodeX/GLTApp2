@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed useRouter issue
+// components/CustomDrawerContent.tsx - Clean version with direct navigation
 import {
   Feather,
   FontAwesome5,
@@ -22,11 +22,8 @@ import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
 
-interface CustomDrawerContentProps {
-  onAddAccount?: () => void;
-}
-
-export default function CustomDrawerContent(props: any & CustomDrawerContentProps) {
+// ✅ Removed onAddAccount prop - no longer needed
+export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
   
@@ -85,15 +82,25 @@ export default function CustomDrawerContent(props: any & CustomDrawerContentProp
     }
   };
 
+  // ✅ Fixed: Direct navigation to business route
   const handleAddAccount = () => {
     setShowAccountDropdown(false);
     props.navigation.closeDrawer();
     
-    if (props.onAddAccount) {
-      props.onAddAccount();
-    } else {
-      // Use React Navigation instead of expo-router
-      props.navigation.navigate('Business');
+    console.log('Navigating to business screen...');
+    
+    try {
+      // Navigate directly to business route (lowercase to match drawer registration)
+      props.navigation.navigate('business');
+    } catch (error) {
+      console.error('Navigation error:', error);
+      // Fallback: try with uppercase if lowercase fails
+      try {
+        props.navigation.navigate('Business');
+      } catch (fallbackError) {
+        console.error('Fallback navigation also failed:', fallbackError);
+        Alert.alert('Navigation Error', 'Could not open business screen');
+      }
     }
   };
 
