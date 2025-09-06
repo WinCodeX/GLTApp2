@@ -1,8 +1,9 @@
-// components/AccountContent.tsx - User-focused only, no business management
+// components/AccountContent.tsx - Fixed avatar upload functionality
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
@@ -24,7 +25,7 @@ const AvatarPreviewModal = React.lazy(() => import('./AvatarPreviewModal'));
 const LoaderOverlay = React.lazy(() => import('./LoaderOverlay'));
 
 import { useUser } from '../context/UserContext';
-import { uploadAvatar } from '../lib/helpers/uploadAvatar';
+import api from '../lib/api';
 
 // Import from the updated api.ts file
 import { 
@@ -62,7 +63,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   // Debug avatar URL
   useEffect(() => {
     if (avatarUrl) {
-      console.log('🔍 Avatar Debug:', {
+      console.log('Avatar Debug:', {
         raw: avatarUrl,
         full: fullAvatarUrl,
         hasError,
@@ -100,7 +101,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         }}
         style={style}
         onError={(error) => {
-          console.warn('❌ Avatar failed to load:', {
+          console.warn('Avatar failed to load:', {
             url: fullAvatarUrl,
             error: error
           });
@@ -109,6 +110,74 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       />
     </TouchableOpacity>
   );
+};
+
+// Fixed avatar upload function for React Native
+const uploadAvatar = async (uri: string) => {
+  try {
+    console.log('Starting avatar upload with URI:', uri);
+    
+    // Get file info first for validation
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    console.log('File info:', fileInfo);
+    
+    if (!fileInfo.exists) {
+      throw new Error('File does not exist');
+    }
+    
+    if (fileInfo.size && fileInfo.size > 5 * 1024 * 1024) { // 5MB limit
+      throw new Error('File too large (max 5MB)');
+    }
+
+    // Detect file type from URI
+    const fileName = uri.split('/').pop() || 'avatar.jpg';
+    const fileExtension = fileName.split('.').pop()?.toLowerCase() || 'jpg';
+    
+    let mimeType = 'image/jpeg';
+    if (fileExtension === 'png') mimeType = 'image/png';
+    else if (fileExtension === 'gif') mimeType = 'image/gif';
+    else if (fileExtension === 'webp') mimeType = 'image/webp';
+
+    console.log('Detected MIME type:', mimeType);
+
+    // Create FormData properly for React Native
+    const formData = new FormData();
+    formData.append('avatar', {
+      uri: uri,
+      type: mimeType,
+      name: fileName
+    } as any);
+
+    console.log('FormData created successfully');
+
+    // Make the API request without setting Content-Type header
+    const response = await api.put('/api/v1/me/avatar', formData, {
+      timeout: 30000, // 30 second timeout for file upload
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          console.log(`Upload progress: ${Math.round(progress)}%`);
+        }
+      }
+    });
+
+    console.log('Upload response:', response.data);
+    return response.data;
+    
+  } catch (error: any) {
+    console.error('Avatar upload error:', error);
+    
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+      throw new Error(error.response.data?.error || `Upload failed with status ${error.response.status}`);
+    } else if (error.request) {
+      console.error('Request error:', error.request);
+      throw new Error('Network error - please check your connection');
+    } else {
+      throw new Error(error.message || 'Upload failed');
+    }
+  }
 };
 
 // Constants
@@ -191,7 +260,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   useEffect(() => {
     if (user?.avatar_url) {
       const fullUrl = getFullAvatarUrl(user.avatar_url);
-      console.log('👤 User Avatar Debug:', {
+      console.log('User Avatar Debug:', {
         userId: user.id,
         rawAvatarUrl: user.avatar_url,
         fullAvatarUrl: fullUrl,
@@ -207,12 +276,12 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     
     async function initializeScreen() {
       try {
-        console.log(`📱 AccountContent (${source}): Initializing...`);
+        console.log(`AccountContent (${source}): Initializing...`);
         
         await new Promise(resolve => setTimeout(resolve, 50));
         
         if (isMounted) {
-          console.log(`✅ AccountContent (${source}): Ready`);
+          console.log(`AccountContent (${source}): Ready`);
           setIsScreenReady(true);
           
           if (source === 'admin') {
@@ -227,7 +296,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         }
         
       } catch (error) {
-        console.error(`❌ AccountContent (${source}) initialization error:`, error);
+        console.error(`AccountContent (${source}) initialization error:`, error);
         if (isMounted) {
           setScreenError(error.message || 'Initialization failed');
           setIsScreenReady(true);
@@ -256,7 +325,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
         // Check if UserContext has user data
         if (!userLoading && !user) {
-          console.log('❌ No user data in context, redirecting to login');
+          console.log('No user data in context, redirecting to login');
           setIsRedirecting(true);
           showToast.error('User session invalid', 'Please log in again');
           router.replace('/login');
@@ -265,7 +334,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
         // If we have user data, proceed normally
         if (user) {
-          console.log(`✅ User data validated for ${source} screen:`, {
+          console.log(`User data validated for ${source} screen:`, {
             id: user.id,
             email: user.email,
             hasDisplayName: !!user.display_name,
@@ -275,7 +344,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         }
 
       } catch (error) {
-        console.error('❌ Error validating user data:', error);
+        console.error('Error validating user data:', error);
         if (isMounted && !user) {
           setIsRedirecting(true);
           showToast.error('Authentication error', 'Please log in again');
@@ -300,7 +369,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       }
 
       setRefreshing(true);
-      console.log('🔄 Manual refresh triggered - clearing cache and fetching fresh data');
+      console.log('Manual refresh triggered - clearing cache and fetching fresh data');
       
       // Force clear cache and refresh user data
       await clearUserCache();
@@ -308,14 +377,14 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
       showToast.success('Data refreshed');
     } catch (error) {
-      console.error('❌ Refresh error:', error);
+      console.error('Refresh error:', error);
       showToast.error('Failed to refresh data', 'Please check your connection');
     } finally {
       setRefreshing(false);
     }
   }, [refreshUser, clearUserCache, user]);
 
-  // Avatar picker
+  // Avatar picker with better validation
   const pickAndPreviewAvatar = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -327,44 +396,56 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.7,
+        quality: 0.8, // Slightly higher quality
+        aspect: [1, 1],
       });
 
       if (result.canceled || !result.assets?.length) return;
-      setPreviewUri(result.assets[0].uri);
+      
+      const asset = result.assets[0];
+      console.log('Selected image:', {
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        fileSize: asset.fileSize
+      });
+      
+      setPreviewUri(asset.uri);
     } catch (error) {
-      console.error('❌ Error picking avatar:', error);
+      console.error('Error picking avatar:', error);
       showToast.error('Failed to select image');
     }
   }, []);
 
-  // Enhanced avatar upload with proper cache clearing and refresh
+  // Fixed avatar upload with proper cache clearing and refresh
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setLoading(true);
-      console.log('📸 Starting avatar upload...');
+      console.log('Starting avatar upload process...');
       
       const result = await uploadAvatar(previewUri);
       
-      if (result?.avatar_url) {
-        console.log('✅ New avatar URL received:', result.avatar_url);
+      if (result?.success && result?.avatar_url) {
+        console.log('Avatar uploaded successfully:', result.avatar_url);
         
         // Force clear all cache before refreshing
-        console.log('🗑️ Clearing avatar and user cache after upload...');
+        console.log('Clearing avatar and user cache after upload...');
         await clearUserCache();
         
         // Force refresh user data to get the new avatar URL
-        console.log('🔄 Force refreshing user data after avatar upload...');
+        console.log('Force refreshing user data after avatar upload...');
         await refreshUser(true);
         
         showToast.success('Avatar updated!');
+      } else {
+        throw new Error(result?.error || 'Upload failed');
       }
       
-    } catch (error) {
-      console.error('❌ Error uploading avatar:', error);
-      showToast.error('Upload failed', 'Please try again');
+    } catch (error: any) {
+      console.error('Error uploading avatar:', error);
+      showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
       setLoading(false);
@@ -374,7 +455,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   // Use AccountManager-backed logout from UserContext
   const confirmLogout = useCallback(async () => {
     try {
-      console.log('🚪 Logging out through UserContext...');
+      console.log('Logging out through UserContext...');
       
       // Use the logout method from UserContext which handles AccountManager
       await logout();
@@ -386,7 +467,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       router.replace('/login');
       
     } catch (error) {
-      console.error('❌ Logout error:', error);
+      console.error('Logout error:', error);
       showToast.error('Logout failed');
     }
   }, [logout, router]);
@@ -437,7 +518,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               setScreenError(null);
               onRefresh();
             } catch (error) {
-              console.error('❌ Error retrying:', error);
+              console.error('Error retrying:', error);
             }
           }}>
             Retry
