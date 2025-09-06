@@ -3,7 +3,7 @@
 import React, { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export const CHANGELOG_VERSION = '1.1.0';
+export const CHANGELOG_VERSION = '1.3.3';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
@@ -14,6 +14,8 @@ const CHANGELOG_CONTENT = [
   'New UI polish',
   'Some Bug fixes',
 'Printing features'
+'Business screen',
+'Avatar upload fix',
 ];
 
 type Props = {
