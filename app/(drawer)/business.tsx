@@ -25,7 +25,9 @@ import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
 import { getFullAvatarUrl } from '../../lib/api';
-import api from '../../lib/api';
+
+// Import the centralized upload avatar helper
+import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
 
 // Lazy load business modals and avatar components
 const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
@@ -91,74 +93,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       />
     </TouchableOpacity>
   );
-};
-
-// Fixed avatar upload function for React Native
-const uploadAvatar = async (uri: string) => {
-  try {
-    console.log('Starting avatar upload with URI:', uri);
-    
-    // Get file info first for validation
-    const fileInfo = await FileSystem.getInfoAsync(uri);
-    console.log('File info:', fileInfo);
-    
-    if (!fileInfo.exists) {
-      throw new Error('File does not exist');
-    }
-    
-    if (fileInfo.size && fileInfo.size > 5 * 1024 * 1024) { // 5MB limit
-      throw new Error('File too large (max 5MB)');
-    }
-
-    // Detect file type from URI
-    const fileName = uri.split('/').pop() || 'avatar.jpg';
-    const fileExtension = fileName.split('.').pop()?.toLowerCase() || 'jpg';
-    
-    let mimeType = 'image/jpeg';
-    if (fileExtension === 'png') mimeType = 'image/png';
-    else if (fileExtension === 'gif') mimeType = 'image/gif';
-    else if (fileExtension === 'webp') mimeType = 'image/webp';
-
-    console.log('Detected MIME type:', mimeType);
-
-    // Create FormData properly for React Native
-    const formData = new FormData();
-    formData.append('avatar', {
-      uri: uri,
-      type: mimeType,
-      name: fileName
-    } as any);
-
-    console.log('FormData created successfully');
-
-    // Make the API request without setting Content-Type header
-    const response = await api.put('/api/v1/me/avatar', formData, {
-      timeout: 30000, // 30 second timeout for file upload
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.total) {
-          const progress = (progressEvent.loaded / progressEvent.total) * 100;
-          console.log(`Upload progress: ${Math.round(progress)}%`);
-        }
-      }
-    });
-
-    console.log('Upload response:', response.data);
-    return response.data;
-    
-  } catch (error: any) {
-    console.error('Avatar upload error:', error);
-    
-    if (error.response) {
-      console.error('Response status:', error.response.status);
-      console.error('Response data:', error.response.data);
-      throw new Error(error.response.data?.error || `Upload failed with status ${error.response.status}`);
-    } else if (error.request) {
-      console.error('Request error:', error.request);
-      throw new Error('Network error - please check your connection');
-    } else {
-      throw new Error(error.message || 'Upload failed');
-    }
-  }
 };
 
 export default function Business({ navigation }: BusinessProps) {
@@ -370,14 +304,15 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, []);
 
-  // Fixed avatar upload functionality
+  // Updated avatar upload using centralized helper
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('Starting avatar upload process...');
+      console.log('Starting avatar upload process using centralized helper...');
       
+      // Use the centralized uploadAvatar helper
       const result = await uploadAvatar(previewUri);
       
       if (result?.success && result?.avatar_url) {
