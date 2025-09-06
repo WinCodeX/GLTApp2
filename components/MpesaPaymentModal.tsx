@@ -32,7 +32,7 @@ interface Package {
 interface MpesaPaymentModalProps {
   visible: boolean;
   onClose: () => void;
-  package: Package | null;
+  packageData: Package | null;  // Fixed: Changed from 'package' to 'packageData'
   onPaymentSuccess: () => void;
 }
 
@@ -41,7 +41,7 @@ type PaymentStep = 'confirm' | 'processing' | 'failed' | 'success' | 'manual_ver
 export default function MpesaPaymentModal({ 
   visible, 
   onClose, 
-  package: packageData, 
+  packageData,  // Fixed: Now matches the prop name from track.tsx
   onPaymentSuccess 
 }: MpesaPaymentModalProps) {
   const { getUserPhone } = useUser();
@@ -61,10 +61,19 @@ export default function MpesaPaymentModal({
   const [isPolling, setIsPolling] = useState(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
+  // Debug: Log when modal visibility changes
+  useEffect(() => {
+    console.log('🎭 MpesaPaymentModal visibility changed:', visible);
+    console.log('📦 Package data:', packageData);
+  }, [visible, packageData]);
+
   // Initialize phone number from user context
   useEffect(() => {
     if (visible && packageData) {
+      console.log('🚀 Initializing modal with package:', packageData.code);
       const userPhone = getUserPhone();
+      console.log('📞 User phone from context:', userPhone);
+      
       // Clean and format phone number
       let cleanPhone = userPhone.replace(/\D/g, '');
       if (cleanPhone.startsWith('254')) {
@@ -73,6 +82,8 @@ export default function MpesaPaymentModal({
       if (cleanPhone.startsWith('0')) {
         cleanPhone = cleanPhone.substring(1);
       }
+      console.log('📞 Cleaned phone number:', cleanPhone);
+      
       setPhoneNumber(cleanPhone);
       setPaymentStep('confirm');
       setTransactionCode('');
@@ -84,6 +95,7 @@ export default function MpesaPaymentModal({
   // Animation for modal show/hide
   useEffect(() => {
     if (visible) {
+      console.log('🎬 Animating modal in');
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: 0,
@@ -97,6 +109,7 @@ export default function MpesaPaymentModal({
         }),
       ]).start();
     } else {
+      console.log('🎬 Animating modal out');
       Animated.parallel([
         Animated.timing(slideAnim, {
           toValue: SCREEN_HEIGHT,
@@ -110,7 +123,7 @@ export default function MpesaPaymentModal({
         }),
       ]).start();
     }
-  }, [visible]);
+  }, [visible, slideAnim, opacityAnim]);
 
   // Spinning animation for loading states
   useEffect(() => {
@@ -134,7 +147,7 @@ export default function MpesaPaymentModal({
         spinAnimation.stop();
       }
     };
-  }, [paymentStep]);
+  }, [paymentStep, spinAnim]);
 
   // Button press animation
   const animateButtonPress = () => {
@@ -205,18 +218,22 @@ export default function MpesaPaymentModal({
       return;
     }
 
+    console.log('💳 Initiating payment for package:', packageData.code);
     animateButtonPress();
     setPaymentStep('processing');
     setErrorMessage('');
 
     try {
       const formattedPhone = formatPhoneForAPI(phoneNumber);
+      console.log('📞 Formatted phone for API:', formattedPhone);
       
       const response = await api.post('/api/v1/mpesa/stk_push', {
         phone_number: formattedPhone,
         amount: packageData.cost,
         package_id: packageData.id,
       });
+
+      console.log('📡 STK Push response:', response.data);
 
       if (response.data.status === 'success') {
         const requestId = response.data.data.checkout_request_id;
@@ -234,7 +251,7 @@ export default function MpesaPaymentModal({
         throw new Error(response.data.message || 'Payment initiation failed');
       }
     } catch (error: any) {
-      console.error('Payment initiation error:', error);
+      console.error('💳 Payment initiation error:', error);
       
       setPaymentStep('failed');
       const errorMsg = error.response?.data?.message || error.message || 'Payment failed to initialize';
@@ -250,20 +267,25 @@ export default function MpesaPaymentModal({
 
   // Poll payment status
   const startPolling = (requestId: string) => {
+    console.log('🔄 Starting payment polling for:', requestId);
     setIsPolling(true);
     let pollCount = 0;
     const maxPolls = 40; // Poll for up to 2 minutes (40 * 3 seconds)
 
     pollingIntervalRef.current = setInterval(async () => {
       pollCount++;
+      console.log(`🔄 Polling attempt ${pollCount}/${maxPolls}`);
       
       try {
         const response = await api.post('/api/v1/mpesa/query_status', {
           checkout_request_id: requestId,
         });
 
+        console.log('📡 Polling response:', response.data);
+
         if (response.data.status === 'success') {
           const transactionStatus = response.data.data.transaction_status;
+          console.log('💳 Transaction status:', transactionStatus);
           
           if (transactionStatus === 'completed') {
             // Payment successful
@@ -305,7 +327,7 @@ export default function MpesaPaymentModal({
           // Continue polling if still pending
         }
       } catch (error) {
-        console.error('Polling error:', error);
+        console.error('🔄 Polling error:', error);
         // Continue polling unless max attempts reached
         if (pollCount >= maxPolls) {
           if (pollingIntervalRef.current) {
@@ -330,6 +352,7 @@ export default function MpesaPaymentModal({
     }
 
     try {
+      console.log('🔍 Verifying manual transaction code:', transactionCode);
       // You can implement manual verification logic here
       // For now, we'll assume it's successful
       setPaymentStep('success');
@@ -356,6 +379,7 @@ export default function MpesaPaymentModal({
 
   // Retry payment
   const retryPayment = () => {
+    console.log('🔄 Retrying payment');
     setPaymentStep('confirm');
     setErrorMessage('');
     setCheckoutRequestId(null);
@@ -367,6 +391,7 @@ export default function MpesaPaymentModal({
 
   // Close modal and cleanup
   const handleClose = () => {
+    console.log('❌ Closing modal');
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
     }
@@ -377,7 +402,13 @@ export default function MpesaPaymentModal({
     onClose();
   };
 
-  if (!packageData) return null;
+  // Early return if no package data
+  if (!packageData) {
+    console.log('⚠️ No package data provided to modal');
+    return null;
+  }
+
+  console.log('🎭 Rendering modal with visible:', visible, 'step:', paymentStep);
 
   const spin = spinAnim.interpolate({
     inputRange: [0, 1],
