@@ -1,5 +1,5 @@
-// app/(drawer)/Business.tsx - Enhanced with business management features
-import React, { useState, Suspense } from 'react';
+// app/(drawer)/Business.tsx - Enhanced with business management features and fixed navigation/avatar
+import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -16,21 +16,84 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Clipboard from 'expo-clipboard';
+import * as ImagePicker from 'expo-image-picker';
+import { useRouter } from 'expo-router';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
+import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
+import { getFullAvatarUrl } from '../../lib/api';
 
-// Lazy load business modals
+// Lazy load business modals and avatar components
 const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
 const JoinBusinessModal = React.lazy(() => import('../../components/JoinBusinessModal'));
+const AvatarPreviewModal = React.lazy(() => import('../../components/AvatarPreviewModal'));
 
 interface BusinessProps {
   navigation: any;
 }
 
+// Safe Avatar Component with error handling like in AccountContent
+interface SafeAvatarProps {
+  size: number;
+  avatarUrl?: string | null;
+  fallbackSource?: any;
+  style?: any;
+  onPress?: () => void;
+}
+
+const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
+  size, 
+  avatarUrl, 
+  fallbackSource = require('../../assets/images/avatar_placeholder.png'),
+  style,
+  onPress 
+}) => {
+  const [hasError, setHasError] = useState(false);
+  const [imageKey, setImageKey] = useState(Date.now());
+  const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
+  
+  useEffect(() => {
+    setHasError(false);
+    setImageKey(Date.now());
+  }, [avatarUrl]);
+  
+  if (!fullAvatarUrl || hasError) {
+    return (
+      <TouchableOpacity onPress={onPress} disabled={!onPress}>
+        <Image
+          source={fallbackSource}
+          style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
+        />
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <TouchableOpacity onPress={onPress} disabled={!onPress}>
+      <Image
+        source={{ 
+          uri: `${fullAvatarUrl}?v=${imageKey}`,
+          headers: {
+            'Cache-Control': 'no-cache, no-store, must-revalidate',
+            'Pragma': 'no-cache',
+            'Expires': '0'
+          }
+        }}
+        style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
+        onError={() => {
+          console.warn('Avatar failed to load:', fullAvatarUrl);
+          setHasError(true);
+        }}
+      />
+    </TouchableOpacity>
+  );
+};
+
 export default function Business({ navigation }: BusinessProps) {
+  const router = useRouter();
   const { 
     user, 
     businesses,
@@ -39,6 +102,8 @@ export default function Business({ navigation }: BusinessProps) {
     getUserPhone,
     getDisplayName,
     refreshBusinesses,
+    refreshUser,
+    clearUserCache,
     selectedBusiness,
     setSelectedBusiness,
   } = useUser();
@@ -52,16 +117,39 @@ export default function Business({ navigation }: BusinessProps) {
   const [currentBusinessIndex, setCurrentBusinessIndex] = useState(0);
   const [inviteLink, setInviteLink] = useState(null);
   const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
+  
+  // Avatar functionality states
+  const [previewUri, setPreviewUri] = useState(null);
+  const [avatarLoading, setAvatarLoading] = useState(false);
 
   const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
   const username = getDisplayName();
 
-  const avatarSource = user?.avatar_url
-    ? { uri: user.avatar_url }
-    : require('../../assets/images/avatar_placeholder.png');
-
   const currentBusiness = selectedBusiness || businesses.owned[currentBusinessIndex] || businesses.owned[0];
+
+  // Fixed back navigation
+  const handleGoBack = () => {
+    try {
+      if (router.canGoBack()) {
+        router.back();
+      } else {
+        router.replace('/');
+      }
+    } catch (error) {
+      console.error('Navigation error:', error);
+      // Fallback navigation
+      try {
+        if (navigation?.goBack) {
+          navigation.goBack();
+        } else if (navigation?.navigate) {
+          navigation.navigate('index');
+        }
+      } catch (navError) {
+        console.error('Fallback navigation error:', navError);
+      }
+    }
+  };
 
   const handleLogin = () => {
     setShowLoginModal(true);
@@ -69,14 +157,6 @@ export default function Business({ navigation }: BusinessProps) {
 
   const handleSignup = () => {
     setShowSignupModal(true);
-  };
-
-  const handleGoBack = () => {
-    if (navigation?.canGoBack && navigation.canGoBack()) {
-      navigation.goBack();
-    } else if (navigation?.navigate) {
-      navigation.navigate('index');
-    }
   };
 
   const switchToSignup = () => {
@@ -165,7 +245,7 @@ export default function Business({ navigation }: BusinessProps) {
   const handleBusinessModalClose = async () => {
     setShowBusinessModal(false);
     try {
-      await refreshBusinesses?.(true); // Force refresh after creating business
+      await refreshBusinesses?.(true);
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
@@ -175,17 +255,88 @@ export default function Business({ navigation }: BusinessProps) {
   const handleJoinModalClose = async () => {
     setShowJoinModal(false);
     try {
-      await refreshBusinesses?.(true); // Force refresh after joining business
+      await refreshBusinesses?.(true);
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
   };
 
+  // Avatar picker functionality (from AccountContent)
+  const pickAndPreviewAvatar = useCallback(async () => {
+    try {
+      const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (!permission.granted) {
+        Toast.show({
+          type: 'error',
+          text1: 'Photo access denied',
+          text2: 'Please allow photo access to change avatar',
+        });
+        return;
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.7,
+        aspect: [1, 1],
+      });
+
+      if (result.canceled || !result.assets?.length) return;
+      setPreviewUri(result.assets[0].uri);
+    } catch (error) {
+      console.error('Error picking avatar:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Failed to select image',
+        text2: 'Please try again',
+      });
+    }
+  }, []);
+
+  // Avatar upload functionality (from AccountContent)
+  const confirmUploadAvatar = useCallback(async () => {
+    try {
+      if (!previewUri) return;
+
+      setAvatarLoading(true);
+      console.log('Starting avatar upload...');
+      
+      const result = await uploadAvatar(previewUri);
+      
+      if (result?.avatar_url) {
+        console.log('New avatar URL received:', result.avatar_url);
+        
+        // Force clear all cache before refreshing
+        await clearUserCache();
+        
+        // Force refresh user data to get the new avatar URL
+        await refreshUser(true);
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Avatar updated!',
+          text2: 'Your profile picture has been changed',
+        });
+      }
+      
+    } catch (error) {
+      console.error('Error uploading avatar:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Upload failed',
+        text2: 'Please try again',
+      });
+    } finally {
+      setPreviewUri(null);
+      setAvatarLoading(false);
+    }
+  }, [previewUri, refreshUser, clearUserCache]);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header */}
+      {/* Header with fixed back navigation */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
@@ -210,12 +361,22 @@ export default function Business({ navigation }: BusinessProps) {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Section */}
+        {/* Profile Section with working avatar functionality */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
-            <Image source={avatarSource} style={styles.avatar} />
-            <TouchableOpacity style={styles.addAvatarButton}>
-              <Feather name="plus" size={20} color="#fff" />
+            <SafeAvatar
+              size={86}
+              avatarUrl={user?.avatar_url}
+              fallbackSource={require('../../assets/images/avatar_placeholder.png')}
+              style={styles.avatar}
+              onPress={pickAndPreviewAvatar}
+            />
+            <TouchableOpacity 
+              style={styles.addAvatarButton}
+              onPress={pickAndPreviewAvatar}
+              disabled={avatarLoading}
+            >
+              <Feather name={avatarLoading ? "loader" : "plus"} size={20} color="#fff" />
             </TouchableOpacity>
           </View>
 
@@ -262,7 +423,6 @@ export default function Business({ navigation }: BusinessProps) {
             style={styles.editButton}
             disabled={!currentBusiness}
             onPress={() => {
-              // Navigate to edit business screen
               Toast.show({
                 type: 'info',
                 text1: 'Edit Business',
@@ -425,6 +585,15 @@ export default function Business({ navigation }: BusinessProps) {
             visible={showJoinModal}
             onClose={handleJoinModalClose}
             onJoin={handleJoinModalClose}
+          />
+        )}
+
+        {previewUri && (
+          <AvatarPreviewModal
+            visible
+            uri={previewUri}
+            onCancel={() => setPreviewUri(null)}
+            onConfirm={confirmUploadAvatar}
           />
         )}
       </Suspense>
