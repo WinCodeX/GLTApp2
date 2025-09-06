@@ -208,25 +208,14 @@ export default function JoinBusinessModal({ visible, onClose, onJoin }: JoinBusi
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.15)', // Much lighter overlay
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 60,
+    backgroundColor: '#16213e', // Direct background, no transparency
   },
   modalContent: {
+    flex: 1,
     backgroundColor: '#16213e',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '95%', // Increased from 100% with maxWidth constraint
-    minHeight: 600, // Ensure minimum height
-    padding: 32, // Increased padding
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.15,
-    shadowRadius: 12,
-    elevation: 8,
+    padding: 32,
+    paddingTop: 60, // Account for status bar
+    paddingBottom: 40,
   },
   modalHeader: {
     alignItems: 'center',
