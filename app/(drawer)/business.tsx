@@ -26,7 +26,7 @@ import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
 import { getFullAvatarUrl } from '../../lib/api';
 
-// Import the centralized upload avatar helper
+// Import the fixed upload avatar helper
 import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
 
 // Lazy load business modals and avatar components
@@ -304,19 +304,22 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, []);
 
-  // Updated avatar upload using centralized helper
+  // Fixed avatar upload using the simplified helper
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('Starting avatar upload process using centralized helper...');
+      console.log('Starting avatar upload process using fixed helper...');
       
-      // Use the centralized uploadAvatar helper
+      // Use the fixed uploadAvatar helper
       const result = await uploadAvatar(previewUri);
       
-      if (result?.success && result?.avatar_url) {
-        console.log('Avatar uploaded successfully:', result.avatar_url);
+      console.log('Upload result:', result);
+      
+      // Check for success - handle different response formats
+      if (result?.avatar_url || result?.success) {
+        console.log('Avatar uploaded successfully');
         
         // Force clear all cache before refreshing
         await clearUserCache();
@@ -330,7 +333,7 @@ export default function Business({ navigation }: BusinessProps) {
           text2: 'Your profile picture has been changed',
         });
       } else {
-        throw new Error(result?.error || 'Upload failed');
+        throw new Error('Upload successful but no avatar URL returned');
       }
       
     } catch (error: any) {
