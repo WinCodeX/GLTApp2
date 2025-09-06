@@ -164,32 +164,37 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                   
                   {/* Categories Grid */}
                   <View style={styles.categoriesContainer}>
-                    <View style={styles.categoriesGrid}>
-                      {BUSINESS_CATEGORIES.map((category, index) => {
-                        const isSelected = selectedCategories.includes(category);
-                        return (
-                          <TouchableOpacity
-                            key={`category-${index}`}
-                            style={[
-                              styles.categoryChip,
-                              isSelected && styles.selectedCategoryChip
-                            ]}
-                            onPress={() => handleCategoryToggle(category)}
-                            disabled={loading}
-                          >
-                            <Text style={[
-                              styles.categoryChipText,
-                              isSelected && styles.selectedCategoryChipText
-                            ]}>
-                              {category}
-                            </Text>
-                            {isSelected && (
-                              <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
-                            )}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
+                    <ScrollView 
+                      showsVerticalScrollIndicator={false}
+                      contentContainerStyle={styles.categoriesScrollContent}
+                    >
+                      <View style={styles.categoriesGrid}>
+                        {BUSINESS_CATEGORIES.map((category, index) => {
+                          const isSelected = selectedCategories.includes(category);
+                          return (
+                            <TouchableOpacity
+                              key={`category-${index}`}
+                              style={[
+                                styles.categoryChip,
+                                isSelected && styles.selectedCategoryChip
+                              ]}
+                              onPress={() => handleCategoryToggle(category)}
+                              disabled={loading}
+                            >
+                              <Text style={[
+                                styles.categoryChipText,
+                                isSelected && styles.selectedCategoryChipText
+                              ]}>
+                                {category}
+                              </Text>
+                              {isSelected && (
+                                <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                              )}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </View>
+                    </ScrollView>
                   </View>
                 </View>
               </View>
@@ -312,14 +317,17 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 12,
+    height: 280, // Fixed height for proper scrolling
     padding: 16,
-    maxHeight: 300, // Limit height and make scrollable
+  },
+  categoriesScrollContent: {
+    flexGrow: 1,
   },
   categoriesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     justifyContent: 'flex-start',
-    gap: 8,
+    paddingBottom: 16,
   },
   categoryChip: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
