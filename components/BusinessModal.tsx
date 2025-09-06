@@ -67,31 +67,33 @@ const CategorySelectionModal = ({
             </Text>
           </View>
 
-          {/* Categories List */}
+          {/* Categories Grid */}
           <ScrollView style={styles.categoriesList} showsVerticalScrollIndicator={false}>
-            {BUSINESS_CATEGORIES.map((category) => {
-              const isSelected = selectedCategories.includes(category);
-              return (
-                <TouchableOpacity
-                  key={category}
-                  style={[
-                    styles.categoryListItem,
-                    isSelected && styles.selectedCategoryListItem
-                  ]}
-                  onPress={() => onCategoryToggle(category)}
-                >
-                  <Text style={[
-                    styles.categoryListText,
-                    isSelected && styles.selectedCategoryListText
-                  ]}>
-                    {category}
-                  </Text>
-                  {isSelected && (
-                    <Feather name="check" size={18} color="#7c3aed" />
-                  )}
-                </TouchableOpacity>
-              );
-            })}
+            <View style={styles.categoriesGrid}>
+              {BUSINESS_CATEGORIES.map((category) => {
+                const isSelected = selectedCategories.includes(category);
+                return (
+                  <TouchableOpacity
+                    key={category}
+                    style={[
+                      styles.categoryChip,
+                      isSelected && styles.selectedCategoryChip
+                    ]}
+                    onPress={() => onCategoryToggle(category)}
+                  >
+                    <Text style={[
+                      styles.categoryChipText,
+                      isSelected && styles.selectedCategoryChipText
+                    ]}>
+                      {category}
+                    </Text>
+                    {isSelected && (
+                      <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                    )}
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
           </ScrollView>
 
           {/* Done Button */}
@@ -487,26 +489,40 @@ const styles = StyleSheet.create({
     flex: 1,
     marginBottom: 24,
   },
-  categoryListItem: {
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    paddingVertical: 8,
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 4,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)', // Changed from dark to light
+    minWidth: 80,
+    justifyContent: 'center',
   },
-  selectedCategoryListItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.15)', // Adjusted for dark background
+  selectedCategoryChip: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
   },
-  categoryListText: {
-    fontSize: 16,
-    color: '#fff', // Changed from dark to white
+  categoryChipText: {
+    fontSize: 14,
+    color: '#fff',
     fontWeight: '500',
+    textAlign: 'center',
   },
-  selectedCategoryListText: {
-    color: '#7c3aed',
+  selectedCategoryChipText: {
+    color: '#fff',
     fontWeight: '600',
+  },
+  categoryCheckIcon: {
+    marginLeft: 6,
   },
   categoryDoneButton: {
     backgroundColor: '#7c3aed',
