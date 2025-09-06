@@ -165,35 +165,34 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                   {/* Categories Grid */}
                   <View style={styles.categoriesContainer}>
                     <ScrollView 
-                      showsVerticalScrollIndicator={false}
-                      contentContainerStyle={styles.categoriesScrollContent}
+                      showsVerticalScrollIndicator={true}
+                      nestedScrollEnabled={true}
+                      style={styles.categoriesScrollView}
                     >
-                      <View style={styles.categoriesGrid}>
-                        {BUSINESS_CATEGORIES.map((category, index) => {
-                          const isSelected = selectedCategories.includes(category);
-                          return (
-                            <TouchableOpacity
-                              key={`category-${index}`}
-                              style={[
-                                styles.categoryChip,
-                                isSelected && styles.selectedCategoryChip
-                              ]}
-                              onPress={() => handleCategoryToggle(category)}
-                              disabled={loading}
-                            >
-                              <Text style={[
-                                styles.categoryChipText,
-                                isSelected && styles.selectedCategoryChipText
-                              ]}>
-                                {category}
-                              </Text>
-                              {isSelected && (
-                                <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
-                              )}
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
+                      {BUSINESS_CATEGORIES.map((category, index) => {
+                        const isSelected = selectedCategories.includes(category);
+                        return (
+                          <TouchableOpacity
+                            key={`category-${index}`}
+                            style={[
+                              styles.categoryChip,
+                              isSelected && styles.selectedCategoryChip
+                            ]}
+                            onPress={() => handleCategoryToggle(category)}
+                            disabled={loading}
+                          >
+                            <Text style={[
+                              styles.categoryChipText,
+                              isSelected && styles.selectedCategoryChipText
+                            ]}>
+                              {category}
+                            </Text>
+                            {isSelected && (
+                              <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
                     </ScrollView>
                   </View>
                 </View>
@@ -317,17 +316,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 12,
-    height: 280, // Fixed height for proper scrolling
+    height: 280,
     padding: 16,
   },
-  categoriesScrollContent: {
-    flexGrow: 1,
-  },
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'flex-start',
-    paddingBottom: 16,
+  categoriesScrollView: {
+    flex: 1,
   },
   categoryChip: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
@@ -335,11 +328,12 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
-    minHeight: 40,
+    marginBottom: 12,
+    minHeight: 44,
+    alignSelf: 'flex-start',
   },
   selectedCategoryChip: {
     backgroundColor: '#7c3aed',
