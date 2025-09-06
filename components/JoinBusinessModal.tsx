@@ -1,4 +1,4 @@
-// components/JoinBusinessModal.tsx - Optimized size and performance
+// components/JoinBusinessModal.tsx - Fixed size and visibility
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -101,105 +101,103 @@ export default function JoinBusinessModal({ visible, onClose, onJoin }: JoinBusi
             activeOpacity={1}
             onPress={() => {}}
           >
-            <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-              {/* Header */}
-              <View style={styles.modalHeader}>
-                <View style={styles.headerIcon}>
-                  <Feather name="users" size={24} color="#7c3aed" />
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View style={styles.headerIcon}>
+                <Feather name="users" size={28} color="#7c3aed" />
+              </View>
+              <Text style={styles.modalTitle}>Join Existing Business</Text>
+              <Text style={styles.modalSubtitle}>
+                Enter the invite code to join your team
+              </Text>
+            </View>
+
+            {/* Form */}
+            <View style={styles.formContainer}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Invite Code *</Text>
+                <View style={styles.inputWrapper}>
+                  <TextInput
+                    style={styles.input}
+                    value={inviteCode}
+                    onChangeText={setInviteCode}
+                    placeholder="Enter invite code"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    autoCapitalize="characters"
+                    maxLength={20}
+                    editable={!loading}
+                  />
+                  <TouchableOpacity
+                    style={styles.pasteButton}
+                    onPress={handlePaste}
+                    disabled={loading}
+                  >
+                    <Feather name="clipboard" size={18} color="#7c3aed" />
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.modalTitle}>Join Existing Business</Text>
-                <Text style={styles.modalSubtitle}>
-                  Enter the invite code to join your team
+                <Text style={styles.helpText}>
+                  Ask your team member to share the invite code
                 </Text>
               </View>
 
-              {/* Form */}
-              <View style={styles.formContainer}>
-                <View style={styles.inputGroup}>
-                  <Text style={styles.inputLabel}>Invite Code *</Text>
-                  <View style={styles.inputWrapper}>
-                    <TextInput
-                      style={styles.input}
-                      value={inviteCode}
-                      onChangeText={setInviteCode}
-                      placeholder="Enter invite code"
-                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                      autoCapitalize="characters"
-                      maxLength={20}
-                      editable={!loading}
-                    />
-                    <TouchableOpacity
-                      style={styles.pasteButton}
-                      onPress={handlePaste}
-                      disabled={loading}
-                    >
-                      <Feather name="clipboard" size={16} color="#7c3aed" />
-                    </TouchableOpacity>
+              {/* Instructions */}
+              <View style={styles.instructionsContainer}>
+                <Text style={styles.instructionsTitle}>How to join:</Text>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepText}>1</Text>
                   </View>
-                  <Text style={styles.helpText}>
-                    Ask your team member to share the invite code
+                  <Text style={styles.instructionText}>
+                    Get invite code from business owner
                   </Text>
                 </View>
-
-                {/* Instructions */}
-                <View style={styles.instructionsContainer}>
-                  <Text style={styles.instructionsTitle}>How to join:</Text>
-                  <View style={styles.instructionItem}>
-                    <View style={styles.stepNumber}>
-                      <Text style={styles.stepText}>1</Text>
-                    </View>
-                    <Text style={styles.instructionText}>
-                      Get invite code from business owner
-                    </Text>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepText}>2</Text>
                   </View>
-                  <View style={styles.instructionItem}>
-                    <View style={styles.stepNumber}>
-                      <Text style={styles.stepText}>2</Text>
-                    </View>
-                    <Text style={styles.instructionText}>
-                      Enter code and tap "Join Business"
-                    </Text>
+                  <Text style={styles.instructionText}>
+                    Enter code and tap "Join Business"
+                  </Text>
+                </View>
+                <View style={styles.instructionItem}>
+                  <View style={styles.stepNumber}>
+                    <Text style={styles.stepText}>3</Text>
                   </View>
-                  <View style={styles.instructionItem}>
-                    <View style={styles.stepNumber}>
-                      <Text style={styles.stepText}>3</Text>
-                    </View>
-                    <Text style={styles.instructionText}>
-                      Start sending packages with your team
-                    </Text>
-                  </View>
+                  <Text style={styles.instructionText}>
+                    Start sending packages with your team
+                  </Text>
                 </View>
               </View>
+            </View>
 
-              {/* Actions */}
-              <View style={styles.actionContainer}>
-                <TouchableOpacity
-                  style={[styles.secondaryButton, loading && styles.disabledButton]}
-                  onPress={handleClose}
-                  disabled={loading}
-                >
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
-                </TouchableOpacity>
+            {/* Actions */}
+            <View style={styles.actionContainer}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, loading && styles.disabledButton]}
+                onPress={handleClose}
+                disabled={loading}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    (!inviteCode.trim() || loading) && styles.disabledButton
-                  ]}
-                  onPress={handleJoin}
-                  disabled={!inviteCode.trim() || loading}
-                >
-                  {loading ? (
-                    <View style={styles.loadingContainer}>
-                      <ActivityIndicator size="small" color="#fff" />
-                      <Text style={styles.primaryButtonText}>Joining...</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.primaryButtonText}>Join Business</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  (!inviteCode.trim() || loading) && styles.disabledButton
+                ]}
+                onPress={handleJoin}
+                disabled={!inviteCode.trim() || loading}
+              >
+                {loading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.primaryButtonText}>Joining...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryButtonText}>Join Business</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </TouchableOpacity>
         </TouchableOpacity>
       </KeyboardAvoidingView>
@@ -210,65 +208,65 @@ export default function JoinBusinessModal({ visible, onClose, onJoin }: JoinBusi
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    backgroundColor: 'rgba(0, 0, 0, 0.15)', // Much lighter overlay
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 32,
+    paddingHorizontal: 24,
+    paddingVertical: 60,
   },
   modalContent: {
     backgroundColor: '#16213e',
     borderRadius: 24,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '70%',
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 10,
+    width: '95%', // Increased from 100% with maxWidth constraint
+    minHeight: 600, // Ensure minimum height
+    padding: 32, // Increased padding
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
   },
   modalHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 40, // Increased spacing
   },
   headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 70, // Increased size
+    height: 70,
+    borderRadius: 35,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 24, // Increased spacing
     borderWidth: 2,
     borderColor: 'rgba(124, 58, 237, 0.4)',
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 26, // Increased font size
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12, // Increased spacing
   },
   modalSubtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 15,
+    fontSize: 16, // Increased font size
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   formContainer: {
-    marginBottom: 20,
+    marginBottom: 32, // Increased spacing
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 32, // Increased spacing
   },
   inputLabel: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16, // Increased font size
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 12, // Increased spacing
   },
   inputWrapper: {
     position: 'relative',
@@ -277,76 +275,80 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 10,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    paddingRight: 45,
+    borderRadius: 12,
+    paddingHorizontal: 18, // Increased padding
+    paddingVertical: 16, // Increased padding
+    paddingRight: 50,
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16, // Increased font size
     fontWeight: '400',
     textTransform: 'uppercase',
     letterSpacing: 1,
   },
   pasteButton: {
     position: 'absolute',
-    right: 12,
-    top: 12,
-    padding: 4,
+    right: 15,
+    top: 15,
+    padding: 6,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 6,
   },
   helpText: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 12,
-    marginTop: 4,
-    lineHeight: 16,
+    fontSize: 13, // Increased font size
+    marginTop: 8, // Increased spacing
+    lineHeight: 18,
   },
   instructionsContainer: {
     backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderRadius: 10,
-    padding: 12,
+    borderRadius: 12,
+    padding: 20, // Increased padding
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.2)',
   },
   instructionsTitle: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 16, // Increased font size
     fontWeight: '600',
-    marginBottom: 12,
+    marginBottom: 16, // Increased spacing
   },
   instructionItem: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    marginBottom: 10,
+    marginBottom: 14, // Increased spacing
   },
   stepNumber: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 24, // Increased size
+    height: 24,
+    borderRadius: 12,
     backgroundColor: '#7c3aed',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 10,
+    marginRight: 12, // Increased spacing
     marginTop: 1,
   },
   stepText: {
     color: '#fff',
-    fontSize: 11,
+    fontSize: 12, // Increased font size
     fontWeight: '700',
   },
   instructionText: {
     color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14, // Increased font size
+    lineHeight: 20,
     flex: 1,
   },
   actionContainer: {
     flexDirection: 'row',
     gap: 16,
+    marginTop: 'auto', // Push buttons to bottom
+    paddingTop: 24, // Add some spacing from content
   },
   primaryButton: {
     flex: 1,
     backgroundColor: '#7c3aed',
-    paddingVertical: 16,
-    borderRadius: 10,
+    paddingVertical: 18, // Increased padding
+    borderRadius: 12,
     alignItems: 'center',
     shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
@@ -356,21 +358,21 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16, // Increased font size
     fontWeight: '600',
   },
   secondaryButton: {
     flex: 1,
     backgroundColor: 'transparent',
-    paddingVertical: 16,
-    borderRadius: 10,
+    paddingVertical: 18, // Increased padding
+    borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   secondaryButtonText: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16, // Increased font size
     fontWeight: '500',
   },
   disabledButton: {
