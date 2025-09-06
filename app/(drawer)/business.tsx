@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Enhanced with business management features and fixed navigation/avatar
+// app/(drawer)/Business.tsx - Fixed avatar upload functionality
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -17,14 +17,15 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
-import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
 import { getFullAvatarUrl } from '../../lib/api';
+import api from '../../lib/api';
 
 // Lazy load business modals and avatar components
 const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
@@ -35,7 +36,7 @@ interface BusinessProps {
   navigation: any;
 }
 
-// Safe Avatar Component with error handling like in AccountContent
+// Safe Avatar Component with error handling
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
@@ -92,6 +93,74 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   );
 };
 
+// Fixed avatar upload function for React Native
+const uploadAvatar = async (uri: string) => {
+  try {
+    console.log('Starting avatar upload with URI:', uri);
+    
+    // Get file info first for validation
+    const fileInfo = await FileSystem.getInfoAsync(uri);
+    console.log('File info:', fileInfo);
+    
+    if (!fileInfo.exists) {
+      throw new Error('File does not exist');
+    }
+    
+    if (fileInfo.size && fileInfo.size > 5 * 1024 * 1024) { // 5MB limit
+      throw new Error('File too large (max 5MB)');
+    }
+
+    // Detect file type from URI
+    const fileName = uri.split('/').pop() || 'avatar.jpg';
+    const fileExtension = fileName.split('.').pop()?.toLowerCase() || 'jpg';
+    
+    let mimeType = 'image/jpeg';
+    if (fileExtension === 'png') mimeType = 'image/png';
+    else if (fileExtension === 'gif') mimeType = 'image/gif';
+    else if (fileExtension === 'webp') mimeType = 'image/webp';
+
+    console.log('Detected MIME type:', mimeType);
+
+    // Create FormData properly for React Native
+    const formData = new FormData();
+    formData.append('avatar', {
+      uri: uri,
+      type: mimeType,
+      name: fileName
+    } as any);
+
+    console.log('FormData created successfully');
+
+    // Make the API request without setting Content-Type header
+    const response = await api.put('/api/v1/me/avatar', formData, {
+      timeout: 30000, // 30 second timeout for file upload
+      onUploadProgress: (progressEvent) => {
+        if (progressEvent.total) {
+          const progress = (progressEvent.loaded / progressEvent.total) * 100;
+          console.log(`Upload progress: ${Math.round(progress)}%`);
+        }
+      }
+    });
+
+    console.log('Upload response:', response.data);
+    return response.data;
+    
+  } catch (error: any) {
+    console.error('Avatar upload error:', error);
+    
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response data:', error.response.data);
+      throw new Error(error.response.data?.error || `Upload failed with status ${error.response.status}`);
+    } else if (error.request) {
+      console.error('Request error:', error.request);
+      throw new Error('Network error - please check your connection');
+    } else {
+      throw new Error(error.message || 'Upload failed');
+    }
+  }
+};
+
 export default function Business({ navigation }: BusinessProps) {
   const router = useRouter();
   const { 
@@ -138,7 +207,6 @@ export default function Business({ navigation }: BusinessProps) {
       }
     } catch (error) {
       console.error('Navigation error:', error);
-      // Fallback navigation
       try {
         if (navigation?.goBack) {
           navigation.goBack();
@@ -261,7 +329,7 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  // Avatar picker functionality (from AccountContent)
+  // Avatar picker functionality with better validation
   const pickAndPreviewAvatar = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -277,12 +345,21 @@ export default function Business({ navigation }: BusinessProps) {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.7,
+        quality: 0.8, // Slightly higher quality
         aspect: [1, 1],
       });
 
       if (result.canceled || !result.assets?.length) return;
-      setPreviewUri(result.assets[0].uri);
+      
+      const asset = result.assets[0];
+      console.log('Selected image:', {
+        uri: asset.uri,
+        width: asset.width,
+        height: asset.height,
+        fileSize: asset.fileSize
+      });
+      
+      setPreviewUri(asset.uri);
     } catch (error) {
       console.error('Error picking avatar:', error);
       Toast.show({
@@ -293,18 +370,18 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, []);
 
-  // Avatar upload functionality (from AccountContent)
+  // Fixed avatar upload functionality
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('Starting avatar upload...');
+      console.log('Starting avatar upload process...');
       
       const result = await uploadAvatar(previewUri);
       
-      if (result?.avatar_url) {
-        console.log('New avatar URL received:', result.avatar_url);
+      if (result?.success && result?.avatar_url) {
+        console.log('Avatar uploaded successfully:', result.avatar_url);
         
         // Force clear all cache before refreshing
         await clearUserCache();
@@ -317,14 +394,16 @@ export default function Business({ navigation }: BusinessProps) {
           text1: 'Avatar updated!',
           text2: 'Your profile picture has been changed',
         });
+      } else {
+        throw new Error(result?.error || 'Upload failed');
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error uploading avatar:', error);
       Toast.show({
         type: 'error',
         text1: 'Upload failed',
-        text2: 'Please try again',
+        text2: error.message || 'Please try again',
       });
     } finally {
       setPreviewUri(null);
@@ -462,7 +541,7 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
       </ScrollView>
 
-      {/* Business Dropdown Modal */}
+      {/* All the modals remain the same */}
       {showBusinessDropdown && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -496,7 +575,6 @@ export default function Business({ navigation }: BusinessProps) {
         </Modal>
       )}
 
-      {/* Add Business Options Modal */}
       {showAddBusinessOptions && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -527,7 +605,6 @@ export default function Business({ navigation }: BusinessProps) {
         </Modal>
       )}
 
-      {/* Share Business Modal */}
       {selectedBusinessForShare && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -598,14 +675,12 @@ export default function Business({ navigation }: BusinessProps) {
         )}
       </Suspense>
 
-      {/* Login Modal */}
       <LoginModal
         visible={showLoginModal}
         onClose={() => setShowLoginModal(false)}
         onSwitchToSignup={switchToSignup}
       />
 
-      {/* Signup Modal */}
       <SignupModal
         visible={showSignupModal}
         onClose={() => setShowSignupModal(false)}
@@ -615,6 +690,7 @@ export default function Business({ navigation }: BusinessProps) {
   );
 }
 
+// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
