@@ -1,4 +1,4 @@
-// components/BusinessModal.tsx - Fixed category selection with matching colors
+// components/BusinessModal.tsx - Fixed with inline category selection
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -30,90 +30,10 @@ const BUSINESS_CATEGORIES = [
   'Beauty & Wellness', 'Legal Services', 'Marketing', 'Sports & Fitness', 'Non-Profit'
 ];
 
-// Category Selection Modal Component
-const CategorySelectionModal = ({ 
-  visible, 
-  onClose, 
-  selectedCategories, 
-  onCategoryToggle 
-}: {
-  visible: boolean;
-  onClose: () => void;
-  selectedCategories: string[];
-  onCategoryToggle: (category: string) => void;
-}) => {
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-    >
-      <View style={styles.categoryModalOverlay}>
-        <TouchableOpacity 
-          style={styles.categoryModalBackdrop} 
-          onPress={onClose}
-          activeOpacity={1}
-        />
-        <View style={styles.categoryModalContent}>
-          {/* Handle Bar */}
-          <View style={styles.modalHandle} />
-          
-          {/* Header */}
-          <View style={styles.categoryModalHeader}>
-            <Text style={styles.categoryModalTitle}>Select Business Categories</Text>
-            <Text style={styles.categoryModalSubtitle}>
-              Choose up to 5 categories ({selectedCategories.length}/5)
-            </Text>
-          </View>
-
-          {/* Categories Grid */}
-          <ScrollView style={styles.categoriesList} showsVerticalScrollIndicator={false}>
-            <View style={styles.categoriesGrid}>
-              {BUSINESS_CATEGORIES.map((category, index) => {
-                const isSelected = selectedCategories.includes(category);
-                return (
-                  <TouchableOpacity
-                    key={`category-${index}`}
-                    style={[
-                      styles.categoryChip,
-                      isSelected && styles.selectedCategoryChip
-                    ]}
-                    onPress={() => onCategoryToggle(category)}
-                  >
-                    <Text style={[
-                      styles.categoryChipText,
-                      isSelected && styles.selectedCategoryChipText
-                    ]}>
-                      {category}
-                    </Text>
-                    {isSelected && (
-                      <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-          </ScrollView>
-
-          {/* Done Button */}
-          <TouchableOpacity 
-            style={styles.categoryDoneButton} 
-            onPress={onClose}
-          >
-            <Text style={styles.categoryDoneButtonText}>Done</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
-};
-
 export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
   const [businessName, setBusinessName] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
-  const [showCategoryModal, setShowCategoryModal] = useState(false);
 
   const handleCategoryToggle = useCallback((category: string) => {
     setSelectedCategories(prev => {
@@ -178,33 +98,31 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
     }
   };
 
-  const getCategoryDisplayText = () => {
-    if (selectedCategories.length === 0) return 'Choose categories';
-    if (selectedCategories.length === 1) return selectedCategories[0];
-    return `${selectedCategories.length} categories selected`;
-  };
-
   return (
-    <>
-      <Modal 
-        visible={visible} 
-        transparent 
-        animationType="fade"
-        statusBarTranslucent
+    <Modal 
+      visible={visible} 
+      transparent 
+      animationType="fade"
+      statusBarTranslucent
+    >
+      <KeyboardAvoidingView 
+        style={styles.modalOverlay}
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <KeyboardAvoidingView 
+        <TouchableOpacity 
           style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          activeOpacity={1}
+          onPress={handleClose}
         >
           <TouchableOpacity 
-            style={styles.modalOverlay}
+            style={styles.modalContent}
             activeOpacity={1}
-            onPress={handleClose}
+            onPress={() => {}}
           >
-            <TouchableOpacity 
-              style={styles.modalContent}
-              activeOpacity={1}
-              onPress={() => {}}
+            <ScrollView 
+              showsVerticalScrollIndicator={false} 
+              bounces={false}
+              contentContainerStyle={styles.scrollContent}
             >
               {/* Header */}
               <View style={styles.modalHeader}>
@@ -235,84 +153,96 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                   </Text>
                 </View>
 
+                {/* Categories Section */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
                     Categories * ({selectedCategories.length}/5)
                   </Text>
-                  <TouchableOpacity
-                    style={styles.categoryDropdown}
-                    onPress={() => setShowCategoryModal(true)}
-                    disabled={loading}
-                  >
-                    <Text style={[
-                      styles.categoryDropdownText,
-                      selectedCategories.length === 0 && styles.categoryPlaceholder
-                    ]}>
-                      {getCategoryDisplayText()}
-                    </Text>
-                    <Feather name="chevron-down" size={20} color="rgba(255, 255, 255, 0.7)" />
-                  </TouchableOpacity>
                   <Text style={styles.helpText}>
                     Select up to 5 categories that best describe your business
                   </Text>
+                  
+                  {/* Categories Grid */}
+                  <View style={styles.categoriesContainer}>
+                    <View style={styles.categoriesGrid}>
+                      {BUSINESS_CATEGORIES.map((category, index) => {
+                        const isSelected = selectedCategories.includes(category);
+                        return (
+                          <TouchableOpacity
+                            key={`category-${index}`}
+                            style={[
+                              styles.categoryChip,
+                              isSelected && styles.selectedCategoryChip
+                            ]}
+                            onPress={() => handleCategoryToggle(category)}
+                            disabled={loading}
+                          >
+                            <Text style={[
+                              styles.categoryChipText,
+                              isSelected && styles.selectedCategoryChipText
+                            ]}>
+                              {category}
+                            </Text>
+                            {isSelected && (
+                              <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </View>
                 </View>
               </View>
+            </ScrollView>
 
-              {/* Actions */}
-              <View style={styles.actionContainer}>
-                <TouchableOpacity
-                  style={[styles.secondaryButton, loading && styles.disabledButton]}
-                  onPress={handleClose}
-                  disabled={loading}
-                >
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
-                </TouchableOpacity>
+            {/* Actions - Fixed at bottom */}
+            <View style={styles.actionContainer}>
+              <TouchableOpacity
+                style={[styles.secondaryButton, loading && styles.disabledButton]}
+                onPress={handleClose}
+                disabled={loading}
+              >
+                <Text style={styles.secondaryButtonText}>Cancel</Text>
+              </TouchableOpacity>
 
-                <TouchableOpacity
-                  style={[
-                    styles.primaryButton,
-                    (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
-                  ]}
-                  onPress={handleCreate}
-                  disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
-                >
-                  {loading ? (
-                    <View style={styles.loadingContainer}>
-                      <ActivityIndicator size="small" color="#fff" />
-                      <Text style={styles.primaryButtonText}>Creating...</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.primaryButtonText}>Create Business</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
+                ]}
+                onPress={handleCreate}
+                disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
+              >
+                {loading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="small" color="#fff" />
+                    <Text style={styles.primaryButtonText}>Creating...</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.primaryButtonText}>Create Business</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </TouchableOpacity>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      {/* Category Selection Modal */}
-      <CategorySelectionModal
-        visible={showCategoryModal}
-        onClose={() => setShowCategoryModal(false)}
-        selectedCategories={selectedCategories}
-        onCategoryToggle={handleCategoryToggle}
-      />
-    </>
+        </TouchableOpacity>
+      </KeyboardAvoidingView>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: '#16213e', // Direct background, no transparency
+    backgroundColor: '#16213e',
   },
   modalContent: {
     flex: 1,
     backgroundColor: '#16213e',
-    padding: 32,
-    paddingTop: 60, // Account for status bar
-    paddingBottom: 40,
+  },
+  scrollContent: {
+    paddingHorizontal: 32,
+    paddingTop: 60,
+    paddingBottom: 20,
   },
   modalHeader: {
     alignItems: 'center',
@@ -371,36 +301,63 @@ const styles = StyleSheet.create({
     textAlign: 'right',
     marginTop: 8,
   },
-  categoryDropdown: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 12,
-    paddingHorizontal: 18,
-    paddingVertical: 16,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  categoryDropdownText: {
-    color: '#fff',
-    fontSize: 16,
-    flex: 1,
-  },
-  categoryPlaceholder: {
-    color: 'rgba(255, 255, 255, 0.5)',
-  },
   helpText: {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 13,
-    marginTop: 8,
+    marginBottom: 16,
     lineHeight: 18,
+  },
+  categoriesContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    padding: 16,
+    maxHeight: 300, // Limit height and make scrollable
+  },
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'flex-start',
+    gap: 8,
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 8,
+    minHeight: 40,
+  },
+  selectedCategoryChip: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  categoryChipText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
+    textAlign: 'center',
+  },
+  selectedCategoryChipText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  categoryCheckIcon: {
+    marginLeft: 6,
   },
   actionContainer: {
     flexDirection: 'row',
     gap: 16,
-    marginTop: 'auto',
-    paddingTop: 24,
+    paddingHorizontal: 32,
+    paddingVertical: 24,
+    backgroundColor: '#16213e',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(124, 58, 237, 0.2)',
   },
   primaryButton: {
     flex: 1,
@@ -440,103 +397,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  
-  // Category Modal Styles - Changed to match main modal colors
-  categoryModalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-  },
-  categoryModalBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  categoryModalContent: {
-    backgroundColor: '#16213e', // Changed from white to match main modal
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    paddingTop: 12,
-    paddingHorizontal: 24,
-    paddingBottom: 32,
-    maxHeight: '70%',
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(124, 58, 237, 0.4)',
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)', // Changed from dark to light
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  categoryModalHeader: {
-    marginBottom: 24,
-  },
-  categoryModalTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#fff', // Changed from dark to white
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  categoryModalSubtitle: {
-    fontSize: 15,
-    color: 'rgba(255, 255, 255, 0.7)', // Changed from dark to light
-    textAlign: 'center',
-  },
-  categoriesList: {
-    flex: 1,
-    marginBottom: 24,
-  },
-  categoriesGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    paddingVertical: 8,
-  },
-  categoryChip: {
-    backgroundColor: 'rgba(255, 255, 255, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    margin: 6,
-    minHeight: 44,
-  },
-  selectedCategoryChip: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
-  },
-  categoryChipText: {
-    fontSize: 14,
-    color: '#fff',
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  selectedCategoryChipText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  categoryCheckIcon: {
-    marginLeft: 6,
-  },
-  categoryDoneButton: {
-    backgroundColor: '#7c3aed',
-    paddingVertical: 16,
-    borderRadius: 12,
-    alignItems: 'center',
-    shadowColor: '#7c3aed',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 6,
-  },
-  categoryDoneButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
