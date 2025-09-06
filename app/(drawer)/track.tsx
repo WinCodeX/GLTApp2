@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - UPDATED: State badge colors
+// app/(drawer)/track.tsx - UPDATED: With M-Pesa Payment Modal Integration
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -21,6 +21,7 @@ import Toast from 'react-native-toast-message';
 import api from '@/lib/api';
 import colors from '@/theme/colors';
 import PackageCreationModal from '@/components/PackageCreationModal';
+import MpesaPaymentModal from '@/components/MpesaPaymentModal';
 
 // Types
 interface Package {
@@ -109,6 +110,8 @@ export default function Track() {
   
   // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [selectedPackageForPayment, setSelectedPackageForPayment] = useState<Package | null>(null);
 
   // Get packages with proper API integration
   const getPackages = useCallback(async (filters?: { state?: string; search?: string; page?: number; per_page?: number }): Promise<PackageResponse> => {
@@ -344,6 +347,33 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
+  // Payment modal handlers
+  const handleOpenPaymentModal = useCallback((packageItem: Package) => {
+    console.log('💳 Opening payment modal for package:', packageItem.code);
+    setSelectedPackageForPayment(packageItem);
+    setShowPaymentModal(true);
+  }, []);
+
+  const handleClosePaymentModal = useCallback(() => {
+    setShowPaymentModal(false);
+    setSelectedPackageForPayment(null);
+  }, []);
+
+  const handlePaymentSuccess = useCallback(() => {
+    console.log('✅ Payment successful, refreshing packages');
+    
+    Toast.show({
+      type: 'success',
+      text1: 'Payment Successful!',
+      text2: 'Your package payment has been processed',
+      position: 'top',
+      visibilityTime: 4000,
+    });
+    
+    // Refresh the package list
+    loadPackages(true);
+  }, []);
+
   // Load packages with correct state mapping and error handling
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
@@ -571,18 +601,11 @@ export default function Track() {
     });
   }, [router]);
 
-  // Handle pay for package
+  // UPDATED: Handle pay for package - now opens modal instead of navigating
   const handlePayPackage = useCallback((packageItem: Package) => {
     console.log('💳 Processing payment for package:', packageItem.code);
-    router.push({
-      pathname: '/(drawer)/payment',
-      params: { 
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString(),
-        amount: packageItem.cost.toString()
-      }
-    });
-  }, [router]);
+    handleOpenPaymentModal(packageItem);
+  }, [handleOpenPaymentModal]);
 
   // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
@@ -915,6 +938,14 @@ export default function Track() {
         visible={showCreateModal}
         onClose={handleCloseCreateModal}
         onPackageCreated={handlePackageCreated}
+      />
+
+      {/* M-Pesa Payment Modal */}
+      <MpesaPaymentModal
+        visible={showPaymentModal}
+        onClose={handleClosePaymentModal}
+        onPaymentSuccess={handlePaymentSuccess}
+        packageData={selectedPackageForPayment}
       />
     </View>
   );
