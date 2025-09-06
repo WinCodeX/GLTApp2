@@ -248,20 +248,35 @@ export default function MpesaPaymentModal({
         // Start polling for payment status
         startPolling(requestId);
       } else {
-        throw new Error(response.data.message || 'Payment initiation failed');
+        // Server responded but with non-success status
+        const errorMsg = response.data.message || 'Payment initiation failed';
+        console.log('📡 Server returned non-success status:', errorMsg);
+        
+        Toast.show({
+          type: 'error',
+          text1: 'Payment Initiation Failed',
+          text2: errorMsg,
+        });
+        
+        // Go to manual verify instead of failed state
+        setPaymentStep('manual_verify');
+        setErrorMessage(errorMsg);
       }
     } catch (error: any) {
       console.error('💳 Payment initiation error:', error);
       
-      setPaymentStep('failed');
-      const errorMsg = error.response?.data?.message || error.message || 'Payment failed to initialize';
-      setErrorMessage(errorMsg);
+      // Don't immediately set to failed - the STK push might not have been sent
+      const errorMsg = error.response?.data?.message || error.message || 'Network error occurred';
       
       Toast.show({
         type: 'error',
-        text1: 'Payment Failed',
-        text2: errorMsg,
+        text1: 'Connection Error',
+        text2: 'Unable to send payment request. Please try again.',
       });
+      
+      // Reset to confirm state to allow retry
+      setPaymentStep('confirm');
+      setErrorMessage(errorMsg);
     }
   };
 
@@ -308,7 +323,7 @@ export default function MpesaPaymentModal({
             }, 2000);
             
           } else if (transactionStatus === 'failed') {
-            // Payment failed
+            // Payment failed - this is when we show failed state
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
             }
