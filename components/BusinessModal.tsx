@@ -1,4 +1,4 @@
-// components/BusinessModal.tsx - Enhanced with dropdown category selection
+// components/BusinessModal.tsx - Fixed category selection with matching colors
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -204,88 +204,86 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
               activeOpacity={1}
               onPress={() => {}}
             >
-              <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
-                {/* Header */}
-                <View style={styles.modalHeader}>
-                  <View style={styles.headerIcon}>
-                    <Feather name="briefcase" size={24} color="#7c3aed" />
-                  </View>
-                  <Text style={styles.modalTitle}>Create New Business</Text>
-                  <Text style={styles.modalSubtitle}>
-                    Start your business and invite team members
+              {/* Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.headerIcon}>
+                  <Feather name="briefcase" size={28} color="#7c3aed" />
+                </View>
+                <Text style={styles.modalTitle}>Create New Business</Text>
+                <Text style={styles.modalSubtitle}>
+                  Start your business and invite team members
+                </Text>
+              </View>
+
+              {/* Form */}
+              <View style={styles.formContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Business Name *</Text>
+                  <TextInput
+                    style={styles.input}
+                    value={businessName}
+                    onChangeText={setBusinessName}
+                    placeholder="Enter business name"
+                    placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                    maxLength={50}
+                    editable={!loading}
+                  />
+                  <Text style={styles.characterCount}>
+                    {businessName.length}/50
                   </Text>
                 </View>
 
-                {/* Form */}
-                <View style={styles.formContainer}>
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Business Name *</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={businessName}
-                      onChangeText={setBusinessName}
-                      placeholder="Enter business name"
-                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
-                      maxLength={50}
-                      editable={!loading}
-                    />
-                    <Text style={styles.characterCount}>
-                      {businessName.length}/50
-                    </Text>
-                  </View>
-
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>
-                      Categories * ({selectedCategories.length}/5)
-                    </Text>
-                    <TouchableOpacity
-                      style={styles.categoryDropdown}
-                      onPress={() => setShowCategoryModal(true)}
-                      disabled={loading}
-                    >
-                      <Text style={[
-                        styles.categoryDropdownText,
-                        selectedCategories.length === 0 && styles.categoryPlaceholder
-                      ]}>
-                        {getCategoryDisplayText()}
-                      </Text>
-                      <Feather name="chevron-down" size={20} color="rgba(255, 255, 255, 0.7)" />
-                    </TouchableOpacity>
-                    <Text style={styles.helpText}>
-                      Select up to 5 categories that best describe your business
-                    </Text>
-                  </View>
-                </View>
-
-                {/* Actions */}
-                <View style={styles.actionContainer}>
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>
+                    Categories * ({selectedCategories.length}/5)
+                  </Text>
                   <TouchableOpacity
-                    style={[styles.secondaryButton, loading && styles.disabledButton]}
-                    onPress={handleClose}
+                    style={styles.categoryDropdown}
+                    onPress={() => setShowCategoryModal(true)}
                     disabled={loading}
                   >
-                    <Text style={styles.secondaryButtonText}>Cancel</Text>
+                    <Text style={[
+                      styles.categoryDropdownText,
+                      selectedCategories.length === 0 && styles.categoryPlaceholder
+                    ]}>
+                      {getCategoryDisplayText()}
+                    </Text>
+                    <Feather name="chevron-down" size={20} color="rgba(255, 255, 255, 0.7)" />
                   </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.primaryButton,
-                      (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
-                    ]}
-                    onPress={handleCreate}
-                    disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
-                  >
-                    {loading ? (
-                      <View style={styles.loadingContainer}>
-                        <ActivityIndicator size="small" color="#fff" />
-                        <Text style={styles.primaryButtonText}>Creating...</Text>
-                      </View>
-                    ) : (
-                      <Text style={styles.primaryButtonText}>Create Business</Text>
-                    )}
-                  </TouchableOpacity>
+                  <Text style={styles.helpText}>
+                    Select up to 5 categories that best describe your business
+                  </Text>
                 </View>
-              </ScrollView>
+              </View>
+
+              {/* Actions */}
+              <View style={styles.actionContainer}>
+                <TouchableOpacity
+                  style={[styles.secondaryButton, loading && styles.disabledButton]}
+                  onPress={handleClose}
+                  disabled={loading}
+                >
+                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.primaryButton,
+                    (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
+                  ]}
+                  onPress={handleCreate}
+                  disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
+                >
+                  {loading ? (
+                    <View style={styles.loadingContainer}>
+                      <ActivityIndicator size="small" color="#fff" />
+                      <Text style={styles.primaryButtonText}>Creating...</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.primaryButtonText}>Create Business</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
             </TouchableOpacity>
           </TouchableOpacity>
         </KeyboardAvoidingView>
@@ -305,90 +303,79 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
+    backgroundColor: '#16213e', // Direct background, no transparency
   },
   modalContent: {
+    flex: 1,
     backgroundColor: '#16213e',
-    borderRadius: 24,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    width: '100%',
-    maxWidth: 400,
-    maxHeight: '75%',
-    padding: 24,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.3,
-    shadowRadius: 16,
-    elevation: 10,
+    padding: 32,
+    paddingTop: 60, // Account for status bar
+    paddingBottom: 40,
   },
   modalHeader: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 40,
   },
   headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 70,
+    height: 70,
+    borderRadius: 35,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 24,
     borderWidth: 2,
     borderColor: 'rgba(124, 58, 237, 0.4)',
   },
   modalTitle: {
     color: '#fff',
-    fontSize: 22,
+    fontSize: 26,
     fontWeight: '700',
     textAlign: 'center',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   modalSubtitle: {
     color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 15,
+    fontSize: 16,
     textAlign: 'center',
-    lineHeight: 22,
+    lineHeight: 24,
   },
   formContainer: {
-    marginBottom: 24,
+    marginBottom: 32,
   },
   inputGroup: {
-    marginBottom: 20,
+    marginBottom: 32,
   },
   inputLabel: {
     color: '#fff',
-    fontSize: 15,
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 12,
   },
   input: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
     color: '#fff',
     fontSize: 16,
     fontWeight: '400',
   },
   characterCount: {
     color: 'rgba(255, 255, 255, 0.5)',
-    fontSize: 12,
+    fontSize: 13,
     textAlign: 'right',
-    marginTop: 4,
+    marginTop: 8,
   },
   categoryDropdown: {
     backgroundColor: 'rgba(255, 255, 255, 0.08)',
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -404,17 +391,19 @@ const styles = StyleSheet.create({
   helpText: {
     color: 'rgba(255, 255, 255, 0.5)',
     fontSize: 13,
-    marginTop: 6,
+    marginTop: 8,
     lineHeight: 18,
   },
   actionContainer: {
     flexDirection: 'row',
     gap: 16,
+    marginTop: 'auto',
+    paddingTop: 24,
   },
   primaryButton: {
     flex: 1,
     backgroundColor: '#7c3aed',
-    paddingVertical: 16,
+    paddingVertical: 18,
     borderRadius: 12,
     alignItems: 'center',
     shadowColor: '#7c3aed',
@@ -431,7 +420,7 @@ const styles = StyleSheet.create({
   secondaryButton: {
     flex: 1,
     backgroundColor: 'transparent',
-    paddingVertical: 16,
+    paddingVertical: 18,
     borderRadius: 12,
     alignItems: 'center',
     borderWidth: 1,
@@ -451,7 +440,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   
-  // Category Modal Styles
+  // Category Modal Styles - Changed to match main modal colors
   categoryModalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
@@ -461,18 +450,20 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
   categoryModalContent: {
-    backgroundColor: '#fff',
+    backgroundColor: '#16213e', // Changed from white to match main modal
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     paddingTop: 12,
     paddingHorizontal: 24,
     paddingBottom: 32,
     maxHeight: '70%',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(124, 58, 237, 0.4)',
   },
   modalHandle: {
     width: 40,
     height: 4,
-    backgroundColor: 'rgba(0, 0, 0, 0.2)',
+    backgroundColor: 'rgba(255, 255, 255, 0.3)', // Changed from dark to light
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 20,
@@ -483,13 +474,13 @@ const styles = StyleSheet.create({
   categoryModalTitle: {
     fontSize: 20,
     fontWeight: '700',
-    color: '#1a1a1a',
+    color: '#fff', // Changed from dark to white
     textAlign: 'center',
     marginBottom: 8,
   },
   categoryModalSubtitle: {
     fontSize: 15,
-    color: 'rgba(26, 26, 26, 0.7)',
+    color: 'rgba(255, 255, 255, 0.7)', // Changed from dark to light
     textAlign: 'center',
   },
   categoriesList: {
@@ -503,14 +494,14 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     paddingHorizontal: 4,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)', // Changed from dark to light
   },
   selectedCategoryListItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.05)',
+    backgroundColor: 'rgba(124, 58, 237, 0.15)', // Adjusted for dark background
   },
   categoryListText: {
     fontSize: 16,
-    color: '#1a1a1a',
+    color: '#fff', // Changed from dark to white
     fontWeight: '500',
   },
   selectedCategoryListText: {
