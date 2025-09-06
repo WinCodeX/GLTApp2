@@ -70,11 +70,11 @@ const CategorySelectionModal = ({
           {/* Categories Grid */}
           <ScrollView style={styles.categoriesList} showsVerticalScrollIndicator={false}>
             <View style={styles.categoriesGrid}>
-              {BUSINESS_CATEGORIES.map((category) => {
+              {BUSINESS_CATEGORIES.map((category, index) => {
                 const isSelected = selectedCategories.includes(category);
                 return (
                   <TouchableOpacity
-                    key={category}
+                    key={`category-${index}`}
                     style={[
                       styles.categoryChip,
                       isSelected && styles.selectedCategoryChip
@@ -492,7 +492,6 @@ const styles = StyleSheet.create({
   categoriesGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
     paddingVertical: 8,
   },
   categoryChip: {
@@ -501,11 +500,11 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
     borderRadius: 20,
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 12,
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 80,
-    justifyContent: 'center',
+    margin: 6,
+    minHeight: 44,
   },
   selectedCategoryChip: {
     backgroundColor: '#7c3aed',
