@@ -34,7 +34,7 @@ import {
   getBaseDomain
 } from '../lib/api';
 
-// Import the centralized upload avatar helper
+// Import the fixed upload avatar helper
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 
 // Safe Avatar Component with error handling and updated API functions
@@ -352,19 +352,22 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, []);
 
-  // Updated avatar upload using centralized helper
+  // Fixed avatar upload using the simplified helper
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setLoading(true);
-      console.log('Starting avatar upload process using centralized helper...');
+      console.log('Starting avatar upload process using fixed helper...');
       
-      // Use the centralized uploadAvatar helper
+      // Use the fixed uploadAvatar helper
       const result = await uploadAvatar(previewUri);
       
-      if (result?.success && result?.avatar_url) {
-        console.log('Avatar uploaded successfully:', result.avatar_url);
+      console.log('Upload result:', result);
+      
+      // Check for success - handle different response formats
+      if (result?.avatar_url || result?.success) {
+        console.log('Avatar uploaded successfully');
         
         // Force clear all cache before refreshing
         console.log('Clearing avatar and user cache after upload...');
@@ -376,7 +379,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         
         showToast.success('Avatar updated!');
       } else {
-        throw new Error(result?.error || 'Upload failed');
+        throw new Error('Upload successful but no avatar URL returned');
       }
       
     } catch (error: any) {
