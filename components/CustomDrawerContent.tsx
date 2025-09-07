@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed avatar refresh from UserContext
+// components/CustomDrawerContent.tsx - Fixed with enhanced avatar synchronization
 import {
   Feather,
   FontAwesome5,
@@ -23,34 +23,37 @@ import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
 import colors from '../theme/colors';
 
-// Safe Avatar Component with error handling and cache busting
+// Enhanced Safe Avatar Component with comprehensive synchronization
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
+  updateTrigger?: number; // New: Force refresh trigger
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
   size, 
   avatarUrl, 
   fallbackSource = require('../assets/images/avatar_placeholder.png'),
-  style
+  style,
+  updateTrigger = 0
 }) => {
   const [hasError, setHasError] = useState(false);
-  const [imageKey, setImageKey] = useState(Date.now()); // For cache busting
+  const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
-  // Reset error state and force reload when avatarUrl changes
+  // Reset error state and force reload when avatarUrl or updateTrigger changes
   useEffect(() => {
-    setHasError(false);
-    setImageKey(Date.now()); // Force reload
-    console.log('🎭 Drawer avatar URL changed:', {
-      raw: avatarUrl,
-      full: fullAvatarUrl,
+    console.log('🎭 Drawer SafeAvatar: Update triggered', {
+      avatarUrl,
+      updateTrigger,
       timestamp: Date.now()
     });
-  }, [avatarUrl, fullAvatarUrl]);
+    
+    setHasError(false);
+    setImageKey(Date.now()); // Force reload with new timestamp
+  }, [avatarUrl, updateTrigger]);
   
   // Use fallback if no URL or error occurred
   if (!fullAvatarUrl || hasError) {
@@ -65,7 +68,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   return (
     <Image
       source={{ 
-        uri: `${fullAvatarUrl}?v=${imageKey}`, // Add version parameter to force reload
+        uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
@@ -74,7 +77,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       }}
       style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
       onError={(error) => {
-        console.warn('🎭 Drawer avatar failed to load:', {
+        console.warn('🎭 Drawer SafeAvatar failed to load:', {
           url: fullAvatarUrl,
           error: error
         });
@@ -96,48 +99,66 @@ export default function CustomDrawerContent(props: any) {
     setSelectedBusiness,
     getUserPhone,
     getDisplayName,
-    refreshUser, // Add refresh capability
-    clearUserCache // Add cache clearing capability
+    refreshUser,
+    clearUserCache,
+    avatarUpdateTrigger, // New: Avatar sync trigger
+    triggerAvatarRefresh, // New: Force avatar refresh
   } = useUser();
 
   // Use selected business name or fallback to user display name
   const displayName = selectedBusiness?.name || getDisplayName();
   const userPhone = getUserPhone();
 
-  // Debug user changes to track avatar updates
+  // Enhanced user data tracking with avatar sync trigger
   useEffect(() => {
     if (user) {
       console.log('🎭 Drawer user data updated:', {
         userId: user.id,
         email: user.email,
         avatarUrl: user.avatar_url,
+        updateTrigger: avatarUpdateTrigger,
         timestamp: Date.now()
       });
     }
-  }, [user?.avatar_url, user?.id]); // Watch specifically for avatar changes
+  }, [user?.avatar_url, user?.id, avatarUpdateTrigger]); // Watch for avatar sync trigger
 
-  // Handle manual refresh when needed (could be triggered by other components)
+  // Enhanced refresh handler that triggers avatar sync
   const handleRefreshUser = useCallback(async () => {
     try {
-      console.log('🎭 Drawer manually refreshing user data...');
+      console.log('🎭 Drawer manually refreshing user data with avatar sync...');
       await clearUserCache();
       await refreshUser(true);
-      console.log('🎭 Drawer user refresh completed');
+      triggerAvatarRefresh(); // Ensure avatar refresh across components
+      console.log('🎭 Drawer user refresh with avatar sync completed');
     } catch (error) {
       console.error('🎭 Drawer user refresh error:', error);
     }
-  }, [refreshUser, clearUserCache]);
+  }, [refreshUser, clearUserCache, triggerAvatarRefresh]);
 
-  // Listen for focus events to refresh user data when drawer opens
+  // Listen for drawer events and optionally refresh
   useEffect(() => {
     const unsubscribe = props.navigation.addListener('drawerOpen', () => {
       console.log('🎭 Drawer opened, checking for user updates...');
-      // Only refresh if we have stale data (optional optimization)
+      // Optionally refresh user data when drawer opens
+      // Uncomment the line below if you want automatic refresh on drawer open
       // handleRefreshUser();
     });
 
     return unsubscribe;
   }, [props.navigation, handleRefreshUser]);
+
+  // Listen for focus events to detect potential avatar updates
+  useEffect(() => {
+    const unsubscribeFocus = props.navigation.addListener('focus', () => {
+      console.log('🎭 Drawer focused, avatar might have been updated');
+      // Trigger a small delay refresh to catch any avatar updates
+      setTimeout(() => {
+        triggerAvatarRefresh();
+      }, 500);
+    });
+
+    return unsubscribeFocus;
+  }, [props.navigation, triggerAvatarRefresh]);
 
   const trackingStatuses = [
     { label: 'Pending', key: 'pending', icon: 'clock' },
@@ -195,6 +216,27 @@ export default function CustomDrawerContent(props: any) {
     props.navigation.navigate('account');
   };
 
+  // Enhanced manual refresh function accessible to user
+  const handleManualRefresh = useCallback(async () => {
+    try {
+      console.log('🎭 Drawer: Manual refresh requested by user');
+      await handleRefreshUser();
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Refreshed',
+        text2: 'Profile data updated',
+      });
+    } catch (error) {
+      console.error('🎭 Drawer: Manual refresh failed:', error);
+      Toast.show({
+        type: 'error',
+        text1: 'Refresh failed',
+        text2: 'Please try again',
+      });
+    }
+  }, [handleRefreshUser]);
+
   const renderBusinessItem = (business: any, isOwned: boolean = true) => {
     const isSelectedBusiness = selectedBusiness?.id === business.id;
 
@@ -229,28 +271,38 @@ export default function CustomDrawerContent(props: any) {
     <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
       <View style={styles.container}>
 
-        {/* Main Business/Account Section */}    
+        {/* Main Business/Account Section with synchronized avatar */}    
         <TouchableOpacity    
           onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
           style={styles.accountHeader}    
           activeOpacity={0.8}
         >    
-          {/* FIXED: Use SafeAvatar component with proper refresh handling */}
+          {/* Enhanced SafeAvatar component with proper synchronization */}
           <SafeAvatar
             size={42}
             avatarUrl={user?.avatar_url}
             fallbackSource={require('../assets/images/avatar_placeholder.png')}
             style={styles.avatar}
+            updateTrigger={avatarUpdateTrigger} // Pass sync trigger
           />
           <View style={styles.accountInfo}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.userPhone}>{userPhone}</Text>
           </View>    
-          <Feather    
-            name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
-            size={20}    
-            color="#fff"    
-          />    
+          <View style={styles.headerActions}>
+            {/* Add refresh button for manual sync */}
+            <TouchableOpacity
+              onPress={handleManualRefresh}
+              style={styles.refreshButton}
+            >
+              <Feather name="refresh-cw" size={16} color="#fff" />
+            </TouchableOpacity>
+            <Feather    
+              name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
+              size={20}    
+              color="#fff"    
+            />
+          </View>
         </TouchableOpacity>    
 
         {showBusinessDropdown && (    
@@ -400,7 +452,6 @@ const styles = StyleSheet.create({
   },
   avatar: {
     marginRight: 12,
-    // Remove width/height as SafeAvatar handles sizing
   },
   accountInfo: {
     flex: 1,
@@ -413,6 +464,16 @@ const styles = StyleSheet.create({
   userPhone: {
     color: 'white',
     fontSize: 13,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  refreshButton: {
+    padding: 4,
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   accountDropdown: {
     backgroundColor: '#4D2292',
