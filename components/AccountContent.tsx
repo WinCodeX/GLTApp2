@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Fixed avatar upload functionality
+// components/AccountContent.tsx - Fixed avatar upload with enhanced synchronization
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -37,13 +37,14 @@ import {
 // Import the fixed upload avatar helper
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 
-// Safe Avatar Component with error handling and updated API functions
+// Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
   onPress?: () => void;
+  updateTrigger?: number; // New: Force refresh trigger
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
@@ -51,31 +52,39 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   avatarUrl, 
   fallbackSource = require('../assets/images/avatar_placeholder.png'),
   style,
-  onPress 
+  onPress,
+  updateTrigger = 0
 }) => {
   const [hasError, setHasError] = useState(false);
-  const [imageKey, setImageKey] = useState(Date.now()); // Force reload on avatar change
+  const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
-  // Reset error state when avatarUrl changes
+  // Reset error state and force reload when avatarUrl or updateTrigger changes
   useEffect(() => {
+    console.log('🎭 AccountContent SafeAvatar: Update triggered', {
+      avatarUrl,
+      updateTrigger,
+      timestamp: Date.now()
+    });
+    
     setHasError(false);
-    setImageKey(Date.now()); // Force reload
-  }, [avatarUrl]);
+    setImageKey(Date.now()); // Force reload with new timestamp
+  }, [avatarUrl, updateTrigger]);
   
   // Debug avatar URL
   useEffect(() => {
     if (avatarUrl) {
-      console.log('Avatar Debug:', {
+      console.log('🎭 AccountContent Avatar Debug:', {
         raw: avatarUrl,
         full: fullAvatarUrl,
         hasError,
         imageKey,
+        updateTrigger,
         apiBaseUrl: getCurrentApiBaseUrl(),
         baseDomain: getBaseDomain()
       });
     }
-  }, [avatarUrl, fullAvatarUrl, hasError, imageKey]);
+  }, [avatarUrl, fullAvatarUrl, hasError, imageKey, updateTrigger]);
   
   // Use fallback if no URL or error occurred
   if (!fullAvatarUrl || hasError) {
@@ -95,7 +104,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       <Avatar.Image
         size={size}
         source={{ 
-          uri: `${fullAvatarUrl}?v=${imageKey}`, // Add version parameter to force reload
+          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
@@ -104,7 +113,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         }}
         style={style}
         onError={(error) => {
-          console.warn('Avatar failed to load:', {
+          console.warn('🎭 AccountContent Avatar failed to load:', {
             url: fullAvatarUrl,
             error: error
           });
@@ -173,15 +182,17 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   
-  // Use UserContext methods with enhanced cache management
+  // Enhanced UserContext methods with avatar synchronization
   const { 
     user, 
     refreshUser, 
-    clearUserCache, // New method for cache management
+    clearUserCache,
     loading: userLoading, 
     error: userError,
     logout,
-    getDisplayName
+    getDisplayName,
+    avatarUpdateTrigger, // New: Avatar sync trigger
+    triggerAvatarRefresh, // New: Force avatar refresh
   } = useUser();
   
   const router = useRouter();
@@ -191,19 +202,20 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [previewUri, setPreviewUri] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
 
-  // Debug avatar URL whenever user changes
+  // Debug avatar URL whenever user changes with sync trigger
   useEffect(() => {
     if (user?.avatar_url) {
       const fullUrl = getFullAvatarUrl(user.avatar_url);
-      console.log('User Avatar Debug:', {
+      console.log('🎭 AccountContent User Avatar Debug:', {
         userId: user.id,
         rawAvatarUrl: user.avatar_url,
         fullAvatarUrl: fullUrl,
+        updateTrigger: avatarUpdateTrigger,
         apiBaseUrl: getCurrentApiBaseUrl(),
         baseDomain: getBaseDomain()
       });
     }
-  }, [user?.avatar_url]);
+  }, [user?.avatar_url, user?.id, avatarUpdateTrigger]); // Watch for avatar sync trigger
 
   // Component initialization with crash protection
   useEffect(() => {
@@ -211,12 +223,12 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     
     async function initializeScreen() {
       try {
-        console.log(`AccountContent (${source}): Initializing...`);
+        console.log(`🎭 AccountContent (${source}): Initializing...`);
         
         await new Promise(resolve => setTimeout(resolve, 50));
         
         if (isMounted) {
-          console.log(`AccountContent (${source}): Ready`);
+          console.log(`🎭 AccountContent (${source}): Ready`);
           setIsScreenReady(true);
           
           if (source === 'admin') {
@@ -231,7 +243,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         }
         
       } catch (error) {
-        console.error(`AccountContent (${source}) initialization error:`, error);
+        console.error(`🎭 AccountContent (${source}) initialization error:`, error);
         if (isMounted) {
           setScreenError(error.message || 'Initialization failed');
           setIsScreenReady(true);
@@ -260,7 +272,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
         // Check if UserContext has user data
         if (!userLoading && !user) {
-          console.log('No user data in context, redirecting to login');
+          console.log('🎭 AccountContent: No user data in context, redirecting to login');
           setIsRedirecting(true);
           showToast.error('User session invalid', 'Please log in again');
           router.replace('/login');
@@ -269,7 +281,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
 
         // If we have user data, proceed normally
         if (user) {
-          console.log(`User data validated for ${source} screen:`, {
+          console.log(`🎭 AccountContent: User data validated for ${source} screen:`, {
             id: user.id,
             email: user.email,
             hasDisplayName: !!user.display_name,
@@ -279,7 +291,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         }
 
       } catch (error) {
-        console.error('Error validating user data:', error);
+        console.error('🎭 AccountContent: Error validating user data:', error);
         if (isMounted && !user) {
           setIsRedirecting(true);
           showToast.error('Authentication error', 'Please log in again');
@@ -295,7 +307,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [isScreenReady, user, userLoading, router, source, isRedirecting]);
 
-  // Enhanced refresh handler - always fetches fresh data and clears cache
+  // Enhanced refresh handler with better avatar synchronization
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
@@ -304,20 +316,23 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       }
 
       setRefreshing(true);
-      console.log('Manual refresh triggered - clearing cache and fetching fresh data');
+      console.log('🎭 AccountContent: Manual refresh triggered - clearing cache and fetching fresh data');
       
       // Force clear cache and refresh user data
       await clearUserCache();
       await refreshUser(true); // Force refresh with cache clearing
       
+      // Trigger avatar refresh to ensure UI sync
+      triggerAvatarRefresh();
+      
       showToast.success('Data refreshed');
     } catch (error) {
-      console.error('Refresh error:', error);
+      console.error('🎭 AccountContent: Refresh error:', error);
       showToast.error('Failed to refresh data', 'Please check your connection');
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, clearUserCache, user]);
+  }, [refreshUser, clearUserCache, triggerAvatarRefresh, user]);
 
   // Avatar picker with better validation
   const pickAndPreviewAvatar = useCallback(async () => {
@@ -331,14 +346,14 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.8, // Slightly higher quality
+        quality: 0.8,
         aspect: [1, 1],
       });
 
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log('Selected image:', {
+      console.log('🎭 AccountContent: Selected image:', {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
@@ -347,54 +362,69 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       
       setPreviewUri(asset.uri);
     } catch (error) {
-      console.error('Error picking avatar:', error);
+      console.error('🎭 AccountContent: Error picking avatar:', error);
       showToast.error('Failed to select image');
     }
   }, []);
 
-  // Fixed avatar upload using the simplified helper
+  // Enhanced avatar upload with comprehensive synchronization
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setLoading(true);
-      console.log('Starting avatar upload process using fixed helper...');
+      console.log('🎭 AccountContent: Starting comprehensive avatar upload and sync process...');
       
-      // Use the fixed uploadAvatar helper
+      // Step 1: Upload avatar using helper
       const result = await uploadAvatar(previewUri);
+      console.log('🎭 AccountContent: Upload result:', result);
       
-      console.log('Upload result:', result);
-      
-      // Check for success - handle different response formats
+      // Step 2: Check for success
       if (result?.avatar_url || result?.success) {
-        console.log('Avatar uploaded successfully');
+        console.log('🎭 AccountContent: Avatar uploaded successfully, starting comprehensive sync...');
         
-        // Force clear all cache before refreshing
-        console.log('Clearing avatar and user cache after upload...');
+        // Step 3: Clear all caches thoroughly
+        console.log('🎭 AccountContent: Clearing all caches...');
         await clearUserCache();
         
-        // Force refresh user data to get the new avatar URL
-        console.log('Force refreshing user data after avatar upload...');
+        // Step 4: Wait for server processing
+        console.log('🎭 AccountContent: Waiting for server processing...');
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Step 5: Force refresh user data from API
+        console.log('🎭 AccountContent: Force refreshing user data...');
+        await refreshUser(true);
+        
+        // Step 6: Trigger avatar refresh across all components
+        console.log('🎭 AccountContent: Triggering comprehensive avatar refresh...');
+        triggerAvatarRefresh();
+        
+        // Step 7: Additional delay to ensure all components update
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Step 8: One more refresh to be absolutely sure
+        console.log('🎭 AccountContent: Final sync refresh...');
         await refreshUser(true);
         
         showToast.success('Avatar updated!');
+        console.log('🎭 AccountContent: Avatar upload and comprehensive sync completed');
       } else {
         throw new Error('Upload successful but no avatar URL returned');
       }
       
     } catch (error: any) {
-      console.error('Error uploading avatar:', error);
+      console.error('🎭 AccountContent: Error during avatar upload:', error);
       showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
       setLoading(false);
     }
-  }, [previewUri, refreshUser, clearUserCache]);
+  }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
   // Use AccountManager-backed logout from UserContext
   const confirmLogout = useCallback(async () => {
     try {
-      console.log('Logging out through UserContext...');
+      console.log('🎭 AccountContent: Logging out through UserContext...');
       
       // Use the logout method from UserContext which handles AccountManager
       await logout();
@@ -406,7 +436,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       router.replace('/login');
       
     } catch (error) {
-      console.error('Logout error:', error);
+      console.error('🎭 AccountContent: Logout error:', error);
       showToast.error('Logout failed');
     }
   }, [logout, router]);
@@ -492,7 +522,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // Main content - focused only on user account information
+  // Main content with synchronized avatar
   return (
     <View style={styles.container}>
       <Suspense fallback={<View />}>
@@ -538,7 +568,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           />
         }
       >
-        {/* User Profile Card */}
+        {/* User Profile Card with synchronized avatar */}
         <View style={styles.identityCard}>
           <View style={styles.identityRow}>
             <View>
@@ -551,6 +581,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               avatarUrl={user?.avatar_url}
               fallbackSource={require('../assets/images/avatar_placeholder.png')}
               onPress={pickAndPreviewAvatar}
+              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
             />
           </View>
         </View>
