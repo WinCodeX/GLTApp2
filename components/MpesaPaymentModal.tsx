@@ -1,4 +1,4 @@
-// components/MpesaPaymentModal.tsx
+// components/MpesaPaymentModal.tsx - Fixed error handling
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
@@ -32,7 +32,7 @@ interface Package {
 interface MpesaPaymentModalProps {
   visible: boolean;
   onClose: () => void;
-  packageData: Package | null;  // Fixed: Changed from 'package' to 'packageData'
+  packageData: Package | null;
   onPaymentSuccess: () => void;
 }
 
@@ -41,7 +41,7 @@ type PaymentStep = 'confirm' | 'processing' | 'failed' | 'success' | 'manual_ver
 export default function MpesaPaymentModal({ 
   visible, 
   onClose, 
-  packageData,  // Fixed: Now matches the prop name from track.tsx
+  packageData,
   onPaymentSuccess 
 }: MpesaPaymentModalProps) {
   const { getUserPhone } = useUser();
@@ -207,7 +207,7 @@ export default function MpesaPaymentModal({
     return cleaned;
   };
 
-  // Start STK push process
+  // FIXED: Simplified payment initiation with proper error handling
   const initiatePayment = async () => {
     if (!packageData || !phoneNumber.trim()) {
       Toast.show({
@@ -235,7 +235,8 @@ export default function MpesaPaymentModal({
 
       console.log('📡 STK Push response:', response.data);
 
-      if (response.data.status === 'success') {
+      // FIXED: Only proceed if we get a successful response with checkout_request_id
+      if (response.data.status === 'success' && response.data.data?.checkout_request_id) {
         const requestId = response.data.data.checkout_request_id;
         setCheckoutRequestId(requestId);
         
@@ -248,35 +249,46 @@ export default function MpesaPaymentModal({
         // Start polling for payment status
         startPolling(requestId);
       } else {
-        // Server responded but with non-success status
+        // FIXED: Proper error handling for non-success responses
         const errorMsg = response.data.message || 'Payment initiation failed';
         console.log('📡 Server returned non-success status:', errorMsg);
+        
+        setPaymentStep('failed');
+        setErrorMessage(errorMsg);
         
         Toast.show({
           type: 'error',
           text1: 'Payment Initiation Failed',
           text2: errorMsg,
         });
-        
-        // Go to manual verify instead of failed state
-        setPaymentStep('manual_verify');
-        setErrorMessage(errorMsg);
       }
     } catch (error: any) {
       console.error('💳 Payment initiation error:', error);
       
-      // Don't immediately set to failed - the STK push might not have been sent
-      const errorMsg = error.response?.data?.message || error.message || 'Network error occurred';
+      // FIXED: Properly handle different types of errors
+      let errorMsg = 'Network error occurred';
+      let errorTitle = 'Connection Error';
+      
+      if (error.response?.data?.message) {
+        errorMsg = error.response.data.message;
+        errorTitle = 'Payment Error';
+      } else if (error.response?.status) {
+        errorMsg = `Server error (${error.response.status})`;
+        errorTitle = 'Server Error';
+      } else if (error.message) {
+        errorMsg = error.message;
+      }
+      
+      console.log('🚨 Setting failed state with error:', errorMsg);
+      
+      setPaymentStep('failed');
+      setErrorMessage(errorMsg);
       
       Toast.show({
         type: 'error',
-        text1: 'Connection Error',
-        text2: 'Unable to send payment request. Please try again.',
+        text1: errorTitle,
+        text2: errorMsg,
       });
-      
-      // Reset to confirm state to allow retry
-      setPaymentStep('confirm');
-      setErrorMessage(errorMsg);
     }
   };
 
@@ -323,7 +335,7 @@ export default function MpesaPaymentModal({
             }, 2000);
             
           } else if (transactionStatus === 'failed') {
-            // Payment failed - this is when we show failed state
+            // Payment failed
             if (pollingIntervalRef.current) {
               clearInterval(pollingIntervalRef.current);
             }
@@ -338,6 +350,7 @@ export default function MpesaPaymentModal({
             }
             setIsPolling(false);
             setPaymentStep('manual_verify');
+            setErrorMessage('Payment verification timed out');
           }
           // Continue polling if still pending
         }
@@ -350,6 +363,7 @@ export default function MpesaPaymentModal({
           }
           setIsPolling(false);
           setPaymentStep('manual_verify');
+          setErrorMessage('Unable to verify payment status');
         }
       }
     }, 3000); // Poll every 3 seconds
@@ -368,36 +382,56 @@ export default function MpesaPaymentModal({
 
     try {
       console.log('🔍 Verifying manual transaction code:', transactionCode);
-      // You can implement manual verification logic here
-      // For now, we'll assume it's successful
-      setPaymentStep('success');
       
-      Toast.show({
-        type: 'success',
-        text1: 'Payment Verified!',
-        text2: 'Transaction has been verified manually',
+      // Call API to verify the transaction code
+      const response = await api.post('/api/v1/mpesa/verify_manual', {
+        transaction_code: transactionCode,
+        package_id: packageData?.id,
+        amount: packageData?.cost
       });
 
-      setTimeout(() => {
-        onPaymentSuccess();
-        onClose();
-      }, 2000);
+      if (response.data.status === 'success') {
+        setPaymentStep('success');
+        
+        Toast.show({
+          type: 'success',
+          text1: 'Payment Verified!',
+          text2: 'Transaction has been verified successfully',
+        });
+
+        setTimeout(() => {
+          onPaymentSuccess();
+          onClose();
+        }, 2000);
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Verification Failed',
+          text2: response.data.message || 'Invalid transaction code',
+        });
+      }
       
-    } catch (error) {
+    } catch (error: any) {
+      console.error('🔍 Manual verification error:', error);
+      
+      const errorMsg = error.response?.data?.message || 'Could not verify the transaction code';
+      
       Toast.show({
         type: 'error',
         text1: 'Verification Failed',
-        text2: 'Could not verify the transaction code',
+        text2: errorMsg,
       });
     }
   };
 
-  // Retry payment
+  // FIXED: Retry payment - properly reset state
   const retryPayment = () => {
     console.log('🔄 Retrying payment');
     setPaymentStep('confirm');
     setErrorMessage('');
     setCheckoutRequestId(null);
+    setTransactionCode('');
+    
     if (pollingIntervalRef.current) {
       clearInterval(pollingIntervalRef.current);
     }
@@ -555,20 +589,22 @@ export default function MpesaPaymentModal({
                     <Feather name="x-circle" size={48} color="#ef4444" />
                   </View>
                   <Text style={styles.stepTitle}>Payment Failed</Text>
-                  <Text style={styles.stepDescription}>{errorMessage}</Text>
+                  <Text style={styles.stepDescription}>
+                    {errorMessage || 'The payment could not be processed.'}
+                  </Text>
                   
                   <View style={styles.failedActions}>
-                    <TouchableOpacity style={styles.secondaryButton} onPress={retryPayment}>
-                      <Feather name="refresh-cw" size={16} color={colors.primary} />
-                      <Text style={styles.secondaryButtonText}>Try Again</Text>
+                    <TouchableOpacity style={styles.primaryButton} onPress={retryPayment}>
+                      <Feather name="refresh-cw" size={16} color="#fff" />
+                      <Text style={styles.primaryButtonText}>Try Again</Text>
                     </TouchableOpacity>
                     
                     <TouchableOpacity 
-                      style={styles.tertiaryButton} 
+                      style={styles.secondaryButton} 
                       onPress={() => setPaymentStep('manual_verify')}
                     >
-                      <Feather name="edit-3" size={16} color="#888" />
-                      <Text style={styles.tertiaryButtonText}>Enter Transaction Code</Text>
+                      <Feather name="edit-3" size={16} color={colors.primary} />
+                      <Text style={styles.secondaryButtonText}>Enter Transaction Code</Text>
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -613,6 +649,7 @@ export default function MpesaPaymentModal({
   );
 }
 
+// Styles remain exactly the same
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
