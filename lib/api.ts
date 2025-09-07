@@ -1,4 +1,4 @@
-// lib/api.ts - Updated to use AccountManager with proper JSON headers
+// lib/api.ts - Fixed to properly handle file uploads
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
 import { router } from 'expo-router';
@@ -96,7 +96,7 @@ const testConnection = async (baseUrl: string, timeout = 3000): Promise<boolean>
       timeout,
       headers: { 
         'Content-Type': 'application/json',
-        'Accept': 'application/json' // CRITICAL: This tells the server to respond with JSON
+        'Accept': 'application/json'
       }
     });
     
@@ -154,17 +154,31 @@ const getBaseUrl = async (): Promise<string> => {
   return resolvedBaseUrl;
 };
 
-// Create the main API instance with proper JSON headers
+// Helper function to detect if request is a file upload
+const isFileUpload = (config: any): boolean => {
+  // Check if data is FormData (file upload)
+  if (config.data && typeof config.data === 'object' && config.data.constructor?.name === 'FormData') {
+    return true;
+  }
+  
+  // Check if Content-Type is already set to multipart/form-data
+  if (config.headers && config.headers['Content-Type']?.includes('multipart/form-data')) {
+    return true;
+  }
+  
+  return false;
+};
+
+// Create the main API instance with conditional headers
 const api = axios.create({
   baseURL: PROD_BASE,
   timeout: 15000,
   headers: {
-    'Content-Type': 'application/json',
-    'Accept': 'application/json', // CRITICAL: This ensures JSON responses
+    'Accept': 'application/json', // Accept JSON responses by default
   },
 });
 
-// Request interceptor - Updated to use AccountManager with proper JSON headers
+// FIXED: Request interceptor that properly handles file uploads
 api.interceptors.request.use(
   async (config) => {
     try {
@@ -179,10 +193,22 @@ api.interceptors.request.use(
         config.baseURL = resolvedBaseUrl;
       }
 
-      // CRITICAL: Ensure JSON headers are always present
+      // CRITICAL FIX: Only set JSON headers for non-file uploads
+      const isUpload = isFileUpload(config);
+      
       if (config.headers) {
-        config.headers['Content-Type'] = 'application/json';
+        // Always accept JSON responses
         config.headers['Accept'] = 'application/json';
+        
+        // Only set Content-Type to JSON if it's NOT a file upload
+        if (!isUpload && !config.headers['Content-Type']) {
+          config.headers['Content-Type'] = 'application/json';
+        }
+        
+        console.log(`📡 Request type: ${isUpload ? 'FILE UPLOAD' : 'JSON'}`);
+        if (isUpload) {
+          console.log('📎 Preserving multipart/form-data headers for file upload');
+        }
       }
 
       // Add auth header if we have a current account
@@ -204,8 +230,8 @@ api.interceptors.request.use(
       // Don't fail the request completely, use fallback
       config.baseURL = FALLBACK_BASE;
       
-      // CRITICAL: Still ensure JSON headers even on error
-      if (config.headers) {
+      // Only set JSON headers if not a file upload
+      if (config.headers && !isFileUpload(config)) {
         config.headers['Content-Type'] = 'application/json';
         config.headers['Accept'] = 'application/json';
       }
