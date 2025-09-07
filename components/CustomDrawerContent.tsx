@@ -216,26 +216,7 @@ export default function CustomDrawerContent(props: any) {
     props.navigation.navigate('account');
   };
 
-  // Enhanced manual refresh function accessible to user
-  const handleManualRefresh = useCallback(async () => {
-    try {
-      console.log('🎭 Drawer: Manual refresh requested by user');
-      await handleRefreshUser();
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Refreshed',
-        text2: 'Profile data updated',
-      });
-    } catch (error) {
-      console.error('🎭 Drawer: Manual refresh failed:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Refresh failed',
-        text2: 'Please try again',
-      });
-    }
-  }, [handleRefreshUser]);
+
 
   const renderBusinessItem = (business: any, isOwned: boolean = true) => {
     const isSelectedBusiness = selectedBusiness?.id === business.id;
@@ -289,20 +270,11 @@ export default function CustomDrawerContent(props: any) {
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.userPhone}>{userPhone}</Text>
           </View>    
-          <View style={styles.headerActions}>
-            {/* Add refresh button for manual sync */}
-            <TouchableOpacity
-              onPress={handleManualRefresh}
-              style={styles.refreshButton}
-            >
-              <Feather name="refresh-cw" size={16} color="#fff" />
-            </TouchableOpacity>
-            <Feather    
-              name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
-              size={20}    
-              color="#fff"    
-            />
-          </View>
+          <Feather    
+            name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
+            size={20}    
+            color="#fff"    
+          />
         </TouchableOpacity>    
 
         {showBusinessDropdown && (    
@@ -469,11 +441,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  refreshButton: {
-    padding: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
   },
   accountDropdown: {
     backgroundColor: '#4D2292',
