@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed avatar upload functionality
+// app/(drawer)/Business.tsx - Fixed avatar upload with proper synchronization
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -38,13 +38,14 @@ interface BusinessProps {
   navigation: any;
 }
 
-// Safe Avatar Component with error handling
+// Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
   onPress?: () => void;
+  updateTrigger?: number; // New: Force refresh trigger
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
@@ -52,16 +53,24 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   avatarUrl, 
   fallbackSource = require('../../assets/images/avatar_placeholder.png'),
   style,
-  onPress 
+  onPress,
+  updateTrigger = 0
 }) => {
   const [hasError, setHasError] = useState(false);
   const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
+  // Reset error state when avatarUrl or updateTrigger changes
   useEffect(() => {
+    console.log('🎭 SafeAvatar: Update triggered', {
+      avatarUrl,
+      updateTrigger,
+      timestamp: Date.now()
+    });
+    
     setHasError(false);
-    setImageKey(Date.now());
-  }, [avatarUrl]);
+    setImageKey(Date.now()); // Force reload with new timestamp
+  }, [avatarUrl, updateTrigger]);
   
   if (!fullAvatarUrl || hasError) {
     return (
@@ -78,7 +87,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     <TouchableOpacity onPress={onPress} disabled={!onPress}>
       <Image
         source={{ 
-          uri: `${fullAvatarUrl}?v=${imageKey}`,
+          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
@@ -87,7 +96,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         }}
         style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
         onError={() => {
-          console.warn('Avatar failed to load:', fullAvatarUrl);
+          console.warn('🎭 SafeAvatar: Failed to load:', fullAvatarUrl);
           setHasError(true);
         }}
       />
@@ -109,6 +118,8 @@ export default function Business({ navigation }: BusinessProps) {
     clearUserCache,
     selectedBusiness,
     setSelectedBusiness,
+    avatarUpdateTrigger, // New: Avatar sync trigger
+    triggerAvatarRefresh, // New: Force avatar refresh
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -279,14 +290,14 @@ export default function Business({ navigation }: BusinessProps) {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
-        quality: 0.8, // Slightly higher quality
+        quality: 0.8,
         aspect: [1, 1],
       });
 
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log('Selected image:', {
+      console.log('🎭 Selected image:', {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
@@ -304,40 +315,53 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, []);
 
-  // Fixed avatar upload using the simplified helper
+  // Enhanced avatar upload with proper synchronization
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('Starting avatar upload process using fixed helper...');
+      console.log('🎭 Starting coordinated avatar upload process...');
       
-      // Use the fixed uploadAvatar helper
+      // Step 1: Upload avatar using helper
       const result = await uploadAvatar(previewUri);
+      console.log('🎭 Upload result:', result);
       
-      console.log('Upload result:', result);
-      
-      // Check for success - handle different response formats
+      // Step 2: Check for success
       if (result?.avatar_url || result?.success) {
-        console.log('Avatar uploaded successfully');
+        console.log('🎭 Avatar uploaded successfully, starting synchronization...');
         
-        // Force clear all cache before refreshing
+        // Step 3: Clear all caches
+        console.log('🎭 Clearing all caches...');
         await clearUserCache();
         
-        // Force refresh user data to get the new avatar URL
+        // Step 4: Wait a moment for server to process
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        // Step 5: Force refresh user data
+        console.log('🎭 Force refreshing user data...');
         await refreshUser(true);
+        
+        // Step 6: Trigger avatar refresh across all components
+        console.log('🎭 Triggering avatar refresh across components...');
+        triggerAvatarRefresh();
+        
+        // Step 7: Another small delay to ensure UI updates
+        await new Promise(resolve => setTimeout(resolve, 200));
         
         Toast.show({
           type: 'success',
           text1: 'Avatar updated!',
           text2: 'Your profile picture has been changed',
         });
+        
+        console.log('🎭 Avatar upload and synchronization completed');
       } else {
         throw new Error('Upload successful but no avatar URL returned');
       }
       
     } catch (error: any) {
-      console.error('Error uploading avatar:', error);
+      console.error('🎭 Error during avatar upload:', error);
       Toast.show({
         type: 'error',
         text1: 'Upload failed',
@@ -347,7 +371,7 @@ export default function Business({ navigation }: BusinessProps) {
       setPreviewUri(null);
       setAvatarLoading(false);
     }
-  }, [previewUri, refreshUser, clearUserCache]);
+  }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -378,7 +402,7 @@ export default function Business({ navigation }: BusinessProps) {
       </View>
 
       <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-        {/* Profile Section with working avatar functionality */}
+        {/* Profile Section with synchronized avatar */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <SafeAvatar
@@ -387,6 +411,7 @@ export default function Business({ navigation }: BusinessProps) {
               fallbackSource={require('../../assets/images/avatar_placeholder.png')}
               style={styles.avatar}
               onPress={pickAndPreviewAvatar}
+              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
             />
             <TouchableOpacity 
               style={styles.addAvatarButton}
@@ -628,7 +653,6 @@ export default function Business({ navigation }: BusinessProps) {
   );
 }
 
-// Styles remain the same
 const styles = StyleSheet.create({
   container: {
     flex: 1,
