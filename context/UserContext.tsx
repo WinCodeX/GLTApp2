@@ -1,4 +1,4 @@
-// context/UserContext.tsx - Fixed with proper cache management and selected business state
+// context/UserContext.tsx - Fixed with proper avatar synchronization
 import React, {
   createContext,
   ReactNode,
@@ -91,6 +91,9 @@ type UserContextType = {
   accounts: AccountData[];
   currentAccount: AccountData | null;
   
+  // Avatar synchronization
+  avatarUpdateTrigger: number; // New: Force avatar refresh across components
+  
   // Core methods
   refreshUser: (forceClearCache?: boolean) => Promise<void>;
   refreshBusinesses: (forceClearCache?: boolean) => Promise<void>;
@@ -99,6 +102,9 @@ type UserContextType = {
   switchAccount: (accountId: string) => Promise<void>;
   removeAccount: (accountId: string) => Promise<void>;
   logout: () => Promise<void>;
+  
+  // Avatar methods
+  triggerAvatarRefresh: () => void; // New: Force all components to refresh avatar
   
   // Business selection
   setSelectedBusiness: (business: Business | null) => void;
@@ -124,6 +130,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [currentAccount, setCurrentAccount] = useState<AccountData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  
+  // New: Avatar synchronization trigger
+  const [avatarUpdateTrigger, setAvatarUpdateTrigger] = useState(Date.now());
 
   // Auto-select first business when businesses change
   useEffect(() => {
@@ -147,14 +156,15 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     
     console.log('🔄 UserContext: Synced with AccountManager', {
       accounts: allAccounts.length,
-      currentAccount: current?.email
+      currentAccount: current?.email,
+      hasAvatar: !!current?.userData?.avatar_url
     });
   };
 
-  // Clear all user-related cache
+  // Enhanced cache clearing with avatar-specific cache
   const clearUserCache = async () => {
     try {
-      console.log('🗑️ UserContext: Clearing all user cache...');
+      console.log('🗑️ UserContext: Clearing all user cache including avatar...');
       
       const cacheKeys = [
         'user_data',
@@ -164,7 +174,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         'business_data',
         'cached_business_data',
         'business_cache_expiry',
-        'selected_business', // Add selected business to cache clearing
+        'selected_business',
+        // Add more avatar-related cache keys
+        'cached_avatar_urls',
+        'avatar_timestamps',
       ];
       
       await Promise.all(
@@ -172,9 +185,19 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       );
       
       console.log('✅ UserContext: Cache cleared successfully');
+      
+      // Trigger avatar refresh across all components
+      setAvatarUpdateTrigger(Date.now());
+      
     } catch (error) {
       console.error('❌ UserContext: Failed to clear cache:', error);
     }
+  };
+
+  // New: Force avatar refresh across all components
+  const triggerAvatarRefresh = () => {
+    console.log('🔄 UserContext: Triggering avatar refresh across all components');
+    setAvatarUpdateTrigger(Date.now());
   };
 
   // Initialize AccountManager and sync data
@@ -238,7 +261,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     saveSelectedBusiness(business);
   };
 
-  // Refresh user data from API with optional cache clearing
+  // Enhanced refresh user data with better avatar synchronization
   const refreshUser = async (forceClearCache: boolean = false) => {
     try {
       const currentAcc = accountManager.getCurrentAccount();
@@ -257,6 +280,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         await clearUserCache();
       }
       
+      // Fetch fresh user data
       const fetchedUser = await getUser();
       
       if (fetchedUser) {
@@ -269,8 +293,24 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         // Update AccountManager with fresh user data
         await accountManager.updateAccount(currentAcc.id, fetchedUser);
         
+        // Set user state first
+        setUser(fetchedUser);
+        
         // Sync with updated data
         syncWithAccountManager();
+        
+        // Trigger avatar refresh if avatar changed
+        const oldAvatarUrl = user?.avatar_url;
+        const newAvatarUrl = fetchedUser.avatar_url;
+        
+        if (oldAvatarUrl !== newAvatarUrl) {
+          console.log('🎭 UserContext: Avatar URL changed, triggering refresh', {
+            old: oldAvatarUrl,
+            new: newAvatarUrl
+          });
+          triggerAvatarRefresh();
+        }
+        
         setError(null);
         
       } else {
@@ -362,7 +402,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       // Clear cache and reset data for account switch
       await clearUserCache();
       setBusinesses({ owned: [], joined: [] });
-      setSelectedBusiness(null); // Clear selected business on account switch
+      setSelectedBusiness(null);
       
       // Try to refresh data from API
       try {
@@ -417,6 +457,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       setAccounts([]);
       setCurrentAccount(null);
       setError(null);
+      
+      // Reset avatar trigger
+      setAvatarUpdateTrigger(Date.now());
       
       console.log('✅ UserContext: Logout completed');
     } catch (error) {
@@ -526,6 +569,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         accounts,
         currentAccount,
         
+        // Avatar synchronization
+        avatarUpdateTrigger,
+        
         // Core methods
         refreshUser,
         refreshBusinesses,
@@ -534,6 +580,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         switchAccount,
         removeAccount,
         logout,
+        
+        // Avatar methods
+        triggerAvatarRefresh,
         
         // Business selection
         setSelectedBusiness,
