@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Clean version with business management
+// components/CustomDrawerContent.tsx - Fixed avatar refresh from UserContext
 import {
   Feather,
   FontAwesome5,
@@ -9,7 +9,7 @@ import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Image,
   StyleSheet,
@@ -20,7 +20,69 @@ import {
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
+import { getFullAvatarUrl } from '../lib/api';
 import colors from '../theme/colors';
+
+// Safe Avatar Component with error handling and cache busting
+interface SafeAvatarProps {
+  size: number;
+  avatarUrl?: string | null;
+  fallbackSource?: any;
+  style?: any;
+}
+
+const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
+  size, 
+  avatarUrl, 
+  fallbackSource = require('../assets/images/avatar_placeholder.png'),
+  style
+}) => {
+  const [hasError, setHasError] = useState(false);
+  const [imageKey, setImageKey] = useState(Date.now()); // For cache busting
+  const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
+  
+  // Reset error state and force reload when avatarUrl changes
+  useEffect(() => {
+    setHasError(false);
+    setImageKey(Date.now()); // Force reload
+    console.log('🎭 Drawer avatar URL changed:', {
+      raw: avatarUrl,
+      full: fullAvatarUrl,
+      timestamp: Date.now()
+    });
+  }, [avatarUrl, fullAvatarUrl]);
+  
+  // Use fallback if no URL or error occurred
+  if (!fullAvatarUrl || hasError) {
+    return (
+      <Image
+        source={fallbackSource}
+        style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
+      />
+    );
+  }
+
+  return (
+    <Image
+      source={{ 
+        uri: `${fullAvatarUrl}?v=${imageKey}`, // Add version parameter to force reload
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      }}
+      style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
+      onError={(error) => {
+        console.warn('🎭 Drawer avatar failed to load:', {
+          url: fullAvatarUrl,
+          error: error
+        });
+        setHasError(true);
+      }}
+    />
+  );
+};
 
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
@@ -33,16 +95,49 @@ export default function CustomDrawerContent(props: any) {
     selectedBusiness,
     setSelectedBusiness,
     getUserPhone,
-    getDisplayName
+    getDisplayName,
+    refreshUser, // Add refresh capability
+    clearUserCache // Add cache clearing capability
   } = useUser();
 
   // Use selected business name or fallback to user display name
   const displayName = selectedBusiness?.name || getDisplayName();
   const userPhone = getUserPhone();
 
-  const avatarSource = user?.avatar_url
-    ? { uri: user.avatar_url }
-    : require('../assets/images/avatar_placeholder.png');
+  // Debug user changes to track avatar updates
+  useEffect(() => {
+    if (user) {
+      console.log('🎭 Drawer user data updated:', {
+        userId: user.id,
+        email: user.email,
+        avatarUrl: user.avatar_url,
+        timestamp: Date.now()
+      });
+    }
+  }, [user?.avatar_url, user?.id]); // Watch specifically for avatar changes
+
+  // Handle manual refresh when needed (could be triggered by other components)
+  const handleRefreshUser = useCallback(async () => {
+    try {
+      console.log('🎭 Drawer manually refreshing user data...');
+      await clearUserCache();
+      await refreshUser(true);
+      console.log('🎭 Drawer user refresh completed');
+    } catch (error) {
+      console.error('🎭 Drawer user refresh error:', error);
+    }
+  }, [refreshUser, clearUserCache]);
+
+  // Listen for focus events to refresh user data when drawer opens
+  useEffect(() => {
+    const unsubscribe = props.navigation.addListener('drawerOpen', () => {
+      console.log('🎭 Drawer opened, checking for user updates...');
+      // Only refresh if we have stale data (optional optimization)
+      // handleRefreshUser();
+    });
+
+    return unsubscribe;
+  }, [props.navigation, handleRefreshUser]);
 
   const trackingStatuses = [
     { label: 'Pending', key: 'pending', icon: 'clock' },
@@ -59,7 +154,7 @@ export default function CustomDrawerContent(props: any) {
       setShowBusinessDropdown(false);
       props.navigation.closeDrawer();
       
-      console.log('Drawer switching to business:', business.name);
+      console.log('🎭 Drawer switching to business:', business.name);
       setSelectedBusiness?.(business);
       
       Toast.show({
@@ -68,7 +163,7 @@ export default function CustomDrawerContent(props: any) {
         text2: `Now using ${business.name}`,
       });
     } catch (error: any) {
-      console.error('Drawer business switch error:', error);
+      console.error('🎭 Drawer business switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch business');
     }
   };
@@ -77,19 +172,27 @@ export default function CustomDrawerContent(props: any) {
     setShowBusinessDropdown(false);
     props.navigation.closeDrawer();
     
-    console.log('Navigating to business management...');
+    console.log('🎭 Navigating to business management...');
     
     try {
       props.navigation.navigate('business');
     } catch (error) {
-      console.error('Navigation error:', error);
+      console.error('🎭 Navigation error:', error);
       try {
         props.navigation.navigate('Business');
       } catch (fallbackError) {
-        console.error('Fallback navigation also failed:', fallbackError);
+        console.error('🎭 Fallback navigation also failed:', fallbackError);
         Alert.alert('Navigation Error', 'Could not open business screen');
       }
     }
+  };
+
+  const handleAccountNavigation = () => {
+    setShowBusinessDropdown(false);
+    props.navigation.closeDrawer();
+    
+    console.log('🎭 Navigating to account...');
+    props.navigation.navigate('account');
   };
 
   const renderBusinessItem = (business: any, isOwned: boolean = true) => {
@@ -132,10 +235,13 @@ export default function CustomDrawerContent(props: any) {
           style={styles.accountHeader}    
           activeOpacity={0.8}
         >    
-          <Image
-            source={avatarSource}
+          {/* FIXED: Use SafeAvatar component with proper refresh handling */}
+          <SafeAvatar
+            size={42}
+            avatarUrl={user?.avatar_url}
+            fallbackSource={require('../assets/images/avatar_placeholder.png')}
             style={styles.avatar}
-          />  
+          />
           <View style={styles.accountInfo}>
             <Text style={styles.userName}>{displayName}</Text>
             <Text style={styles.userPhone}>{userPhone}</Text>
@@ -154,10 +260,7 @@ export default function CustomDrawerContent(props: any) {
               label="Account"    
               labelStyle={styles.label}    
               icon={() => <Feather name="user" size={22} color="#fff" />}    
-              onPress={() => {
-                setShowBusinessDropdown(false);
-                props.navigation.navigate('account');
-              }}    
+              onPress={handleAccountNavigation}
             />
             
             {/* Business Listings */}
@@ -296,10 +399,8 @@ const styles = StyleSheet.create({
     elevation: 3,
   },
   avatar: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
     marginRight: 12,
+    // Remove width/height as SafeAvatar handles sizing
   },
   accountInfo: {
     flex: 1,
