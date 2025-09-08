@@ -614,25 +614,25 @@ export default function HomeScreen() {
     Animated.parallel([
       Animated.timing(fabRotation, {
         toValue: 1,
-        duration: 300,
+        duration: 150,
         easing: Easing.bezier(0.4, 0.0, 0.2, 1),
         useNativeDriver: true,
       }),
       Animated.timing(overlayOpacity, {
         toValue: 1,
-        duration: 300,
+        duration: 150,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(optionsScale, {
         toValue: 1,
-        duration: 400,
+        duration: 180,
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
       Animated.timing(optionsTranslateY, {
         toValue: 0,
-        duration: 400,
+        duration: 180,
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
@@ -1001,14 +1001,14 @@ export default function HomeScreen() {
           onPress={option.action}
           activeOpacity={0.8}
         >
-          {/* FIXED: Increased opacity for more solid but still semi-translucent appearance */}
+          {/* FIXED: More solid appearance with higher opacity */}
           <View
             style={[
               styles.fabOptionBackground,
               {
                 borderColor: option.color,
                 borderWidth: 2,
-                backgroundColor: `${option.color}35`, // FIXED: Increased from 15% to 35% opacity
+                backgroundColor: `${option.color}85`, // FIXED: Increased to 85% opacity for more solid appearance
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1020,7 +1020,7 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
-                  backgroundColor: `${option.color}50`, // FIXED: Increased from 25% to 50% opacity
+                  backgroundColor: `${option.color}90`, // FIXED: Increased to 90% opacity for more solid appearance
                   borderColor: option.color,
                   borderWidth: 1,
                   shadowColor: option.glowColor,
@@ -1029,7 +1029,7 @@ export default function HomeScreen() {
                   shadowRadius: 8,
                 }
               ]}>
-                <Feather name={option.icon as any} size={22} color={option.color} />
+                <Feather name={option.icon as any} size={22} color="white" />
               </View>
               <Text style={[styles.fabOptionLabel, { color: option.color }]}>{option.label}</Text>
               <TouchableOpacity 
