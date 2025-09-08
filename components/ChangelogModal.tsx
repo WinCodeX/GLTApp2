@@ -3,7 +3,7 @@
 import React, { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export const CHANGELOG_VERSION = '1.3.3';
+export const CHANGELOG_VERSION = '1.3.4';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
