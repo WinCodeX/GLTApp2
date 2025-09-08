@@ -1,6 +1,7 @@
-// lib/helpers/business.ts - Updated with categories fetch and phone number support
+// lib/helpers/business.ts - Updated with secure token verification and categories fetch
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as SecureStore from 'expo-secure-store';
 import api from '../api';
 
 interface Category {
@@ -21,21 +22,45 @@ const CATEGORIES_CACHE_KEY = '@business_categories';
 const CATEGORIES_CACHE_EXPIRY = '@categories_cache_expiry';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
 
-// Fetch categories from server with caching
+// Get auth token with proper error handling
+const getAuthToken = async (): Promise<string> => {
+  try {
+    const token = await SecureStore.getItemAsync("auth_token");
+    
+    if (!token) {
+      throw new Error('Authentication required. Please log in again.');
+    }
+    
+    return token;
+  } catch (error: any) {
+    console.error('Failed to get auth token:', error);
+    throw new Error('Authentication required. Please log in again.');
+  }
+};
+
+// Fetch categories from server with caching and auth verification
 export const fetchCategories = async (forceRefresh = false): Promise<Category[]> => {
   try {
     // Check cache first unless force refresh
     if (!forceRefresh) {
       const cachedCategories = await getCachedCategories();
       if (cachedCategories.length > 0) {
-        console.log('🏷️ Using cached categories:', cachedCategories.length);
+        console.log('Using cached categories:', cachedCategories.length);
         return cachedCategories;
       }
     }
 
-    console.log('🏷️ Fetching categories from server...');
+    console.log('Fetching categories from server...');
     
-    const response = await api.get('/api/v1/categories');
+    // Get auth token
+    const token = await getAuthToken();
+    
+    const response = await api.get('/api/v1/categories', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: 10000, // 10 second timeout
+    });
     
     if (!response.data.success) {
       throw new Error(response.data.message || 'Failed to fetch categories');
@@ -43,19 +68,31 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
 
     const categories: Category[] = response.data.data || [];
     
-    console.log('🏷️ Categories fetched successfully:', categories.length);
+    console.log('Categories fetched successfully:', categories.length);
     
     // Cache categories for future use
     await cacheCategories(categories);
     
     return categories;
   } catch (error: any) {
-    console.error('❌ Fetch Categories Error:', error?.response?.data || error?.message);
+    console.error('Fetch Categories Error:', error?.response?.data || error?.message);
+    
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
     
     // Try to return cached categories as fallback
     const cachedCategories = await getCachedCategories();
     if (cachedCategories.length > 0) {
-      console.log('🏷️ Falling back to cached categories');
+      console.log('Falling back to cached categories');
       
       Toast.show({
         type: 'warning',
@@ -96,9 +133,9 @@ const cacheCategories = async (categories: Category[]): Promise<void> => {
       [CATEGORIES_CACHE_EXPIRY, expiry.toString()]
     ]);
     
-    console.log('🏷️ Categories cached successfully');
+    console.log('Categories cached successfully');
   } catch (error) {
-    console.error('❌ Error caching categories:', error);
+    console.error('Error caching categories:', error);
   }
 };
 
@@ -121,7 +158,7 @@ const getCachedCategories = async (): Promise<Category[]> => {
     const now = Date.now();
     
     if (now > expiryTime) {
-      console.log('🏷️ Categories cache expired');
+      console.log('Categories cache expired');
       await clearCategoriesCache();
       return [];
     }
@@ -129,7 +166,7 @@ const getCachedCategories = async (): Promise<Category[]> => {
     const categories: Category[] = JSON.parse(categoriesData);
     return categories;
   } catch (error) {
-    console.error('❌ Error reading cached categories:', error);
+    console.error('Error reading cached categories:', error);
     return [];
   }
 };
@@ -138,15 +175,21 @@ const getCachedCategories = async (): Promise<Category[]> => {
 export const clearCategoriesCache = async (): Promise<void> => {
   try {
     await AsyncStorage.multiRemove([CATEGORIES_CACHE_KEY, CATEGORIES_CACHE_EXPIRY]);
-    console.log('🏷️ Categories cache cleared');
+    console.log('Categories cache cleared');
   } catch (error) {
-    console.error('❌ Error clearing categories cache:', error);
+    console.error('Error clearing categories cache:', error);
   }
 };
 
-// Create a new business - Updated to handle phone number and category IDs
+// Create a new business with secure token verification
 export const createBusiness = async (businessData: string | BusinessData) => {
   try {
+    console.log('Starting business creation process...');
+    
+    // Get auth token with verification
+    const token = await getAuthToken();
+    console.log('Found auth token for business creation');
+
     // Handle both legacy string input and new object input
     let requestData: any;
     
@@ -166,17 +209,75 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       };
     }
 
-    console.log('🏢 Creating business with data:', requestData);
+    console.log('Creating business with data:', requestData);
 
-    const response = await api.post('/api/v1/businesses', requestData);
+    const response = await api.post('/api/v1/businesses', requestData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000, // 15 second timeout
+    });
     
-    console.log('🏢 Business creation response:', response.data);
+    console.log('Business creation response:', response.data);
     
     return response.data;
   } catch (error: any) {
-    console.error('❌ Create Business Error:', error?.response?.data || error?.message);
+    console.error('Create Business Error:', error?.response?.data || error?.message);
     
-    // Enhanced error handling
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      console.log('Authentication failed during business creation');
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
+    
+    // Handle validation errors
+    if (error.response?.status === 422) {
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.errors?.join(', ') ||
+                          'Invalid business data';
+      Toast.show({
+        type: 'error',
+        text1: 'Validation Error',
+        text2: errorMessage,
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorMessage);
+    }
+    
+    // Handle network/connection errors
+    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Please check your connection and try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Network error. Please check your connection and try again.');
+    }
+    
+    // Handle timeout errors
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Request Timeout',
+        text2: 'Please try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Request timeout. Please try again.');
+    }
+    
+    // Enhanced error handling for other cases
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.errors?.join(', ') ||
                         error?.response?.data?.error || 
@@ -195,18 +296,39 @@ export const createBusiness = async (businessData: string | BusinessData) => {
   }
 };
 
-// Generate an invite code for a business
+// Generate an invite code for a business with secure token verification
 export const createInvite = async (businessId: number) => {
   try {
-    console.log('🔗 Creating invite for business ID:', businessId);
+    console.log('Creating invite for business ID:', businessId);
     
-    const response = await api.post('/api/v1/invites', { business_id: businessId });
+    // Get auth token with verification
+    const token = await getAuthToken();
     
-    console.log('🔗 Invite creation response:', response.data);
+    const response = await api.post('/api/v1/invites', { business_id: businessId }, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000, // 10 second timeout
+    });
+    
+    console.log('Invite creation response:', response.data);
     
     return response.data;
   } catch (error: any) {
-    console.error('❌ Create Invite Error:', error?.response?.data || error?.message);
+    console.error('Create Invite Error:', error?.response?.data || error?.message);
+    
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
     
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
@@ -224,18 +346,39 @@ export const createInvite = async (businessId: number) => {
   }
 };
 
-// Join a business via invite code
+// Join a business via invite code with secure token verification
 export const joinBusiness = async (code: string) => {
   try {
-    console.log('🤝 Joining business with code:', code);
+    console.log('Joining business with code:', code);
     
-    const response = await api.post('/api/v1/invites/accept', { code });
+    // Get auth token with verification
+    const token = await getAuthToken();
     
-    console.log('🤝 Join business response:', response.data);
+    const response = await api.post('/api/v1/invites/accept', { code }, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 10000, // 10 second timeout
+    });
+    
+    console.log('Join business response:', response.data);
     
     return response.data;
   } catch (error: any) {
-    console.error('❌ Join Business Error:', error?.response?.data || error?.message);
+    console.error('Join Business Error:', error?.response?.data || error?.message);
+    
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
     
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
@@ -253,12 +396,20 @@ export const joinBusiness = async (code: string) => {
   }
 };
 
-// Fetch both owned and joined businesses with enhanced error handling
+// Fetch both owned and joined businesses with secure token verification
 export const getBusinesses = async () => {
   try {
-    console.log('📋 Fetching businesses...');
+    console.log('Fetching businesses...');
     
-    const response = await api.get('/api/v1/businesses');
+    // Get auth token with verification
+    const token = await getAuthToken();
+    
+    const response = await api.get('/api/v1/businesses', {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+      timeout: 10000, // 10 second timeout
+    });
     
     if (!response.data || typeof response.data !== 'object') {
       throw new Error('Invalid business data received from server');
@@ -280,14 +431,39 @@ export const getBusinesses = async () => {
       };
     }
 
-    console.log('📋 Businesses fetched successfully:', {
+    console.log('Businesses fetched successfully:', {
       owned: businessData.owned.length,
       joined: businessData.joined.length
     });
 
     return businessData;
   } catch (error: any) {
-    console.error('❌ Get Businesses Error:', error?.response?.data || error?.message);
+    console.error('Get Businesses Error:', error?.response?.data || error?.message);
+    
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
+    
+    // Handle network/connection errors
+    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Check your internet connection',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      // Return safe fallback for network errors
+      return { owned: [], joined: [] };
+    }
     
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
