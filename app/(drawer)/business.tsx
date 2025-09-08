@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed avatar upload with proper synchronization
+// app/(drawer)/Business.tsx - Fixed with refresh feature and proper synchronization
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   StatusBar,
   Alert,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -62,7 +63,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   
   // Reset error state when avatarUrl or updateTrigger changes
   useEffect(() => {
-    console.log('🎭 SafeAvatar: Update triggered', {
+    console.log('🎭 Business SafeAvatar: Update triggered', {
       avatarUrl,
       updateTrigger,
       timestamp: Date.now()
@@ -96,12 +97,55 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         }}
         style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
         onError={() => {
-          console.warn('🎭 SafeAvatar: Failed to load:', fullAvatarUrl);
+          console.warn('🎭 Business SafeAvatar: Failed to load:', fullAvatarUrl);
           setHasError(true);
         }}
       />
     </TouchableOpacity>
   );
+};
+
+// Centralized toast helper
+const showToast = {
+  success: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'success',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 2500,
+    });
+  },
+  
+  error: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'error',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+  },
+  
+  warning: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'warning',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3500,
+    });
+  },
+  
+  info: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'info',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3000,
+    });
+  },
 };
 
 export default function Business({ navigation }: BusinessProps) {
@@ -118,8 +162,8 @@ export default function Business({ navigation }: BusinessProps) {
     clearUserCache,
     selectedBusiness,
     setSelectedBusiness,
-    avatarUpdateTrigger, // New: Avatar sync trigger
-    triggerAvatarRefresh, // New: Force avatar refresh
+    avatarUpdateTrigger, // Avatar sync trigger
+    triggerAvatarRefresh, // Force avatar refresh
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -135,12 +179,43 @@ export default function Business({ navigation }: BusinessProps) {
   // Avatar functionality states
   const [previewUri, setPreviewUri] = useState(null);
   const [avatarLoading, setAvatarLoading] = useState(false);
+  
+  // Refresh functionality states
+  const [refreshing, setRefreshing] = useState(false);
 
   const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
   const username = getDisplayName();
 
   const currentBusiness = selectedBusiness || businesses.owned[currentBusinessIndex] || businesses.owned[0];
+
+  // Enhanced refresh handler similar to AccountContent
+  const onRefresh = useCallback(async () => {
+    try {
+      if (!user) {
+        showToast.warning('Please log in first');
+        return;
+      }
+
+      setRefreshing(true);
+      console.log('🔄 Business: Manual refresh triggered - clearing cache and fetching fresh data');
+      
+      // Force clear cache and refresh both user and business data
+      await clearUserCache();
+      await refreshUser(true); // Force refresh with cache clearing
+      await refreshBusinesses(true); // Force refresh businesses too
+      
+      // Trigger avatar refresh to ensure UI sync
+      triggerAvatarRefresh();
+      
+      showToast.success('Data refreshed');
+    } catch (error) {
+      console.error('🔄 Business: Refresh error:', error);
+      showToast.error('Failed to refresh data', 'Please check your connection');
+    } finally {
+      setRefreshing(false);
+    }
+  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user]);
 
   // Fixed back navigation
   const handleGoBack = () => {
@@ -188,11 +263,7 @@ export default function Business({ navigation }: BusinessProps) {
     setCurrentBusinessIndex(businessIndex);
     setSelectedBusiness?.(selectedBiz);
     setShowBusinessDropdown(false);
-    Toast.show({
-      type: 'info',
-      text1: 'Business selected',
-      text2: selectedBiz?.name,
-    });
+    showToast.info('Business selected', selectedBiz?.name);
   };
 
   // Share business functionality
@@ -200,11 +271,7 @@ export default function Business({ navigation }: BusinessProps) {
     if (currentBusiness) {
       setSelectedBusinessForShare(currentBusiness);
     } else {
-      Toast.show({
-        type: 'warning',
-        text1: 'No business selected',
-        text2: 'Please select a business first',
-      });
+      showToast.warning('No business selected', 'Please select a business first');
     }
   };
 
@@ -215,18 +282,10 @@ export default function Business({ navigation }: BusinessProps) {
     try {
       const result = await createInvite(selectedBusinessForShare.id);
       setInviteLink(result?.code || 'No code generated');
-      Toast.show({
-        type: 'success',
-        text1: 'Invite link generated',
-        text2: 'Copy and share with your team',
-      });
+      showToast.success('Invite link generated', 'Copy and share with your team');
     } catch (error) {
       console.error('Error creating invite:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Failed to create invite',
-        text2: 'Please try again',
-      });
+      showToast.error('Failed to create invite', 'Please try again');
     }
   };
 
@@ -234,11 +293,7 @@ export default function Business({ navigation }: BusinessProps) {
   const copyInviteLink = () => {
     if (inviteLink) {
       Clipboard.setStringAsync(inviteLink);
-      Toast.show({
-        type: 'success',
-        text1: 'Copied to clipboard!',
-        text2: 'Share this invite code',
-      });
+      showToast.success('Copied to clipboard!', 'Share this invite code');
     }
   };
 
@@ -258,6 +313,7 @@ export default function Business({ navigation }: BusinessProps) {
   const handleBusinessModalClose = async () => {
     setShowBusinessModal(false);
     try {
+      console.log('🔄 Business: Refreshing businesses after modal close');
       await refreshBusinesses?.(true);
     } catch (error) {
       console.error('Error refreshing businesses:', error);
@@ -268,6 +324,7 @@ export default function Business({ navigation }: BusinessProps) {
   const handleJoinModalClose = async () => {
     setShowJoinModal(false);
     try {
+      console.log('🔄 Business: Refreshing businesses after join modal close');
       await refreshBusinesses?.(true);
     } catch (error) {
       console.error('Error refreshing businesses:', error);
@@ -279,11 +336,7 @@ export default function Business({ navigation }: BusinessProps) {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Toast.show({
-          type: 'error',
-          text1: 'Photo access denied',
-          text2: 'Please allow photo access to change avatar',
-        });
+        showToast.error('Photo access denied', 'Please allow photo access to change avatar');
         return;
       }
 
@@ -297,7 +350,7 @@ export default function Business({ navigation }: BusinessProps) {
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log('🎭 Selected image:', {
+      console.log('🎭 Business: Selected image:', {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
@@ -306,12 +359,8 @@ export default function Business({ navigation }: BusinessProps) {
       
       setPreviewUri(asset.uri);
     } catch (error) {
-      console.error('Error picking avatar:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Failed to select image',
-        text2: 'Please try again',
-      });
+      console.error('Business: Error picking avatar:', error);
+      showToast.error('Failed to select image', 'Please try again');
     }
   }, []);
 
@@ -321,52 +370,44 @@ export default function Business({ navigation }: BusinessProps) {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('🎭 Starting coordinated avatar upload process...');
+      console.log('🎭 Business: Starting coordinated avatar upload process...');
       
       // Step 1: Upload avatar using helper
       const result = await uploadAvatar(previewUri);
-      console.log('🎭 Upload result:', result);
+      console.log('🎭 Business: Upload result:', result);
       
       // Step 2: Check for success
       if (result?.avatar_url || result?.success) {
-        console.log('🎭 Avatar uploaded successfully, starting synchronization...');
+        console.log('🎭 Business: Avatar uploaded successfully, starting synchronization...');
         
         // Step 3: Clear all caches
-        console.log('🎭 Clearing all caches...');
+        console.log('🎭 Business: Clearing all caches...');
         await clearUserCache();
         
         // Step 4: Wait a moment for server to process
         await new Promise(resolve => setTimeout(resolve, 500));
         
         // Step 5: Force refresh user data
-        console.log('🎭 Force refreshing user data...');
+        console.log('🎭 Business: Force refreshing user data...');
         await refreshUser(true);
         
         // Step 6: Trigger avatar refresh across all components
-        console.log('🎭 Triggering avatar refresh across components...');
+        console.log('🎭 Business: Triggering avatar refresh across components...');
         triggerAvatarRefresh();
         
         // Step 7: Another small delay to ensure UI updates
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        Toast.show({
-          type: 'success',
-          text1: 'Avatar updated!',
-          text2: 'Your profile picture has been changed',
-        });
+        showToast.success('Avatar updated!', 'Your profile picture has been changed');
         
-        console.log('🎭 Avatar upload and synchronization completed');
+        console.log('🎭 Business: Avatar upload and synchronization completed');
       } else {
         throw new Error('Upload successful but no avatar URL returned');
       }
       
     } catch (error: any) {
-      console.error('🎭 Error during avatar upload:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Upload failed',
-        text2: error.message || 'Please try again',
-      });
+      console.error('🎭 Business: Error during avatar upload:', error);
+      showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
       setAvatarLoading(false);
@@ -389,8 +430,17 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
         
         <View style={styles.headerRight}>
-          <TouchableOpacity style={styles.headerIcon}>
-            <Feather name="refresh-cw" size={20} color="#fff" />
+          <TouchableOpacity 
+            style={styles.headerIcon}
+            onPress={onRefresh}
+            disabled={refreshing}
+          >
+            <Feather 
+              name="refresh-cw" 
+              size={20} 
+              color="#fff" 
+              style={refreshing ? { opacity: 0.6 } : {}}
+            />
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIcon}>
             <Feather name="plus-square" size={20} color="#fff" />
@@ -401,7 +451,20 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            colors={['#7c3aed']}
+            tintColor="#7c3aed"
+            title="Pull to refresh"
+            titleColor="#7c3aed"
+          />
+        }
+      >
         {/* Profile Section with synchronized avatar */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
@@ -465,11 +528,7 @@ export default function Business({ navigation }: BusinessProps) {
             style={styles.editButton}
             disabled={!currentBusiness}
             onPress={() => {
-              Toast.show({
-                type: 'info',
-                text1: 'Edit Business',
-                text2: 'Feature coming soon',
-              });
+              showToast.info('Edit Business', 'Feature coming soon');
             }}
           >
             <Text style={styles.editButtonText}>Edit Business</Text>
