@@ -358,7 +358,7 @@ const AreaSelectionModal: React.FC<{
                 <View>
                   {(selectedFilter === 'all' || selectedFilter === 'areas') && filteredAreas.length > 0 && (
                     <View>
-                      <Text style={styles.sectionTitle}>Areas ({filteredAreas.length})</Text>
+                      <Text style={styles.modalSectionTitle}>Areas ({filteredAreas.length})</Text>
                       <FlatList
                         data={filteredAreas}
                         keyExtractor={(item) => `area-${item.id}`}
@@ -370,7 +370,7 @@ const AreaSelectionModal: React.FC<{
                   
                   {(selectedFilter === 'all' || selectedFilter === 'offices') && filteredAgents.length > 0 && (
                     <View style={{ marginTop: selectedFilter === 'all' && filteredAreas.length > 0 ? 16 : 0 }}>
-                      <Text style={styles.sectionTitle}>Offices ({filteredAgents.length})</Text>
+                      <Text style={styles.modalSectionTitle}>Offices ({filteredAgents.length})</Text>
                       <FlatList
                         data={filteredAgents}
                         keyExtractor={(item) => `agent-${item.id}`}
@@ -1038,9 +1038,9 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* Animated Scrolling Section */}
+      {/* FIXED: Animated Scrolling Section with matching title style */}
       <View style={styles.locationsContainer}>
-        <Text style={styles.sectionTitle}>Currently Reaching</Text>
+        <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
           <Animated.View
             style={[
@@ -1055,8 +1055,12 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* Enhanced Cost Calculator */}
-      <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
+      {/* FIXED: Enhanced Cost Calculator with proper bottom padding */}
+      <ScrollView 
+        style={styles.scrollContainer} 
+        contentContainerStyle={styles.scrollContentContainer}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
           
@@ -1404,13 +1408,13 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     backgroundColor: '#0a0a0f',
   },
-  sectionTitle: {
+  // FIXED: Main section title to match calculator title exactly
+  mainSectionTitle: {
     fontSize: 24, 
     fontWeight: 'bold', 
-    color: '#ffffff',
+    color: '#fff',
     textAlign: 'center', 
-    marginBottom: 15, 
-    opacity: 1,
+    marginBottom: 30,
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
@@ -1444,6 +1448,10 @@ const styles = StyleSheet.create({
   },
   scrollContainer: { 
     flex: 1 
+  },
+  // FIXED: Added proper content container style with bottom padding for FAB
+  scrollContentContainer: {
+    paddingBottom: 120, // Ensures content doesn't hide behind FAB
   },
   calculatorContainer: { 
     padding: 20, 
@@ -1790,7 +1798,8 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
   },
-  sectionTitle: {
+  // FIXED: Separate style for modal section titles to avoid conflicts
+  modalSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#8B5CF6',
