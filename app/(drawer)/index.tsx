@@ -481,7 +481,7 @@ export default function HomeScreen() {
       // Animate to exactly one set width (this creates seamless loop)
       Animated.timing(scrollX, {
         toValue: -singleSetWidth,
-        duration: 12000, // FIXED: Faster scrolling - reduced from 18000ms to 12000ms
+        duration: 12000, // Faster scrolling - reduced from 18000ms to 12000ms
         easing: Easing.linear,
         useNativeDriver: true,
       }).start(({ finished }) => {
@@ -607,32 +607,32 @@ export default function HomeScreen() {
     return true;
   };
 
-  // FAB Menu Handlers
+  // FIXED: FAB Menu Handlers with instant animation timings
   const openFabMenu = () => {
     setFabMenuOpen(true);
     
     Animated.parallel([
       Animated.timing(fabRotation, {
         toValue: 1,
-        duration: 150,
+        duration: 150, // 50% faster - reduced from 300ms
         easing: Easing.bezier(0.4, 0.0, 0.2, 1),
         useNativeDriver: true,
       }),
       Animated.timing(overlayOpacity, {
         toValue: 1,
-        duration: 150,
+        duration: 150, // 50% faster - reduced from 300ms
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(optionsScale, {
         toValue: 1,
-        duration: 180,
+        duration: 180, // 55% faster - reduced from 400ms
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
       Animated.timing(optionsTranslateY, {
         toValue: 0,
-        duration: 180,
+        duration: 180, // 55% faster - reduced from 400ms
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
@@ -971,6 +971,7 @@ export default function HomeScreen() {
     );
   };
 
+  // FIXED: FAB option rendering with solid appearance and faster animations
   const renderFabOption = (option: FABOption, index: number) => {
     const optionOpacity = overlayOpacity.interpolate({
       inputRange: [0, 1],
@@ -1001,14 +1002,13 @@ export default function HomeScreen() {
           onPress={option.action}
           activeOpacity={0.8}
         >
-          {/* FIXED: More solid appearance with higher opacity */}
           <View
             style={[
               styles.fabOptionBackground,
               {
                 borderColor: option.color,
                 borderWidth: 2,
-                backgroundColor: `${option.color}85`, // FIXED: Increased to 85% opacity for more solid appearance
+                backgroundColor: `${option.color}85`, // Solid appearance - 85% opacity
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1020,7 +1020,7 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
-                  backgroundColor: `${option.color}90`, // FIXED: Increased to 90% opacity for more solid appearance
+                  backgroundColor: `${option.color}90`, // Very solid - 90% opacity
                   borderColor: option.color,
                   borderWidth: 1,
                   shadowColor: option.glowColor,
@@ -1057,7 +1057,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* FIXED: Currently Reaching Section with seamless endless scrolling */}
+      {/* Currently Reaching Section with seamless endless scrolling */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
@@ -1067,7 +1067,7 @@ export default function HomeScreen() {
               { transform: [{ translateX: scrollX }] },
             ]}
           >
-            {/* FIXED: Create more repetitions for seamless loop - increased from 5 to 10 */}
+            {/* Create more repetitions for seamless loop - increased from 5 to 10 */}
             {Array(10).fill(locations).flat().map((location, index) => (
               <LocationTag key={`${location.name}-${index}`} location={location} />
             ))}
