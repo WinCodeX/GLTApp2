@@ -467,30 +467,37 @@ export default function HomeScreen() {
     loadFormDataInBackground();
   }, []);
 
-  // Location scrolling animation - works immediately with default locations
+  // FIXED: Improved location scrolling animation for seamless endless loop
   useEffect(() => {
     if (locations.length === 0) return;
     
     const locationTagWidth = 120;
-    const visibleSetWidth = locations.length * locationTagWidth;
-    const repeatedList = 5;
-    const scrollDistance = visibleSetWidth * repeatedList;
+    const singleSetWidth = locations.length * locationTagWidth;
 
-    const loop = () => {
+    const startContinuousLoop = () => {
+      // Reset position to 0
       scrollX.setValue(0);
+      
+      // Animate to exactly one set width (this creates seamless loop)
       Animated.timing(scrollX, {
-        toValue: -scrollDistance / 2,
-        duration: 30000,
+        toValue: -singleSetWidth,
+        duration: 25000, // Slightly faster for better visual flow
         easing: Easing.linear,
         useNativeDriver: true,
-      }).start(() => {
-        loop();
+      }).start(({ finished }) => {
+        // Only restart if animation completed (not interrupted)
+        if (finished) {
+          startContinuousLoop();
+        }
       });
     };
 
-    loop();
+    startContinuousLoop();
 
-    return () => scrollX.stopAnimation();
+    // Cleanup function
+    return () => {
+      scrollX.stopAnimation();
+    };
   }, [scrollX, locations]);
 
   // Check if user has seen the current changelog version
@@ -994,14 +1001,14 @@ export default function HomeScreen() {
           onPress={option.action}
           activeOpacity={0.8}
         >
-          {/* FIXED: Changed to outline style with semi-transparent background */}
+          {/* FIXED: Increased opacity for more solid but still semi-translucent appearance */}
           <View
             style={[
               styles.fabOptionBackground,
               {
                 borderColor: option.color,
                 borderWidth: 2,
-                backgroundColor: `${option.color}15`, // Semi-transparent background
+                backgroundColor: `${option.color}35`, // FIXED: Increased from 15% to 35% opacity
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1013,7 +1020,7 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
-                  backgroundColor: `${option.color}25`, // Semi-transparent icon background
+                  backgroundColor: `${option.color}50`, // FIXED: Increased from 25% to 50% opacity
                   borderColor: option.color,
                   borderWidth: 1,
                   shadowColor: option.glowColor,
@@ -1050,7 +1057,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* Currently Reaching Section - Loads immediately with default locations */}
+      {/* FIXED: Currently Reaching Section with seamless endless scrolling */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
@@ -1060,7 +1067,8 @@ export default function HomeScreen() {
               { transform: [{ translateX: scrollX }] },
             ]}
           >
-            {Array(5).fill(locations).flat().map((location, index) => (
+            {/* FIXED: Create more repetitions for seamless loop - increased from 5 to 10 */}
+            {Array(10).fill(locations).flat().map((location, index) => (
               <LocationTag key={`${location.name}-${index}`} location={location} />
             ))}
           </Animated.View>
@@ -1681,20 +1689,17 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'visible',
   },
-  // FIXED: Changed FAB option background to outline style
   fabOptionBackground: {
     paddingVertical: 18,
     paddingHorizontal: 24,
     minWidth: 240,
     borderRadius: 20,
     overflow: 'visible',
-    // backgroundColor removed - now using semi-transparent background from renderFabOption
   },
   fabOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
-  // FIXED: Updated FAB option icon for outline style
   fabOptionIcon: {
     width: 44,
     height: 44,
@@ -1703,9 +1708,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 16,
     elevation: 8,
-    // backgroundColor now set in renderFabOption with semi-transparent color
   },
-  // FIXED: Updated FAB option label to use dynamic color
   fabOptionLabel: {
     flex: 1,
     fontSize: 16,
@@ -1713,9 +1716,7 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    // color now set dynamically in renderFabOption
   },
-  // FIXED: Updated info button for outline style
   infoButton: {
     width: 32,
     height: 32,
@@ -1724,7 +1725,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
-    // borderColor and borderWidth now set dynamically in renderFabOption
   },
 
   // Area Selection Modal Styles
