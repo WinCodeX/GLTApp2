@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Fixed splash screen handling
+// app/(drawer)/_layout.tsx - Using native splash screen only
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import * as SplashScreen from 'expo-splash-screen';
@@ -17,7 +17,6 @@ import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
-import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
@@ -218,17 +217,12 @@ export default function DrawerLayout() {
     }, [initState])
   );
 
-  // Always show loading screen during initialization
-  if (initState === 'loading') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
+  // Don't render anything during loading or redirect - let splash screen handle it
+  if (initState === 'loading' || initState === 'redirect') {
+    return null;
   }
 
-  // Show loading screen during redirect
-  if (initState === 'redirect') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
-  }
-
-  // Only render drawer when authenticated and splash is hidden
+  // Only render drawer when authenticated and ready
   if (initState === 'authenticated') {
     return (
       <Drawer
@@ -260,6 +254,6 @@ export default function DrawerLayout() {
     );
   }
 
-  // Fallback loading screen
-  return <LoadingSplashScreen backgroundColor={colors.background} />;
+  // Fallback - should never reach here
+  return null;
 }
