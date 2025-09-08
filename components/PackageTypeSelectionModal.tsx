@@ -357,7 +357,7 @@ export default function PackageTypeSelectionModal({
     }
   };
 
-  // Render package type option with solid translucent styling
+  // Render package type option with solid translucent styling - NO INNER BOXES
   const renderPackageTypeOption = (packageType: PackageType, index: number) => {
     const isSelected = selectedType === packageType.id;
     
@@ -383,52 +383,46 @@ export default function PackageTypeSelectionModal({
         activeOpacity={0.8}
         disabled={isProcessing}
       >
-        <View style={styles.packageTypeContent}>
-          <View 
-            style={[
-              styles.packageTypeIcon,
-              {
-                backgroundColor: isSelected ? 'transparent' : `${packageType.color}30`,
-                borderColor: isSelected ? `${packageType.color}60` : `${packageType.color}80`,
-                opacity: isSelected ? 0.6 : 1,
-              }
-            ]}
-          >
-            <Feather 
-              name={packageType.icon as any} 
-              size={28} 
-              color={isSelected ? `${packageType.color}80` : packageType.color} 
-            />
-          </View>
-          
-          <View style={styles.packageTypeText}>
-            <Text style={[
-              styles.packageTypeLabel, 
-              { 
-                color: isSelected ? `${packageType.color}80` : '#ffffff',
-                opacity: isSelected ? 0.6 : 1,
-              }
-            ]}>
-              {packageType.label}
-            </Text>
-            <Text style={[
-              styles.packageTypeDescription,
-              { opacity: isSelected ? 0.4 : 0.8 }
-            ]}>
-              {packageType.description}
-            </Text>
-          </View>
-          
-          <View style={[
-            styles.packageTypeArrow,
+        <View 
+          style={[
+            styles.packageTypeIcon,
+            {
+              backgroundColor: 'transparent',
+              opacity: isSelected ? 0.6 : 1,
+            }
+          ]}
+        >
+          <Feather 
+            name={packageType.icon as any} 
+            size={28} 
+            color={isSelected ? `${packageType.color}80` : '#ffffff'} 
+          />
+        </View>
+        
+        <View style={styles.packageTypeText}>
+          <Text style={[
+            styles.packageTypeLabel, 
             { 
-              backgroundColor: isSelected ? 'transparent' : 'rgba(255, 255, 255, 0.1)',
-              opacity: isSelected ? 0.4 : 1 
+              color: isSelected ? `${packageType.color}80` : '#ffffff',
+              opacity: isSelected ? 0.6 : 1,
             }
           ]}>
-            <Feather name="chevron-right" size={20} color="#ffffff" />
-          </View>
+            {packageType.label}
+          </Text>
+          <Text style={[
+            styles.packageTypeDescription,
+            { opacity: isSelected ? 0.4 : 0.8 }
+          ]}>
+            {packageType.description}
+          </Text>
         </View>
+        
+        <Feather 
+          name="chevron-right" 
+          size={20} 
+          color={isSelected ? `${packageType.color}60` : '#ffffff'} 
+          style={{ opacity: isSelected ? 0.4 : 0.7 }}
+        />
       </TouchableOpacity>
     );
   };
@@ -598,17 +592,12 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   
-  // Solid Translucent Package Type Options
+  // Solid Translucent Package Type Options - NO INNER CONTAINERS
   packageTypeOption: {
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    overflow: 'hidden',
-  },
-  packageTypeContent: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 20,
+    borderRadius: 16,
     gap: 16,
   },
   packageTypeIcon: {
@@ -617,7 +606,6 @@ const styles = StyleSheet.create({
     borderRadius: 28,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 2,
   },
   packageTypeText: {
     flex: 1,
@@ -631,13 +619,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: '#cccccc',
     lineHeight: 18,
-  },
-  packageTypeArrow: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   
   // Modal Footer
