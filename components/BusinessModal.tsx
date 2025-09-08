@@ -1,4 +1,4 @@
-// components/BusinessModal.tsx - Fixed with inline category selection
+// components/BusinessModal.tsx - Fixed with proper business name and category handling
 import React, { useState, useCallback } from 'react';
 import {
   View,
@@ -30,6 +30,39 @@ const BUSINESS_CATEGORIES = [
   'Beauty & Wellness', 'Legal Services', 'Marketing', 'Sports & Fitness', 'Non-Profit'
 ];
 
+// Centralized toast helper
+const showToast = {
+  success: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'success',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 2500,
+    });
+  },
+  
+  error: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'error',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+  },
+  
+  warning: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'warning',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3500,
+    });
+  },
+};
+
 export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
   const [businessName, setBusinessName] = useState('');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -42,19 +75,21 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       } else if (prev.length < 5) {
         return [...prev, category];
       } else {
-        Toast.show({
-          type: 'warning',
-          text1: 'Maximum Categories',
-          text2: 'You can select up to 5 categories only',
-        });
+        showToast.warning('Maximum Categories', 'You can select up to 5 categories only');
         return prev;
       }
     });
   }, []);
 
   const handleCreate = async () => {
+    // Validation
     if (!businessName.trim()) {
       Alert.alert('Error', 'Please enter a business name');
+      return;
+    }
+
+    if (businessName.trim().length < 2) {
+      Alert.alert('Error', 'Business name must be at least 2 characters long');
       return;
     }
 
@@ -64,27 +99,39 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
     }
 
     setLoading(true);
+    
     try {
-      await createBusiness({
+      console.log('🏢 BusinessModal: Creating business with data:', {
+        name: businessName.trim(),
+        categories: selectedCategories
+      });
+
+      // Create the business with proper data structure
+      const result = await createBusiness({
         name: businessName.trim(),
         categories: selectedCategories,
       });
 
-      Toast.show({
-        type: 'success',
-        text1: 'Business Created',
-        text2: `${businessName} has been created successfully`,
-      });
+      console.log('🏢 BusinessModal: Business creation result:', result);
 
+      showToast.success('Business Created', `${businessName} has been created successfully`);
+
+      // Reset form
       setBusinessName('');
       setSelectedCategories([]);
+      
+      // Close modal and trigger refresh
       onCreate();
+      
     } catch (error: any) {
-      console.error('Create business error:', error);
-      Alert.alert(
-        'Creation Failed',
-        error.message || 'Failed to create business. Please try again.'
-      );
+      console.error('🏢 BusinessModal: Create business error:', error);
+      
+      const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.error || 
+                          error?.message || 
+                          'Failed to create business. Please try again.';
+      
+      Alert.alert('Creation Failed', errorMessage);
     } finally {
       setLoading(false);
     }
@@ -147,6 +194,8 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                     placeholderTextColor="rgba(255, 255, 255, 0.5)"
                     maxLength={50}
                     editable={!loading}
+                    autoCapitalize="words"
+                    autoCorrect={false}
                   />
                   <Text style={styles.characterCount}>
                     {businessName.length}/50
