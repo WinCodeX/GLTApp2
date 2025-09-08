@@ -1,5 +1,4 @@
-
-// lib/helpers/packageHelpers.ts - FIXED: Updated pricing function to use correct endpoint
+// lib/helpers/packageHelpers.ts - FIXED: Fragile deliveries don't require agents
 
 import api from '../api';
 
@@ -55,7 +54,6 @@ export interface Package {
   special_instructions?: string;
 }
 
-// UPDATED: Enhanced Package creation data interface with package_size and special_instructions
 export interface PackageData {
   sender_name: string;
   sender_phone: string;
@@ -68,7 +66,7 @@ export interface PackageData {
   delivery_type: string;
   delivery_location?: string;
   
-  // UPDATED: Added package size and special instructions for doorstep deliveries
+  // Package size and special instructions for doorstep deliveries
   package_size?: string; // 'small', 'medium', 'large' for doorstep deliveries
   special_instructions?: string; // For large packages and special handling requirements
   
@@ -133,7 +131,7 @@ export interface QRCodeResponse {
 export interface PricingRequest {
   origin_area_id: string;
   destination_area_id: string;
-  package_size: string; // FIXED: Use package_size instead of delivery_type
+  package_size: string;
 }
 
 export interface PricingResult {
@@ -188,7 +186,7 @@ let locationsCache: Location[] | null = null;
 let cacheTimestamp: number = 0;
 const CACHE_DURATION = 5 * 60 * 1000; // 5 minutes
 
-// Delivery types that don't require origin agent
+// FIXED: Delivery types that don't require origin agent (fragile included)
 const NO_ORIGIN_AGENT_DELIVERY_TYPES = [
   'fragile', 
   'collect', 
@@ -196,14 +194,19 @@ const NO_ORIGIN_AGENT_DELIVERY_TYPES = [
   'collection'
 ];
 
-// Delivery types that don't require destination area
+// FIXED: Delivery types that don't require destination area (fragile included)
 const NO_DESTINATION_AREA_DELIVERY_TYPES = [
   'fragile',
   'collection'
 ];
 
+// FIXED: Delivery types where agents are completely optional
+const OPTIONAL_AGENT_DELIVERY_TYPES = [
+  'fragile'
+];
+
 /**
- * UPDATED: Helper function to resolve area ID from agent ID
+ * UPDATED: Helper function to resolve area ID from agent ID (only if agent provided)
  */
 const resolveAreaIdFromAgent = async (agentId: string): Promise<string | null> => {
   try {
@@ -523,7 +526,7 @@ export const validatePackageFormData = (data: any): ValidationResult => {
 };
 
 /**
- * UPDATED: Validate individual package data for creation including package size and special instructions
+ * FIXED: Validate individual package data - fragile deliveries don't require agents
  */
 const validatePackageData = (packageData: PackageData): ValidationResult => {
   const issues: string[] = [];
@@ -545,14 +548,14 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
     // Conditional validation based on delivery type
     const deliveryType = packageData.delivery_type.toLowerCase();
     
-    // Check if origin agent is required
+    // Check if origin agent is required (not for fragile deliveries)
     if (!NO_ORIGIN_AGENT_DELIVERY_TYPES.includes(deliveryType)) {
       if (!packageData.origin_agent_id) {
         issues.push('Origin agent is required for standard deliveries');
       }
     }
     
-    // Check if destination area is required
+    // Check if destination area is required (not for fragile deliveries)
     if (!NO_DESTINATION_AREA_DELIVERY_TYPES.includes(deliveryType)) {
       if (!packageData.destination_area_id) {
         issues.push('Destination area is required for standard deliveries');
@@ -599,16 +602,9 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
       }
     }
     
-    // Fragile-specific validation
+    // FIXED: Fragile-specific validation - agents are now optional
     if (deliveryType === 'fragile') {
-      if (!packageData.origin_agent_id?.trim()) {
-        issues.push('Pickup agent is required for fragile deliveries');
-      }
-      
-      if (!packageData.destination_agent_id?.trim()) {
-        issues.push('Delivery agent is required for fragile deliveries');
-      }
-      
+      // Only require delivery location and package description
       if (!packageData.delivery_location?.trim()) {
         issues.push('Delivery location is required for fragile deliveries');
       }
@@ -616,6 +612,10 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
       if (!packageData.package_description?.trim()) {
         issues.push('Package description is required for fragile items');
       }
+      
+      // Agents are completely optional for fragile deliveries
+      // Areas are also optional - the system can handle fragile deliveries without specific area assignments
+      console.log('Fragile delivery validation: agents and areas are optional');
     }
     
     return {
@@ -630,7 +630,7 @@ const validatePackageData = (packageData: PackageData): ValidationResult => {
 };
 
 /**
- * UPDATED: Create a new package with proper agent-to-area mapping and package_size/special_instructions support
+ * FIXED: Create a new package - fragile deliveries work without required agents
  */
 export const createPackage = async (packageData: PackageData): Promise<any> => {
   try {
@@ -642,16 +642,16 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       throw new Error(validation.issues.join(', '));
     }
     
-    // UPDATED: Enhanced package data processing with agent-to-area mapping
+    // Enhanced package data processing with agent-to-area mapping
     let processedPackageData = { ...packageData };
     
     const deliveryType = packageData.delivery_type.toLowerCase();
     
-    // FIXED: Auto-resolve area IDs from agent IDs for special delivery types
+    // FIXED: For fragile deliveries, only resolve areas if agents are provided
     if (deliveryType === 'fragile') {
-      console.log('Processing fragile delivery - resolving area IDs from agents...');
+      console.log('Processing fragile delivery - agents and areas are optional...');
       
-      // Resolve origin area from origin agent
+      // Only resolve origin area if origin agent is provided
       if (packageData.origin_agent_id && !packageData.origin_area_id) {
         const originAreaId = await resolveAreaIdFromAgent(packageData.origin_agent_id);
         if (originAreaId) {
@@ -660,13 +660,18 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
         }
       }
       
-      // Resolve destination area from destination agent
+      // Only resolve destination area if destination agent is provided
       if (packageData.destination_agent_id && !packageData.destination_area_id) {
         const destinationAreaId = await resolveAreaIdFromAgent(packageData.destination_agent_id);
         if (destinationAreaId) {
           processedPackageData.destination_area_id = destinationAreaId;
           console.log('Resolved destination area ID:', destinationAreaId);
         }
+      }
+      
+      // If no agents provided, fragile delivery can still proceed without area assignments
+      if (!packageData.origin_agent_id && !packageData.destination_agent_id) {
+        console.log('Fragile delivery proceeding without agent assignments - using direct location addressing');
       }
     }
     
@@ -696,7 +701,7 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       }
     }
     
-    // UPDATED: Clean up package data and ensure package_size and special_instructions are included
+    // Clean up package data and ensure package_size and special_instructions are included
     const cleanPackageData = {
       ...processedPackageData,
       // Convert null to undefined for optional fields
@@ -705,7 +710,7 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       origin_area_id: processedPackageData.origin_area_id || undefined,
       destination_area_id: processedPackageData.destination_area_id || undefined,
       
-      // UPDATED: Include package_size and special_instructions for doorstep deliveries
+      // Include package_size and special_instructions for doorstep deliveries
       package_size: deliveryType === 'doorstep' ? processedPackageData.package_size || 'medium' : undefined,
       special_instructions: processedPackageData.special_instructions || undefined
     };
@@ -723,7 +728,10 @@ export const createPackage = async (packageData: PackageData): Promise<any> => {
       has_package_size: !!cleanPackageData.package_size,
       has_special_instructions: !!cleanPackageData.special_instructions,
       resolved_origin_area: !!cleanPackageData.origin_area_id,
-      resolved_destination_area: !!cleanPackageData.destination_area_id
+      resolved_destination_area: !!cleanPackageData.destination_area_id,
+      has_origin_agent: !!cleanPackageData.origin_agent_id,
+      has_destination_agent: !!cleanPackageData.destination_agent_id,
+      delivery_type: cleanPackageData.delivery_type
     });
     
     const response = await api.post('/api/v1/packages', cleanPackageData, {
@@ -939,6 +947,11 @@ export const isSpecialDeliveryType = (deliveryType: string): boolean => {
   return specialTypes.includes(deliveryType.toLowerCase());
 };
 
+// ADDED: Check if agents are optional for delivery type
+export const hasOptionalAgents = (deliveryType: string): boolean => {
+  return OPTIONAL_AGENT_DELIVERY_TYPES.includes(deliveryType.toLowerCase());
+};
+
 // Updated default export with all functions including pricing
 export default {
   // MAIN FUNCTIONS
@@ -946,7 +959,7 @@ export default {
   validatePackageFormData,
   createPackage,
   getPackagePricing,
-  calculatePackagePricing, // FIXED: Now uses correct endpoint
+  calculatePackagePricing,
   getLocations,
   
   // IMPORTED FUNCTIONS
@@ -957,6 +970,7 @@ export default {
   requiresOriginAgent,
   requiresDestinationArea,
   isSpecialDeliveryType,
+  hasOptionalAgents, // NEW: Check for optional agents
   resolveAreaIdFromAgent,
   
   // EXISTING FUNCTIONS
