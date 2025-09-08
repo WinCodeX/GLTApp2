@@ -958,11 +958,11 @@ export default function HomeScreen() {
             <Text style={styles.pricingType}>Home</Text>
             <Text style={styles.pricingAmount}>KSh {pricing.home.toLocaleString()}</Text>
           </View>
-          <View style={[styles.pricingCard, { borderColor: '#10B981' }]}>
+          <View style={[styles.pricingCard, { borderColor: '#6366F1' }]}>
             <Text style={styles.pricingType}>Office</Text>
             <Text style={styles.pricingAmount}>KSh {pricing.office.toLocaleString()}</Text>
           </View>
-          <View style={[styles.pricingCard, { borderColor: '#6366F1' }]}>
+          <View style={[styles.pricingCard, { borderColor: '#10B981' }]}>
             <Text style={styles.pricingType}>Collection</Text>
             <Text style={styles.pricingAmount}>KSh {pricing.collection.toLocaleString()}</Text>
           </View>
