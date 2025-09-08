@@ -1,7 +1,6 @@
-// app/(drawer)/_layout.tsx - Using native splash screen only
+// app/(drawer)/_layout.tsx - Simplified without native splash screen
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
-import * as SplashScreen from 'expo-splash-screen';
 import { useRouter } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -17,6 +16,7 @@ import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
 import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
+import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
@@ -30,18 +30,12 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   Settings: { name: 'settings-outline', lib: Ionicons },
 };
 
-// Prevent auto-hide immediately when module loads
-SplashScreen.preventAutoHideAsync().catch((error) => {
-  console.warn('Failed to prevent splash screen auto-hide:', error);
-});
-
 type InitializationState = 'loading' | 'authenticated' | 'redirect';
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [initState, setInitState] = useState<InitializationState>('loading');
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
-  const [splashHidden, setSplashHidden] = useState(false);
   const router = useRouter();
 
   // Handle app state changes
@@ -57,20 +51,6 @@ export default function DrawerLayout() {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
   }, [initState]);
-
-  // Properly hide splash screen when ready
-  const hideSplashScreen = useCallback(async () => {
-    if (!splashHidden) {
-      try {
-        await SplashScreen.hideAsync();
-        setSplashHidden(true);
-        console.log('Splash screen hidden successfully');
-      } catch (error) {
-        console.error('Failed to hide splash screen:', error);
-        setSplashHidden(true); // Set to true anyway to prevent infinite loading
-      }
-    }
-  }, [splashHidden]);
 
   // Initialize the app
   const initializeApp = useCallback(async () => {
@@ -190,22 +170,15 @@ export default function DrawerLayout() {
         try {
           // Small delay to ensure smooth transition
           await new Promise(resolve => setTimeout(resolve, 100));
-          
-          await hideSplashScreen();
           router.replace(redirectPath);
         } catch (error) {
           console.error('Navigation error:', error);
-          // Force hide splash screen even on error
-          await hideSplashScreen();
         }
       };
       
       performRedirect();
-    } else if (initState === 'authenticated') {
-      // Hide splash screen when authentication is complete
-      hideSplashScreen();
     }
-  }, [initState, redirectPath, router, hideSplashScreen]);
+  }, [initState, redirectPath, router]);
 
   // Use focus effect to ensure proper state on screen focus
   useFocusEffect(
@@ -217,12 +190,17 @@ export default function DrawerLayout() {
     }, [initState])
   );
 
-  // Don't render anything during loading or redirect - let splash screen handle it
-  if (initState === 'loading' || initState === 'redirect') {
-    return null;
+  // Always show loading screen during initialization
+  if (initState === 'loading') {
+    return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Only render drawer when authenticated and ready
+  // Show loading screen during redirect
+  if (initState === 'redirect') {
+    return <LoadingSplashScreen backgroundColor={colors.background} />;
+  }
+
+  // Only render drawer when authenticated
   if (initState === 'authenticated') {
     return (
       <Drawer
@@ -254,6 +232,6 @@ export default function DrawerLayout() {
     );
   }
 
-  // Fallback - should never reach here
-  return null;
+  // Fallback loading screen
+  return <LoadingSplashScreen backgroundColor={colors.background} />;
 }
