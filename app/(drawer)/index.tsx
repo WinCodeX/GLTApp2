@@ -20,15 +20,37 @@ import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import CollectDeliverModal from '../../components/CollectDeliverModal';
-import { createPackage, type PackageData } from '../../lib/helpers/packageHelpers';
+import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
-const locations = [
-  'Nairobi', 'Mombasa', 'Kisumu', 'Eldoret', 'Nakuru',
-  'Thika', 'Machakos', 'Kisii', 'Kakamega', 'Meru',
-];
+interface Location {
+  id: string;
+  name: string;
+  initials?: string;
+}
+
+interface Area {
+  id: string;
+  name: string;
+  location_id?: string;
+  location?: Location;
+}
+
+interface PackageSize {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+}
+
+interface PricingResult {
+  fragile: number;
+  home: number;
+  office: number;
+  collection: number;
+}
 
 interface FABOption {
   id: string;
@@ -46,6 +68,12 @@ interface DeliveryInfo {
   description: string;
 }
 
+interface PackageSizeInfo {
+  title: string;
+  description: string;
+  deliveryOptions: string[];
+}
+
 interface SuccessModalData {
   title: string;
   message: string;
@@ -54,6 +82,27 @@ interface SuccessModalData {
   color: string;
   icon: string;
 }
+
+const PACKAGE_SIZES: PackageSize[] = [
+  {
+    id: 'small',
+    name: 'Small Package',
+    description: 'Documents, accessories, small items',
+    icon: 'package'
+  },
+  {
+    id: 'medium',
+    name: 'Medium Package',
+    description: 'Books, clothes, electronics',
+    icon: 'box'
+  },
+  {
+    id: 'large',
+    name: 'Large Package',
+    description: 'Bulky items, furniture parts',
+    icon: 'truck'
+  }
+];
 
 const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   fragile: {
@@ -70,24 +119,51 @@ const DELIVERY_INFO: Record<string, DeliveryInfo> = {
   }
 };
 
+const PACKAGE_SIZE_INFO: Record<string, PackageSizeInfo> = {
+  small: {
+    title: 'Small Package',
+    description: 'Perfect for documents, accessories, and small items. These packages can be sent via both delivery options.',
+    deliveryOptions: ['Home Delivery - Direct to recipient address', 'Office Delivery - Collect from our office']
+  },
+  medium: {
+    title: 'Medium Package',
+    description: 'Ideal for books, clothes, and electronics. These packages can be sent via both delivery options.',
+    deliveryOptions: ['Home Delivery - Direct to recipient address', 'Office Delivery - Collect from our office']
+  },
+  large: {
+    title: 'Large Package',
+    description: 'For bulky items and furniture parts. Large packages can only be sent via Home Delivery and must not exceed our stipulated size limits.',
+    deliveryOptions: ['Home Delivery - Direct to recipient address (Only option for large packages)']
+  }
+};
+
 export default function HomeScreen() {
-  const [origin, setOrigin] = useState('');
-  const [destination, setDestination] = useState('');
-  const [cost, setCost] = useState<number | null>(null);
+  const [selectedOriginLocation, setSelectedOriginLocation] = useState<Location | null>(null);
+  const [selectedOriginArea, setSelectedOriginArea] = useState<Area | null>(null);
+  const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<Location | null>(null);
+  const [selectedDestinationArea, setSelectedDestinationArea] = useState<Area | null>(null);
+  const [selectedPackageSize, setSelectedPackageSize] = useState<PackageSize | null>(null);
+  const [pricing, setPricing] = useState<PricingResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  
+  // Data from API
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [filteredOriginAreas, setFilteredOriginAreas] = useState<Area[]>([]);
+  const [filteredDestinationAreas, setFilteredDestinationAreas] = useState<Area[]>([]);
+  
+  // Modal states
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [showFragileModal, setShowFragileModal] = useState(false);
   const [showCollectModal, setShowCollectModal] = useState(false);
   const [fabMenuOpen, setFabMenuOpen] = useState(false);
-  
-  // Info modal states
   const [showInfoModal, setShowInfoModal] = useState(false);
   const [selectedInfo, setSelectedInfo] = useState<DeliveryInfo | null>(null);
-  
-  // Success modal states
+  const [showPackageSizeInfoModal, setShowPackageSizeInfoModal] = useState(false);
+  const [selectedPackageSizeInfo, setSelectedPackageSizeInfo] = useState<PackageSizeInfo | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
-  // ✅ UPDATED: Use UserContext which now uses AccountManager
   const { 
     user, 
     currentAccount,
@@ -106,17 +182,18 @@ export default function HomeScreen() {
   const overlayOpacity = useRef(new Animated.Value(0)).current;
   const optionsScale = useRef(new Animated.Value(0)).current;
   const optionsTranslateY = useRef(new Animated.Value(100)).current;
-  
-  // Success modal animations
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
 
-  // ✅ Check user authentication status
-  const isUserAuthenticated = () => {
-    return !!(user && currentAccount && getCurrentToken() && getCurrentUserId());
-  };
-
+  // Load data on mount
   useEffect(() => {
+    loadFormData();
+  }, []);
+
+  // Location scrolling animation
+  useEffect(() => {
+    if (locations.length === 0) return;
+    
     const locationTagWidth = 120;
     const visibleSetWidth = locations.length * locationTagWidth;
     const repeatedList = 5;
@@ -137,15 +214,103 @@ export default function HomeScreen() {
     loop();
 
     return () => scrollX.stopAnimation();
-  }, [scrollX]);
+  }, [scrollX, locations]);
 
-  const calculateCost = () => {
-    if (origin && destination) {
-      const estimatedCost = 500 + Math.abs(locations.indexOf(origin) - locations.indexOf(destination)) * 100;
-      setCost(estimatedCost);
+  // Filter areas based on selected locations
+  useEffect(() => {
+    if (selectedOriginLocation) {
+      const filtered = areas.filter(area => area.location_id === selectedOriginLocation.id);
+      setFilteredOriginAreas(filtered);
     } else {
-      setCost(null);
+      setFilteredOriginAreas([]);
     }
+  }, [selectedOriginLocation, areas]);
+
+  useEffect(() => {
+    if (selectedDestinationLocation) {
+      const filtered = areas.filter(area => area.location_id === selectedDestinationLocation.id);
+      setFilteredDestinationAreas(filtered);
+    } else {
+      setFilteredDestinationAreas([]);
+    }
+  }, [selectedDestinationLocation, areas]);
+
+  const loadFormData = async () => {
+    try {
+      setLoading(true);
+      const formData = await getPackageFormData();
+      setLocations(formData.locations || []);
+      setAreas(formData.areas || []);
+    } catch (error) {
+      console.error('Failed to load form data:', error);
+      Alert.alert('Error', 'Failed to load locations and areas');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const calculateCost = async () => {
+    if (!selectedOriginArea || !selectedDestinationArea || !selectedPackageSize) {
+      Alert.alert('Missing Information', 'Please select origin area, destination area, and package size');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      
+      const pricingData = {
+        origin_area_id: selectedOriginArea.id,
+        destination_area_id: selectedDestinationArea.id,
+        package_size: selectedPackageSize.id
+      };
+
+      const result = await calculatePackagePricing(pricingData);
+      setPricing(result);
+    } catch (error) {
+      console.error('Failed to calculate pricing:', error);
+      Alert.alert('Error', 'Failed to calculate pricing');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const isUserAuthenticated = () => {
+    return !!(user && currentAccount && getCurrentToken() && getCurrentUserId());
+  };
+
+  const validateUserForPackageCreation = (): boolean => {
+    if (userLoading) {
+      Alert.alert('Please wait', 'User authentication is loading...');
+      return false;
+    }
+
+    if (userError) {
+      Alert.alert('Authentication Error', 'Please refresh the app and try again.');
+      return false;
+    }
+
+    if (!isUserAuthenticated()) {
+      Alert.alert(
+        'Authentication Required', 
+        'Please ensure you are logged in to create packages. You may need to log in or switch to a valid account.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+
+    const token = getCurrentToken();
+    const userId = getCurrentUserId();
+    
+    if (!token || !userId) {
+      Alert.alert(
+        'Session Error', 
+        'Your session may have expired. Please log out and log back in.',
+        [{ text: 'OK' }]
+      );
+      return false;
+    }
+
+    return true;
   };
 
   // FAB Menu Handlers
@@ -219,10 +384,14 @@ export default function HomeScreen() {
     }
   };
 
-  // Info Modal Handlers
   const showDeliveryInfo = (type: string) => {
     setSelectedInfo(DELIVERY_INFO[type]);
     setShowInfoModal(true);
+  };
+
+  const showPackageSizeInfo = (sizeId: string) => {
+    setSelectedPackageSizeInfo(PACKAGE_SIZE_INFO[sizeId]);
+    setShowPackageSizeInfoModal(true);
   };
 
   const closeInfoModal = () => {
@@ -230,12 +399,15 @@ export default function HomeScreen() {
     setSelectedInfo(null);
   };
 
-  // Success Modal Handlers
+  const closePackageSizeInfoModal = () => {
+    setShowPackageSizeInfoModal(false);
+    setSelectedPackageSizeInfo(null);
+  };
+
   const showSuccessPopup = (data: SuccessModalData) => {
     setSuccessModalData(data);
     setShowSuccessModal(true);
     
-    // Animate in
     Animated.parallel([
       Animated.spring(successModalScale, {
         toValue: 1,
@@ -251,7 +423,6 @@ export default function HomeScreen() {
       }),
     ]).start();
 
-    // Auto hide after 4 seconds
     setTimeout(() => {
       closeSuccessModal();
     }, 4000);
@@ -279,80 +450,22 @@ export default function HomeScreen() {
     });
   };
 
-  // ✅ UPDATED: Enhanced authentication check for package creation
-  const validateUserForPackageCreation = (): boolean => {
-    if (userLoading) {
-      Alert.alert('Please wait', 'User authentication is loading...');
-      return false;
-    }
-
-    if (userError) {
-      Alert.alert('Authentication Error', 'Please refresh the app and try again.');
-      return false;
-    }
-
-    if (!isUserAuthenticated()) {
-      Alert.alert(
-        'Authentication Required', 
-        'Please ensure you are logged in to create packages. You may need to log in or switch to a valid account.',
-        [
-          { text: 'OK' }
-        ]
-      );
-      return false;
-    }
-
-    const token = getCurrentToken();
-    const userId = getCurrentUserId();
-    
-    if (!token || !userId) {
-      console.error('❌ Missing authentication data:', { hasToken: !!token, hasUserId: !!userId });
-      Alert.alert(
-        'Session Error', 
-        'Your session may have expired. Please log out and log back in.',
-        [
-          { text: 'OK' }
-        ]
-      );
-      return false;
-    }
-
-    console.log('✅ User authentication validated:', {
-      userId: userId,
-      email: user?.email,
-      currentAccountId: currentAccount?.id,
-      hasToken: !!token
-    });
-
-    return true;
-  };
-
-  // FAB Options Actions with enhanced validation
   const handleFragileDelivery = () => {
     if (!validateUserForPackageCreation()) return;
-    
     closeFabMenu();
-    setTimeout(() => {
-      setShowFragileModal(true);
-    }, 300);
+    setTimeout(() => setShowFragileModal(true), 300);
   };
 
   const handleSendToSomeone = () => {
     if (!validateUserForPackageCreation()) return;
-    
     closeFabMenu();
-    setTimeout(() => {
-      setShowPackageModal(true);
-    }, 300);
+    setTimeout(() => setShowPackageModal(true), 300);
   };
 
   const handleCollectAndDeliver = () => {
     if (!validateUserForPackageCreation()) return;
-    
     closeFabMenu();
-    setTimeout(() => {
-      setShowCollectModal(true);
-    }, 300);
+    setTimeout(() => setShowCollectModal(true), 300);
   };
 
   const fabOptions: FABOption[] = [
@@ -388,20 +501,10 @@ export default function HomeScreen() {
     },
   ];
 
-  // ✅ UPDATED: Enhanced package submission with AccountManager validation
   const handlePackageSubmit = async (packageData: PackageData) => {
     try {
       if (!validateUserForPackageCreation()) return;
 
-      console.log('📦 Creating package with data:', packageData);
-      console.log('📦 Using account context:', {
-        userId: getCurrentUserId(),
-        email: user?.email,
-        accountId: currentAccount?.id,
-        displayName: getDisplayName(),
-        phone: getUserPhone()
-      });
-      
       const enhancedPackageData = {
         ...packageData,
         sender_name: getDisplayName(),
@@ -409,8 +512,6 @@ export default function HomeScreen() {
       };
       
       const response = await createPackage(enhancedPackageData);
-      
-      console.log('✅ Package created successfully:', response);
       
       showSuccessPopup({
         title: 'Package Created Successfully!',
@@ -422,25 +523,11 @@ export default function HomeScreen() {
       });
       
     } catch (error: any) {
-      console.error('❌ Error creating package:', error);
-      
-      // Handle specific authentication errors
-      if (error.message?.includes('Authentication') || 
-          error.message?.includes('expired') || 
-          error.message?.includes('401') ||
-          error.message?.includes('422')) {
-        Alert.alert(
-          'Session Expired',
-          'Your session has expired. Please log out and log back in, then try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Error',
-          error.message || 'Failed to create package. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to create package. Please try again.',
+        [{ text: 'OK' }]
+      );
       throw error;
     }
   };
@@ -449,8 +536,6 @@ export default function HomeScreen() {
     try {
       if (!validateUserForPackageCreation()) return;
 
-      console.log('📦 Creating fragile delivery package:', packageData);
-      
       const enhancedPackageData = {
         ...packageData,
         sender_name: getDisplayName(),
@@ -459,8 +544,6 @@ export default function HomeScreen() {
       };
       
       const response = await createPackage(enhancedPackageData);
-      
-      console.log('✅ Fragile package created successfully:', response);
       
       showSuccessPopup({
         title: 'Fragile Items Scheduled!',
@@ -472,24 +555,11 @@ export default function HomeScreen() {
       });
       
     } catch (error: any) {
-      console.error('❌ Error creating fragile package:', error);
-      
-      if (error.message?.includes('Authentication') || 
-          error.message?.includes('expired') || 
-          error.message?.includes('401') ||
-          error.message?.includes('422')) {
-        Alert.alert(
-          'Session Expired',
-          'Your session has expired. Please log out and log back in, then try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Error',
-          error.message || 'Failed to schedule fragile items delivery. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to schedule fragile items delivery. Please try again.',
+        [{ text: 'OK' }]
+      );
       throw error;
     }
   };
@@ -498,20 +568,16 @@ export default function HomeScreen() {
     try {
       if (!validateUserForPackageCreation()) return;
 
-      console.log('📦 Creating collect package:', packageData);
-      
       const enhancedPackageData = {
         ...packageData,
         sender_name: getDisplayName(),
         sender_phone: getUserPhone(),
-        receiver_name: getDisplayName(), // Delivering to self
+        receiver_name: getDisplayName(),
         receiver_phone: getUserPhone(),
         delivery_type: 'collection' as const,
       };
       
       const response = await createPackage(enhancedPackageData);
-      
-      console.log('✅ Collect package created successfully:', response);
       
       showSuccessPopup({
         title: 'Package Collection Scheduled!',
@@ -523,24 +589,11 @@ export default function HomeScreen() {
       });
       
     } catch (error: any) {
-      console.error('❌ Error creating collect package:', error);
-      
-      if (error.message?.includes('Authentication') || 
-          error.message?.includes('expired') || 
-          error.message?.includes('401') ||
-          error.message?.includes('422')) {
-        Alert.alert(
-          'Session Expired',
-          'Your session has expired. Please log out and log back in, then try again.',
-          [{ text: 'OK' }]
-        );
-      } else {
-        Alert.alert(
-          'Error',
-          error.message || 'Failed to schedule package collection. Please try again.',
-          [{ text: 'OK' }]
-        );
-      }
+      Alert.alert(
+        'Error',
+        error.message || 'Failed to schedule package collection. Please try again.',
+        [{ text: 'OK' }]
+      );
       throw error;
     }
   };
@@ -554,13 +607,106 @@ export default function HomeScreen() {
     >
       <TouchableOpacity
         style={styles.locationTag}
-        onPress={() => setOrigin(location)}
+        onPress={() => setSelectedOriginLocation(location)}
         activeOpacity={0.8}
       >
-        <Text style={styles.locationText}>{location}</Text>
+        <Text style={styles.locationText}>{location.name}</Text>
       </TouchableOpacity>
     </LinearGradient>
   );
+
+  const renderDropdown = (
+    items: any[],
+    selectedItem: any,
+    onSelect: (item: any) => void,
+    placeholder: string,
+    getDisplayName: (item: any) => string
+  ) => (
+    <View style={styles.dropdownContainer}>
+      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dropdownScroll}>
+        {items.map((item) => (
+          <TouchableOpacity
+            key={item.id}
+            style={[
+              styles.dropdownItem,
+              selectedItem?.id === item.id && styles.dropdownItemSelected
+            ]}
+            onPress={() => onSelect(item)}
+          >
+            <Text style={[
+              styles.dropdownText,
+              selectedItem?.id === item.id && styles.dropdownTextSelected
+            ]}>
+              {getDisplayName(item)}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </ScrollView>
+    </View>
+  );
+
+  const renderPackageSizes = () => (
+    <View style={styles.packageSizeContainer}>
+      <Text style={styles.sectionLabel}>What are you sending?</Text>
+      <View style={styles.packageSizeGrid}>
+        {PACKAGE_SIZES.map((size) => (
+          <TouchableOpacity
+            key={size.id}
+            style={[
+              styles.packageSizeCard,
+              selectedPackageSize?.id === size.id && styles.packageSizeCardSelected
+            ]}
+            onPress={() => setSelectedPackageSize(size)}
+          >
+            <View style={styles.packageSizeContent}>
+              <Feather name={size.icon as any} size={24} color={selectedPackageSize?.id === size.id ? '#8B5CF6' : '#fff'} />
+              <Text style={[
+                styles.packageSizeName,
+                selectedPackageSize?.id === size.id && styles.packageSizeNameSelected
+              ]}>
+                {size.name}
+              </Text>
+              <Text style={styles.packageSizeDescription}>{size.description}</Text>
+              <TouchableOpacity
+                style={styles.infoIconButton}
+                onPress={() => showPackageSizeInfo(size.id)}
+              >
+                <Feather name="info" size={16} color="rgba(255, 255, 255, 0.7)" />
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+        ))}
+      </View>
+    </View>
+  );
+
+  const renderPricingResults = () => {
+    if (!pricing) return null;
+
+    return (
+      <View style={styles.pricingContainer}>
+        <Text style={styles.pricingTitle}>Estimated Costs</Text>
+        <View style={styles.pricingGrid}>
+          <View style={[styles.pricingCard, { borderColor: '#FF9500' }]}>
+            <Text style={styles.pricingType}>Fragile</Text>
+            <Text style={styles.pricingAmount}>KSh {pricing.fragile.toLocaleString()}</Text>
+          </View>
+          <View style={[styles.pricingCard, { borderColor: '#8B5CF6' }]}>
+            <Text style={styles.pricingType}>Home</Text>
+            <Text style={styles.pricingAmount}>KSh {pricing.home.toLocaleString()}</Text>
+          </View>
+          <View style={[styles.pricingCard, { borderColor: '#10B981' }]}>
+            <Text style={styles.pricingType}>Office</Text>
+            <Text style={styles.pricingAmount}>KSh {pricing.office.toLocaleString()}</Text>
+          </View>
+          <View style={[styles.pricingCard, { borderColor: '#6366F1' }]}>
+            <Text style={styles.pricingType}>Collection</Text>
+            <Text style={styles.pricingAmount}>KSh {pricing.collection.toLocaleString()}</Text>
+          </View>
+        </View>
+      </View>
+    );
+  };
 
   const renderFabOption = (option: FABOption, index: number) => {
     const optionOpacity = overlayOpacity.interpolate({
@@ -642,155 +788,6 @@ export default function HomeScreen() {
     );
   };
 
-  const renderInfoModal = () => (
-    <Modal
-      visible={showInfoModal}
-      transparent
-      animationType="fade"
-      onRequestClose={closeInfoModal}
-    >
-      <View style={styles.infoModalOverlay}>
-        <View style={styles.infoModalContainer}>
-          <LinearGradient
-            colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
-            style={styles.infoModalContent}
-          >
-            <View style={styles.infoModalHeader}>
-              <Text style={styles.infoModalTitle}>{selectedInfo?.title}</Text>
-              <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalClose}>
-                <Feather name="x" size={24} color="#fff" />
-              </TouchableOpacity>
-            </View>
-            <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
-            <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
-              <View
-                style={[
-                  styles.infoModalButtonBackground,
-                  { backgroundColor: '#CD56DD' }
-                ]}
-              >
-                <Text style={styles.infoModalButtonText}>Got it</Text>
-              </View>
-            </TouchableOpacity>
-          </LinearGradient>
-        </View>
-      </View>
-    </Modal>
-  );
-
-  const renderSuccessModal = () => (
-    <Modal
-      visible={showSuccessModal}
-      transparent
-      animationType="none"
-      onRequestClose={closeSuccessModal}
-    >
-      <View style={styles.successModalOverlay}>
-        <TouchableOpacity 
-          style={styles.successModalTouchable}
-          onPress={closeSuccessModal}
-          activeOpacity={1}
-        >
-          <Animated.View
-            style={[
-              styles.successModalContainer,
-              {
-                opacity: successModalOpacity,
-                transform: [{ scale: successModalScale }],
-              },
-            ]}
-          >
-            <LinearGradient
-              colors={[
-                `${successModalData?.color}15`,
-                `${successModalData?.color}25`,
-                `${successModalData?.color}15`,
-              ]}
-              style={[
-                styles.successModalContent,
-                {
-                  borderColor: `${successModalData?.color}40`,
-                  shadowColor: successModalData?.color,
-                }
-              ]}
-            >
-              <View style={styles.successModalHeader}>
-                <View 
-                  style={[
-                    styles.successModalIconContainer,
-                    { 
-                      backgroundColor: `${successModalData?.color}20`,
-                      shadowColor: successModalData?.color,
-                    }
-                  ]}
-                >
-                  <Feather 
-                    name={successModalData?.icon as any} 
-                    size={28} 
-                    color={successModalData?.color} 
-                  />
-                </View>
-                <TouchableOpacity 
-                  onPress={closeSuccessModal} 
-                  style={styles.successModalClose}
-                >
-                  <Feather name="x" size={20} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              
-              <Text style={[styles.successModalTitle, { color: successModalData?.color }]}>
-                {successModalData?.title}
-              </Text>
-              
-              <Text style={styles.successModalMessage}>
-                {successModalData?.message}
-              </Text>
-              
-              <View style={styles.successModalDetails}>
-                <Text style={styles.successModalDetailLabel}>Tracking Code:</Text>
-                <Text style={[styles.successModalDetailValue, { color: successModalData?.color }]}>
-                  {successModalData?.trackingNumber}
-                </Text>
-              </View>
-              
-              <View style={styles.successModalDetails}>
-                <Text style={styles.successModalDetailLabel}>Status:</Text>
-                <Text style={styles.successModalDetailValue}>
-                  {successModalData?.status}
-                </Text>
-              </View>
-
-              <View style={styles.successModalButtons}>
-                <TouchableOpacity 
-                  onPress={() => {
-                    closeSuccessModal();
-                    setTimeout(() => {
-                      if (successModalData?.icon === 'alert-triangle') {
-                        setShowFragileModal(true);
-                      } else if (successModalData?.icon === 'package') {
-                        setShowCollectModal(true);
-                      } else if (successModalData?.icon === 'send') {
-                        setShowPackageModal(true);
-                      }
-                    }, 500);
-                  }}
-                  style={[
-                    styles.successModalButton,
-                    { backgroundColor: `${successModalData?.color}20` }
-                  ]}
-                >
-                  <Text style={[styles.successModalButtonText, { color: successModalData?.color }]}>
-                    {successModalData?.icon === 'send' ? 'Create Another' : 'Schedule Another'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-            </LinearGradient>
-          </Animated.View>
-        </TouchableOpacity>
-      </View>
-    </Modal>
-  );
-
   const fabIconRotation = fabRotation.interpolate({
     inputRange: [0, 1],
     outputRange: ['0deg', '45deg'],
@@ -811,49 +808,92 @@ export default function HomeScreen() {
             ]}
           >
             {Array(5).fill(locations).flat().map((location, index) => (
-              <LocationTag key={`${location}-${index}`} location={location} />
+              <LocationTag key={`${location.name}-${index}`} location={location} />
             ))}
           </Animated.View>
         </View>
       </View>
 
-      {/* Cost Calculator */}
+      {/* Enhanced Cost Calculator */}
       <ScrollView style={styles.scrollContainer} showsVerticalScrollIndicator={false}>
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
-          <View style={styles.inputContainer}>
-            <LinearGradient colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']} style={styles.inputGradientBorder}>
-              <TextInput
-                style={styles.input}
-                placeholder="From Location"
-                placeholderTextColor="#888"
-                value={origin}
-                onChangeText={setOrigin}
-              />
-            </LinearGradient>
-            <LinearGradient colors={['rgba(124, 58, 237, 0.3)', 'rgba(59, 130, 246, 0.3)']} style={styles.inputGradientBorder}>
-              <TextInput
-                style={styles.input}
-                placeholder="To Location"
-                placeholderTextColor="#888"
-                value={destination}
-                onChangeText={setDestination}
-              />
-            </LinearGradient>
-            <TouchableOpacity onPress={calculateCost} activeOpacity={0.8}>
-              <LinearGradient colors={['#7c3aed', '#3b82f6', '#10b981']} style={styles.calculateButton}>
-                <Text style={styles.calculateButtonText}>Calculate Cost</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-
-            {cost !== null && (
-              <View style={styles.costContainer}>
-                <LinearGradient colors={['rgba(16, 185, 129, 0.2)', 'rgba(59, 130, 246, 0.2)']} style={styles.costGradientBg}>
-                  <Text style={styles.costText}>Estimated Cost: KSh {cost.toLocaleString()}</Text>
-                </LinearGradient>
-              </View>
+          
+          {/* Origin Selection */}
+          <View style={styles.inputSection}>
+            <Text style={styles.sectionLabel}>Where are you sending from?</Text>
+            <Text style={styles.subLabel}>Select Location</Text>
+            {renderDropdown(
+              locations,
+              selectedOriginLocation,
+              setSelectedOriginLocation,
+              'Select Origin Location',
+              (item) => item.name
+            )}
+            {selectedOriginLocation && (
+              <>
+                <Text style={styles.subLabel}>Select Area</Text>
+                {renderDropdown(
+                  filteredOriginAreas,
+                  selectedOriginArea,
+                  setSelectedOriginArea,
+                  'Select Origin Area',
+                  (item) => item.name
+                )}
+              </>
             )}
           </View>
+
+          {/* Destination Selection */}
+          <View style={styles.inputSection}>
+            <Text style={styles.sectionLabel}>Where are you sending to?</Text>
+            <Text style={styles.subLabel}>Select Location</Text>
+            {renderDropdown(
+              locations,
+              selectedDestinationLocation,
+              setSelectedDestinationLocation,
+              'Select Destination Location',
+              (item) => item.name
+            )}
+            {selectedDestinationLocation && (
+              <>
+                <Text style={styles.subLabel}>Select Area</Text>
+                {renderDropdown(
+                  filteredDestinationAreas,
+                  selectedDestinationArea,
+                  setSelectedDestinationArea,
+                  'Select Destination Area',
+                  (item) => item.name
+                )}
+              </>
+            )}
+          </View>
+
+          {/* Package Size Selection */}
+          {renderPackageSizes()}
+
+          {/* Calculate Button */}
+          <TouchableOpacity 
+            onPress={calculateCost} 
+            activeOpacity={0.8}
+            disabled={loading || !selectedOriginArea || !selectedDestinationArea || !selectedPackageSize}
+            style={[
+              styles.calculateButton,
+              (!selectedOriginArea || !selectedDestinationArea || !selectedPackageSize) && styles.calculateButtonDisabled
+            ]}
+          >
+            <LinearGradient 
+              colors={['#7c3aed', '#3b82f6', '#10b981']} 
+              style={styles.calculateButtonGradient}
+            >
+              <Text style={styles.calculateButtonText}>
+                {loading ? 'Calculating...' : 'Calculate Cost'}
+              </Text>
+            </LinearGradient>
+          </TouchableOpacity>
+
+          {/* Pricing Results */}
+          {renderPricingResults()}
         </View>
       </ScrollView>
 
@@ -906,10 +946,157 @@ export default function HomeScreen() {
       </View>
 
       {/* Info Modal */}
-      {renderInfoModal()}
+      <Modal
+        visible={showInfoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeInfoModal}
+      >
+        <View style={styles.infoModalOverlay}>
+          <View style={styles.infoModalContainer}>
+            <LinearGradient
+              colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+              style={styles.infoModalContent}
+            >
+              <View style={styles.infoModalHeader}>
+                <Text style={styles.infoModalTitle}>{selectedInfo?.title}</Text>
+                <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalClose}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
+              <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
+                <View style={styles.infoModalButtonBackground}>
+                  <Text style={styles.infoModalButtonText}>Got it</Text>
+                </View>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Package Size Info Modal */}
+      <Modal
+        visible={showPackageSizeInfoModal}
+        transparent
+        animationType="fade"
+        onRequestClose={closePackageSizeInfoModal}
+      >
+        <View style={styles.infoModalOverlay}>
+          <View style={styles.infoModalContainer}>
+            <LinearGradient
+              colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+              style={styles.infoModalContent}
+            >
+              <View style={styles.infoModalHeader}>
+                <Text style={styles.infoModalTitle}>{selectedPackageSizeInfo?.title}</Text>
+                <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalClose}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.infoModalText}>{selectedPackageSizeInfo?.description}</Text>
+              <View style={styles.deliveryOptionsContainer}>
+                <Text style={styles.deliveryOptionsTitle}>Available Delivery Options:</Text>
+                {selectedPackageSizeInfo?.deliveryOptions.map((option, index) => (
+                  <Text key={index} style={styles.deliveryOption}>• {option}</Text>
+                ))}
+              </View>
+              <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalButton}>
+                <View style={styles.infoModalButtonBackground}>
+                  <Text style={styles.infoModalButtonText}>Got it</Text>
+                </View>
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
 
       {/* Success Modal */}
-      {renderSuccessModal()}
+      <Modal
+        visible={showSuccessModal}
+        transparent
+        animationType="none"
+        onRequestClose={closeSuccessModal}
+      >
+        <View style={styles.successModalOverlay}>
+          <TouchableOpacity 
+            style={styles.successModalTouchable}
+            onPress={closeSuccessModal}
+            activeOpacity={1}
+          >
+            <Animated.View
+              style={[
+                styles.successModalContainer,
+                {
+                  opacity: successModalOpacity,
+                  transform: [{ scale: successModalScale }],
+                },
+              ]}
+            >
+              <LinearGradient
+                colors={[
+                  `${successModalData?.color}15`,
+                  `${successModalData?.color}25`,
+                  `${successModalData?.color}15`,
+                ]}
+                style={[
+                  styles.successModalContent,
+                  {
+                    borderColor: `${successModalData?.color}40`,
+                    shadowColor: successModalData?.color,
+                  }
+                ]}
+              >
+                <View style={styles.successModalHeader}>
+                  <View 
+                    style={[
+                      styles.successModalIconContainer,
+                      { 
+                        backgroundColor: `${successModalData?.color}20`,
+                        shadowColor: successModalData?.color,
+                      }
+                    ]}
+                  >
+                    <Feather 
+                      name={successModalData?.icon as any} 
+                      size={28} 
+                      color={successModalData?.color} 
+                    />
+                  </View>
+                  <TouchableOpacity 
+                    onPress={closeSuccessModal} 
+                    style={styles.successModalClose}
+                  >
+                    <Feather name="x" size={20} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                
+                <Text style={[styles.successModalTitle, { color: successModalData?.color }]}>
+                  {successModalData?.title}
+                </Text>
+                
+                <Text style={styles.successModalMessage}>
+                  {successModalData?.message}
+                </Text>
+                
+                <View style={styles.successModalDetails}>
+                  <Text style={styles.successModalDetailLabel}>Tracking Code:</Text>
+                  <Text style={[styles.successModalDetailValue, { color: successModalData?.color }]}>
+                    {successModalData?.trackingNumber}
+                  </Text>
+                </View>
+                
+                <View style={styles.successModalDetails}>
+                  <Text style={styles.successModalDetailLabel}>Status:</Text>
+                  <Text style={styles.successModalDetailValue}>
+                    {successModalData?.status}
+                  </Text>
+                </View>
+              </LinearGradient>
+            </Animated.View>
+          </TouchableOpacity>
+        </View>
+      </Modal>
 
       {/* Package Creation Modal */}
       <PackageCreationModal
@@ -955,7 +1142,6 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(124, 58, 237, 0.5)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
-    zIndex: 10,
   },
   animatedContainer: { 
     height: 60, 
@@ -1001,62 +1187,167 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  inputContainer: { 
-    alignItems: 'center', 
-    gap: 20 
+  inputSection: {
+    marginBottom: 25,
   },
-  inputGradientBorder: { 
-    borderRadius: 12, 
-    padding: 2, 
-    width: '90%' 
+  sectionLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 15,
+    textAlign: 'center',
   },
-  input: {
-    backgroundColor: '#1a1a2e',
-    color: '#fff', 
-    padding: 16, 
+  subLabel: {
+    fontSize: 14,
+    color: '#ccc',
+    marginBottom: 10,
+    marginLeft: 5,
+  },
+  dropdownContainer: {
+    marginBottom: 15,
+  },
+  dropdownScroll: {
+    maxHeight: 50,
+  },
+  dropdownItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 25,
+    marginRight: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  dropdownItemSelected: {
+    backgroundColor: 'rgba(124, 58, 237, 0.6)',
+    borderColor: '#7c3aed',
+  },
+  dropdownText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  dropdownTextSelected: {
+    color: '#fff',
+    fontWeight: '700',
+  },
+  packageSizeContainer: {
+    marginBottom: 25,
+  },
+  packageSizeGrid: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+  },
+  packageSizeCard: {
+    width: '31%',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 15,
+    marginBottom: 15,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+  },
+  packageSizeCardSelected: {
+    borderColor: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+  },
+  packageSizeContent: {
+    alignItems: 'center',
+    position: 'relative',
+  },
+  packageSizeName: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+    marginTop: 8,
+    marginBottom: 4,
+  },
+  packageSizeNameSelected: {
+    color: '#8B5CF6',
+  },
+  packageSizeDescription: {
+    color: '#ccc',
+    fontSize: 10,
+    textAlign: 'center',
+    lineHeight: 14,
+  },
+  infoIconButton: {
+    position: 'absolute',
+    top: -5,
+    right: -10,
+    width: 20,
+    height: 20,
     borderRadius: 10,
-    fontSize: 16, 
-    width: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   calculateButton: {
-    paddingVertical: 16, 
-    paddingHorizontal: 40, 
+    marginVertical: 20,
     borderRadius: 25,
-    alignItems: 'center', 
-    marginTop: 10,
-    shadowColor: '#7c3aed', 
+    overflow: 'hidden',
+    shadowColor: '#7c3aed',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3, 
-    shadowRadius: 8, 
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
     elevation: 8,
   },
+  calculateButtonDisabled: {
+    opacity: 0.5,
+  },
+  calculateButtonGradient: {
+    paddingVertical: 16,
+    paddingHorizontal: 40,
+    alignItems: 'center',
+  },
   calculateButtonText: {
-    color: '#fff', 
-    fontSize: 18, 
+    color: '#fff',
+    fontSize: 18,
     fontWeight: 'bold',
     textShadowColor: 'rgba(0, 0, 0, 0.3)',
     textShadowOffset: { width: 0, height: 1 },
     textShadowRadius: 2,
   },
-  costContainer: { 
-    marginTop: 20, 
-    width: '90%' 
+  pricingContainer: {
+    marginTop: 20,
   },
-  costGradientBg: {
-    borderRadius: 12, 
-    padding: 16, 
-    alignItems: 'center',
-    borderWidth: 1, 
-    borderColor: 'rgba(16, 185, 129, 0.3)',
-  },
-  costText: {
-    fontSize: 18, 
-    fontWeight: '600', 
-    color: '#fff', 
+  pricingTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
     textAlign: 'center',
+    marginBottom: 20,
   },
-
-  // Enhanced FAB Styles
+  pricingGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+  },
+  pricingCard: {
+    width: '48%',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 15,
+    borderWidth: 2,
+    alignItems: 'center',
+  },
+  pricingType: {
+    color: '#ccc',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  pricingAmount: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  
+  // FAB Styles
   fabContainer: {
     position: 'absolute',
     right: 20,
@@ -1085,8 +1376,6 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   fabIcon: {},
-
-  // FAB Overlay
   fabOverlay: {
     position: 'absolute',
     top: 0,
@@ -1099,8 +1388,6 @@ const styles = StyleSheet.create({
   fabOverlayTouchable: {
     flex: 1,
   },
-
-  // Single Color FAB Options with Glow
   fabOptionsContainer: {
     position: 'absolute',
     right: 20,
@@ -1158,7 +1445,7 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // Info Modal Styles
+  // Modal Styles
   infoModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1209,11 +1496,27 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     marginBottom: 24,
   },
+  deliveryOptionsContainer: {
+    marginBottom: 24,
+  },
+  deliveryOptionsTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  deliveryOption: {
+    fontSize: 14,
+    color: '#ccc',
+    lineHeight: 20,
+    marginBottom: 4,
+  },
   infoModalButton: {
     borderRadius: 12,
     overflow: 'hidden',
   },
   infoModalButtonBackground: {
+    backgroundColor: '#8B5CF6',
     paddingVertical: 14,
     alignItems: 'center',
     borderRadius: 12,
@@ -1324,22 +1627,5 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     maxWidth: '60%',
     textAlign: 'right',
-  },
-  successModalButtons: {
-    marginTop: 20,
-    alignItems: 'center',
-  },
-  successModalButton: {
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    minWidth: 160,
-    alignItems: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  successModalButtonText: {
-    fontSize: 16,
-    fontWeight: '600',
   },
 });
