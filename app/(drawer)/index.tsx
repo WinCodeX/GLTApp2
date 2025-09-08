@@ -481,7 +481,7 @@ export default function HomeScreen() {
       // Animate to exactly one set width (this creates seamless loop)
       Animated.timing(scrollX, {
         toValue: -singleSetWidth,
-        duration: 25000, // Slightly faster for better visual flow
+        duration: 18000, // Faster scrolling for better visual engagement
         easing: Easing.linear,
         useNativeDriver: true,
       }).start(({ finished }) => {
