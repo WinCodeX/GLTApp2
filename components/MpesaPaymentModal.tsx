@@ -1,4 +1,4 @@
-// components/MpesaPaymentModal.tsx - Fixed error handling
+// components/MpesaPaymentModal.tsx - Updated for multiple packages
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
@@ -11,6 +11,7 @@ import {
   TextInput,
   ActivityIndicator,
   PanResponder,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -27,12 +28,13 @@ interface Package {
   receiver_name: string;
   cost: number;
   route_description: string;
+  delivery_type?: string;
 }
 
 interface MpesaPaymentModalProps {
   visible: boolean;
   onClose: () => void;
-  packageData: Package | null;
+  packageData: Package | Package[] | null;
   onPaymentSuccess: () => void;
 }
 
@@ -61,16 +63,28 @@ export default function MpesaPaymentModal({
   const [isPolling, setIsPolling] = useState(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Debug: Log when modal visibility changes
+  // Convert packageData to array format
+  const packages: Package[] = React.useMemo(() => {
+    if (!packageData) return [];
+    return Array.isArray(packageData) ? packageData : [packageData];
+  }, [packageData]);
+
+  // Calculate total cost
+  const totalCost = React.useMemo(() => {
+    return packages.reduce((total, pkg) => total + pkg.cost, 0);
+  }, [packages]);
+
+  // Debug logging
   useEffect(() => {
     console.log('🎭 MpesaPaymentModal visibility changed:', visible);
-    console.log('📦 Package data:', packageData);
-  }, [visible, packageData]);
+    console.log('📦 Package data:', packages);
+    console.log('💰 Total cost:', totalCost);
+  }, [visible, packages, totalCost]);
 
   // Initialize phone number from user context
   useEffect(() => {
-    if (visible && packageData) {
-      console.log('🚀 Initializing modal with package:', packageData.code);
+    if (visible && packages.length > 0) {
+      console.log('🚀 Initializing modal with packages:', packages.map(p => p.code));
       const userPhone = getUserPhone();
       console.log('📞 User phone from context:', userPhone);
       
@@ -90,7 +104,7 @@ export default function MpesaPaymentModal({
       setErrorMessage('');
       setCheckoutRequestId(null);
     }
-  }, [visible, packageData, getUserPhone]);
+  }, [visible, packages, getUserPhone]);
 
   // Animation for modal show/hide
   useEffect(() => {
@@ -207,9 +221,9 @@ export default function MpesaPaymentModal({
     return cleaned;
   };
 
-  // FIXED: Simplified payment initiation with proper error handling
+  // Payment initiation for multiple packages
   const initiatePayment = async () => {
-    if (!packageData || !phoneNumber.trim()) {
+    if (packages.length === 0 || !phoneNumber.trim()) {
       Toast.show({
         type: 'error',
         text1: 'Invalid Input',
@@ -218,7 +232,7 @@ export default function MpesaPaymentModal({
       return;
     }
 
-    console.log('💳 Initiating payment for package:', packageData.code);
+    console.log('💳 Initiating payment for packages:', packages.map(p => p.code));
     animateButtonPress();
     setPaymentStep('processing');
     setErrorMessage('');
@@ -227,15 +241,14 @@ export default function MpesaPaymentModal({
       const formattedPhone = formatPhoneForAPI(phoneNumber);
       console.log('📞 Formatted phone for API:', formattedPhone);
       
-      const response = await api.post('/api/v1/mpesa/stk_push', {
+      const response = await api.post('/api/v1/mpesa/stk_push_bulk', {
         phone_number: formattedPhone,
-        amount: packageData.cost,
-        package_id: packageData.id,
+        amount: totalCost,
+        package_ids: packages.map(pkg => pkg.id),
       });
 
-      console.log('📡 STK Push response:', response.data);
+      console.log('📡 Bulk STK Push response:', response.data);
 
-      // FIXED: Only proceed if we get a successful response with checkout_request_id
       if (response.data.status === 'success' && response.data.data?.checkout_request_id) {
         const requestId = response.data.data.checkout_request_id;
         setCheckoutRequestId(requestId);
@@ -249,7 +262,6 @@ export default function MpesaPaymentModal({
         // Start polling for payment status
         startPolling(requestId);
       } else {
-        // FIXED: Proper error handling for non-success responses
         const errorMsg = response.data.message || 'Payment initiation failed';
         console.log('📡 Server returned non-success status:', errorMsg);
         
@@ -265,7 +277,6 @@ export default function MpesaPaymentModal({
     } catch (error: any) {
       console.error('💳 Payment initiation error:', error);
       
-      // FIXED: Properly handle different types of errors
       let errorMsg = 'Network error occurred';
       let errorTitle = 'Connection Error';
       
@@ -322,10 +333,11 @@ export default function MpesaPaymentModal({
             setIsPolling(false);
             setPaymentStep('success');
             
+            const packageCodes = packages.map(p => p.code).join(', ');
             Toast.show({
               type: 'success',
               text1: 'Payment Successful!',
-              text2: `Payment for ${packageData.code} completed`,
+              text2: `Payment for ${packageCodes} completed`,
             });
 
             // Auto close after 2 seconds and trigger refresh
@@ -356,7 +368,6 @@ export default function MpesaPaymentModal({
         }
       } catch (error) {
         console.error('🔄 Polling error:', error);
-        // Continue polling unless max attempts reached
         if (pollCount >= maxPolls) {
           if (pollingIntervalRef.current) {
             clearInterval(pollingIntervalRef.current);
@@ -366,7 +377,7 @@ export default function MpesaPaymentModal({
           setErrorMessage('Unable to verify payment status');
         }
       }
-    }, 3000); // Poll every 3 seconds
+    }, 3000);
   };
 
   // Handle manual transaction verification
@@ -383,11 +394,10 @@ export default function MpesaPaymentModal({
     try {
       console.log('🔍 Verifying manual transaction code:', transactionCode);
       
-      // Call API to verify the transaction code
-      const response = await api.post('/api/v1/mpesa/verify_manual', {
+      const response = await api.post('/api/v1/mpesa/verify_manual_bulk', {
         transaction_code: transactionCode,
-        package_id: packageData?.id,
-        amount: packageData?.cost
+        package_ids: packages.map(pkg => pkg.id),
+        amount: totalCost
       });
 
       if (response.data.status === 'success') {
@@ -424,7 +434,7 @@ export default function MpesaPaymentModal({
     }
   };
 
-  // FIXED: Retry payment - properly reset state
+  // Retry payment
   const retryPayment = () => {
     console.log('🔄 Retrying payment');
     setPaymentStep('confirm');
@@ -451,8 +461,30 @@ export default function MpesaPaymentModal({
     onClose();
   };
 
+  // Get delivery type display
+  const getDeliveryTypeDisplay = (deliveryType?: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return 'Home';
+      case 'agent': return 'Office';
+      case 'fragile': return 'Fragile';
+      case 'collection': return 'Collection';
+      default: return 'Office';
+    }
+  };
+
+  // Get delivery type color
+  const getDeliveryTypeColor = (deliveryType?: string) => {
+    switch (deliveryType) {
+      case 'doorstep': return '#8b5cf6';
+      case 'agent': return '#3b82f6';
+      case 'fragile': return '#f97316';
+      case 'collection': return '#10b981';
+      default: return '#8b5cf6';
+    }
+  };
+
   // Early return if no package data
-  if (!packageData) {
+  if (!packages || packages.length === 0) {
     console.log('⚠️ No package data provided to modal');
     return null;
   }
@@ -502,7 +534,9 @@ export default function MpesaPaymentModal({
                 </View>
                 <View style={styles.headerText}>
                   <Text style={styles.modalTitle}>M-Pesa Payment</Text>
-                  <Text style={styles.modalSubtitle}>Pay for package {packageData.code}</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Pay for {packages.length} package{packages.length !== 1 ? 's' : ''}
+                  </Text>
                 </View>
                 <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
                   <Feather name="x" size={20} color="#888" />
@@ -510,19 +544,56 @@ export default function MpesaPaymentModal({
               </View>
             </View>
 
-            {/* Package Info */}
-            <View style={styles.packageInfo}>
-              <LinearGradient
-                colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
-                style={styles.packageCard}
+            {/* Packages Info */}
+            <View style={styles.packagesInfo}>
+              <ScrollView 
+                style={styles.packagesScrollView}
+                showsVerticalScrollIndicator={false}
+                bounces={false}
               >
-                <View style={styles.packageHeader}>
-                  <Text style={styles.packageCode}>{packageData.code}</Text>
-                  <Text style={styles.packageAmount}>KES {packageData.cost.toLocaleString()}</Text>
-                </View>
-                <Text style={styles.packageDescription}>{packageData.route_description}</Text>
-                <Text style={styles.packageReceiver}>To: {packageData.receiver_name}</Text>
-              </LinearGradient>
+                {packages.map((pkg, index) => (
+                  <LinearGradient
+                    key={pkg.id}
+                    colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
+                    style={[styles.packageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
+                  >
+                    <View style={styles.packageHeader}>
+                      <View style={styles.packageInfo}>
+                        <Text style={styles.packageCode}>{pkg.code}</Text>
+                        <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
+                      </View>
+                      <View style={styles.packageRight}>
+                        {pkg.delivery_type && (
+                          <View style={[
+                            styles.deliveryTypeBadge,
+                            { borderColor: getDeliveryTypeColor(pkg.delivery_type) }
+                          ]}>
+                            <Text style={[
+                              styles.badgeText,
+                              { color: getDeliveryTypeColor(pkg.delivery_type) }
+                            ]}>
+                              {getDeliveryTypeDisplay(pkg.delivery_type)}
+                            </Text>
+                          </View>
+                        )}
+                        <Text style={styles.packageAmount}>KES {pkg.cost.toLocaleString()}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.packageDescription}>{pkg.route_description}</Text>
+                  </LinearGradient>
+                ))}
+              </ScrollView>
+              
+              {/* Total Cost */}
+              <View style={styles.totalSection}>
+                <LinearGradient
+                  colors={['rgba(124, 58, 237, 0.2)', 'rgba(124, 58, 237, 0.1)']}
+                  style={styles.totalCard}
+                >
+                  <Text style={styles.totalLabel}>Total Amount</Text>
+                  <Text style={styles.totalAmount}>KES {totalCost.toLocaleString()}</Text>
+                </LinearGradient>
+              </View>
             </View>
 
             {/* Payment Steps */}
@@ -649,7 +720,6 @@ export default function MpesaPaymentModal({
   );
 }
 
-// Styles remain exactly the same
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
@@ -660,7 +730,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.85,
+    maxHeight: SCREEN_HEIGHT * 0.9,
   },
   modal: {
     borderTopLeftRadius: 24,
@@ -719,42 +789,88 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   
-  // Package Info
-  packageInfo: {
+  // Packages Info
+  packagesInfo: {
     paddingHorizontal: 20,
     paddingVertical: 16,
+    maxHeight: 200,
+  },
+  packagesScrollView: {
+    flexGrow: 0,
   },
   packageCard: {
-    padding: 16,
-    borderRadius: 12,
+    padding: 12,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   packageHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    marginBottom: 8,
+    marginBottom: 6,
+  },
+  packageInfo: {
+    flex: 1,
   },
   packageCode: {
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '700',
     color: '#fff',
+    marginBottom: 2,
+  },
+  packageReceiver: {
+    fontSize: 12,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  packageRight: {
+    alignItems: 'flex-end',
+    gap: 4,
+  },
+  deliveryTypeBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+  },
+  badgeText: {
+    fontSize: 9,
+    fontWeight: '600',
   },
   packageAmount: {
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '700',
     color: colors.primary,
   },
   packageDescription: {
-    fontSize: 12,
+    fontSize: 11,
     color: '#888',
-    marginBottom: 4,
   },
-  packageReceiver: {
+  
+  // Total Section
+  totalSection: {
+    marginTop: 12,
+  },
+  totalCard: {
+    padding: 12,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  totalLabel: {
     fontSize: 14,
     color: '#fff',
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  totalAmount: {
+    fontSize: 18,
+    color: colors.primary,
+    fontWeight: '700',
   },
   
   // Payment Content
@@ -909,23 +1025,5 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '500',
     color: colors.primary,
-  },
-  tertiaryButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: '#444',
-    paddingVertical: 12,
-    paddingHorizontal: 20,
-    borderRadius: 8,
-    gap: 6,
-    width: '100%',
-  },
-  tertiaryButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#888',
   },
 });
