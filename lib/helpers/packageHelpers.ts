@@ -1,4 +1,5 @@
-// lib/helpers/packageHelpers.ts - UPDATED: Added package_size, special_instructions, and agent-to-area mapping
+// lib/helpers/packageHelpers.ts - UPDATED: Added pricing calculation function
+
 import api from '../api';
 
 // FIXED: Import the working implementations from separate files
@@ -8,6 +9,7 @@ import { getAgents } from './getAgents';
 export interface Location {
   id: string;
   name: string;
+  initials?: string;
 }
 
 export interface Area {
@@ -124,6 +126,20 @@ export interface QRCodeResponse {
   };
   success: boolean;
   message?: string;
+}
+
+// ADDED: Pricing calculation interfaces
+export interface PricingRequest {
+  origin_area_id: string;
+  destination_area_id: string;
+  package_size: string;
+}
+
+export interface PricingResult {
+  fragile: number;
+  home: number;
+  office: number;
+  collection: number;
 }
 
 export type DrawerState = 
@@ -373,15 +389,46 @@ const transformLocationData = (rawData: any): Location => {
     
     return {
       id: String(locationData.id || ''),
-      name: locationData.name || 'Unknown Location'
+      name: locationData.name || 'Unknown Location',
+      initials: locationData.initials
     };
     
   } catch (error) {
     console.error('Error transforming location data:', error, rawData);
     return {
       id: String(rawData.id || 'unknown'),
-      name: rawData.name || rawData.attributes?.name || 'Unknown Location'
+      name: rawData.name || rawData.attributes?.name || 'Unknown Location',
+      initials: rawData.initials || rawData.attributes?.initials
     };
+  }
+};
+
+/**
+ * ADDED: Calculate pricing for all delivery types
+ */
+export const calculatePackagePricing = async (pricingData: PricingRequest): Promise<PricingResult> => {
+  try {
+    console.log('📦 Calculating pricing for:', pricingData);
+    
+    const response = await api.post('/api/v1/pricing/calculate', pricingData, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    console.log('Pricing calculated:', response.data);
+    
+    if (response.data.success && response.data.data) {
+      return response.data.data;
+    } else {
+      throw new Error(response.data.message || 'Failed to calculate pricing');
+    }
+    
+  } catch (error: any) {
+    console.error('Failed to calculate pricing:', error);
+    throw new Error(error.response?.data?.message || error.message || 'Failed to calculate pricing');
   }
 };
 
@@ -867,404 +914,14 @@ export const isSpecialDeliveryType = (deliveryType: string): boolean => {
   return specialTypes.includes(deliveryType.toLowerCase());
 };
 
-// Additional package management and transformation functions...
-const transformAreaData = (rawData: any, included: any[] = []): Area => {
-  try {
-    let areaData = rawData;
-    
-    if (rawData.attributes) {
-      areaData = {
-        id: rawData.id,
-        name: rawData.attributes.name,
-        ...rawData.attributes
-      };
-      
-      if (rawData.relationships?.location?.data && included.length > 0) {
-        const locationRef = rawData.relationships.location.data;
-        const includedLocation = included.find((inc: any) => 
-          inc.type === 'location' && inc.id === locationRef.id
-        );
-        
-        if (includedLocation && includedLocation.attributes) {
-          areaData.location = {
-            id: includedLocation.id,
-            name: includedLocation.attributes.name || 'Unknown Location'
-          };
-        }
-      }
-    }
-    
-    return {
-      id: String(areaData.id),
-      name: areaData.name || 'Unknown Area',
-      location_id: areaData.location_id || areaData.location?.id,
-      location: areaData.location ? {
-        id: String(areaData.location.id),
-        name: areaData.location.name || 'Unknown Location'
-      } : undefined,
-      initials: areaData.initials || areaData.name?.substring(0, 2).toUpperCase()
-    };
-  } catch (error) {
-    console.error('Error transforming area data:', error, rawData);
-    return {
-      id: String(rawData.id || 'unknown'),
-      name: rawData.name || rawData.attributes?.name || 'Unknown Area'
-    };
-  }
-};
-
-const transformAgentData = (rawData: any, included: any[] = []): Agent => {
-  try {
-    let agentData = rawData;
-    
-    if (rawData.attributes) {
-      agentData = {
-        id: rawData.id,
-        name: rawData.attributes.name,
-        phone: rawData.attributes.phone,
-        ...rawData.attributes
-      };
-      
-      if (rawData.relationships?.area?.data && included.length > 0) {
-        const areaRef = rawData.relationships.area.data;
-        const includedArea = included.find((inc: any) => 
-          inc.type === 'area' && inc.id === areaRef.id
-        );
-        
-        if (includedArea && includedArea.attributes) {
-          let location = undefined;
-          if (includedArea.relationships?.location?.data) {
-            const locationRef = includedArea.relationships.location.data;
-            const includedLocation = included.find((inc: any) => 
-              inc.type === 'location' && inc.id === locationRef.id
-            );
-            
-            if (includedLocation && includedLocation.attributes) {
-              location = {
-                id: includedLocation.id,
-                name: includedLocation.attributes.name || 'Unknown Location'
-              };
-            }
-          }
-          
-          agentData.area = {
-            id: includedArea.id,
-            name: includedArea.attributes.name || 'Unknown Area',
-            location_id: includedArea.attributes.location_id,
-            location
-          };
-        }
-      }
-    }
-    
-    return {
-      id: String(agentData.id),
-      name: agentData.name || 'Unknown Agent',
-      phone: agentData.phone || 'No phone',
-      area_id: agentData.area_id || agentData.area?.id,
-      area: agentData.area ? {
-        id: String(agentData.area.id),
-        name: agentData.area.name || 'Unknown Area',
-        location_id: agentData.area.location_id,
-        location: agentData.area.location ? {
-          id: String(agentData.area.location.id),
-          name: agentData.area.location.name || 'Unknown Location'
-        } : undefined
-      } : undefined
-    };
-  } catch (error) {
-    console.error('Error transforming agent data:', error, rawData);
-    return {
-      id: String(rawData.id || 'unknown'),
-      name: rawData.name || rawData.attributes?.name || 'Unknown Agent',
-      phone: rawData.phone || rawData.attributes?.phone || 'No phone'
-    };
-  }
-};
-
-// Package management functions...
-export const getPackages = async (filters?: PackageFilters): Promise<PackageResponse> => {
-  try {
-    console.log('Fetching packages with filters:', filters);
-    
-    const params = new URLSearchParams();
-    
-    if (filters?.state) {
-      const apiState = STATE_MAPPING[filters.state];
-      params.append('state', apiState);
-    }
-    
-    if (filters?.page) {
-      params.append('page', filters.page.toString());
-    }
-    
-    if (filters?.per_page) {
-      params.append('per_page', filters.per_page.toString());
-    }
-    
-    if (filters?.search) {
-      params.append('search', filters.search);
-    }
-    
-    const queryString = params.toString();
-    const url = `/api/v1/packages${queryString ? '?' + queryString : ''}`;
-    
-    console.log('API call URL:', url);
-    
-    const response = await api.get(url, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 15000
-    });
-    
-    console.log('Packages API response:', {
-      success: response.data.success,
-      dataCount: response.data.data?.length || 0,
-      totalCount: response.data.pagination?.total_count || 0
-    });
-    
-    if (response.data.success !== false) {
-      const packagesData = response.data.data || response.data || [];
-      const included = response.data.included || [];
-      
-      const transformedPackages = Array.isArray(packagesData) 
-        ? packagesData.map((pkg: any) => transformPackageData(pkg, included))
-        : [transformPackageData(packagesData, included)];
-      
-      return {
-        data: transformedPackages,
-        pagination: response.data.pagination || {
-          total_count: transformedPackages.length,
-          page: 1,
-          per_page: 20,
-          total_pages: 1
-        },
-        success: true,
-        message: response.data.message
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to fetch packages');
-    }
-    
-  } catch (error: any) {
-    console.error('Failed to fetch packages:', error);
-    
-    return {
-      data: [],
-      pagination: {
-        total_count: 0,
-        page: 1,
-        per_page: 20,
-        total_pages: 0
-      },
-      success: false,
-      message: error.message || 'Failed to fetch packages'
-    };
-  }
-};
-
-const transformPackageData = (rawData: any, included: any[] = []): Package => {
-  try {
-    let packageData = rawData;
-    
-    if (rawData.attributes) {
-      packageData = {
-        id: rawData.id,
-        ...rawData.attributes
-      };
-      
-      if (rawData.relationships && included.length > 0) {
-        // Origin area
-        if (rawData.relationships.origin_area?.data) {
-          const areaRef = rawData.relationships.origin_area.data;
-          const includedArea = included.find((inc: any) => 
-            inc.type === 'area' && inc.id === areaRef.id
-          );
-          if (includedArea) {
-            packageData.origin_area = transformAreaData(includedArea, included);
-          }
-        }
-        
-        // Destination area
-        if (rawData.relationships.destination_area?.data) {
-          const areaRef = rawData.relationships.destination_area.data;
-          const includedArea = included.find((inc: any) => 
-            inc.type === 'area' && inc.id === areaRef.id
-          );
-          if (includedArea) {
-            packageData.destination_area = transformAreaData(includedArea, included);
-          }
-        }
-        
-        // Origin agent
-        if (rawData.relationships.origin_agent?.data) {
-          const agentRef = rawData.relationships.origin_agent.data;
-          const includedAgent = included.find((inc: any) => 
-            inc.type === 'agent' && inc.id === agentRef.id
-          );
-          if (includedAgent) {
-            packageData.origin_agent = transformAgentData(includedAgent, included);
-          }
-        }
-        
-        // Destination agent
-        if (rawData.relationships.destination_agent?.data) {
-          const agentRef = rawData.relationships.destination_agent.data;
-          const includedAgent = included.find((inc: any) => 
-            inc.type === 'agent' && inc.id === agentRef.id
-          );
-          if (includedAgent) {
-            packageData.destination_agent = transformAgentData(includedAgent, included);
-          }
-        }
-      }
-    }
-    
-    return {
-      id: String(packageData.id || ''),
-      code: packageData.code || '',
-      state: packageData.state || 'unknown',
-      state_display: packageData.state_display || getStateDisplay(packageData.state || ''),
-      sender_name: packageData.sender_name || 'Unknown Sender',
-      receiver_name: packageData.receiver_name || 'Unknown Receiver',
-      receiver_phone: packageData.receiver_phone || '',
-      route_description: packageData.route_description || 'Route information unavailable',
-      cost: Number(packageData.cost) || 0,
-      delivery_type: packageData.delivery_type || 'agent',
-      created_at: packageData.created_at || new Date().toISOString(),
-      updated_at: packageData.updated_at || packageData.created_at || new Date().toISOString(),
-      origin_area: packageData.origin_area,
-      destination_area: packageData.destination_area,
-      origin_agent: packageData.origin_agent,
-      destination_agent: packageData.destination_agent,
-      delivery_location: packageData.delivery_location,
-      sender_phone: packageData.sender_phone,
-      sender_email: packageData.sender_email,
-      receiver_email: packageData.receiver_email,
-      business_name: packageData.business_name,
-      package_size: packageData.package_size,
-      special_instructions: packageData.special_instructions
-    };
-    
-  } catch (error) {
-    console.error('Error transforming package data:', error, rawData);
-    throw new Error('Failed to transform package data');
-  }
-};
-
-// Additional package management functions...
-export const getPackagesByState = async (state: DrawerState, page = 1, perPage = 20): Promise<PackageResponse> => {
-  return getPackages({ state, page, per_page: perPage });
-};
-
-export const searchPackages = async (query: string, page = 1, perPage = 20): Promise<PackageResponse> => {
-  return getPackages({ search: query, page, per_page: perPage });
-};
-
-export const getPackageDetails = async (packageId: string): Promise<Package> => {
-  try {
-    console.log('Fetching package details for ID:', packageId);
-    
-    const response = await api.get(`/api/v1/packages/${packageId}`, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 15000
-    });
-    
-    if (response.data.success !== false) {
-      const included = response.data.included || [];
-      return transformPackageData(response.data.data || response.data, included);
-    } else {
-      throw new Error(response.data.message || 'Failed to fetch package details');
-    }
-    
-  } catch (error: any) {
-    console.error('Failed to fetch package details:', error);
-    throw new Error(error.response?.data?.message || error.message || 'Failed to fetch package details');
-  }
-};
-
-export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
-  try {
-    console.log('Fetching QR code for package:', packageCode);
-    
-    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json'
-      },
-      timeout: 15000
-    });
-    
-    console.log('QR Code response:', response.data);
-    
-    if (response.data.success !== false && response.data.data) {
-      return {
-        data: {
-          qr_code_base64: response.data.data.qr_code_base64 || null,
-          tracking_url: response.data.data.tracking_url || `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-          package_code: packageCode,
-          package_state: response.data.data.package_state || 'unknown',
-          route_description: response.data.data.route_description || 'Route information unavailable'
-        },
-        success: true,
-        message: response.data.message
-      };
-    } else {
-      throw new Error(response.data.message || 'Failed to generate QR code');
-    }
-    
-  } catch (error: any) {
-    console.error('Failed to fetch QR code:', error);
-    
-    return {
-      data: {
-        qr_code_base64: null,
-        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-        package_code: packageCode,
-        package_state: 'unknown',
-        route_description: 'Route information unavailable'
-      },
-      success: false,
-      message: error.message || 'Failed to generate QR code'
-    };
-  }
-};
-
-export const refreshData = async (): Promise<void> => {
-  try {
-    console.log('Refreshing package helpers data...');
-    
-    clearCache();
-    
-    const [locations, areas, agents] = await Promise.allSettled([
-      getLocations(),
-      getAreas(),
-      getAgents()
-    ]);
-    
-    console.log('Data refresh results:', {
-      locations: locations.status === 'fulfilled' ? locations.value.length : 'failed',
-      areas: areas.status === 'fulfilled' ? areas.value.length : 'failed',
-      agents: agents.status === 'fulfilled' ? agents.value.length : 'failed'
-    });
-  } catch (error: any) {
-    console.error('Failed to refresh package helpers data:', error);
-    throw error;
-  }
-};
-
-// Updated default export with all functions
+// Updated default export with all functions including pricing
 export default {
   // MAIN FUNCTIONS
   getPackageFormData,
   validatePackageFormData,
   createPackage,
   getPackagePricing,
+  calculatePackagePricing, // NEW: Added pricing calculation
   getLocations,
   
   // IMPORTED FUNCTIONS
@@ -1275,7 +932,7 @@ export default {
   requiresOriginAgent,
   requiresDestinationArea,
   isSpecialDeliveryType,
-  resolveAreaIdFromAgent, // NEW: Export the area resolution helper
+  resolveAreaIdFromAgent,
   
   // EXISTING FUNCTIONS
   getAgentsForArea,
@@ -1290,13 +947,5 @@ export default {
   canEditPackage,
   getNextValidStates,
   formatRouteDescription,
-  refreshData,
-  
-  // Package-specific functions
-  getPackages,
-  getPackagesByState,
-  searchPackages,
-  getPackageDetails,
-  getPackageQRCode,
   STATE_MAPPING
 };
