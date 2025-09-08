@@ -1,4 +1,4 @@
-// context/UserContext.tsx - Fixed with proper avatar synchronization
+// context/UserContext.tsx - Fixed with proper AsyncStorage caching
 import React, {
   createContext,
   ReactNode,
@@ -92,7 +92,7 @@ type UserContextType = {
   currentAccount: AccountData | null;
   
   // Avatar synchronization
-  avatarUpdateTrigger: number; // New: Force avatar refresh across components
+  avatarUpdateTrigger: number;
   
   // Core methods
   refreshUser: (forceClearCache?: boolean) => Promise<void>;
@@ -104,7 +104,7 @@ type UserContextType = {
   logout: () => Promise<void>;
   
   // Avatar methods
-  triggerAvatarRefresh: () => void; // New: Force all components to refresh avatar
+  triggerAvatarRefresh: () => void;
   
   // Business selection
   setSelectedBusiness: (business: Business | null) => void;
@@ -114,13 +114,26 @@ type UserContextType = {
   getUserPhone: () => string;
   getBusinessDisplayName: () => string;
   
-  // Auth helpers - these now pull from AccountManager
+  // Auth helpers
   getCurrentToken: () => string | null;
   getCurrentUserId: () => string | null;
   getCurrentRole: () => string | null;
 };
 
 const UserContext = createContext<UserContextType | undefined>(undefined);
+
+// Cache keys
+const CACHE_KEYS = {
+  USER_DATA: 'cached_user_data',
+  USER_EXPIRY: 'user_cache_expiry',
+  BUSINESS_DATA: 'cached_business_data',
+  BUSINESS_EXPIRY: 'business_cache_expiry',
+  SELECTED_BUSINESS: 'selected_business',
+  AVATAR_CACHE: 'avatar_cache',
+};
+
+// Cache duration (30 minutes)
+const CACHE_DURATION = 30 * 60 * 1000;
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -131,7 +144,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   
-  // New: Avatar synchronization trigger
+  // Avatar synchronization trigger
   const [avatarUpdateTrigger, setAvatarUpdateTrigger] = useState(Date.now());
 
   // Auto-select first business when businesses change
@@ -144,6 +157,85 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       setSelectedBusinessState(null);
     }
   }, [businesses.owned, selectedBusiness]);
+
+  // Enhanced cache management functions
+  const saveUserToCache = async (userData: User) => {
+    try {
+      const cacheData = {
+        data: userData,
+        timestamp: Date.now(),
+      };
+      await AsyncStorage.setItem(CACHE_KEYS.USER_DATA, JSON.stringify(cacheData));
+      await AsyncStorage.setItem(CACHE_KEYS.USER_EXPIRY, Date.now().toString());
+      console.log('💾 UserContext: User data saved to cache:', userData.email);
+    } catch (error) {
+      console.error('❌ UserContext: Failed to save user to cache:', error);
+    }
+  };
+
+  const loadUserFromCache = async (): Promise<User | null> => {
+    try {
+      const cachedData = await AsyncStorage.getItem(CACHE_KEYS.USER_DATA);
+      const expiryTime = await AsyncStorage.getItem(CACHE_KEYS.USER_EXPIRY);
+      
+      if (cachedData && expiryTime) {
+        const expiry = parseInt(expiryTime);
+        const now = Date.now();
+        
+        if (now - expiry < CACHE_DURATION) {
+          const parsed = JSON.parse(cachedData);
+          console.log('📱 UserContext: Loaded user from cache:', parsed.data?.email);
+          return parsed.data;
+        } else {
+          console.log('⏰ UserContext: User cache expired, clearing');
+          await AsyncStorage.removeItem(CACHE_KEYS.USER_DATA);
+          await AsyncStorage.removeItem(CACHE_KEYS.USER_EXPIRY);
+        }
+      }
+    } catch (error) {
+      console.error('❌ UserContext: Failed to load user from cache:', error);
+    }
+    return null;
+  };
+
+  const saveBusinessesToCache = async (businessData: BusinessData) => {
+    try {
+      const cacheData = {
+        data: businessData,
+        timestamp: Date.now(),
+      };
+      await AsyncStorage.setItem(CACHE_KEYS.BUSINESS_DATA, JSON.stringify(cacheData));
+      await AsyncStorage.setItem(CACHE_KEYS.BUSINESS_EXPIRY, Date.now().toString());
+      console.log('💾 UserContext: Business data saved to cache');
+    } catch (error) {
+      console.error('❌ UserContext: Failed to save businesses to cache:', error);
+    }
+  };
+
+  const loadBusinessesFromCache = async (): Promise<BusinessData | null> => {
+    try {
+      const cachedData = await AsyncStorage.getItem(CACHE_KEYS.BUSINESS_DATA);
+      const expiryTime = await AsyncStorage.getItem(CACHE_KEYS.BUSINESS_EXPIRY);
+      
+      if (cachedData && expiryTime) {
+        const expiry = parseInt(expiryTime);
+        const now = Date.now();
+        
+        if (now - expiry < CACHE_DURATION) {
+          const parsed = JSON.parse(cachedData);
+          console.log('📱 UserContext: Loaded businesses from cache');
+          return parsed.data;
+        } else {
+          console.log('⏰ UserContext: Business cache expired, clearing');
+          await AsyncStorage.removeItem(CACHE_KEYS.BUSINESS_DATA);
+          await AsyncStorage.removeItem(CACHE_KEYS.BUSINESS_EXPIRY);
+        }
+      }
+    } catch (error) {
+      console.error('❌ UserContext: Failed to load businesses from cache:', error);
+    }
+    return null;
+  };
 
   // Sync with AccountManager
   const syncWithAccountManager = () => {
@@ -161,21 +253,25 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     });
   };
 
-  // Enhanced cache clearing with avatar-specific cache
+  // Enhanced cache clearing with comprehensive cleanup
   const clearUserCache = async () => {
     try {
       console.log('🗑️ UserContext: Clearing all user cache including avatar...');
       
       const cacheKeys = [
-        'user_data',
+        CACHE_KEYS.USER_DATA,
+        CACHE_KEYS.USER_EXPIRY,
+        CACHE_KEYS.BUSINESS_DATA,
+        CACHE_KEYS.BUSINESS_EXPIRY,
+        CACHE_KEYS.SELECTED_BUSINESS,
+        CACHE_KEYS.AVATAR_CACHE,
+        'user_data', // Legacy keys
         'user_cache_expiry',
         'avatar_cache',
         'avatar_cache_expiry',
         'business_data',
         'cached_business_data',
         'business_cache_expiry',
-        'selected_business',
-        // Add more avatar-related cache keys
         'cached_avatar_urls',
         'avatar_timestamps',
       ];
@@ -194,7 +290,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // New: Force avatar refresh across all components
+  // Force avatar refresh across all components
   const triggerAvatarRefresh = () => {
     console.log('🔄 UserContext: Triggering avatar refresh across all components');
     setAvatarUpdateTrigger(Date.now());
@@ -228,7 +324,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   // Restore selected business from cache
   const restoreSelectedBusiness = async () => {
     try {
-      const cached = await AsyncStorage.getItem('selected_business');
+      const cached = await AsyncStorage.getItem(CACHE_KEYS.SELECTED_BUSINESS);
       if (cached) {
         const business = JSON.parse(cached);
         console.log('🔄 UserContext: Restored selected business from cache:', business.name);
@@ -243,10 +339,10 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   const saveSelectedBusiness = async (business: Business | null) => {
     try {
       if (business) {
-        await AsyncStorage.setItem('selected_business', JSON.stringify(business));
+        await AsyncStorage.setItem(CACHE_KEYS.SELECTED_BUSINESS, JSON.stringify(business));
         console.log('💾 UserContext: Saved selected business to cache:', business.name);
       } else {
-        await AsyncStorage.removeItem('selected_business');
+        await AsyncStorage.removeItem(CACHE_KEYS.SELECTED_BUSINESS);
         console.log('🗑️ UserContext: Removed selected business from cache');
       }
     } catch (error) {
@@ -261,7 +357,7 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     saveSelectedBusiness(business);
   };
 
-  // Enhanced refresh user data with better avatar synchronization
+  // Enhanced refresh user data with proper caching
   const refreshUser = async (forceClearCache: boolean = false) => {
     try {
       const currentAcc = accountManager.getCurrentAccount();
@@ -278,17 +374,33 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       if (forceClearCache) {
         console.log('🗑️ UserContext: Force clearing user cache before refresh');
         await clearUserCache();
+      } else {
+        // Try to load from cache first
+        const cachedUser = await loadUserFromCache();
+        if (cachedUser) {
+          console.log('📱 UserContext: Using cached user data');
+          setUser(cachedUser);
+          
+          // Update AccountManager with cached data
+          await accountManager.updateAccount(currentAcc.id, cachedUser);
+          syncWithAccountManager();
+          setError(null);
+          return;
+        }
       }
       
-      // Fetch fresh user data
+      // Fetch fresh user data from API
       const fetchedUser = await getUser();
       
       if (fetchedUser) {
-        console.log('✅ UserContext: User data refreshed:', {
+        console.log('✅ UserContext: User data refreshed from API:', {
           email: fetchedUser.email,
           avatarUrl: fetchedUser.avatar_url,
           timestamp: new Date().toISOString()
         });
+        
+        // Save to cache
+        await saveUserToCache(fetchedUser);
         
         // Update AccountManager with fresh user data
         await accountManager.updateAccount(currentAcc.id, fetchedUser);
@@ -332,24 +444,30 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Refresh businesses with optional cache clearing
+  // Enhanced refresh businesses with proper caching
   const refreshBusinesses = async (forceClearCache: boolean = false) => {
     try {
       if (forceClearCache) {
         console.log('🗑️ UserContext: Force clearing business cache before refresh');
-        const businessCacheKeys = [
-          'business_data',
-          'cached_business_data', 
-          'business_cache_expiry'
-        ];
-        await Promise.all(
-          businessCacheKeys.map(key => AsyncStorage.removeItem(key).catch(() => {}))
-        );
+        await AsyncStorage.removeItem(CACHE_KEYS.BUSINESS_DATA);
+        await AsyncStorage.removeItem(CACHE_KEYS.BUSINESS_EXPIRY);
+      } else {
+        // Try to load from cache first
+        const cachedBusinesses = await loadBusinessesFromCache();
+        if (cachedBusinesses) {
+          console.log('📱 UserContext: Using cached business data');
+          setBusinesses(cachedBusinesses);
+          return;
+        }
       }
       
       const businessData = await getBusinesses();
       setBusinesses(businessData);
-      console.log('✅ UserContext: Businesses refreshed:', {
+      
+      // Save to cache
+      await saveBusinessesToCache(businessData);
+      
+      console.log('✅ UserContext: Businesses refreshed from API:', {
         owned: businessData.owned.length,
         joined: businessData.joined.length
       });
@@ -534,8 +652,8 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         if (current) {
           console.log('🔑 UserContext: Found current account, refreshing data');
           try {
-            await refreshUser();
-            await refreshBusinesses();
+            await refreshUser(); // This will check cache first
+            await refreshBusinesses(); // This will check cache first
           } catch (refreshError) {
             console.warn('⚠️ UserContext: Could not refresh data, using cached');
           }
