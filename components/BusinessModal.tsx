@@ -1,5 +1,5 @@
-// components/BusinessModal.tsx - Fixed with proper business name and category handling
-import React, { useState, useCallback } from 'react';
+// components/BusinessModal.tsx - Updated with server categories and phone number
+import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
   Text,
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { createBusiness } from '../lib/helpers/business';
+import { createBusiness, fetchCategories, validatePhoneNumber, formatPhoneNumber } from '../lib/helpers/business';
 
 interface BusinessModalProps {
   visible: boolean;
@@ -23,12 +23,12 @@ interface BusinessModalProps {
   onCreate: () => void;
 }
 
-const BUSINESS_CATEGORIES = [
-  'Technology', 'Retail', 'Food & Beverage', 'Healthcare', 'Education',
-  'Finance', 'Real Estate', 'Manufacturing', 'Transportation', 'Entertainment',
-  'Consulting', 'Construction', 'Agriculture', 'Tourism', 'Fashion',
-  'Beauty & Wellness', 'Legal Services', 'Marketing', 'Sports & Fitness', 'Non-Profit'
-];
+interface Category {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string;
+}
 
 // Centralized toast helper
 const showToast = {
@@ -65,15 +65,52 @@ const showToast = {
 
 export default function BusinessModal({ visible, onClose, onCreate }: BusinessModalProps) {
   const [businessName, setBusinessName] = useState('');
-  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [selectedCategoryIds, setSelectedCategoryIds] = useState<number[]>([]);
+  const [categories, setCategories] = useState<Category[]>([]);
   const [loading, setLoading] = useState(false);
+  const [loadingCategories, setLoadingCategories] = useState(false);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
-  const handleCategoryToggle = useCallback((category: string) => {
-    setSelectedCategories(prev => {
-      if (prev.includes(category)) {
-        return prev.filter(c => c !== category);
+  // Load categories when modal opens
+  useEffect(() => {
+    if (visible) {
+      loadCategories();
+    }
+  }, [visible]);
+
+  const loadCategories = async () => {
+    setLoadingCategories(true);
+    setCategoriesError(null);
+    
+    try {
+      console.log('🏷️ BusinessModal: Loading categories...');
+      const fetchedCategories = await fetchCategories();
+      setCategories(fetchedCategories);
+      console.log('🏷️ BusinessModal: Categories loaded:', fetchedCategories.length);
+    } catch (error: any) {
+      console.error('🏷️ BusinessModal: Error loading categories:', error);
+      setCategoriesError('Failed to load categories. Please try again.');
+      
+      // Set some default categories as fallback
+      setCategories([
+        { id: 1, name: 'Technology', slug: 'technology' },
+        { id: 2, name: 'Retail', slug: 'retail' },
+        { id: 3, name: 'Food & Beverage', slug: 'food-beverage' },
+        { id: 4, name: 'Healthcare', slug: 'healthcare' },
+        { id: 5, name: 'Other', slug: 'other' }
+      ]);
+    } finally {
+      setLoadingCategories(false);
+    }
+  };
+
+  const handleCategoryToggle = useCallback((categoryId: number) => {
+    setSelectedCategoryIds(prev => {
+      if (prev.includes(categoryId)) {
+        return prev.filter(id => id !== categoryId);
       } else if (prev.length < 5) {
-        return [...prev, category];
+        return [...prev, categoryId];
       } else {
         showToast.warning('Maximum Categories', 'You can select up to 5 categories only');
         return prev;
@@ -81,35 +118,63 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
     });
   }, []);
 
-  const handleCreate = async () => {
-    // Validation
+  const handlePhoneNumberChange = (text: string) => {
+    // Allow only digits, spaces, hyphens, parentheses, and plus sign
+    const cleaned = text.replace(/[^\d\s\-\(\)\+]/g, '');
+    setPhoneNumber(cleaned);
+  };
+
+  const validateForm = () => {
+    // Business name validation
     if (!businessName.trim()) {
       Alert.alert('Error', 'Please enter a business name');
-      return;
+      return false;
     }
 
     if (businessName.trim().length < 2) {
       Alert.alert('Error', 'Business name must be at least 2 characters long');
-      return;
+      return false;
     }
 
-    if (selectedCategories.length === 0) {
-      Alert.alert('Error', 'Please select at least one category');
-      return;
+    // Phone number validation
+    if (!phoneNumber.trim()) {
+      Alert.alert('Error', 'Please enter a phone number');
+      return false;
     }
+
+    if (!validatePhoneNumber(phoneNumber)) {
+      Alert.alert(
+        'Invalid Phone Number', 
+        'Please enter a valid Kenyan phone number (e.g., 712345678 or +254712345678)'
+      );
+      return false;
+    }
+
+    // Categories validation
+    if (selectedCategoryIds.length === 0) {
+      Alert.alert('Error', 'Please select at least one category');
+      return false;
+    }
+
+    return true;
+  };
+
+  const handleCreate = async () => {
+    if (!validateForm()) return;
 
     setLoading(true);
     
     try {
       console.log('🏢 BusinessModal: Creating business with data:', {
         name: businessName.trim(),
-        categories: selectedCategories
+        phone_number: formatPhoneNumber(phoneNumber),
+        category_ids: selectedCategoryIds
       });
 
-      // Create the business with proper data structure
       const result = await createBusiness({
         name: businessName.trim(),
-        categories: selectedCategories,
+        phone_number: formatPhoneNumber(phoneNumber),
+        category_ids: selectedCategoryIds,
       });
 
       console.log('🏢 BusinessModal: Business creation result:', result);
@@ -118,7 +183,8 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
 
       // Reset form
       setBusinessName('');
-      setSelectedCategories([]);
+      setPhoneNumber('');
+      setSelectedCategoryIds([]);
       
       // Close modal and trigger refresh
       onCreate();
@@ -127,6 +193,7 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       console.error('🏢 BusinessModal: Create business error:', error);
       
       const errorMessage = error?.response?.data?.message || 
+                          error?.response?.data?.errors?.join(', ') ||
                           error?.response?.data?.error || 
                           error?.message || 
                           'Failed to create business. Please try again.';
@@ -140,9 +207,15 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
   const handleClose = () => {
     if (!loading) {
       setBusinessName('');
-      setSelectedCategories([]);
+      setPhoneNumber('');
+      setSelectedCategoryIds([]);
+      setCategoriesError(null);
       onClose();
     }
+  };
+
+  const retryLoadCategories = () => {
+    loadCategories();
   };
 
   return (
@@ -184,6 +257,7 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
 
               {/* Form */}
               <View style={styles.formContainer}>
+                {/* Business Name */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>Business Name *</Text>
                   <TextInput
@@ -205,48 +279,96 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                 {/* Categories Section */}
                 <View style={styles.inputGroup}>
                   <Text style={styles.inputLabel}>
-                    Categories * ({selectedCategories.length}/5)
+                    Categories * ({selectedCategoryIds.length}/5)
                   </Text>
                   <Text style={styles.helpText}>
                     Select up to 5 categories that best describe your business
                   </Text>
                   
-                  {/* Categories Grid */}
-                  <View style={styles.categoriesContainer}>
-                    <ScrollView 
-                      showsVerticalScrollIndicator={true}
-                      nestedScrollEnabled={true}
-                      style={styles.categoriesScrollView}
-                      contentContainerStyle={styles.categoriesScrollContent}
-                    >
-                      <View style={styles.categoriesGrid}>
-                        {BUSINESS_CATEGORIES.map((category, index) => {
-                          const isSelected = selectedCategories.includes(category);
-                          return (
-                            <TouchableOpacity
-                              key={`category-${index}`}
-                              style={[
-                                styles.categoryChip,
-                                isSelected && styles.selectedCategoryChip
-                              ]}
-                              onPress={() => handleCategoryToggle(category)}
-                              disabled={loading}
-                            >
-                              <Text style={[
-                                styles.categoryChipText,
-                                isSelected && styles.selectedCategoryChipText
-                              ]}>
-                                {category}
-                              </Text>
-                              {isSelected && (
-                                <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
-                              )}
-                            </TouchableOpacity>
-                          );
-                        })}
-                      </View>
-                    </ScrollView>
+                  {/* Categories Loading/Error State */}
+                  {loadingCategories ? (
+                    <View style={styles.loadingContainer}>
+                      <ActivityIndicator size="small" color="#7c3aed" />
+                      <Text style={styles.loadingText}>Loading categories...</Text>
+                    </View>
+                  ) : categoriesError ? (
+                    <View style={styles.errorContainer}>
+                      <Text style={styles.errorText}>{categoriesError}</Text>
+                      <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
+                        <Feather name="refresh-cw" size={16} color="#7c3aed" />
+                        <Text style={styles.retryButtonText}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : (
+                    /* Categories Grid */
+                    <View style={styles.categoriesContainer}>
+                      <ScrollView 
+                        showsVerticalScrollIndicator={true}
+                        nestedScrollEnabled={true}
+                        style={styles.categoriesScrollView}
+                        contentContainerStyle={styles.categoriesScrollContent}
+                      >
+                        <View style={styles.categoriesGrid}>
+                          {categories.map((category) => {
+                            const isSelected = selectedCategoryIds.includes(category.id);
+                            return (
+                              <TouchableOpacity
+                                key={`category-${category.id}`}
+                                style={[
+                                  styles.categoryChip,
+                                  isSelected && styles.selectedCategoryChip
+                                ]}
+                                onPress={() => handleCategoryToggle(category.id)}
+                                disabled={loading}
+                              >
+                                <Text style={[
+                                  styles.categoryChipText,
+                                  isSelected && styles.selectedCategoryChipText
+                                ]}>
+                                  {category.name}
+                                </Text>
+                                {isSelected && (
+                                  <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                                )}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </View>
+                      </ScrollView>
+                    </View>
+                  )}
+                </View>
+
+                {/* Phone Number Section */}
+                <View style={styles.inputGroup}>
+                  <Text style={styles.inputLabel}>Phone Number *</Text>
+                  <Text style={styles.helpText}>
+                    Enter your business phone number (e.g., 712345678 or +254712345678)
+                  </Text>
+                  <View style={styles.phoneInputContainer}>
+                    <View style={styles.countryCodeContainer}>
+                      <Text style={styles.countryCodeText}>🇰🇪 +254</Text>
+                    </View>
+                    <TextInput
+                      style={styles.phoneInput}
+                      value={phoneNumber}
+                      onChangeText={handlePhoneNumberChange}
+                      placeholder="712345678"
+                      placeholderTextColor="rgba(255, 255, 255, 0.5)"
+                      keyboardType="phone-pad"
+                      maxLength={20}
+                      editable={!loading}
+                    />
                   </View>
+                  <Text style={styles.phoneHint}>
+                    {phoneNumber && validatePhoneNumber(phoneNumber) ? (
+                      <Text style={styles.validPhone}>✓ Valid phone number</Text>
+                    ) : phoneNumber ? (
+                      <Text style={styles.invalidPhone}>✗ Invalid phone number</Text>
+                    ) : (
+                      <Text style={styles.phoneHintText}>Enter a valid Kenyan phone number</Text>
+                    )}
+                  </Text>
                 </View>
               </View>
             </ScrollView>
@@ -264,10 +386,10 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
               <TouchableOpacity
                 style={[
                   styles.primaryButton,
-                  (!businessName.trim() || selectedCategories.length === 0 || loading) && styles.disabledButton
+                  (!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories) && styles.disabledButton
                 ]}
                 onPress={handleCreate}
-                disabled={!businessName.trim() || selectedCategories.length === 0 || loading}
+                disabled={!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories}
               >
                 {loading ? (
                   <View style={styles.loadingContainer}>
@@ -363,6 +485,50 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     lineHeight: 18,
   },
+  
+  // Loading and Error States
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+    gap: 12,
+  },
+  loadingText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+  },
+  errorContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
+  },
+  errorText: {
+    color: '#ef4444',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 8,
+    gap: 8,
+  },
+  retryButtonText: {
+    color: '#7c3aed',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  
+  // Categories
   categoriesContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderWidth: 1,
@@ -395,7 +561,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     marginHorizontal: 2,
     minHeight: 44,
-    maxWidth: '48%', // Allows 2 per row for longer text
+    maxWidth: '48%',
     flexShrink: 1,
   },
   selectedCategoryChip: {
@@ -415,6 +581,56 @@ const styles = StyleSheet.create({
   categoryCheckIcon: {
     marginLeft: 6,
   },
+  
+  // Phone Number Styles
+  phoneInputContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  countryCodeContainer: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(124, 58, 237, 0.3)',
+    justifyContent: 'center',
+  },
+  countryCodeText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  phoneInput: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '400',
+  },
+  phoneHint: {
+    marginTop: 8,
+  },
+  phoneHintText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 13,
+  },
+  validPhone: {
+    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  invalidPhone: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  
+  // Action Buttons
   actionContainer: {
     flexDirection: 'row',
     gap: 16,
@@ -457,10 +673,5 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
-  },
-  loadingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
   },
 });
