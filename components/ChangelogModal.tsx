@@ -8,14 +8,10 @@ export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Added Hambuger menu feature',
-'User search',
-'And Chatlist for frequent chats',
-  'New UI polish',
-  'Some Bug fixes',
-'Printing features'
-'Business screen',
-'Avatar upload fix',
+  'Added notifications and cart icons,
+'Fixed business creation nameless',
+'Fixed glitch in header',
+'Avatar upload glitch fixed',
 ];
 
 type Props = {
