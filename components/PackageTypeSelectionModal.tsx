@@ -1,4 +1,4 @@
-// components/PackageTypeSelectionModal.tsx - Fixed with proper modal opening and selection styling
+// components/PackageTypeSelectionModal.tsx - Fixed with solid translucent buttons
 import React, { useRef, useEffect, useState } from 'react';
 import {
   StyleSheet,
@@ -357,7 +357,7 @@ export default function PackageTypeSelectionModal({
     }
   };
 
-  // Render package type option with selection styling
+  // Render package type option with solid translucent styling
   const renderPackageTypeOption = (packageType: PackageType, index: number) => {
     const isSelected = selectedType === packageType.id;
     
@@ -366,81 +366,69 @@ export default function PackageTypeSelectionModal({
         key={packageType.id}
         style={[
           styles.packageTypeOption,
-          isSelected && styles.packageTypeOptionSelected,
           {
+            backgroundColor: isSelected 
+              ? `${packageType.backgroundColor}20` 
+              : `${packageType.backgroundColor}40`,
             shadowColor: isSelected ? 'transparent' : packageType.color,
             shadowOffset: { width: 0, height: 4 },
             shadowOpacity: isSelected ? 0 : 0.3,
             shadowRadius: 8,
             elevation: isSelected ? 0 : 8,
+            opacity: isSelected ? 0.6 : 1,
+            transform: isSelected ? [{ scale: 0.98 }] : [{ scale: 1 }],
           }
         ]}
         onPress={() => handleSelectPackageType(packageType)}
         activeOpacity={0.8}
         disabled={isProcessing}
       >
-        <LinearGradient
-          colors={
-            isSelected 
-              ? ['transparent', 'transparent', 'transparent']
-              : [
-                  `${packageType.backgroundColor}15`,
-                  `${packageType.backgroundColor}25`,
-                  `${packageType.backgroundColor}15`,
-                ]
-          }
-          style={[
-            styles.packageTypeGradient,
-            {
-              borderColor: isSelected ? `${packageType.color}60` : `${packageType.color}40`,
-              opacity: isSelected ? 0.5 : 1,
-            }
-          ]}
-        >
-          <View style={styles.packageTypeContent}>
-            <View 
-              style={[
-                styles.packageTypeIcon,
-                {
-                  backgroundColor: isSelected ? 'transparent' : `${packageType.color}20`,
-                  borderColor: isSelected ? `${packageType.color}60` : `${packageType.color}40`,
-                  opacity: isSelected ? 0.6 : 1,
-                }
-              ]}
-            >
-              <Feather 
-                name={packageType.icon as any} 
-                size={28} 
-                color={isSelected ? `${packageType.color}80` : packageType.color} 
-              />
-            </View>
-            
-            <View style={styles.packageTypeText}>
-              <Text style={[
-                styles.packageTypeLabel, 
-                { 
-                  color: isSelected ? `${packageType.color}80` : packageType.color,
-                  opacity: isSelected ? 0.6 : 1,
-                }
-              ]}>
-                {packageType.label}
-              </Text>
-              <Text style={[
-                styles.packageTypeDescription,
-                { opacity: isSelected ? 0.4 : 1 }
-              ]}>
-                {packageType.description}
-              </Text>
-            </View>
-            
-            <View style={[
-              styles.packageTypeArrow,
-              { opacity: isSelected ? 0.4 : 1 }
-            ]}>
-              <Feather name="chevron-right" size={20} color="#888" />
-            </View>
+        <View style={styles.packageTypeContent}>
+          <View 
+            style={[
+              styles.packageTypeIcon,
+              {
+                backgroundColor: isSelected ? 'transparent' : `${packageType.color}30`,
+                borderColor: isSelected ? `${packageType.color}60` : `${packageType.color}80`,
+                opacity: isSelected ? 0.6 : 1,
+              }
+            ]}
+          >
+            <Feather 
+              name={packageType.icon as any} 
+              size={28} 
+              color={isSelected ? `${packageType.color}80` : packageType.color} 
+            />
           </View>
-        </LinearGradient>
+          
+          <View style={styles.packageTypeText}>
+            <Text style={[
+              styles.packageTypeLabel, 
+              { 
+                color: isSelected ? `${packageType.color}80` : '#ffffff',
+                opacity: isSelected ? 0.6 : 1,
+              }
+            ]}>
+              {packageType.label}
+            </Text>
+            <Text style={[
+              styles.packageTypeDescription,
+              { opacity: isSelected ? 0.4 : 0.8 }
+            ]}>
+              {packageType.description}
+            </Text>
+          </View>
+          
+          <View style={[
+            styles.packageTypeArrow,
+            { 
+              backgroundColor: isSelected ? 'transparent' : 'rgba(255, 255, 255, 0.1)',
+              opacity: isSelected ? 0.4 : 1 
+            }
+          ]}>
+            <Feather name="chevron-right" size={20} color="#ffffff" />
+          </View>
+        </View>
       </TouchableOpacity>
     );
   };
@@ -610,17 +598,11 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   
-  // Package Type Option with Selection State
+  // Solid Translucent Package Type Options
   packageTypeOption: {
     borderRadius: 16,
-    overflow: 'hidden',
-  },
-  packageTypeOptionSelected: {
-    transform: [{ scale: 0.98 }],
-  },
-  packageTypeGradient: {
-    borderWidth: 2,
-    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     overflow: 'hidden',
   },
   packageTypeContent: {
@@ -647,14 +629,13 @@ const styles = StyleSheet.create({
   },
   packageTypeDescription: {
     fontSize: 13,
-    color: '#888',
+    color: '#cccccc',
     lineHeight: 18,
   },
   packageTypeArrow: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
   },
