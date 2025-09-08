@@ -13,6 +13,8 @@ import {
   Alert,
   Platform,
   Modal,
+  ActivityIndicator,
+  FlatList,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,23 +24,21 @@ import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import CollectDeliverModal from '../../components/CollectDeliverModal';
 import ChangelogModal, { CHANGELOG_VERSION, CHANGELOG_KEY } from '../../components/ChangelogModal';
-import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing } from '../../lib/helpers/packageHelpers';
+import { 
+  createPackage, 
+  type PackageData, 
+  getPackageFormData, 
+  calculatePackagePricing,
+  getAreas,
+  getAgents,
+  type Area,
+  type Agent,
+  type Location
+} from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-
-interface Location {
-  id: string;
-  name: string;
-  initials?: string;
-}
-
-interface Area {
-  id: string;
-  name: string;
-  location_id?: string;
-  location?: Location;
-}
+const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 44 : 20;
 
 interface PackageSize {
   id: string;
@@ -83,6 +83,15 @@ interface SuccessModalData {
   status: string;
   color: string;
   icon: string;
+}
+
+interface SelectedLocation {
+  type: 'area' | 'office';
+  id: string;
+  name: string;
+  displayName: string;
+  area?: Area;
+  agent?: Agent;
 }
 
 const PACKAGE_SIZES: PackageSize[] = [
@@ -139,20 +148,249 @@ const PACKAGE_SIZE_INFO: Record<string, PackageSizeInfo> = {
   }
 };
 
+// Area Selection Modal Component
+const AreaSelectionModal: React.FC<{
+  visible: boolean;
+  onClose: () => void;
+  onSelect: (selection: SelectedLocation) => void;
+  title: string;
+}> = ({ visible, onClose, onSelect, title }) => {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterType, setFilterType] = useState<'all' | 'areas' | 'office'>('all');
+  const slideAnim = useRef(new Animated.Value(screenHeight)).current;
+
+  useEffect(() => {
+    if (visible) {
+      loadData();
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [visible]);
+
+  const loadData = async () => {
+    try {
+      setIsLoading(true);
+      const [areasData, agentsData] = await Promise.all([
+        getAreas(),
+        getAgents()
+      ]);
+      setAreas(areasData);
+      setAgents(agentsData);
+    } catch (error) {
+      console.error('Failed to load areas and agents:', error);
+      Alert.alert('Error', 'Failed to load locations');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const closeModal = () => {
+    Animated.timing(slideAnim, {
+      toValue: screenHeight,
+      duration: 250,
+      useNativeDriver: true,
+    }).start(() => {
+      onClose();
+      setSearchQuery('');
+      setFilterType('all');
+    });
+  };
+
+  const handleAreaSelect = (area: Area) => {
+    const selection: SelectedLocation = {
+      type: 'area',
+      id: area.id,
+      name: area.name,
+      displayName: `${area.name} • ${area.location?.name}`,
+      area: area
+    };
+    onSelect(selection);
+    closeModal();
+  };
+
+  const handleAgentSelect = (agent: Agent) => {
+    const selection: SelectedLocation = {
+      type: 'office',
+      id: agent.id,
+      name: agent.name,
+      displayName: `${agent.name} • ${agent.area?.name}`,
+      agent: agent,
+      area: agent.area
+    };
+    onSelect(selection);
+    closeModal();
+  };
+
+  const filteredAreas = areas.filter(area => {
+    const matchesSearch = !searchQuery || 
+      area.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      area.location?.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = filterType === 'all' || filterType === 'areas';
+    return matchesSearch && matchesFilter;
+  });
+
+  const filteredAgents = agents.filter(agent => {
+    const matchesSearch = !searchQuery || 
+      agent.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      agent.area?.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      agent.area?.location?.name.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesFilter = filterType === 'all' || filterType === 'office';
+    return matchesSearch && matchesFilter;
+  });
+
+  const renderAreaItem = ({ item }: { item: Area }) => (
+    <TouchableOpacity
+      style={styles.locationItem}
+      onPress={() => handleAreaSelect(item)}
+    >
+      <View style={styles.locationIcon}>
+        <Text style={styles.locationInitials}>
+          {item.name.substring(0, 2).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <Text style={styles.locationAddress}>{item.location?.name}</Text>
+        <Text style={styles.locationDescription}>Area</Text>
+      </View>
+      <Feather name="chevron-right" size={20} color="#8B5CF6" />
+    </TouchableOpacity>
+  );
+
+  const renderAgentItem = ({ item }: { item: Agent }) => (
+    <TouchableOpacity
+      style={styles.locationItem}
+      onPress={() => handleAgentSelect(item)}
+    >
+      <View style={[styles.locationIcon, { backgroundColor: 'rgba(249, 115, 22, 0.2)' }]}>
+        <Text style={[styles.locationInitials, { color: '#f97316' }]}>
+          {item.name.substring(0, 2).toUpperCase()}
+        </Text>
+      </View>
+      <View style={styles.locationInfo}>
+        <Text style={styles.locationName}>{item.name}</Text>
+        <Text style={styles.locationAddress}>{item.area?.name} • {item.area?.location?.name}</Text>
+        <Text style={styles.locationDescription}>Office • {item.phone}</Text>
+      </View>
+      <Feather name="chevron-right" size={20} color="#f97316" />
+    </TouchableOpacity>
+  );
+
+  return (
+    <Modal visible={visible} transparent animationType="none">
+      <View style={styles.modalOverlay}>
+        <Animated.View
+          style={[
+            styles.areaModalContainer,
+            { transform: [{ translateY: slideAnim }] }
+          ]}
+        >
+          <LinearGradient
+            colors={['#1a1a2e', '#2d3748', '#4a5568']}
+            style={styles.areaModalContent}
+          >
+            <View style={styles.areaModalHeader}>
+              <TouchableOpacity onPress={closeModal} style={styles.areaModalClose}>
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Text style={styles.areaModalTitle}>{title}</Text>
+              <View style={{ width: 40 }} />
+            </View>
+            
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search areas or offices..."
+                placeholderTextColor="#888"
+                value={searchQuery}
+                onChangeText={setSearchQuery}
+              />
+            </View>
+
+            <View style={styles.filterContainer}>
+              {['all', 'areas', 'office'].map((filter) => (
+                <TouchableOpacity
+                  key={filter}
+                  style={[
+                    styles.filterButton,
+                    filterType === filter && styles.filterButtonActive
+                  ]}
+                  onPress={() => setFilterType(filter as typeof filterType)}
+                >
+                  <Text style={[
+                    styles.filterText,
+                    filterType === filter && styles.filterTextActive
+                  ]}>
+                    {filter === 'all' ? 'All' : filter === 'areas' ? 'Areas' : 'Offices'}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+              {isLoading ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="large" color="#8B5CF6" />
+                  <Text style={styles.loadingText}>Loading locations...</Text>
+                </View>
+              ) : (
+                <View>
+                  {(filterType === 'all' || filterType === 'areas') && filteredAreas.length > 0 && (
+                    <View>
+                      <Text style={styles.sectionTitle}>Areas ({filteredAreas.length})</Text>
+                      <FlatList
+                        data={filteredAreas}
+                        keyExtractor={(item) => `area-${item.id}`}
+                        renderItem={renderAreaItem}
+                        scrollEnabled={false}
+                      />
+                    </View>
+                  )}
+                  
+                  {(filterType === 'all' || filterType === 'office') && filteredAgents.length > 0 && (
+                    <View style={{ marginTop: filterType === 'all' ? 16 : 0 }}>
+                      <Text style={styles.sectionTitle}>Offices ({filteredAgents.length})</Text>
+                      <FlatList
+                        data={filteredAgents}
+                        keyExtractor={(item) => `agent-${item.id}`}
+                        renderItem={renderAgentItem}
+                        scrollEnabled={false}
+                      />
+                    </View>
+                  )}
+                  
+                  {filteredAreas.length === 0 && filteredAgents.length === 0 && (
+                    <View style={styles.noResults}>
+                      <Feather name="search" size={48} color="#666" />
+                      <Text style={styles.noResultsText}>No locations found</Text>
+                      <Text style={styles.noResultsSubtext}>Try a different search term or filter</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+            </ScrollView>
+          </LinearGradient>
+        </Animated.View>
+      </View>
+    </Modal>
+  );
+};
+
 export default function HomeScreen() {
-  const [selectedOriginLocation, setSelectedOriginLocation] = useState<Location | null>(null);
-  const [selectedOriginArea, setSelectedOriginArea] = useState<Area | null>(null);
-  const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<Location | null>(null);
-  const [selectedDestinationArea, setSelectedDestinationArea] = useState<Area | null>(null);
+  const [selectedOrigin, setSelectedOrigin] = useState<SelectedLocation | null>(null);
+  const [selectedDestination, setSelectedDestination] = useState<SelectedLocation | null>(null);
   const [selectedPackageSize, setSelectedPackageSize] = useState<PackageSize | null>(null);
   const [pricing, setPricing] = useState<PricingResult | null>(null);
   const [loading, setLoading] = useState(false);
   
   // Data from API
   const [locations, setLocations] = useState<Location[]>([]);
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [filteredOriginAreas, setFilteredOriginAreas] = useState<Area[]>([]);
-  const [filteredDestinationAreas, setFilteredDestinationAreas] = useState<Area[]>([]);
   
   // Modal states
   const [showPackageModal, setShowPackageModal] = useState(false);
@@ -165,9 +403,11 @@ export default function HomeScreen() {
   const [selectedPackageSizeInfo, setSelectedPackageSizeInfo] = useState<PackageSizeInfo | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
-  
-  // ADDED: Changelog modal state
   const [showChangelogModal, setShowChangelogModal] = useState(false);
+  
+  // Area selection modal states
+  const [showOriginModal, setShowOriginModal] = useState(false);
+  const [showDestinationModal, setShowDestinationModal] = useState(false);
   
   const { 
     user, 
@@ -190,7 +430,7 @@ export default function HomeScreen() {
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
 
-  // ADDED: Check for changelog on app start
+  // Check for changelog on app start
   useEffect(() => {
     checkForChangelog();
   }, []);
@@ -226,32 +466,11 @@ export default function HomeScreen() {
     return () => scrollX.stopAnimation();
   }, [scrollX, locations]);
 
-  // Filter areas based on selected locations
-  useEffect(() => {
-    if (selectedOriginLocation) {
-      const filtered = areas.filter(area => area.location_id === selectedOriginLocation.id);
-      setFilteredOriginAreas(filtered);
-    } else {
-      setFilteredOriginAreas([]);
-    }
-  }, [selectedOriginLocation, areas]);
-
-  useEffect(() => {
-    if (selectedDestinationLocation) {
-      const filtered = areas.filter(area => area.location_id === selectedDestinationLocation.id);
-      setFilteredDestinationAreas(filtered);
-    } else {
-      setFilteredDestinationAreas([]);
-    }
-  }, [selectedDestinationLocation, areas]);
-
-  // ADDED: Check if user has seen the current changelog version
   const checkForChangelog = async () => {
     try {
       const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
       
       if (!hasSeenChangelog) {
-        // Delay showing the changelog slightly to allow the UI to load
         setTimeout(() => {
           setShowChangelogModal(true);
         }, 1000);
@@ -261,7 +480,6 @@ export default function HomeScreen() {
     }
   };
 
-  // ADDED: Handle changelog modal close
   const handleChangelogClose = async () => {
     try {
       await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
@@ -277,18 +495,17 @@ export default function HomeScreen() {
       setLoading(true);
       const formData = await getPackageFormData();
       setLocations(formData.locations || []);
-      setAreas(formData.areas || []);
     } catch (error) {
       console.error('Failed to load form data:', error);
-      Alert.alert('Error', 'Failed to load locations and areas');
+      Alert.alert('Error', 'Failed to load locations');
     } finally {
       setLoading(false);
     }
   };
 
   const calculateCost = async () => {
-    if (!selectedOriginArea || !selectedDestinationArea || !selectedPackageSize) {
-      Alert.alert('Missing Information', 'Please select origin area, destination area, and package size');
+    if (!selectedOrigin || !selectedDestination || !selectedPackageSize) {
+      Alert.alert('Missing Information', 'Please select origin, destination, and package size');
       return;
     }
 
@@ -296,8 +513,8 @@ export default function HomeScreen() {
       setLoading(true);
       
       const pricingData = {
-        origin_area_id: selectedOriginArea.id,
-        destination_area_id: selectedDestinationArea.id,
+        origin_area_id: selectedOrigin.area?.id || selectedOrigin.id,
+        destination_area_id: selectedDestination.area?.id || selectedDestination.id,
         package_size: selectedPackageSize.id
       };
 
@@ -644,42 +861,11 @@ export default function HomeScreen() {
     >
       <TouchableOpacity
         style={styles.locationTag}
-        onPress={() => setSelectedOriginLocation(location)}
         activeOpacity={0.8}
       >
         <Text style={styles.locationText}>{location.name}</Text>
       </TouchableOpacity>
     </LinearGradient>
-  );
-
-  const renderDropdown = (
-    items: any[],
-    selectedItem: any,
-    onSelect: (item: any) => void,
-    placeholder: string,
-    getDisplayName: (item: any) => string
-  ) => (
-    <View style={styles.dropdownContainer}>
-      <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.dropdownScroll}>
-        {items.map((item) => (
-          <TouchableOpacity
-            key={item.id}
-            style={[
-              styles.dropdownItem,
-              selectedItem?.id === item.id && styles.dropdownItemSelected
-            ]}
-            onPress={() => onSelect(item)}
-          >
-            <Text style={[
-              styles.dropdownText,
-              selectedItem?.id === item.id && styles.dropdownTextSelected
-            ]}>
-              {getDisplayName(item)}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </ScrollView>
-    </View>
   );
 
   const renderPackageSizes = () => (
@@ -856,54 +1042,29 @@ export default function HomeScreen() {
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
           
-          {/* Origin Selection */}
+          {/* Origin and Destination Input Fields */}
           <View style={styles.inputSection}>
-            <Text style={styles.sectionLabel}>Where are you sending from?</Text>
-            <Text style={styles.subLabel}>Select Location</Text>
-            {renderDropdown(
-              locations,
-              selectedOriginLocation,
-              setSelectedOriginLocation,
-              'Select Origin Location',
-              (item) => item.name
-            )}
-            {selectedOriginLocation && (
-              <>
-                <Text style={styles.subLabel}>Select Area</Text>
-                {renderDropdown(
-                  filteredOriginAreas,
-                  selectedOriginArea,
-                  setSelectedOriginArea,
-                  'Select Origin Area',
-                  (item) => item.name
-                )}
-              </>
-            )}
-          </View>
-
-          {/* Destination Selection */}
-          <View style={styles.inputSection}>
-            <Text style={styles.sectionLabel}>Where are you sending to?</Text>
-            <Text style={styles.subLabel}>Select Location</Text>
-            {renderDropdown(
-              locations,
-              selectedDestinationLocation,
-              setSelectedDestinationLocation,
-              'Select Destination Location',
-              (item) => item.name
-            )}
-            {selectedDestinationLocation && (
-              <>
-                <Text style={styles.subLabel}>Select Area</Text>
-                {renderDropdown(
-                  filteredDestinationAreas,
-                  selectedDestinationArea,
-                  setSelectedDestinationArea,
-                  'Select Destination Area',
-                  (item) => item.name
-                )}
-              </>
-            )}
+            <Text style={styles.sectionLabel}>Select Locations</Text>
+            
+            <TouchableOpacity 
+              style={[styles.locationInput, selectedOrigin && styles.locationInputSelected]}
+              onPress={() => setShowOriginModal(true)}
+            >
+              <Text style={[styles.locationText, selectedOrigin && styles.locationTextSelected]}>
+                {selectedOrigin ? selectedOrigin.displayName : 'Where are you sending from?'}
+              </Text>
+              <Feather name="map-pin" size={20} color={selectedOrigin ? "#8B5CF6" : "#666"} />
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.locationInput, selectedDestination && styles.locationInputSelected]}
+              onPress={() => setShowDestinationModal(true)}
+            >
+              <Text style={[styles.locationText, selectedDestination && styles.locationTextSelected]}>
+                {selectedDestination ? selectedDestination.displayName : 'Where are you sending to?'}
+              </Text>
+              <Feather name="map-pin" size={20} color={selectedDestination ? "#8B5CF6" : "#666"} />
+            </TouchableOpacity>
           </View>
 
           {/* Package Size Selection */}
@@ -913,10 +1074,10 @@ export default function HomeScreen() {
           <TouchableOpacity 
             onPress={calculateCost} 
             activeOpacity={0.8}
-            disabled={loading || !selectedOriginArea || !selectedDestinationArea || !selectedPackageSize}
+            disabled={loading || !selectedOrigin || !selectedDestination || !selectedPackageSize}
             style={[
               styles.calculateButton,
-              (!selectedOriginArea || !selectedDestinationArea || !selectedPackageSize) && styles.calculateButtonDisabled
+              (!selectedOrigin || !selectedDestination || !selectedPackageSize) && styles.calculateButtonDisabled
             ]}
           >
             <LinearGradient 
@@ -982,7 +1143,22 @@ export default function HomeScreen() {
         </LinearGradient>
       </View>
 
-      {/* ADDED: Changelog Modal */}
+      {/* Area Selection Modals */}
+      <AreaSelectionModal
+        visible={showOriginModal}
+        onClose={() => setShowOriginModal(false)}
+        onSelect={setSelectedOrigin}
+        title="Select Origin"
+      />
+      
+      <AreaSelectionModal
+        visible={showDestinationModal}
+        onClose={() => setShowDestinationModal(false)}
+        onSelect={setSelectedDestination}
+        title="Select Destination"
+      />
+
+      {/* Changelog Modal */}
       <ChangelogModal
         visible={showChangelogModal}
         onClose={handleChangelogClose}
@@ -1240,39 +1416,27 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     textAlign: 'center',
   },
-  subLabel: {
-    fontSize: 14,
-    color: '#ccc',
-    marginBottom: 10,
-    marginLeft: 5,
-  },
-  dropdownContainer: {
-    marginBottom: 15,
-  },
-  dropdownScroll: {
-    maxHeight: 50,
-  },
-  dropdownItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 25,
-    marginRight: 10,
+  locationInput: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderColor: 'rgba(139, 92, 246, 0.3)',
   },
-  dropdownItemSelected: {
-    backgroundColor: 'rgba(124, 58, 237, 0.6)',
-    borderColor: '#7c3aed',
+  locationInputSelected: {
+    borderColor: '#8B5CF6',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
   },
-  dropdownText: {
+  locationText: {
+    flex: 1,
+    fontSize: 16,
+    color: '#888',
+  },
+  locationTextSelected: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  dropdownTextSelected: {
-    color: '#fff',
-    fontWeight: '700',
   },
   packageSizeContainer: {
     marginBottom: 25,
@@ -1486,6 +1650,162 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
+  },
+
+  // Area Selection Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  areaModalContainer: {
+    width: screenWidth,
+    height: screenHeight * 0.8,
+  },
+  areaModalContent: {
+    flex: 1,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+    overflow: 'hidden',
+  },
+  areaModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 20,
+    paddingTop: 15,
+    paddingBottom: 10,
+  },
+  areaModalClose: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  areaModalTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  searchContainer: {
+    paddingHorizontal: 20,
+    paddingBottom: 10,
+  },
+  searchInput: {
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    fontSize: 16,
+    color: '#fff',
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  filterContainer: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 15,
+    gap: 10,
+  },
+  filterButton: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+  },
+  filterButtonActive: {
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
+    borderColor: '#8B5CF6',
+  },
+  filterText: {
+    fontSize: 14,
+    color: '#ccc',
+    fontWeight: '500',
+  },
+  filterTextActive: {
+    color: '#8B5CF6',
+    fontWeight: '600',
+  },
+  selectionList: {
+    flex: 1,
+    paddingHorizontal: 20,
+  },
+  sectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8B5CF6',
+    marginBottom: 10,
+    marginTop: 10,
+  },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.6)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 12,
+    gap: 12,
+  },
+  locationIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  locationInitials: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#8B5CF6',
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationName: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 2,
+  },
+  locationAddress: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 2,
+  },
+  locationDescription: {
+    fontSize: 12,
+    color: '#666',
+  },
+  noResults: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    fontSize: 18,
+    color: '#888',
+    marginTop: 16,
+  },
+  noResultsSubtext: {
+    fontSize: 14,
+    color: '#666',
+    marginTop: 8,
+    textAlign: 'center',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: '#8B5CF6',
+    marginTop: 12,
   },
 
   // Modal Styles
