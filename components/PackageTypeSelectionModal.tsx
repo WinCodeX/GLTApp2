@@ -89,7 +89,7 @@ export default function PackageTypeSelectionModal({
     {
       id: 'collect',
       label: 'Collect my Packages',
-      description: 'Collection service where we pick up your packages for delivery',
+      description: 'A collection service where we pick up your packages, consolidate them & send them to you',
       icon: 'package',
       color: '#10B981',
       backgroundColor: '#10B981',
