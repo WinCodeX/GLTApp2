@@ -8,7 +8,7 @@ export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Added notifications and cart icons,
+  'Added notifications and cart icons',
 'Fixed business creation nameless',
 'Fixed glitch in header',
 'Avatar upload glitch fixed',
