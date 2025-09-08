@@ -3,7 +3,7 @@
 import React, { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export const CHANGELOG_VERSION = '1.3.4';
+export const CHANGELOG_VERSION = '1.3.5';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
@@ -12,6 +12,7 @@ const CHANGELOG_CONTENT = [
 'Fixed business creation nameless',
 'Fixed glitch in header',
 'Avatar upload glitch fixed',
+'Cost Calculator now working',
 ];
 
 type Props = {
