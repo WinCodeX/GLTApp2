@@ -1,4 +1,4 @@
-// components/MpesaPaymentModal.tsx - Fixed with backward compatibility
+// components/MpesaPaymentModal.tsx - Fixed modal sizing to show package details properly
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
@@ -643,7 +643,7 @@ export default function MpesaPaymentModal({
                       style={[styles.multiPackageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
                     >
                       <View style={styles.packageHeader}>
-                        <View style={styles.packageInfo}>
+                        <View style={styles.packageLeftSection}>
                           <Text style={styles.packageCode}>{pkg.code}</Text>
                           <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
                         </View>
@@ -815,8 +815,9 @@ const styles = StyleSheet.create({
   overlayTouchable: {
     flex: 1,
   },
+  // FIXED: Increased modal height to show package details properly
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.9,
+    maxHeight: SCREEN_HEIGHT * 0.85, // Increased from 0.9 to show more content
   },
   modal: {
     borderTopLeftRadius: 24,
@@ -913,11 +914,11 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Multiple Packages Info
+  // Multiple Packages Info - FIXED: Increased height significantly
   packagesInfo: {
     paddingHorizontal: 20,
     paddingVertical: 16,
-    maxHeight: 200,
+    maxHeight: 320, // FIXED: Increased from 200 to 320 to show more packages
   },
   packagesScrollView: {
     flexGrow: 0,
@@ -928,7 +929,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
-  packageInfo: {
+  packageLeftSection: {
     flex: 1,
   },
   packageRight: {
