@@ -357,7 +357,7 @@ export default function PackageTypeSelectionModal({
     }
   };
 
-  // Render completely flat solid translucent buttons - NO INNER ELEMENTS
+  // Render outlined buttons with transparent backgrounds
   const renderPackageTypeOption = (packageType: PackageType, index: number) => {
     const isSelected = selectedType === packageType.id;
     
@@ -368,8 +368,11 @@ export default function PackageTypeSelectionModal({
           styles.packageTypeOption,
           {
             backgroundColor: isSelected 
-              ? `${packageType.backgroundColor}20` 
-              : `${packageType.backgroundColor}60`,
+              ? `${packageType.backgroundColor}10` 
+              : `${packageType.backgroundColor}15`,
+            borderColor: isSelected 
+              ? `${packageType.color}60` 
+              : `${packageType.color}80`,
             opacity: isSelected ? 0.6 : 1,
             transform: isSelected ? [{ scale: 0.98 }] : [{ scale: 1 }],
           }
@@ -381,7 +384,7 @@ export default function PackageTypeSelectionModal({
         <Feather 
           name={packageType.icon as any} 
           size={28} 
-          color="#ffffff" 
+          color={isSelected ? `${packageType.color}70` : packageType.color}
           style={{ opacity: isSelected ? 0.7 : 1 }}
         />
         
@@ -389,7 +392,7 @@ export default function PackageTypeSelectionModal({
           <Text style={[
             styles.packageTypeLabel, 
             { 
-              color: '#ffffff',
+              color: isSelected ? `${packageType.color}70` : packageType.color,
               opacity: isSelected ? 0.7 : 1,
             }
           ]}>
@@ -397,7 +400,10 @@ export default function PackageTypeSelectionModal({
           </Text>
           <Text style={[
             styles.packageTypeDescription,
-            { opacity: isSelected ? 0.5 : 0.8 }
+            { 
+              color: isSelected ? `${packageType.color}50` : `${packageType.color}80`,
+              opacity: isSelected ? 0.5 : 0.8 
+            }
           ]}>
             {packageType.description}
           </Text>
@@ -406,7 +412,7 @@ export default function PackageTypeSelectionModal({
         <Feather 
           name="chevron-right" 
           size={20} 
-          color="#ffffff" 
+          color={isSelected ? `${packageType.color}60` : `${packageType.color}90`}
           style={{ opacity: isSelected ? 0.5 : 0.8 }}
         />
       </TouchableOpacity>
@@ -578,12 +584,13 @@ const styles = StyleSheet.create({
     gap: 16,
   },
   
-  // Completely flat solid colored buttons - NO CONTAINERS OR BOXES
+  // Outlined buttons with transparent backgrounds
   packageTypeOption: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 20,
     borderRadius: 16,
+    borderWidth: 2,
     gap: 16,
   },
   packageTypeTextContainer: {
@@ -593,11 +600,9 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
-    color: '#ffffff',
   },
   packageTypeDescription: {
     fontSize: 13,
-    color: '#ffffff',
     lineHeight: 18,
   },
   
