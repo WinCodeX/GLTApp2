@@ -467,7 +467,7 @@ export default function HomeScreen() {
     loadFormDataInBackground();
   }, []);
 
-  // FIXED: Improved location scrolling animation for seamless endless loop
+  // FIXED: Faster location scrolling animation for seamless endless loop
   useEffect(() => {
     if (locations.length === 0) return;
     
@@ -481,7 +481,7 @@ export default function HomeScreen() {
       // Animate to exactly one set width (this creates seamless loop)
       Animated.timing(scrollX, {
         toValue: -singleSetWidth,
-        duration: 18000, // Faster scrolling for better visual engagement
+        duration: 12000, // FIXED: Faster scrolling - reduced from 18000ms to 12000ms
         easing: Easing.linear,
         useNativeDriver: true,
       }).start(({ finished }) => {
