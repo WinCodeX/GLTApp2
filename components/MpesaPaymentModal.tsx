@@ -1,4 +1,4 @@
-// components/MpesaPaymentModal.tsx - Updated for multiple packages
+// components/MpesaPaymentModal.tsx - Fixed with backward compatibility
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
@@ -74,12 +74,16 @@ export default function MpesaPaymentModal({
     return packages.reduce((total, pkg) => total + pkg.cost, 0);
   }, [packages]);
 
+  // Determine if single or multiple packages
+  const isSinglePackage = packages.length === 1;
+
   // Debug logging
   useEffect(() => {
     console.log('🎭 MpesaPaymentModal visibility changed:', visible);
     console.log('📦 Package data:', packages);
     console.log('💰 Total cost:', totalCost);
-  }, [visible, packages, totalCost]);
+    console.log('🔢 Is single package:', isSinglePackage);
+  }, [visible, packages, totalCost, isSinglePackage]);
 
   // Initialize phone number from user context
   useEffect(() => {
@@ -221,7 +225,7 @@ export default function MpesaPaymentModal({
     return cleaned;
   };
 
-  // Payment initiation for multiple packages
+  // FIXED: Use original working endpoint for single packages, bulk for multiple
   const initiatePayment = async () => {
     if (packages.length === 0 || !phoneNumber.trim()) {
       Toast.show({
@@ -233,6 +237,8 @@ export default function MpesaPaymentModal({
     }
 
     console.log('💳 Initiating payment for packages:', packages.map(p => p.code));
+    console.log('🔢 Using single package endpoint:', isSinglePackage);
+    
     animateButtonPress();
     setPaymentStep('processing');
     setErrorMessage('');
@@ -241,14 +247,46 @@ export default function MpesaPaymentModal({
       const formattedPhone = formatPhoneForAPI(phoneNumber);
       console.log('📞 Formatted phone for API:', formattedPhone);
       
-      const response = await api.post('/api/v1/mpesa/stk_push_bulk', {
-        phone_number: formattedPhone,
-        amount: totalCost,
-        package_ids: packages.map(pkg => pkg.id),
-      });
+      let response;
+      
+      if (isSinglePackage) {
+        // Use the original working endpoint for single packages
+        console.log('📡 Using original stk_push endpoint');
+        response = await api.post('/api/v1/mpesa/stk_push', {
+          phone_number: formattedPhone,
+          amount: packages[0].cost,
+          package_id: packages[0].id,
+        });
+      } else {
+        // Use bulk endpoint for multiple packages (if available)
+        console.log('📡 Using bulk stk_push_bulk endpoint');
+        try {
+          response = await api.post('/api/v1/mpesa/stk_push_bulk', {
+            phone_number: formattedPhone,
+            amount: totalCost,
+            package_ids: packages.map(pkg => pkg.id),
+          });
+        } catch (bulkError: any) {
+          // Fallback: If bulk endpoint doesn't exist, process packages individually
+          console.log('📡 Bulk endpoint failed, falling back to individual payments');
+          
+          if (bulkError.response?.status === 404) {
+            Toast.show({
+              type: 'error',
+              text1: 'Bulk Payments Not Supported',
+              text2: 'Please pay for packages individually',
+            });
+            setPaymentStep('failed');
+            setErrorMessage('Bulk payments are not yet supported. Please pay for packages one by one.');
+            return;
+          }
+          throw bulkError;
+        }
+      }
 
-      console.log('📡 Bulk STK Push response:', response.data);
+      console.log('📡 STK Push response:', response.data);
 
+      // FIXED: Handle response the same way as the original working version
       if (response.data.status === 'success' && response.data.data?.checkout_request_id) {
         const requestId = response.data.data.checkout_request_id;
         setCheckoutRequestId(requestId);
@@ -262,6 +300,7 @@ export default function MpesaPaymentModal({
         // Start polling for payment status
         startPolling(requestId);
       } else {
+        // Handle the same way as original
         const errorMsg = response.data.message || 'Payment initiation failed';
         console.log('📡 Server returned non-success status:', errorMsg);
         
@@ -277,6 +316,7 @@ export default function MpesaPaymentModal({
     } catch (error: any) {
       console.error('💳 Payment initiation error:', error);
       
+      // Handle errors the same way as original
       let errorMsg = 'Network error occurred';
       let errorTitle = 'Connection Error';
       
@@ -303,7 +343,7 @@ export default function MpesaPaymentModal({
     }
   };
 
-  // Poll payment status
+  // Poll payment status (unchanged from original)
   const startPolling = (requestId: string) => {
     console.log('🔄 Starting payment polling for:', requestId);
     setIsPolling(true);
@@ -380,7 +420,7 @@ export default function MpesaPaymentModal({
     }, 3000);
   };
 
-  // Handle manual transaction verification
+  // FIXED: Use original endpoint for single package, bulk for multiple
   const verifyManualTransaction = async () => {
     if (!transactionCode.trim()) {
       Toast.show({
@@ -393,12 +433,37 @@ export default function MpesaPaymentModal({
 
     try {
       console.log('🔍 Verifying manual transaction code:', transactionCode);
+      console.log('🔢 Using single package verification:', isSinglePackage);
       
-      const response = await api.post('/api/v1/mpesa/verify_manual_bulk', {
-        transaction_code: transactionCode,
-        package_ids: packages.map(pkg => pkg.id),
-        amount: totalCost
-      });
+      let response;
+      
+      if (isSinglePackage) {
+        // Use original working endpoint for single packages
+        response = await api.post('/api/v1/mpesa/verify_manual', {
+          transaction_code: transactionCode,
+          package_id: packages[0].id,
+          amount: packages[0].cost
+        });
+      } else {
+        // Try bulk endpoint, fallback if not available
+        try {
+          response = await api.post('/api/v1/mpesa/verify_manual_bulk', {
+            transaction_code: transactionCode,
+            package_ids: packages.map(pkg => pkg.id),
+            amount: totalCost
+          });
+        } catch (bulkError: any) {
+          if (bulkError.response?.status === 404) {
+            Toast.show({
+              type: 'error',
+              text1: 'Bulk Verification Not Supported',
+              text2: 'Please verify packages individually',
+            });
+            return;
+          }
+          throw bulkError;
+        }
+      }
 
       if (response.data.status === 'success') {
         setPaymentStep('success');
@@ -434,7 +499,7 @@ export default function MpesaPaymentModal({
     }
   };
 
-  // Retry payment
+  // Retry payment (unchanged from original)
   const retryPayment = () => {
     console.log('🔄 Retrying payment');
     setPaymentStep('confirm');
@@ -448,7 +513,7 @@ export default function MpesaPaymentModal({
     setIsPolling(false);
   };
 
-  // Close modal and cleanup
+  // Close modal and cleanup (unchanged from original)
   const handleClose = () => {
     console.log('❌ Closing modal');
     if (pollingIntervalRef.current) {
@@ -535,7 +600,10 @@ export default function MpesaPaymentModal({
                 <View style={styles.headerText}>
                   <Text style={styles.modalTitle}>M-Pesa Payment</Text>
                   <Text style={styles.modalSubtitle}>
-                    Pay for {packages.length} package{packages.length !== 1 ? 's' : ''}
+                    {isSinglePackage 
+                      ? `Pay for package ${packages[0].code}`
+                      : `Pay for ${packages.length} packages`
+                    }
                   </Text>
                 </View>
                 <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
@@ -544,59 +612,77 @@ export default function MpesaPaymentModal({
               </View>
             </View>
 
-            {/* Packages Info */}
-            <View style={styles.packagesInfo}>
-              <ScrollView 
-                style={styles.packagesScrollView}
-                showsVerticalScrollIndicator={false}
-                bounces={false}
-              >
-                {packages.map((pkg, index) => (
-                  <LinearGradient
-                    key={pkg.id}
-                    colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
-                    style={[styles.packageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
-                  >
-                    <View style={styles.packageHeader}>
-                      <View style={styles.packageInfo}>
-                        <Text style={styles.packageCode}>{pkg.code}</Text>
-                        <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
-                      </View>
-                      <View style={styles.packageRight}>
-                        {pkg.delivery_type && (
-                          <View style={[
-                            styles.deliveryTypeBadge,
-                            { borderColor: getDeliveryTypeColor(pkg.delivery_type) }
-                          ]}>
-                            <Text style={[
-                              styles.badgeText,
-                              { color: getDeliveryTypeColor(pkg.delivery_type) }
-                            ]}>
-                              {getDeliveryTypeDisplay(pkg.delivery_type)}
-                            </Text>
-                          </View>
-                        )}
-                        <Text style={styles.packageAmount}>KES {pkg.cost.toLocaleString()}</Text>
-                      </View>
-                    </View>
-                    <Text style={styles.packageDescription}>{pkg.route_description}</Text>
-                  </LinearGradient>
-                ))}
-              </ScrollView>
-              
-              {/* Total Cost */}
-              <View style={styles.totalSection}>
+            {/* Package Info - Show single package like original, or list for multiple */}
+            {isSinglePackage ? (
+              /* Single Package Display (Original Style) */
+              <View style={styles.packageInfo}>
                 <LinearGradient
-                  colors={['rgba(124, 58, 237, 0.2)', 'rgba(124, 58, 237, 0.1)']}
-                  style={styles.totalCard}
+                  colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
+                  style={styles.packageCard}
                 >
-                  <Text style={styles.totalLabel}>Total Amount</Text>
-                  <Text style={styles.totalAmount}>KES {totalCost.toLocaleString()}</Text>
+                  <View style={styles.packageHeader}>
+                    <Text style={styles.packageCode}>{packages[0].code}</Text>
+                    <Text style={styles.packageAmount}>KES {packages[0].cost.toLocaleString()}</Text>
+                  </View>
+                  <Text style={styles.packageDescription}>{packages[0].route_description}</Text>
+                  <Text style={styles.packageReceiver}>To: {packages[0].receiver_name}</Text>
                 </LinearGradient>
               </View>
-            </View>
+            ) : (
+              /* Multiple Packages Display */
+              <View style={styles.packagesInfo}>
+                <ScrollView 
+                  style={styles.packagesScrollView}
+                  showsVerticalScrollIndicator={false}
+                  bounces={false}
+                >
+                  {packages.map((pkg, index) => (
+                    <LinearGradient
+                      key={pkg.id}
+                      colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
+                      style={[styles.multiPackageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
+                    >
+                      <View style={styles.packageHeader}>
+                        <View style={styles.packageInfo}>
+                          <Text style={styles.packageCode}>{pkg.code}</Text>
+                          <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
+                        </View>
+                        <View style={styles.packageRight}>
+                          {pkg.delivery_type && (
+                            <View style={[
+                              styles.deliveryTypeBadge,
+                              { borderColor: getDeliveryTypeColor(pkg.delivery_type) }
+                            ]}>
+                              <Text style={[
+                                styles.badgeText,
+                                { color: getDeliveryTypeColor(pkg.delivery_type) }
+                              ]}>
+                                {getDeliveryTypeDisplay(pkg.delivery_type)}
+                              </Text>
+                            </View>
+                          )}
+                          <Text style={styles.packageAmount}>KES {pkg.cost.toLocaleString()}</Text>
+                        </View>
+                      </View>
+                      <Text style={styles.packageDescription}>{pkg.route_description}</Text>
+                    </LinearGradient>
+                  ))}
+                </ScrollView>
+                
+                {/* Total Cost for Multiple Packages */}
+                <View style={styles.totalSection}>
+                  <LinearGradient
+                    colors={['rgba(124, 58, 237, 0.2)', 'rgba(124, 58, 237, 0.1)']}
+                    style={styles.totalCard}
+                  >
+                    <Text style={styles.totalLabel}>Total Amount</Text>
+                    <Text style={styles.totalAmount}>KES {totalCost.toLocaleString()}</Text>
+                  </LinearGradient>
+                </View>
+              </View>
+            )}
 
-            {/* Payment Steps */}
+            {/* Payment Steps - Same as original */}
             <View style={styles.paymentContent}>
               {paymentStep === 'confirm' && (
                 <View style={styles.confirmStep}>
@@ -789,7 +875,45 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   
-  // Packages Info
+  // Single Package Info (Original Style)
+  packageInfo: {
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+  },
+  packageCard: {
+    padding: 16,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  packageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+  },
+  packageCode: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: '#fff',
+  },
+  packageAmount: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: colors.primary,
+  },
+  packageDescription: {
+    fontSize: 12,
+    color: '#888',
+    marginBottom: 4,
+  },
+  packageReceiver: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  
+  // Multiple Packages Info
   packagesInfo: {
     paddingHorizontal: 20,
     paddingVertical: 16,
@@ -798,31 +922,14 @@ const styles = StyleSheet.create({
   packagesScrollView: {
     flexGrow: 0,
   },
-  packageCard: {
+  multiPackageCard: {
     padding: 12,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
-  packageHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
   packageInfo: {
     flex: 1,
-  },
-  packageCode: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  packageReceiver: {
-    fontSize: 12,
-    color: '#fff',
-    fontWeight: '500',
   },
   packageRight: {
     alignItems: 'flex-end',
@@ -838,15 +945,6 @@ const styles = StyleSheet.create({
   badgeText: {
     fontSize: 9,
     fontWeight: '600',
-  },
-  packageAmount: {
-    fontSize: 14,
-    fontWeight: '700',
-    color: colors.primary,
-  },
-  packageDescription: {
-    fontSize: 11,
-    color: '#888',
   },
   
   // Total Section
