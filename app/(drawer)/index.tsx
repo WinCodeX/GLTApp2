@@ -14,12 +14,14 @@ import {
   Platform,
   Modal,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import CollectDeliverModal from '../../components/CollectDeliverModal';
+import ChangelogModal, { CHANGELOG_VERSION, CHANGELOG_KEY } from '../../components/ChangelogModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 
@@ -164,6 +166,9 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
+  // ADDED: Changelog modal state
+  const [showChangelogModal, setShowChangelogModal] = useState(false);
+  
   const { 
     user, 
     currentAccount,
@@ -184,6 +189,11 @@ export default function HomeScreen() {
   const optionsTranslateY = useRef(new Animated.Value(100)).current;
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
+
+  // ADDED: Check for changelog on app start
+  useEffect(() => {
+    checkForChangelog();
+  }, []);
 
   // Load data on mount
   useEffect(() => {
@@ -234,6 +244,33 @@ export default function HomeScreen() {
       setFilteredDestinationAreas([]);
     }
   }, [selectedDestinationLocation, areas]);
+
+  // ADDED: Check if user has seen the current changelog version
+  const checkForChangelog = async () => {
+    try {
+      const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
+      
+      if (!hasSeenChangelog) {
+        // Delay showing the changelog slightly to allow the UI to load
+        setTimeout(() => {
+          setShowChangelogModal(true);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error checking changelog status:', error);
+    }
+  };
+
+  // ADDED: Handle changelog modal close
+  const handleChangelogClose = async () => {
+    try {
+      await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
+      setShowChangelogModal(false);
+    } catch (error) {
+      console.error('Error saving changelog status:', error);
+      setShowChangelogModal(false);
+    }
+  };
 
   const loadFormData = async () => {
     try {
@@ -944,6 +981,12 @@ export default function HomeScreen() {
           </TouchableOpacity>
         </LinearGradient>
       </View>
+
+      {/* ADDED: Changelog Modal */}
+      <ChangelogModal
+        visible={showChangelogModal}
+        onClose={handleChangelogClose}
+      />
 
       {/* Info Modal */}
       <Modal
