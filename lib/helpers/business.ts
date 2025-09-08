@@ -1,4 +1,4 @@
-// lib/helpers/business.ts - Updated with secure token verification and categories fetch
+// lib/helpers/business.ts - Fixed error handling and authentication issues
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -28,14 +28,26 @@ const getAuthToken = async (): Promise<string> => {
     const token = await SecureStore.getItemAsync("auth_token");
     
     if (!token) {
-      throw new Error('Authentication required. Please log in again.');
+      throw new Error('AUTH_REQUIRED');
     }
     
     return token;
   } catch (error: any) {
     console.error('Failed to get auth token:', error);
-    throw new Error('Authentication required. Please log in again.');
+    throw new Error('AUTH_REQUIRED');
   }
+};
+
+// Check if error is authentication related
+const isAuthenticationError = (error: any): boolean => {
+  return error.response?.status === 401 || 
+         error.response?.status === 403 ||
+         error.message === 'AUTH_REQUIRED';
+};
+
+// Check if error is a validation error
+const isValidationError = (error: any): boolean => {
+  return error.response?.status === 422;
 };
 
 // Fetch categories from server with caching and auth verification
@@ -78,7 +90,7 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
     console.error('Fetch Categories Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -89,7 +101,7 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
       throw new Error('Session expired. Please log in again.');
     }
     
-    // Try to return cached categories as fallback
+    // Try to return cached categories as fallback for other errors
     const cachedCategories = await getCachedCategories();
     if (cachedCategories.length > 0) {
       console.log('Falling back to cached categories');
@@ -181,7 +193,7 @@ export const clearCategoriesCache = async (): Promise<void> => {
   }
 };
 
-// Create a new business with secure token verification
+// Create a new business with proper error handling
 export const createBusiness = async (businessData: string | BusinessData) => {
   try {
     console.log('Starting business creation process...');
@@ -221,12 +233,19 @@ export const createBusiness = async (businessData: string | BusinessData) => {
     
     console.log('Business creation response:', response.data);
     
-    return response.data;
+    // Check if the response indicates success
+    if (response.data.success) {
+      return response.data;
+    } else {
+      // Server returned success=false
+      throw new Error(response.data.message || 'Business creation failed');
+    }
+    
   } catch (error: any) {
     console.error('Create Business Error:', error?.response?.data || error?.message);
     
-    // Handle authentication errors
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    // Handle authentication errors specifically
+    if (isAuthenticationError(error)) {
       console.log('Authentication failed during business creation');
       Toast.show({
         type: 'error',
@@ -238,19 +257,21 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       throw new Error('Session expired. Please log in again.');
     }
     
-    // Handle validation errors
-    if (error.response?.status === 422) {
-      const errorMessage = error.response?.data?.message || 
-                          error.response?.data?.errors?.join(', ') ||
-                          'Invalid business data';
+    // Handle validation errors (422) - DON'T redirect to login
+    if (isValidationError(error)) {
+      const errorMessage = error.response?.data?.message || 'Validation failed';
+      const errorDetails = error.response?.data?.errors?.join(', ') || '';
+      
+      console.log('Validation error during business creation:', errorMessage, errorDetails);
+      
       Toast.show({
         type: 'error',
         text1: 'Validation Error',
-        text2: errorMessage,
+        text2: errorDetails || errorMessage,
         position: 'bottom',
         visibilityTime: 4000,
       });
-      throw new Error(errorMessage);
+      throw new Error(errorDetails || errorMessage);
     }
     
     // Handle network/connection errors
@@ -277,6 +298,18 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       throw new Error('Request timeout. Please try again.');
     }
     
+    // Handle server errors (500)
+    if (error.response?.status >= 500) {
+      Toast.show({
+        type: 'error',
+        text1: 'Server Error',
+        text2: 'Please try again later',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Server error. Please try again later.');
+    }
+    
     // Enhanced error handling for other cases
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.errors?.join(', ') ||
@@ -292,11 +325,11 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       visibilityTime: 4000,
     });
     
-    throw error;
+    throw new Error(errorMessage);
   }
 };
 
-// Generate an invite code for a business with secure token verification
+// Generate an invite code for a business with proper error handling
 export const createInvite = async (businessId: number) => {
   try {
     console.log('Creating invite for business ID:', businessId);
@@ -319,7 +352,7 @@ export const createInvite = async (businessId: number) => {
     console.error('Create Invite Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -346,7 +379,7 @@ export const createInvite = async (businessId: number) => {
   }
 };
 
-// Join a business via invite code with secure token verification
+// Join a business via invite code with proper error handling
 export const joinBusiness = async (code: string) => {
   try {
     console.log('Joining business with code:', code);
@@ -369,7 +402,7 @@ export const joinBusiness = async (code: string) => {
     console.error('Join Business Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -396,7 +429,7 @@ export const joinBusiness = async (code: string) => {
   }
 };
 
-// Fetch both owned and joined businesses with secure token verification
+// Fetch both owned and joined businesses with proper error handling
 export const getBusinesses = async () => {
   try {
     console.log('Fetching businesses...');
@@ -441,7 +474,7 @@ export const getBusinesses = async () => {
     console.error('Get Businesses Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
-    if (error.response?.status === 401 || error.response?.status === 403) {
+    if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
         text1: 'Session expired',
