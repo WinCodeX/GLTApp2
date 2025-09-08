@@ -29,6 +29,18 @@ import { useUser } from '../../context/UserContext';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
+// Default locations that show immediately (no loading delay)
+const DEFAULT_LOCATIONS = [
+  { id: 'nairobi', name: 'Nairobi' },
+  { id: 'mombasa', name: 'Mombasa' },
+  { id: 'kisumu', name: 'Kisumu' },
+  { id: 'nakuru', name: 'Nakuru' },
+  { id: 'eldoret', name: 'Eldoret' },
+  { id: 'thika', name: 'Thika' },
+  { id: 'machakos', name: 'Machakos' },
+  { id: 'kisii', name: 'Kisii' },
+];
+
 interface Location {
   id: string;
   name: string;
@@ -404,8 +416,8 @@ export default function HomeScreen() {
   const [pricing, setPricing] = useState<PricingResult | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Data from API
-  const [locations, setLocations] = useState<Location[]>([]);
+  // Data from API - starts with default locations for immediate display
+  const [locations, setLocations] = useState<Location[]>(DEFAULT_LOCATIONS);
   
   // Modal states
   const [showPackageModal, setShowPackageModal] = useState(false);
@@ -450,12 +462,12 @@ export default function HomeScreen() {
     checkForChangelog();
   }, []);
 
-  // Load data on mount
+  // Load additional data in background while showing default locations immediately
   useEffect(() => {
-    loadFormData();
+    loadFormDataInBackground();
   }, []);
 
-  // Location scrolling animation
+  // Location scrolling animation - works immediately with default locations
   useEffect(() => {
     if (locations.length === 0) return;
     
@@ -508,16 +520,19 @@ export default function HomeScreen() {
     }
   };
 
-  const loadFormData = async () => {
+  // Load form data in background without blocking UI
+  const loadFormDataInBackground = async () => {
     try {
-      setLoading(true);
+      console.log('Loading additional location data in background...');
       const formData = await getPackageFormData();
-      setLocations(formData.locations || []);
+      
+      // If we get additional locations from API, merge with defaults
+      if (formData.locations && formData.locations.length > 0) {
+        setLocations(formData.locations);
+      }
     } catch (error) {
-      console.error('Failed to load form data:', error);
-      Alert.alert('Error', 'Failed to load locations');
-    } finally {
-      setLoading(false);
+      console.error('Failed to load additional form data (non-critical):', error);
+      // Keep using default locations - no user-facing error
     }
   };
 
@@ -975,24 +990,18 @@ export default function HomeScreen() {
         ]}
       >
         <TouchableOpacity
-          style={[
-            styles.fabOptionContainer,
-            {
-              shadowColor: option.glowColor,
-              shadowOffset: { width: 0, height: 0 },
-              shadowOpacity: 0.6,
-              shadowRadius: 15,
-              elevation: 15,
-            }
-          ]}
+          style={styles.fabOptionContainer}
           onPress={option.action}
           activeOpacity={0.8}
         >
+          {/* FIXED: Changed to outline style with semi-transparent background */}
           <View
             style={[
               styles.fabOptionBackground,
               {
-                backgroundColor: option.backgroundColor,
+                borderColor: option.color,
+                borderWidth: 2,
+                backgroundColor: `${option.color}15`, // Semi-transparent background
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1004,23 +1013,26 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
+                  backgroundColor: `${option.color}25`, // Semi-transparent icon background
+                  borderColor: option.color,
+                  borderWidth: 1,
                   shadowColor: option.glowColor,
                   shadowOffset: { width: 0, height: 0 },
                   shadowOpacity: 0.8,
                   shadowRadius: 8,
                 }
               ]}>
-                <Feather name={option.icon as any} size={22} color="white" />
+                <Feather name={option.icon as any} size={22} color={option.color} />
               </View>
-              <Text style={styles.fabOptionLabel}>{option.label}</Text>
+              <Text style={[styles.fabOptionLabel, { color: option.color }]}>{option.label}</Text>
               <TouchableOpacity 
-                style={styles.infoButton}
+                style={[styles.infoButton, { borderColor: option.color, borderWidth: 1 }]}
                 onPress={(e) => {
                   e.stopPropagation();
                   option.infoAction();
                 }}
               >
-                <Feather name="info" size={18} color="rgba(255, 255, 255, 0.9)" />
+                <Feather name="info" size={18} color={option.color} />
               </TouchableOpacity>
             </View>
           </View>
@@ -1038,7 +1050,7 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* FIXED: Animated Scrolling Section with matching title style */}
+      {/* Currently Reaching Section - Loads immediately with default locations */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
@@ -1055,7 +1067,7 @@ export default function HomeScreen() {
         </View>
       </View>
 
-      {/* FIXED: Enhanced Cost Calculator with proper bottom padding */}
+      {/* Enhanced Cost Calculator with proper bottom padding */}
       <ScrollView 
         style={styles.scrollContainer} 
         contentContainerStyle={styles.scrollContentContainer}
@@ -1408,7 +1420,6 @@ const styles = StyleSheet.create({
     paddingBottom: 20,
     backgroundColor: '#0a0a0f',
   },
-  // FIXED: Main section title to match calculator title exactly
   mainSectionTitle: {
     fontSize: 24, 
     fontWeight: 'bold', 
@@ -1449,7 +1460,6 @@ const styles = StyleSheet.create({
   scrollContainer: { 
     flex: 1 
   },
-  // FIXED: Added proper content container style with bottom padding for FAB
   scrollContentContainer: {
     paddingBottom: 120, // Ensures content doesn't hide behind FAB
   },
@@ -1671,46 +1681,50 @@ const styles = StyleSheet.create({
     borderRadius: 20,
     overflow: 'visible',
   },
+  // FIXED: Changed FAB option background to outline style
   fabOptionBackground: {
     paddingVertical: 18,
     paddingHorizontal: 24,
     minWidth: 240,
     borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.25)',
     overflow: 'visible',
+    // backgroundColor removed - now using semi-transparent background from renderFabOption
   },
   fabOptionContent: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  // FIXED: Updated FAB option icon for outline style
   fabOptionIcon: {
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 16,
     elevation: 8,
+    // backgroundColor now set in renderFabOption with semi-transparent color
   },
+  // FIXED: Updated FAB option label to use dynamic color
   fabOptionLabel: {
     flex: 1,
     fontSize: 16,
     fontWeight: '600',
-    color: 'white',
     textShadowColor: 'rgba(0, 0, 0, 0.6)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
+    // color now set dynamically in renderFabOption
   },
+  // FIXED: Updated info button for outline style
   infoButton: {
     width: 32,
     height: 32,
     borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.25)',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
     justifyContent: 'center',
     marginLeft: 8,
+    // borderColor and borderWidth now set dynamically in renderFabOption
   },
 
   // Area Selection Modal Styles
@@ -1798,7 +1812,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
   },
-  // FIXED: Separate style for modal section titles to avoid conflicts
   modalSectionTitle: {
     fontSize: 16,
     fontWeight: '600',
