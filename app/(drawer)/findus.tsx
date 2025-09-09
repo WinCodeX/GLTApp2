@@ -246,7 +246,7 @@ const FindUs: React.FC = () => {
   const groupedAgents = React.useMemo(() => {
     if (sortConfig.field === 'name') {
       return [{
-        locationName: 'All Agents',
+        locationName: 'All Offices',
         agents: filteredAndSortedAgents
       }];
     }
@@ -281,7 +281,7 @@ const FindUs: React.FC = () => {
         <Feather name="search" size={20} color="#888" />
         <TextInput
           style={styles.searchInput}
-          placeholder="Search agents by name, area, or location..."
+          placeholder="Search offices by name, area, or location..."
           placeholderTextColor="#888"
           value={searchQuery}
           onChangeText={setSearchQuery}
@@ -405,7 +405,7 @@ const FindUs: React.FC = () => {
       renderItem={({ item: group }) => (
         <View>
           {/* Only show location header when sorting by location */}
-          {sortConfig.field === 'location' && group.locationName !== 'All Agents' && (
+          {sortConfig.field === 'location' && group.locationName !== 'All Offices' && (
             <View style={styles.locationHeader}>
               <Text style={styles.locationHeaderText}>{group.locationName}</Text>
               <Text style={styles.locationHeaderCount}>({group.agents.length})</Text>
@@ -425,12 +425,12 @@ const FindUs: React.FC = () => {
           <View style={styles.emptyState}>
             <MaterialIcons name="location-off" size={64} color={colors.textSecondary} />
             <Text style={styles.emptyTitle}>
-              {searchQuery ? 'No agents found' : 'No agents available'}
+              {searchQuery ? 'No offices found' : 'No offices available'}
             </Text>
             <Text style={styles.emptySubtitle}>
               {searchQuery 
                 ? 'Try a different search term or clear the search'
-                : 'We\'ll notify you when agents become available in your area'
+                : 'We\'ll notify you when offices become available in your area'
               }
             </Text>
             {searchQuery && (
@@ -480,9 +480,9 @@ const FindUs: React.FC = () => {
       </View>
 
       <View style={styles.header}>
-        <Text style={styles.title}>Our Agents</Text>
+        <Text style={styles.title}>Our Offices</Text>
         <Text style={styles.subtitle}>
-          {loading ? 'Loading...' : `${agents.length} agent${agents.length !== 1 ? 's' : ''} available`}
+          {loading ? 'Loading...' : `${agents.length} office${agents.length !== 1 ? 's' : ''} available`}
         </Text>
       </View>
 
