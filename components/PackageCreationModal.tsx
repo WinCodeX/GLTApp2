@@ -534,36 +534,22 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type, packageData.package_size, calculateSizeCost]);
 
-  // FIXED: Enhanced updatePackageData to handle both origin and destination agents properly
+  // FIXED: Updated updatePackageData to handle both origin and destination agents
   const updatePackageData = useCallback((field: keyof ExtendedPackageData, value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
       
-      // Handle origin agent selection - set both agent ID and area ID
       if (field === 'origin_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
         if (selectedAgent && selectedAgent.area?.id) {
           updated.origin_area_id = selectedAgent.area.id;
-          console.log('🏢 Origin agent selected:', {
-            agentId: value,
-            agentName: selectedAgent.name,
-            areaId: selectedAgent.area.id,
-            areaName: selectedAgent.area.name
-          });
         }
       }
       
-      // FIXED: Handle destination agent selection - set both agent ID and area ID
       if (field === 'destination_agent_id') {
         const selectedAgent = agents.find(agent => agent.id === value);
         if (selectedAgent && selectedAgent.area?.id) {
           updated.destination_area_id = selectedAgent.area.id;
-          console.log('🏢 Destination agent selected:', {
-            agentId: value,
-            agentName: selectedAgent.name,
-            areaId: selectedAgent.area.id,
-            areaName: selectedAgent.area.name
-          });
         }
       }
       
@@ -757,72 +743,38 @@ export default function PackageCreationModal({
     setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
   }, []);
 
-  // FIXED: Enhanced package creation with proper agent/area handling
+  // FIXED: Submit all packages without calling onSubmit to avoid duplication
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
     setIsSubmitting(true);
     try {
-      // FIXED: Ensure we have both agent ID and area ID for each package
-      const processPackageData = (pkg: ExtendedPackageData) => {
-        const processed = { ...pkg };
-        
-        // Ensure origin area ID is set from origin agent if available
-        if (processed.origin_agent_id && !processed.origin_area_id) {
-          const originAgent = agents.find(agent => agent.id === processed.origin_agent_id);
-          if (originAgent && originAgent.area?.id) {
-            processed.origin_area_id = originAgent.area.id;
-            console.log('🔧 Resolved origin area ID from agent:', {
-              agentId: processed.origin_agent_id,
-              areaId: originAgent.area.id
-            });
-          }
-        }
-        
-        // FIXED: Ensure destination area ID is set from destination agent if available
-        if (processed.destination_agent_id && !processed.destination_area_id) {
-          const destinationAgent = agents.find(agent => agent.id === processed.destination_agent_id);
-          if (destinationAgent && destinationAgent.area?.id) {
-            processed.destination_area_id = destinationAgent.area.id;
-            console.log('🔧 Resolved destination area ID from agent:', {
-              agentId: processed.destination_agent_id,
-              areaId: destinationAgent.area.id
-            });
-          }
-        }
-        
-        return {
-          ...processed,
-          sender_name: 'Current User',
-          sender_phone: '+254700000000',
-          delivery_location: deliveryLocation
-        };
+      // Prepare current package
+      let finalOriginAreaId = packageData.origin_area_id;
+      
+      if (!finalOriginAreaId && selectedOriginAgent?.area?.id) {
+        finalOriginAreaId = selectedOriginAgent.area.id;
+      }
+
+      const currentPackageData = {
+        ...packageData,
+        origin_area_id: finalOriginAreaId,
+        sender_name: 'Current User',
+        sender_phone: '+254700000000',
+        delivery_location: deliveryLocation
       };
 
-      // Prepare current package
-      const currentPackageData = processPackageData(packageData);
-
-      // FIXED: Process all pending packages to ensure they have correct agent/area mapping
+      // FIXED: Only create packages that haven't been submitted yet
       const packagesToSubmit = [
-        ...pendingPackages.map(pkg => processPackageData(pkg)),
+        ...pendingPackages.map(pkg => ({
+          ...pkg,
+          sender_name: 'Current User',
+          sender_phone: '+254700000000'
+        })),
         currentPackageData
       ];
 
-      console.log(`📦 Submitting ${packagesToSubmit.length} packages with agent/area mapping...`);
-      
-      // Log the final package data structure for debugging
-      packagesToSubmit.forEach((pkg, index) => {
-        console.log(`Package ${index + 1} data:`, {
-          origin_agent_id: pkg.origin_agent_id,
-          origin_area_id: pkg.origin_area_id,
-          destination_agent_id: pkg.destination_agent_id,
-          destination_area_id: pkg.destination_area_id,
-          delivery_type: pkg.delivery_type,
-          receiver_name: pkg.receiver_name,
-          package_size: pkg.package_size,
-          special_instructions: pkg.special_instructions
-        });
-      });
+      console.log(`📦 Submitting ${packagesToSubmit.length} packages...`);
 
       // Submit all packages via API
       const responses = await Promise.all(
@@ -858,7 +810,7 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, agents, pendingPackages, closeModal]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, onSubmit, closeModal]);
 
   const retryDataLoad = useCallback(() => {
     loadModalData();
@@ -2408,4 +2360,127 @@ const styles = StyleSheet.create({
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingH
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  spacer: {
+    flex: 1,
+  },
+  backButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  backButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  nextButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    gap: 8,
+  },
+  nextButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  submitButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#10b981',
+    gap: 8,
+  },
+  submitButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  disabledButton: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  disabledButtonText: {
+    color: '#666',
+  },
+  
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 20,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 30,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+  },
+  retryButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  cancelButtonText: {
+    fontSize: 16,
+    color: '#fff',
+    fontWeight: '500',
+  },
+});
