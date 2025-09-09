@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
 import colors from '../../theme/colors';
@@ -41,6 +42,7 @@ interface ExtendedAgent extends Agent {
 type SortDirection = 'asc' | 'desc';
 
 const FindUs: React.FC = () => {
+  const navigation = useNavigation();
   const [agents, setAgents] = useState<ExtendedAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -369,7 +371,7 @@ const FindUs: React.FC = () => {
               <MaterialIcons 
                 name="location-on" 
                 size={16} 
-                color={hasLocation ? colors.primary : colors.textSecondary} 
+                color={hasLocation ? '#7c3aed' : '#888'} 
               />
               <Text style={[
                 styles.locationText,
@@ -378,16 +380,9 @@ const FindUs: React.FC = () => {
                 {locationText}
               </Text>
             </View>
-            
-            {item.phone && (
-              <View style={styles.phoneRow}>
-                <Feather name="phone" size={14} color={colors.textSecondary} />
-                <Text style={styles.phoneText}>{item.phone}</Text>
-              </View>
-            )}
           </View>
           
-          <Feather name="chevron-right" size={20} color={colors.textSecondary} />
+          <Feather name="chevron-right" size={20} color="#888" />
         </View>
       </TouchableOpacity>
     );
@@ -471,8 +466,20 @@ const FindUs: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header with back navigation */}
+      <View style={styles.navigationHeader}>
+        <TouchableOpacity 
+          style={styles.backButton}
+          onPress={() => navigation.goBack()}
+        >
+          <Feather name="arrow-left" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Find Us</Text>
+        <View style={styles.headerSpacer} />
+      </View>
+
       <View style={styles.header}>
-        <Text style={styles.title}>Find Us</Text>
+        <Text style={styles.title}>Our Agents</Text>
         <Text style={styles.subtitle}>
           {loading ? 'Loading...' : `${agents.length} agent${agents.length !== 1 ? 's' : ''} available`}
         </Text>
@@ -538,17 +545,13 @@ const FindUs: React.FC = () => {
 
                   <View style={styles.modalSection}>
                     <Text style={styles.sectionTitle}>Contact Information</Text>
-                    {selectedAgent.email && (
+                    {selectedAgent.email ? (
                       <View style={styles.contactItem}>
-                        <Feather name="mail" size={18} color={colors.primary} />
+                        <Feather name="mail" size={18} color="#7c3aed" />
                         <Text style={styles.contactText}>{selectedAgent.email}</Text>
                       </View>
-                    )}
-                    {selectedAgent.phone && (
-                      <View style={styles.contactItem}>
-                        <Feather name="phone" size={18} color={colors.primary} />
-                        <Text style={styles.contactText}>{selectedAgent.phone}</Text>
-                      </View>
+                    ) : (
+                      <Text style={styles.noContactText}>No contact information available</Text>
                     )}
                   </View>
 
@@ -612,23 +615,52 @@ const FindUs: React.FC = () => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: '#1a1a2e',
+  },
+  // Navigation Header
+  navigationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    backgroundColor: '#601DA6',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  headerTitle: {
+    flex: 1,
+    fontSize: 20,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginHorizontal: 16,
+  },
+  headerSpacer: {
+    width: 40,
   },
   header: {
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   title: {
     fontSize: 28,
     fontWeight: 'bold',
-    color: colors.text,
+    color: '#fff',
     marginBottom: 4,
   },
   subtitle: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#ccc',
   },
   
   // Search and Sort
@@ -636,15 +668,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 16,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   searchInputContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.cardBackground,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
     paddingHorizontal: 16,
     minHeight: 44,
     gap: 12,
@@ -653,7 +685,7 @@ const styles = StyleSheet.create({
   searchInput: {
     flex: 1,
     fontSize: 16,
-    color: colors.text,
+    color: '#fff',
     paddingVertical: 10,
   },
   sortContainer: {
@@ -663,7 +695,7 @@ const styles = StyleSheet.create({
   },
   sortLabel: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#ccc',
     fontWeight: '500',
   },
   sortButtons: {
@@ -676,21 +708,21 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 5,
     borderRadius: 16,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     gap: 4,
   },
   activeSortButton: {
-    backgroundColor: colors.primary + '20',
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: '#7c3aed',
   },
   sortButtonText: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: '#ccc',
     fontWeight: '500',
   },
   activeSortButtonText: {
-    color: colors.primary,
+    color: '#7c3aed',
     fontWeight: '600',
   },
   
@@ -701,16 +733,16 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
   },
   locationHeaderText: {
     fontSize: 16,
     fontWeight: '600',
-    color: colors.primary,
+    color: '#7c3aed',
   },
   locationHeaderCount: {
     fontSize: 12,
-    color: colors.textSecondary,
+    color: '#ccc',
   },
   
   // List
@@ -719,12 +751,12 @@ const styles = StyleSheet.create({
     flexGrow: 1,
   },
   agentCard: {
-    backgroundColor: colors.cardBackground,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
     padding: 16,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -750,7 +782,7 @@ const styles = StyleSheet.create({
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: colors.primary,
+    backgroundColor: '#7c3aed',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -770,7 +802,7 @@ const styles = StyleSheet.create({
   agentName: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.text,
+    color: '#fff',
     flex: 1,
   },
   activeIndicator: {
@@ -806,22 +838,13 @@ const styles = StyleSheet.create({
   },
   locationText: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#ccc',
     marginLeft: 4,
     flex: 1,
   },
   noLocationText: {
     fontStyle: 'italic',
-    color: colors.textDisabled,
-  },
-  phoneRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  phoneText: {
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginLeft: 4,
+    color: '#888',
   },
   
   // Empty States
@@ -834,13 +857,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: colors.textSecondary,
+    color: '#ccc',
     marginTop: 16,
     marginBottom: 8,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#888',
     textAlign: 'center',
     paddingHorizontal: 32,
   },
@@ -849,13 +872,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: colors.primary + '20',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: '#7c3aed',
   },
   clearSearchButtonText: {
     fontSize: 14,
-    color: colors.primary,
+    color: '#7c3aed',
     fontWeight: '600',
   },
   
@@ -868,7 +891,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#ccc',
     marginTop: 16,
   },
   
@@ -888,7 +911,7 @@ const styles = StyleSheet.create({
   },
   errorMessage: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#ccc',
     textAlign: 'center',
     marginBottom: 20,
   },
@@ -896,7 +919,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 8,
-    backgroundColor: colors.primary,
+    backgroundColor: '#7c3aed',
   },
   retryButtonText: {
     fontSize: 16,
@@ -911,7 +934,7 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContent: {
-    backgroundColor: colors.background,
+    backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     maxHeight: '90%',
@@ -922,12 +945,12 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     padding: 20,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   modalTitle: {
     fontSize: 20,
     fontWeight: '600',
-    color: colors.text,
+    color: '#fff',
     flex: 1,
   },
   closeButton: {
@@ -953,7 +976,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: colors.primary,
+    backgroundColor: '#7c3aed',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -965,7 +988,7 @@ const styles = StyleSheet.create({
   modalAgentName: {
     fontSize: 24,
     fontWeight: 'bold',
-    color: colors.text,
+    color: '#fff',
     marginBottom: 8,
   },
   statusBadge: {
@@ -999,7 +1022,7 @@ const styles = StyleSheet.create({
   sectionTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: colors.text,
+    color: '#fff',
     marginBottom: 12,
   },
   contactItem: {
@@ -1009,8 +1032,13 @@ const styles = StyleSheet.create({
   },
   contactText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#ccc',
     marginLeft: 12,
+  },
+  noContactText: {
+    fontSize: 16,
+    color: '#888',
+    fontStyle: 'italic',
   },
   locationItem: {
     flexDirection: 'row',
@@ -1019,7 +1047,7 @@ const styles = StyleSheet.create({
   },
   locationDetailText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#ccc',
     marginLeft: 12,
     flex: 1,
   },
@@ -1030,17 +1058,17 @@ const styles = StyleSheet.create({
   },
   areaDetailLabel: {
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#888',
     marginRight: 8,
   },
   areaDetailText: {
     fontSize: 14,
-    color: colors.text,
+    color: '#fff',
     fontWeight: '500',
   },
   descriptionText: {
     fontSize: 16,
-    color: colors.textSecondary,
+    color: '#ccc',
     lineHeight: 24,
   },
   modalSpecialties: {
@@ -1048,7 +1076,7 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
   },
   modalSpecialtyTag: {
-    backgroundColor: colors.primary + '20',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
@@ -1057,13 +1085,13 @@ const styles = StyleSheet.create({
   },
   modalSpecialtyText: {
     fontSize: 14,
-    color: colors.primary,
+    color: '#7c3aed',
     fontWeight: '500',
   },
   noDescriptionNote: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: colors.border,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     padding: 12,
     borderRadius: 8,
     marginTop: 12,
@@ -1072,7 +1100,7 @@ const styles = StyleSheet.create({
   noDescriptionText: {
     flex: 1,
     fontSize: 14,
-    color: colors.textSecondary,
+    color: '#888',
     fontStyle: 'italic',
   },
 });
