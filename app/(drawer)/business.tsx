@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed header dropdown and removed plus button
+// app/(drawer)/Business.tsx - Redesigned Business Page
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -6,26 +6,22 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
-  Image,
   SafeAreaView,
   StatusBar,
-  Alert,
   Modal,
   RefreshControl,
+  FlatList,
 } from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import * as FileSystem from 'expo-file-system';
 import { useRouter } from 'expo-router';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
-import { getFullAvatarUrl } from '../../lib/api';
 import { SafeLogo } from '../../components/SafeLogo';
 
 // Import the upload helpers
@@ -41,74 +37,6 @@ const EditBusinessModal = React.lazy(() => import('../../components/EditBusiness
 interface BusinessProps {
   navigation: any;
 }
-
-// Display modes for the profile section
-type DisplayMode = 'you' | 'business';
-
-// Enhanced Safe Avatar Component with business logo support
-interface SafeAvatarProps {
-  size: number;
-  avatarUrl?: string | null;
-  fallbackSource?: any;
-  style?: any;
-  onPress?: () => void;
-  updateTrigger?: number;
-}
-
-const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
-  size, 
-  avatarUrl, 
-  fallbackSource = require('../../assets/images/avatar_placeholder.png'),
-  style,
-  onPress,
-  updateTrigger = 0
-}) => {
-  const [hasError, setHasError] = useState(false);
-  const [imageKey, setImageKey] = useState(Date.now());
-  const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
-  
-  useEffect(() => {
-    console.log('🎭 Business SafeAvatar: Update triggered', {
-      avatarUrl,
-      updateTrigger,
-      timestamp: Date.now()
-    });
-    
-    setHasError(false);
-    setImageKey(Date.now());
-  }, [avatarUrl, updateTrigger]);
-  
-  if (!fullAvatarUrl || hasError) {
-    return (
-      <TouchableOpacity onPress={onPress} disabled={!onPress}>
-        <Image
-          source={fallbackSource}
-          style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
-        />
-      </TouchableOpacity>
-    );
-  }
-
-  return (
-    <TouchableOpacity onPress={onPress} disabled={!onPress}>
-      <Image
-        source={{ 
-          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`,
-          headers: {
-            'Cache-Control': 'no-cache, no-store, must-revalidate',
-            'Pragma': 'no-cache',
-            'Expires': '0'
-          }
-        }}
-        style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
-        onError={() => {
-          console.warn('🎭 Business SafeAvatar: Failed to load:', fullAvatarUrl);
-          setHasError(true);
-        }}
-      />
-    </TouchableOpacity>
-  );
-};
 
 // Centralized toast helper
 const showToast = {
@@ -158,8 +86,6 @@ export default function Business({ navigation }: BusinessProps) {
   const { 
     user, 
     businesses,
-    currentAccount,
-    getBusinessDisplayName, 
     getUserPhone,
     getDisplayName,
     refreshBusinesses,
@@ -179,7 +105,6 @@ export default function Business({ navigation }: BusinessProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   
   // UI states
-  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
   const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   
@@ -188,10 +113,7 @@ export default function Business({ navigation }: BusinessProps) {
   const [inviteLink, setInviteLink] = useState(null);
   const [generatingInvite, setGeneratingInvite] = useState(false);
   
-  // NEW: Display mode state - determines if we show user avatar or business logo
-  const [displayMode, setDisplayMode] = useState<DisplayMode>('you');
-  
-  // Image upload states with enhanced context awareness
+  // Image upload states
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [uploadType, setUploadType] = useState<'avatar' | 'business-logo'>('avatar');
   const [selectedBusinessForUpload, setSelectedBusinessForUpload] = useState<any>(null);
@@ -201,18 +123,8 @@ export default function Business({ navigation }: BusinessProps) {
   const [localAvatarUrl, setLocalAvatarUrl] = useState<string | null>(null);
   const [localBusinessLogos, setLocalBusinessLogos] = useState<Record<number, string>>({});
 
-  const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
   const username = getDisplayName();
-
-  // Initialize display mode based on selected business
-  useEffect(() => {
-    if (selectedBusiness) {
-      setDisplayMode('business');
-    } else {
-      setDisplayMode('you');
-    }
-  }, [selectedBusiness]);
 
   // Enhanced refresh handler
   const onRefresh = useCallback(async () => {
@@ -280,93 +192,18 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
-  // NEW: Handle header dropdown toggle
-  const handleHeaderDropdown = () => {
-    console.log('🎭 Business: Header dropdown tapped');
-    setShowBusinessDropdown(true);
-  };
-
-  // NEW: Handle display mode switching
-  const handleDisplayModeSwitch = (mode: DisplayMode) => {
-    console.log('🎭 Business: Switching display mode to:', mode);
-    setDisplayMode(mode);
-    
-    if (mode === 'you') {
-      setSelectedBusiness(null);
-      showToast.info('Personal mode', 'Now showing your profile');
-    } else if (mode === 'business' && businesses.owned.length > 0) {
-      const firstBusiness = businesses.owned[0];
-      setSelectedBusiness(firstBusiness);
-      showToast.info('Business mode', `Now showing ${firstBusiness.name}`);
-    }
-    
-    setShowBusinessDropdown(false);
-  };
-
-  // Business dropdown selection with display mode update
+  // Handle business selection
   const handleBusinessSelect = (business: any) => {
     console.log('🎭 Business: Selecting business:', business.name);
     setSelectedBusiness(business);
-    setDisplayMode('business');
-    setShowBusinessDropdown(false);
     showToast.info('Business selected', business.name);
   };
 
-  // Fixed share business functionality
-  const handleShareBusiness = () => {
-    if (displayMode === 'business' && selectedBusiness) {
-      console.log('🎭 Business: Setting business for share:', selectedBusiness.name);
-      setSelectedBusinessForShare(selectedBusiness);
-      setInviteLink(null); // Reset invite link
-    } else {
-      showToast.warning('No business selected', 'Please select a business first');
-    }
-  };
-
-  // Fixed generate invite link with better error handling
-  const generateInviteLink = async () => {
-    if (!selectedBusinessForShare) {
-      showToast.error('No business selected', 'Please select a business first');
-      return;
-    }
-
-    try {
-      setGeneratingInvite(true);
-      console.log('🎭 Business: Generating invite for business:', selectedBusinessForShare.id);
-      
-      const result = await createInvite(selectedBusinessForShare.id);
-      console.log('🎭 Business: Invite result:', result);
-      
-      if (result?.success && result?.data?.code) {
-        setInviteLink(result.data.code);
-        showToast.success('Invite link generated', 'Copy and share with your team');
-      } else if (result?.code) {
-        // Handle legacy response format
-        setInviteLink(result.code);
-        showToast.success('Invite link generated', 'Copy and share with your team');
-      } else {
-        throw new Error('No invite code received from server');
-      }
-    } catch (error: any) {
-      console.error('🎭 Business: Error creating invite:', error);
-      const errorMessage = error.message || 'Failed to generate invite code';
-      showToast.error('Failed to create invite', errorMessage);
-    } finally {
-      setGeneratingInvite(false);
-    }
-  };
-
-  // Copy invite link
-  const copyInviteLink = async () => {
-    if (inviteLink) {
-      try {
-        await Clipboard.setStringAsync(inviteLink);
-        showToast.success('Copied to clipboard!', 'Share this invite code');
-      } catch (error) {
-        console.error('Failed to copy to clipboard:', error);
-        showToast.error('Failed to copy', 'Please try again');
-      }
-    }
+  // Navigate to business details
+  const handleBusinessDetails = (business: any) => {
+    console.log('🎭 Business: Navigating to business details:', business.name);
+    setSelectedBusiness(business);
+    router.push('/(drawer)/BusinessDetails');
   };
 
   // Handle creating new business
@@ -381,13 +218,20 @@ export default function Business({ navigation }: BusinessProps) {
     setShowJoinModal(true);
   };
 
-  // Handle business modal close with refresh
-  const handleBusinessModalClose = async () => {
+  // Handle business modal close with refresh and auto-select
+  const handleBusinessModalClose = async (newBusiness?: any) => {
     setShowBusinessModal(false);
     try {
       console.log('🔄 Business: Refreshing businesses after modal close');
       await refreshBusinesses(true);
       setLogoUpdateTrigger(Date.now());
+      
+      // Auto-select newly created business
+      if (newBusiness) {
+        console.log('🎭 Business: Auto-selecting newly created business:', newBusiness.name);
+        setSelectedBusiness(newBusiness);
+        showToast.success('Business created!', `${newBusiness.name} is now selected`);
+      }
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
@@ -405,7 +249,7 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  // Handle business update from edit modal with instant logo update
+  // Handle business update from edit modal
   const handleBusinessUpdate = async (updatedBusiness: any) => {
     try {
       console.log('🔄 Business: Handling business update:', updatedBusiness);
@@ -440,13 +284,13 @@ export default function Business({ navigation }: BusinessProps) {
         return;
       }
 
-      // Determine upload context based on display mode
-      const isBusinessMode = displayMode === 'business' && selectedBusiness;
-      const targetUploadType: 'avatar' | 'business-logo' = isBusinessMode ? 'business-logo' : 'avatar';
-      const targetBusiness = isBusinessMode ? selectedBusiness : null;
+      // Determine upload context based on selected business
+      const isBusinessSelected = selectedBusiness;
+      const targetUploadType: 'avatar' | 'business-logo' = isBusinessSelected ? 'business-logo' : 'avatar';
+      const targetBusiness = isBusinessSelected ? selectedBusiness : null;
 
       console.log('🎭 Business: Image picker context:', {
-        displayMode,
+        selectedBusiness: selectedBusiness?.name || 'None',
         uploadType: targetUploadType,
         business: targetBusiness?.name || 'None'
       });
@@ -475,7 +319,7 @@ export default function Business({ navigation }: BusinessProps) {
       console.error('Business: Error picking image:', error);
       showToast.error('Failed to select image', 'Please try again');
     }
-  }, [displayMode, selectedBusiness]);
+  }, [selectedBusiness]);
 
   // Enhanced upload handler with instant visual feedback
   const confirmUploadImage = useCallback(async () => {
@@ -562,9 +406,9 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, [previewUri, uploadType, selectedBusinessForUpload, selectedBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
 
-  // Get the appropriate image URL based on display mode
+  // Get the appropriate image URL based on selected business
   const getCurrentImageUrl = () => {
-    if (displayMode === 'business' && selectedBusiness) {
+    if (selectedBusiness) {
       // Check local cache first for instant updates
       const localLogoUrl = localBusinessLogos[selectedBusiness.id];
       return localLogoUrl || selectedBusiness.logo_url;
@@ -574,43 +418,79 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  // Get the current display name based on mode
-  const getCurrentDisplayName = () => {
-    if (displayMode === 'business' && selectedBusiness) {
-      return selectedBusiness.name;
+  // Get the current display info
+  const getCurrentDisplayInfo = () => {
+    if (selectedBusiness) {
+      return {
+        name: selectedBusiness.name,
+        phone: selectedBusiness.phone_number || userPhone,
+        type: 'Business'
+      };
     } else {
-      return username;
+      return {
+        name: username,
+        phone: userPhone,
+        type: 'Personal Account'
+      };
     }
   };
 
-  // Get upload indicator text
-  const getUploadIndicatorText = () => {
-    if (displayMode === 'business' && selectedBusiness) {
-      return `${selectedBusiness.name} Logo`;
-    } else {
-      return 'Your Avatar';
-    }
-  };
+  // Render business item
+  const renderBusinessItem = (business: any, isOwned: boolean = true) => (
+    <TouchableOpacity
+      key={business.id}
+      style={[
+        styles.businessItem,
+        selectedBusiness?.id === business.id && styles.selectedBusinessItem
+      ]}
+      onPress={() => isOwned ? handleBusinessDetails(business) : handleBusinessSelect(business)}
+      activeOpacity={0.7}
+    >
+      <SafeLogo
+        size={40}
+        logoUrl={localBusinessLogos[business.id] || business.logo_url}
+        avatarUrl={user?.avatar_url}
+        style={styles.businessItemLogo}
+        updateTrigger={logoUpdateTrigger}
+      />
+      
+      <View style={styles.businessItemInfo}>
+        <Text style={styles.businessItemName}>{business.name}</Text>
+        <Text style={styles.businessItemPhone}>
+          {business.phone_number || 'No phone number'}
+        </Text>
+        {business.categories && business.categories.length > 0 && (
+          <Text style={styles.businessItemCategories}>
+            {business.categories.slice(0, 2).map(cat => cat.name).join(', ')}
+            {business.categories.length > 2 && ` +${business.categories.length - 2} more`}
+          </Text>
+        )}
+      </View>
+      
+      <View style={styles.businessItemActions}>
+        {selectedBusiness?.id === business.id && (
+          <View style={styles.selectedIndicator}>
+            <Feather name="check-circle" size={20} color="#7c3aed" />
+          </View>
+        )}
+        <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.5)" />
+      </View>
+    </TouchableOpacity>
+  );
+
+  const currentInfo = getCurrentDisplayInfo();
 
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header with functional dropdown */}
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         
-        {/* Make header center touchable for dropdown */}
-        <TouchableOpacity 
-          style={styles.headerCenter}
-          onPress={handleHeaderDropdown}
-          activeOpacity={0.7}
-        >
-          <Text style={styles.username}>{getCurrentDisplayName()}</Text>
-          <Feather name="chevron-down" size={20} color="#fff" />
-        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Business</Text>
         
         <View style={styles.headerRight}>
           <TouchableOpacity 
@@ -648,261 +528,87 @@ export default function Business({ navigation }: BusinessProps) {
           />
         }
       >
-        {/* Enhanced Profile Section without plus button */}
+        {/* Profile Section - Current Selection */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <SafeLogo
               size={86}
               logoUrl={getCurrentImageUrl()}
-              avatarUrl={displayMode === 'you' ? getCurrentImageUrl() : null}
+              avatarUrl={selectedBusiness ? null : getCurrentImageUrl()}
               style={styles.avatar}
               onPress={pickAndPreviewImage}
               updateTrigger={logoUpdateTrigger + avatarUpdateTrigger}
             />
-            
-            {/* Enhanced upload indicator */}
-            <View style={styles.uploadIndicator}>
-              <Text style={styles.uploadIndicatorText}>
-                {getUploadIndicatorText()}
-              </Text>
-              <Text style={styles.uploadModeText}>
-                {displayMode === 'business' ? 'Business Mode' : 'Personal Mode'}
-              </Text>
-            </View>
           </View>
 
-          <View style={styles.statsContainer}>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>1</Text>
-              <Text style={styles.statLabel}>accounts</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>{businesses.owned.length}</Text>
-              <Text style={styles.statLabel}>businesses</Text>
-            </View>
-            <View style={styles.stat}>
-              <Text style={styles.statNumber}>{businesses.joined.length}</Text>
-              <Text style={styles.statLabel}>joined</Text>
-            </View>
+          <View style={styles.currentInfoContainer}>
+            <Text style={styles.currentInfoType}>{currentInfo.type}</Text>
+            <Text style={styles.currentInfoName}>{currentInfo.name}</Text>
+            <Text style={styles.currentInfoPhone}>{currentInfo.phone}</Text>
           </View>
         </View>
 
-        {/* Enhanced Mode Switcher Section */}
-        <View style={styles.modeSwitcherSection}>
-          <TouchableOpacity 
-            style={[
-              styles.modeButton,
-              displayMode === 'you' && styles.activeModeButton
-            ]}
-            onPress={() => handleDisplayModeSwitch('you')}
-          >
-            <Feather name="user" size={18} color={displayMode === 'you' ? '#fff' : '#7c3aed'} />
-            <Text style={[
-              styles.modeButtonText,
-              displayMode === 'you' && styles.activeModeButtonText
-            ]}>You</Text>
-          </TouchableOpacity>
+        {/* Businesses Section */}
+        <View style={styles.businessesSection}>
+          <Text style={styles.sectionTitle}>Businesses</Text>
           
-          <TouchableOpacity 
-            style={[
-              styles.modeButton,
-              displayMode === 'business' && styles.activeModeButton
-            ]}
-            onPress={() => handleDisplayModeSwitch('business')}
-            disabled={businesses.owned.length === 0}
-          >
-            <Feather name="briefcase" size={18} color={displayMode === 'business' ? '#fff' : '#7c3aed'} />
-            <Text style={[
-              styles.modeButtonText,
-              displayMode === 'business' && styles.activeModeButtonText,
-              businesses.owned.length === 0 && styles.disabledModeButtonText
-            ]}>Business</Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Dynamic Content Section based on display mode */}
-        <View style={styles.currentBusinessSection}>
-          {displayMode === 'you' ? (
-            /* Personal Mode Content */
-            <View style={styles.personalModeContent}>
-              <Text style={styles.personalModeTitle}>Personal Account</Text>
-              <Text style={styles.personalModeName}>{username}</Text>
-              <View style={styles.contactInfo}>
-                <Text style={styles.phoneNumber}>{userPhone}</Text>
-              </View>
-            </View>
-          ) : (
-            /* Business Mode Content */
-            <View style={styles.businessModeContent}>
+          {/* Owned Businesses */}
+          <View style={styles.businessSubsection}>
+            <Text style={styles.subsectionTitle}>Owned Businesses</Text>
+            <View style={styles.businessList}>
               {businesses.owned.length > 0 ? (
-                <TouchableOpacity 
-                  style={styles.businessDropdownButton}
-                  onPress={() => setShowBusinessDropdown(true)}
+                <>
+                  {businesses.owned.map(business => renderBusinessItem(business, true))}
+                  <TouchableOpacity
+                    style={styles.addBusinessButton}
+                    onPress={() => setShowAddBusinessOptions(true)}
+                  >
+                    <Feather name="plus" size={20} color="#7c3aed" />
+                    <Text style={styles.addBusinessText}>Add Another Business</Text>
+                    <Feather name="chevron-right" size={20} color="#7c3aed" />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.createBusinessButton}
+                  onPress={handleCreateBusiness}
                 >
-                  <Text style={styles.businessName}>{selectedBusiness?.name || 'Select Business'}</Text>
-                  <Feather name="chevron-down" size={20} color="#fff" />
+                  <Feather name="plus-circle" size={24} color="#7c3aed" />
+                  <Text style={styles.createBusinessText}>Create Your First Business</Text>
                 </TouchableOpacity>
-              ) : (
-                <Text style={styles.businessName}>No businesses owned</Text>
               )}
-              
-              {/* Business Categories Display */}
-              {selectedBusiness?.categories && selectedBusiness.categories.length > 0 ? (
-                <View style={styles.categoriesSection}>
-                  <Text style={styles.categoriesTitle}>Categories</Text>
-                  <View style={styles.categoriesContainer}>
-                    {selectedBusiness.categories.map((category, index) => (
-                      <View key={category.id} style={styles.categoryChip}>
-                        <Text style={styles.categoryText}>{category.name}</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
-              ) : selectedBusiness ? (
-                <View style={styles.categoriesSection}>
-                  <Text style={styles.noCategoriesText}>No categories selected</Text>
-                </View>
-              ) : (
-                <View style={styles.categoriesSection}>
-                  <Text style={styles.noCategoriesText}>Select a business to view categories</Text>
-                </View>
-              )}
-              
-              <View style={styles.contactInfo}>
-                <Text style={styles.phoneNumber}>{userPhone}</Text>
-              </View>
             </View>
-          )}
-        </View>
+          </View>
 
-        {/* Enhanced Action Buttons based on mode */}
-        <View style={styles.actionButtons}>
-          {displayMode === 'you' ? (
-            /* Personal Mode Actions */
-            <>
-              <TouchableOpacity 
-                style={styles.editButton}
-                onPress={() => showToast.info('Edit Profile', 'Navigate to account settings')}
-              >
-                <Text style={styles.editButtonText}>Edit Profile</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.shareButton}
-                onPress={() => showToast.info('Share Profile', 'Profile sharing coming soon')}
-              >
-                <Text style={styles.shareButtonText}>Share Profile</Text>
-              </TouchableOpacity>
-            </>
-          ) : (
-            /* Business Mode Actions */
-            <>
-              <TouchableOpacity 
-                style={styles.editButton}
-                disabled={!selectedBusiness}
-                onPress={() => setShowEditModal(true)}
-              >
-                <Text style={styles.editButtonText}>Edit Business</Text>
-              </TouchableOpacity>
-              
-              <TouchableOpacity 
-                style={styles.shareButton}
-                disabled={!selectedBusiness}
-                onPress={handleShareBusiness}
-              >
-                <Text style={styles.shareButtonText}>Share Business</Text>
-              </TouchableOpacity>
-            </>
-          )}
-          
-          <TouchableOpacity 
-            style={styles.moreButton}
-            onPress={() => setShowAddBusinessOptions(true)}
-          >
-            <Feather name="plus" size={18} color="#fff" />
-          </TouchableOpacity>
-        </View>
-
-        {/* Add Business Button */}
-        <View style={styles.addBusinessSection}>
-          <TouchableOpacity 
-            style={styles.addBusinessButton}
-            onPress={() => setShowAddBusinessOptions(true)}
-          >
-            <Feather name="briefcase" size={20} color="#7c3aed" />
-            <Text style={styles.addBusinessText}>Add Another Business</Text>
-            <Feather name="chevron-right" size={20} color="#7c3aed" />
-          </TouchableOpacity>
+          {/* Joined Businesses */}
+          <View style={styles.businessSubsection}>
+            <Text style={styles.subsectionTitle}>Joined Businesses</Text>
+            <View style={styles.businessList}>
+              {businesses.joined.length > 0 ? (
+                <>
+                  {businesses.joined.map(business => renderBusinessItem(business, false))}
+                  <TouchableOpacity
+                    style={styles.joinBusinessButton}
+                    onPress={handleJoinBusiness}
+                  >
+                    <Feather name="users" size={20} color="#7c3aed" />
+                    <Text style={styles.joinBusinessText}>Join Another Business</Text>
+                    <Feather name="chevron-right" size={20} color="#7c3aed" />
+                  </TouchableOpacity>
+                </>
+              ) : (
+                <TouchableOpacity
+                  style={styles.joinBusinessButton}
+                  onPress={handleJoinBusiness}
+                >
+                  <Feather name="users" size={24} color="#7c3aed" />
+                  <Text style={styles.joinBusinessText}>Join a Business</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          </View>
         </View>
       </ScrollView>
-
-      {/* Enhanced Business Selection Dropdown with You option */}
-      {showBusinessDropdown && (
-        <Modal visible transparent animationType="fade">
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            onPress={() => setShowBusinessDropdown(false)}
-          >
-            <View style={styles.dropdownModal}>
-              <Text style={styles.dropdownTitle}>Select Mode</Text>
-              
-              {/* You option */}
-              <TouchableOpacity
-                style={[
-                  styles.dropdownItem,
-                  displayMode === 'you' && styles.selectedDropdownItem
-                ]}
-                onPress={() => handleDisplayModeSwitch('you')}
-              >
-                <SafeAvatar
-                  size={24}
-                  avatarUrl={user?.avatar_url}
-                  style={styles.dropdownBusinessLogo}
-                  updateTrigger={avatarUpdateTrigger}
-                />
-                <Text style={[
-                  styles.dropdownItemText,
-                  displayMode === 'you' && styles.selectedDropdownItemText
-                ]}>
-                  You (Personal)
-                </Text>
-                {displayMode === 'you' && (
-                  <Feather name="check" size={16} color="#7c3aed" />
-                )}
-              </TouchableOpacity>
-              
-              {/* Business options */}
-              {businesses.owned.map((business, index) => (
-                <TouchableOpacity
-                  key={business.id}
-                  style={[
-                    styles.dropdownItem,
-                    selectedBusiness?.id === business.id && displayMode === 'business' && styles.selectedDropdownItem
-                  ]}
-                  onPress={() => handleBusinessSelect(business)}
-                >
-                  <SafeLogo
-                    size={24}
-                    logoUrl={localBusinessLogos[business.id] || business.logo_url}
-                    avatarUrl={user?.avatar_url}
-                    style={styles.dropdownBusinessLogo}
-                    updateTrigger={logoUpdateTrigger}
-                  />
-                  <Text style={[
-                    styles.dropdownItemText,
-                    selectedBusiness?.id === business.id && displayMode === 'business' && styles.selectedDropdownItemText
-                  ]}>
-                    {business.name}
-                  </Text>
-                  {selectedBusiness?.id === business.id && displayMode === 'business' && (
-                    <Feather name="check" size={16} color="#7c3aed" />
-                  )}
-                </TouchableOpacity>
-              ))}
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
 
       {/* Add Business Options Modal */}
       {showAddBusinessOptions && (
@@ -929,55 +635,6 @@ export default function Business({ navigation }: BusinessProps) {
                   <Text style={styles.optionTitle}>Join Existing</Text>
                   <Text style={styles.optionDescription}>Join a business</Text>
                 </View>
-              </TouchableOpacity>
-            </View>
-          </TouchableOpacity>
-        </Modal>
-      )}
-
-      {/* Fixed Share Business Modal */}
-      {selectedBusinessForShare && (
-        <Modal visible transparent animationType="fade">
-          <TouchableOpacity 
-            style={styles.modalOverlay}
-            onPress={() => {
-              setSelectedBusinessForShare(null);
-              setInviteLink(null);
-            }}
-          >
-            <View style={styles.inviteModal}>
-              <Text style={styles.modalText}>
-                Share "{selectedBusinessForShare.name}"
-              </Text>
-
-              {!inviteLink ? (
-                <TouchableOpacity 
-                  style={styles.generateButton} 
-                  onPress={generateInviteLink}
-                  disabled={generatingInvite}
-                >
-                  <Text style={styles.generateButtonText}>
-                    {generatingInvite ? 'Generating...' : 'Generate Invite Link'}
-                  </Text>
-                </TouchableOpacity>
-              ) : (
-                <View style={styles.inviteLinkContainer}>
-                  <Text style={styles.inviteCode}>{inviteLink}</Text>
-                  <TouchableOpacity style={styles.copyButton} onPress={copyInviteLink}>
-                    <Feather name="copy" size={16} color="#fff" />
-                    <Text style={styles.copyButtonText}>Copy</Text>
-                  </TouchableOpacity>
-                </View>
-              )}
-
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={() => {
-                  setSelectedBusinessForShare(null);
-                  setInviteLink(null);
-                }}
-              >
-                <Text style={styles.closeButtonText}>Close</Text>
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -1062,15 +719,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
-  },
-  username: {
+  headerTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
@@ -1093,282 +742,151 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingTop: 20,
-    paddingBottom: 16,
+    paddingBottom: 24,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
   avatarContainer: {
-    position: 'relative',
-    marginRight: 24,
-    alignItems: 'center',
+    marginRight: 20,
   },
   avatar: {
     width: 86,
     height: 86,
     borderRadius: 43,
   },
-  uploadIndicator: {
-    marginTop: 8,
-    alignItems: 'center',
-  },
-  uploadIndicatorText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 11,
-    textAlign: 'center',
-    maxWidth: 100,
-  },
-  uploadModeText: {
-    color: '#7c3aed',
-    fontSize: 10,
-    textAlign: 'center',
-    marginTop: 2,
-    fontWeight: '500',
-  },
-  statsContainer: {
+  currentInfoContainer: {
     flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
   },
-  stat: {
-    alignItems: 'center',
-  },
-  statNumber: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
+  currentInfoType: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+    fontWeight: '500',
     marginBottom: 4,
   },
-  statLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
+  currentInfoName: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginBottom: 4,
   },
-  
-  // NEW: Mode Switcher Styles
-  modeSwitcherSection: {
-    flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 16,
-    gap: 12,
-  },
-  modeButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    borderRadius: 8,
-    gap: 8,
-  },
-  activeModeButton: {
-    backgroundColor: '#7c3aed',
-    borderColor: '#7c3aed',
-  },
-  modeButtonText: {
+  currentInfoPhone: {
     color: '#7c3aed',
     fontSize: 14,
     fontWeight: '500',
   },
-  activeModeButtonText: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  disabledModeButtonText: {
-    color: 'rgba(124, 58, 237, 0.5)',
-  },
-  
-  currentBusinessSection: {
+  businessesSection: {
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingVertical: 20,
   },
-  
-  // Personal Mode Styles
-  personalModeContent: {
-    alignItems: 'center',
-    paddingVertical: 16,
-  },
-  personalModeTitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  personalModeName: {
+  sectionTitle: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 22,
+    fontWeight: '700',
+    marginBottom: 20,
+  },
+  businessSubsection: {
+    marginBottom: 24,
+  },
+  subsectionTitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 16,
     fontWeight: '600',
-    marginBottom: 8,
+    marginBottom: 12,
   },
-  
-  // Business Mode Styles
-  businessModeContent: {
-    // Existing business content styles
+  businessList: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    overflow: 'hidden',
   },
-  businessDropdownButton: {
+  businessItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  businessName: {
+  selectedBusinessItem: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  businessItemLogo: {
+    marginRight: 12,
+  },
+  businessItemInfo: {
+    flex: 1,
+  },
+  businessItemName: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 2,
   },
-  categoriesSection: {
-    marginTop: 12,
-    marginBottom: 8,
+  businessItemPhone: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 13,
+    marginBottom: 2,
   },
-  categoriesTitle: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-  },
-  categoryChip: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    borderRadius: 12,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  categoryText: {
-    color: '#bd93f9',
+  businessItemCategories: {
+    color: '#7c3aed',
     fontSize: 12,
     fontWeight: '500',
   },
-  noCategoriesText: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 14,
-    fontStyle: 'italic',
-  },
-  contactInfo: {
-    marginTop: 4,
-  },
-  phoneNumber: {
-    color: '#7c3aed',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  actionButtons: {
+  businessItemActions: {
     flexDirection: 'row',
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+    alignItems: 'center',
     gap: 8,
   },
-  editButton: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
+  selectedIndicator: {
+    // Visual indicator for selected business
   },
-  editButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  shareButton: {
-    flex: 1,
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingVertical: 8,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  shareButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  moreButton: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
-    paddingVertical: 8,
-    paddingHorizontal: 12,
-    borderRadius: 8,
+  createBusinessButton: {
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 12,
   },
-  addBusinessSection: {
-    paddingHorizontal: 20,
-    paddingBottom: 24,
+  createBusinessText: {
+    color: '#7c3aed',
+    fontSize: 16,
+    fontWeight: '600',
   },
   addBusinessButton: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 16,
-    paddingHorizontal: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(124, 58, 237, 0.3)',
   },
   addBusinessText: {
     flex: 1,
-    color: '#fff',
-    fontSize: 16,
+    color: '#7c3aed',
+    fontSize: 14,
     fontWeight: '600',
     marginLeft: 12,
+  },
+  joinBusinessButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 12,
+  },
+  joinBusinessText: {
+    color: '#7c3aed',
+    fontSize: 16,
+    fontWeight: '600',
   },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
-  },
-  dropdownModal: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 32,
-    padding: 20,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    maxWidth: 300,
-    width: '80%',
-  },
-  dropdownTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 16,
-  },
-  dropdownItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    marginBottom: 8,
-  },
-  selectedDropdownItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-  },
-  dropdownBusinessLogo: {
-    marginRight: 12,
-  },
-  dropdownItemText: {
-    color: '#fff',
-    fontSize: 16,
-    flex: 1,
-  },
-  selectedDropdownItemText: {
-    color: '#bd93f9',
-    fontWeight: '600',
   },
   optionsModal: {
     backgroundColor: '#16213e',
@@ -1418,68 +936,5 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 15,
     lineHeight: 22,
-  },
-  inviteModal: {
-    backgroundColor: '#1a1a2e',
-    marginHorizontal: 32,
-    padding: 24,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    alignItems: 'center',
-  },
-  modalText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  generateButton: {
-    backgroundColor: '#7c3aed',
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-    borderRadius: 8,
-    marginBottom: 16,
-    minWidth: 150,
-    alignItems: 'center',
-  },
-  generateButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  inviteLinkContainer: {
-    alignItems: 'center',
-    marginBottom: 16,
-  },
-  inviteCode: {
-    color: '#bd93f9',
-    fontSize: 18,
-    fontWeight: 'bold',
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  copyButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#7c3aed',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 8,
-    gap: 8,
-  },
-  copyButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  closeButton: {
-    paddingVertical: 12,
-    paddingHorizontal: 24,
-  },
-  closeButtonText: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 16,
   },
 });
