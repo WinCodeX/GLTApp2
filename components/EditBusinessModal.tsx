@@ -1,5 +1,5 @@
-// components/EditBusinessModal.tsx - Edit business modal with logo upload
-import React, { useState, useEffect, useCallback } from 'react';
+// components/EditBusinessModal.tsx - Fixed with ImagePreviewModal and category fetching
+import React, { useState, useEffect, useCallback, Suspense } from 'react';
 import {
   Modal,
   View,
@@ -16,10 +16,13 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeLogo } from './SafeLogo';
-import { fetchCategories } from '../lib/helpers/business';
+import { fetchCategories, validatePhoneNumber, formatPhoneNumber } from '../lib/helpers/business';
 import { uploadBusinessLogo } from '../lib/helpers/uploadBusinessLogo';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
+
+// Lazy load ImagePreviewModal
+const ImagePreviewModal = React.lazy(() => import('./ImagePreviewModal'));
 
 interface Category {
   id: number;
@@ -43,25 +46,66 @@ interface EditBusinessModalProps {
   onUpdate: (updatedBusiness: Business) => void;
 }
 
+// Centralized toast helper
+const showToast = {
+  success: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'success',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 2500,
+    });
+  },
+  
+  error: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'error',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+  },
+  
+  warning: (text1: string, text2?: string) => {
+    Toast.show({
+      type: 'warning',
+      text1,
+      text2,
+      position: 'bottom',
+      visibilityTime: 3500,
+    });
+  },
+};
+
 export default function EditBusinessModal({ 
   visible, 
   business, 
   onClose, 
   onUpdate 
 }: EditBusinessModalProps) {
-  const { user, triggerAvatarRefresh } = useUser();
+  const { user, triggerAvatarRefresh, clearUserCache, refreshBusinesses } = useUser();
   
+  // Form states
   const [businessName, setBusinessName] = useState(business.name);
   const [phoneNumber, setPhoneNumber] = useState(business.phone_number || '');
   const [selectedCategories, setSelectedCategories] = useState<number[]>(
     business.categories.map(cat => cat.id)
   );
+  
+  // Categories data
   const [categories, setCategories] = useState<Category[]>([]);
-  const [loading, setLoading] = useState(false);
   const [loadingCategories, setLoadingCategories] = useState(true);
-  const [logoUploading, setLogoUploading] = useState(false);
-  const [previewLogoUri, setPreviewLogoUri] = useState<string | null>(null);
+  const [categoriesError, setCategoriesError] = useState<string | null>(null);
+  
+  // Loading states
+  const [loading, setLoading] = useState(false);
+  
+  // Image upload states
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
+  const [localLogoUrl, setLocalLogoUrl] = useState<string | null>(null);
 
   // Load categories on mount
   useEffect(() => {
@@ -75,52 +119,65 @@ export default function EditBusinessModal({
     setBusinessName(business.name);
     setPhoneNumber(business.phone_number || '');
     setSelectedCategories(business.categories.map(cat => cat.id));
-    setPreviewLogoUri(null);
+    setPreviewUri(null);
+    setLocalLogoUrl(null);
   }, [business]);
 
   const loadCategories = async () => {
+    setLoadingCategories(true);
+    setCategoriesError(null);
+    
     try {
-      setLoadingCategories(true);
+      console.log('🏷️ EditBusinessModal: Loading categories...');
       const categoriesData = await fetchCategories();
       setCategories(categoriesData);
+      console.log('🏷️ EditBusinessModal: Categories loaded:', categoriesData.length);
     } catch (error: any) {
-      console.error('Failed to load categories:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Failed to load categories',
-        text2: error.message || 'Please try again',
-      });
+      console.error('🏷️ EditBusinessModal: Error loading categories:', error);
+      setCategoriesError('Failed to load categories. Please try again.');
+      
+      // Set some default categories as fallback
+      setCategories([
+        { id: 1, name: 'Technology', slug: 'technology' },
+        { id: 2, name: 'Retail', slug: 'retail' },
+        { id: 3, name: 'Food & Beverage', slug: 'food-beverage' },
+        { id: 4, name: 'Healthcare', slug: 'healthcare' },
+        { id: 5, name: 'Other', slug: 'other' }
+      ]);
     } finally {
       setLoadingCategories(false);
     }
   };
 
-  const toggleCategory = (categoryId: number) => {
+  const retryLoadCategories = () => {
+    loadCategories();
+  };
+
+  const toggleCategory = useCallback((categoryId: number) => {
     setSelectedCategories(prev => {
       if (prev.includes(categoryId)) {
         return prev.filter(id => id !== categoryId);
       } else if (prev.length < 5) {
         return [...prev, categoryId];
       } else {
-        Toast.show({
-          type: 'warning',
-          text1: 'Maximum categories reached',
-          text2: 'You can select up to 5 categories',
-        });
+        showToast.warning('Maximum Categories', 'You can select up to 5 categories only');
         return prev;
       }
     });
+  }, []);
+
+  const handlePhoneNumberChange = (text: string) => {
+    // Allow only digits, spaces, hyphens, parentheses, and plus sign
+    const cleaned = text.replace(/[^\d\s\-\(\)\+]/g, '');
+    setPhoneNumber(cleaned);
   };
 
+  // Enhanced business logo picker
   const pickBusinessLogo = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        Toast.show({
-          type: 'error',
-          text1: 'Photo access denied',
-          text2: 'Please allow photo access to change business logo',
-        });
+        showToast.error('Photo access denied', 'Please allow photo access to change business logo');
         return;
       }
 
@@ -134,79 +191,82 @@ export default function EditBusinessModal({
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log('Selected business logo:', {
+      console.log('🎭 EditBusinessModal: Selected business logo:', {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
         fileSize: asset.fileSize
       });
       
-      setPreviewLogoUri(asset.uri);
+      setPreviewUri(asset.uri);
     } catch (error) {
-      console.error('Error picking business logo:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Failed to select image',
-        text2: 'Please try again',
-      });
+      console.error('🎭 EditBusinessModal: Error picking business logo:', error);
+      showToast.error('Failed to select image', 'Please try again');
     }
   }, []);
 
-  const uploadLogo = async () => {
-    if (!previewLogoUri) return;
+  // Enhanced upload handler with instant feedback
+  const confirmUploadLogo = useCallback(async () => {
+    if (!previewUri) return;
 
     try {
-      setLogoUploading(true);
-      console.log('Starting business logo upload...');
+      console.log('🎭 EditBusinessModal: Starting business logo upload...');
       
-      const result = await uploadBusinessLogo(previewLogoUri, business.id);
+      const result = await uploadBusinessLogo(previewUri, business.id);
       
       if (result.success && result.logo_url) {
-        console.log('Business logo uploaded successfully');
+        console.log('🎭 EditBusinessModal: Business logo uploaded successfully');
+        
+        // INSTANT UPDATE: Set local logo for immediate visual feedback
+        setLocalLogoUrl(result.logo_url);
         setLogoUpdateTrigger(Date.now());
         triggerAvatarRefresh();
         
-        Toast.show({
-          type: 'success',
-          text1: 'Business logo updated!',
-          text2: 'Logo has been changed successfully',
-        });
+        showToast.success('Business logo updated!', 'Logo has been changed successfully');
         
-        // Update the business object with new logo URL
+        // Update the business object with new logo URL and notify parent
         const updatedBusiness = { ...business, logo_url: result.logo_url };
         onUpdate(updatedBusiness);
+        
+        // Background sync (don't await to keep UI responsive)
+        setTimeout(async () => {
+          try {
+            await clearUserCache();
+            await refreshBusinesses(true);
+          } catch (bgError) {
+            console.error('Background refresh error:', bgError);
+          }
+        }, 1000);
+        
       } else {
         throw new Error(result.message || 'Upload failed');
       }
     } catch (error: any) {
-      console.error('Business logo upload error:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Upload failed',
-        text2: error.message || 'Please try again',
-      });
+      console.error('🎭 EditBusinessModal: Business logo upload error:', error);
+      showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
-      setPreviewLogoUri(null);
-      setLogoUploading(false);
+      setPreviewUri(null);
     }
-  };
+  }, [previewUri, business, onUpdate, triggerAvatarRefresh, clearUserCache, refreshBusinesses]);
 
   const validateForm = () => {
     if (!businessName.trim()) {
-      Toast.show({
-        type: 'error',
-        text1: 'Validation Error',
-        text2: 'Business name is required',
-      });
+      showToast.error('Validation Error', 'Business name is required');
+      return false;
+    }
+
+    if (businessName.trim().length < 2) {
+      showToast.error('Validation Error', 'Business name must be at least 2 characters long');
+      return false;
+    }
+
+    if (phoneNumber.trim() && !validatePhoneNumber(phoneNumber)) {
+      showToast.error('Invalid Phone Number', 'Please enter a valid Kenyan phone number (e.g., 712345678 or +254712345678)');
       return false;
     }
 
     if (selectedCategories.length === 0) {
-      Toast.show({
-        type: 'error',
-        text1: 'Validation Error', 
-        text2: 'Please select at least one category',
-      });
+      showToast.error('Validation Error', 'Please select at least one category');
       return false;
     }
 
@@ -220,32 +280,31 @@ export default function EditBusinessModal({
       setLoading(true);
       
       // Here you would typically call an API to update the business
-      // For now, we'll just simulate success
+      // For now, we'll simulate success
       const updatedBusiness = {
         ...business,
         name: businessName.trim(),
-        phone_number: phoneNumber.trim(),
-        categories: categories.filter(cat => selectedCategories.includes(cat.id))
+        phone_number: phoneNumber.trim() ? formatPhoneNumber(phoneNumber.trim()) : '',
+        categories: categories.filter(cat => selectedCategories.includes(cat.id)),
+        // Keep the current logo URL unless we have a new local one
+        logo_url: localLogoUrl || business.logo_url
       };
 
-      Toast.show({
-        type: 'success',
-        text1: 'Business updated!',
-        text2: 'Changes have been saved successfully',
-      });
+      showToast.success('Business updated!', 'Changes have been saved successfully');
 
       onUpdate(updatedBusiness);
       onClose();
     } catch (error: any) {
       console.error('Update business error:', error);
-      Toast.show({
-        type: 'error',
-        text1: 'Update failed',
-        text2: error.message || 'Please try again',
-      });
+      showToast.error('Update failed', error.message || 'Please try again');
     } finally {
       setLoading(false);
     }
+  };
+
+  // Get current logo URL (local takes precedence for instant updates)
+  const getCurrentLogoUrl = () => {
+    return localLogoUrl || business.logo_url;
   };
 
   return (
@@ -285,7 +344,7 @@ export default function EditBusinessModal({
             <View style={styles.logoContainer}>
               <SafeLogo
                 size={80}
-                logoUrl={business.logo_url}
+                logoUrl={getCurrentLogoUrl()}
                 avatarUrl={user?.avatar_url}
                 style={styles.logo}
                 onPress={pickBusinessLogo}
@@ -295,46 +354,11 @@ export default function EditBusinessModal({
               <TouchableOpacity 
                 style={styles.logoButton}
                 onPress={pickBusinessLogo}
-                disabled={logoUploading}
               >
-                <Feather 
-                  name={logoUploading ? "loader" : "camera"} 
-                  size={16} 
-                  color="#fff" 
-                />
-                <Text style={styles.logoButtonText}>
-                  {logoUploading ? 'Uploading...' : 'Change Logo'}
-                </Text>
+                <Feather name="camera" size={16} color="#fff" />
+                <Text style={styles.logoButtonText}>Change Logo</Text>
               </TouchableOpacity>
             </View>
-
-            {previewLogoUri && (
-              <View style={styles.previewContainer}>
-                <Text style={styles.previewText}>New logo preview:</Text>
-                <SafeLogo
-                  size={60}
-                  logoUrl={previewLogoUri}
-                  style={styles.previewLogo}
-                />
-                <View style={styles.previewActions}>
-                  <TouchableOpacity 
-                    style={styles.previewCancel}
-                    onPress={() => setPreviewLogoUri(null)}
-                  >
-                    <Text style={styles.previewCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity 
-                    style={styles.previewConfirm}
-                    onPress={uploadLogo}
-                    disabled={logoUploading}
-                  >
-                    <Text style={styles.previewConfirmText}>
-                      {logoUploading ? 'Uploading...' : 'Upload'}
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            )}
           </View>
 
           {/* Business Name */}
@@ -346,20 +370,46 @@ export default function EditBusinessModal({
               onChangeText={setBusinessName}
               placeholder="Enter business name"
               placeholderTextColor="rgba(255,255,255,0.5)"
+              maxLength={50}
+              editable={!loading}
+              autoCapitalize="words"
+              autoCorrect={false}
             />
+            <Text style={styles.characterCount}>
+              {businessName.length}/50
+            </Text>
           </View>
 
           {/* Phone Number */}
           <View style={styles.section}>
             <Text style={styles.label}>Phone Number</Text>
-            <TextInput
-              style={styles.input}
-              value={phoneNumber}
-              onChangeText={setPhoneNumber}
-              placeholder="Enter phone number"
-              placeholderTextColor="rgba(255,255,255,0.5)"
-              keyboardType="phone-pad"
-            />
+            <Text style={styles.helpText}>
+              Enter your business phone number (e.g., 712345678 or +254712345678)
+            </Text>
+            <View style={styles.phoneInputContainer}>
+              <View style={styles.countryCodeContainer}>
+                <Text style={styles.countryCodeText}>🇰🇪 +254</Text>
+              </View>
+              <TextInput
+                style={styles.phoneInput}
+                value={phoneNumber}
+                onChangeText={handlePhoneNumberChange}
+                placeholder="712345678"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                keyboardType="phone-pad"
+                maxLength={20}
+                editable={!loading}
+              />
+            </View>
+            <Text style={styles.phoneHint}>
+              {phoneNumber && validatePhoneNumber(phoneNumber) ? (
+                <Text style={styles.validPhone}>✓ Valid phone number</Text>
+              ) : phoneNumber ? (
+                <Text style={styles.invalidPhone}>✗ Invalid phone number</Text>
+              ) : (
+                <Text style={styles.phoneHintText}>Enter a valid Kenyan phone number</Text>
+              )}
+            </Text>
           </View>
 
           {/* Categories */}
@@ -367,41 +417,76 @@ export default function EditBusinessModal({
             <Text style={styles.label}>
               Categories * ({selectedCategories.length}/5)
             </Text>
+            <Text style={styles.helpText}>
+              Select up to 5 categories that best describe your business
+            </Text>
             
             {loadingCategories ? (
               <View style={styles.loadingContainer}>
                 <ActivityIndicator size="small" color={colors.primary} />
                 <Text style={styles.loadingText}>Loading categories...</Text>
               </View>
+            ) : categoriesError ? (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>{categoriesError}</Text>
+                <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
+                  <Feather name="refresh-cw" size={16} color={colors.primary} />
+                  <Text style={styles.retryButtonText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
             ) : (
               <View style={styles.categoriesContainer}>
-                {categories.map((category) => {
-                  const isSelected = selectedCategories.includes(category.id);
-                  return (
-                    <TouchableOpacity
-                      key={category.id}
-                      style={[
-                        styles.categoryItem,
-                        isSelected && styles.selectedCategoryItem
-                      ]}
-                      onPress={() => toggleCategory(category.id)}
-                    >
-                      <Text style={[
-                        styles.categoryText,
-                        isSelected && styles.selectedCategoryText
-                      ]}>
-                        {category.name}
-                      </Text>
-                      {isSelected && (
-                        <Feather name="check" size={16} color="#fff" />
-                      )}
-                    </TouchableOpacity>
-                  );
-                })}
+                <ScrollView 
+                  showsVerticalScrollIndicator={true}
+                  nestedScrollEnabled={true}
+                  style={styles.categoriesScrollView}
+                  contentContainerStyle={styles.categoriesScrollContent}
+                >
+                  <View style={styles.categoriesGrid}>
+                    {categories.map((category) => {
+                      const isSelected = selectedCategories.includes(category.id);
+                      return (
+                        <TouchableOpacity
+                          key={`category-${category.id}`}
+                          style={[
+                            styles.categoryChip,
+                            isSelected && styles.selectedCategoryChip
+                          ]}
+                          onPress={() => toggleCategory(category.id)}
+                          disabled={loading}
+                        >
+                          <Text style={[
+                            styles.categoryChipText,
+                            isSelected && styles.selectedCategoryChipText
+                          ]}>
+                            {category.name}
+                          </Text>
+                          {isSelected && (
+                            <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                          )}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </ScrollView>
               </View>
             )}
           </View>
         </ScrollView>
+
+        {/* Lazy loaded ImagePreviewModal */}
+        <Suspense fallback={<View />}>
+          {previewUri && (
+            <ImagePreviewModal
+              visible={true}
+              uri={previewUri}
+              uploadType="business-logo"
+              businessName={business.name}
+              onCancel={() => setPreviewUri(null)}
+              onConfirm={confirmUploadLogo}
+            />
+          )}
+        </Suspense>
       </SafeAreaView>
     </Modal>
   );
@@ -484,47 +569,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
   },
-  previewContainer: {
-    alignItems: 'center',
-    padding: 16,
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-  },
-  previewText: {
-    color: '#fff',
-    fontSize: 14,
-    marginBottom: 8,
-  },
-  previewLogo: {
-    marginBottom: 12,
-  },
-  previewActions: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  previewCancel: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  previewCancelText: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-  },
-  previewConfirm: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-    backgroundColor: colors.primary,
-  },
-  previewConfirmText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
   label: {
     color: '#fff',
     fontSize: 16,
@@ -541,43 +585,160 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: '#fff',
   },
+  characterCount: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 13,
+    textAlign: 'right',
+    marginTop: 8,
+  },
+  helpText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 13,
+    marginBottom: 16,
+    lineHeight: 18,
+  },
+  
+  // Phone Number Styles
+  phoneInputContainer: {
+    flexDirection: 'row',
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  countryCodeContainer: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    paddingHorizontal: 16,
+    paddingVertical: 16,
+    borderRightWidth: 1,
+    borderRightColor: 'rgba(124, 58, 237, 0.3)',
+    justifyContent: 'center',
+  },
+  countryCodeText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  phoneInput: {
+    flex: 1,
+    paddingHorizontal: 18,
+    paddingVertical: 16,
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '400',
+  },
+  phoneHint: {
+    marginTop: 8,
+  },
+  phoneHintText: {
+    color: 'rgba(255, 255, 255, 0.5)',
+    fontSize: 13,
+  },
+  validPhone: {
+    color: '#10b981',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  invalidPhone: {
+    color: '#ef4444',
+    fontSize: 13,
+    fontWeight: '500',
+  },
+  
+  // Loading and Error States
   loadingContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 20,
-    gap: 8,
+    paddingVertical: 40,
+    gap: 12,
   },
   loadingText: {
-    color: 'rgba(255,255,255,0.7)',
+    color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 14,
   },
-  categoriesContainer: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+  errorContainer: {
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.3)',
+    borderRadius: 12,
+    padding: 20,
+    alignItems: 'center',
   },
-  categoryItem: {
+  errorText: {
+    color: '#ef4444',
+    fontSize: 14,
+    textAlign: 'center',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  retryButton: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.4)',
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    gap: 6,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 8,
+    gap: 8,
   },
-  selectedCategoryItem: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
-  },
-  categoryText: {
-    color: 'rgba(255,255,255,0.8)',
+  retryButtonText: {
+    color: '#7c3aed',
     fontSize: 14,
+    fontWeight: '600',
   },
-  selectedCategoryText: {
+  
+  // Categories
+  categoriesContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 12,
+    height: 280,
+    padding: 16,
+  },
+  categoriesScrollView: {
+    flex: 1,
+  },
+  categoriesScrollContent: {
+    paddingBottom: 16,
+  },
+  categoriesGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(255, 255, 255, 0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+    marginHorizontal: 2,
+    minHeight: 44,
+    maxWidth: '48%',
+    flexShrink: 1,
+  },
+  selectedCategoryChip: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  categoryChipText: {
+    fontSize: 14,
     color: '#fff',
     fontWeight: '500',
+    textAlign: 'center',
+  },
+  selectedCategoryChipText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  categoryCheckIcon: {
+    marginLeft: 6,
   },
 });
