@@ -1,7 +1,8 @@
-// lib/helpers/uploadBusinessLogo.ts - Business logo upload helper
+// lib/helpers/uploadBusinessLogo.ts - Fixed to use API instance like avatar upload
 import * as FileSystem from 'expo-file-system';
 import * as SecureStore from 'expo-secure-store';
-import { API_BASE_URL } from '../api';
+import { Platform } from 'react-native';
+import api from '../api';
 
 interface UploadBusinessLogoResult {
   success: boolean;
@@ -27,7 +28,7 @@ export const uploadBusinessLogo = async (
     }
 
     // Validate image URI
-    if (!imageUri || !imageUri.startsWith('file://') && !imageUri.startsWith('content://')) {
+    if (!imageUri || (!imageUri.startsWith('file://') && !imageUri.startsWith('content://'))) {
       throw new Error('Invalid image URI provided');
     }
 
@@ -49,85 +50,46 @@ export const uploadBusinessLogo = async (
       throw new Error('Image file is too large. Please select an image under 5MB.');
     }
 
-    // Prepare FormData for upload
+    // Create form data with proper file metadata (same pattern as avatar upload)
     const formData = new FormData();
-    
-    // Determine file extension and MIME type
-    const fileExtension = imageUri.split('.').pop()?.toLowerCase() || 'jpg';
-    let mimeType = 'image/jpeg';
-    
-    switch (fileExtension) {
-      case 'png':
-        mimeType = 'image/png';
-        break;
-      case 'gif':
-        mimeType = 'image/gif';
-        break;
-      case 'webp':
-        mimeType = 'image/webp';
-        break;
-      default:
-        mimeType = 'image/jpeg';
-    }
-
-    // Append image file to FormData
     formData.append('logo', {
       uri: imageUri,
-      type: mimeType,
-      name: `business_logo.${fileExtension}`,
+      name: 'business_logo.jpg',
+      type: Platform.OS === 'ios' ? 'image/jpeg' : 'image/jpg',
     } as any);
 
-    console.log('📷 Uploading business logo to server...', {
+    console.log('📷 Uploading business logo using API instance...', {
       businessId,
-      mimeType,
-      fileName: `business_logo.${fileExtension}`
+      fileName: 'business_logo.jpg'
     });
 
-    // Upload to server
-    const response = await fetch(`${API_BASE_URL}/api/v1/businesses/${businessId}/logo`, {
-      method: 'POST',
+    // Use the api instance (which has proper file upload handling) instead of fetch
+    const response = await api.post(`/businesses/${businessId}/logo`, formData, {
       headers: {
-        'Authorization': `Bearer ${token}`,
+        Authorization: `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
       },
-      body: formData,
+      timeout: 30000, // 30 second timeout for uploads
     });
-
-    const responseData = await response.json();
     
     console.log('📷 Business logo upload response:', {
       status: response.status,
-      success: responseData.success,
-      hasLogoUrl: !!responseData.data?.logo_url
+      success: response.data.success,
+      hasLogoUrl: !!response.data.data?.logo_url
     });
 
-    if (!response.ok) {
-      const errorMessage = responseData.message || responseData.error || `Upload failed with status ${response.status}`;
-      console.error('📷 Business logo upload error:', {
-        status: response.status,
-        message: errorMessage,
-        errors: responseData.errors
-      });
-      
+    if (!response.data.success) {
+      console.error('📷 Server reported business logo upload failure:', response.data);
       return {
         success: false,
-        message: errorMessage,
-        errors: responseData.errors
+        message: response.data.message || 'Upload failed',
+        errors: response.data.errors
       };
     }
 
-    if (!responseData.success) {
-      console.error('📷 Server reported business logo upload failure:', responseData);
-      return {
-        success: false,
-        message: responseData.message || 'Upload failed',
-        errors: responseData.errors
-      };
-    }
-
-    const logoUrl = responseData.data?.logo_url;
+    const logoUrl = response.data.data?.logo_url;
     if (!logoUrl) {
-      console.error('📷 No logo URL in successful response:', responseData);
+      console.error('📷 No logo URL in successful response:', response.data);
       return {
         success: false,
         message: 'Upload completed but no logo URL received'
@@ -149,25 +111,42 @@ export const uploadBusinessLogo = async (
     console.error('📷 Business logo upload error:', {
       message: error.message,
       name: error.name,
-      stack: error.stack?.substring(0, 200)
+      status: error.response?.status
     });
 
-    let errorMessage = 'Failed to upload business logo';
+    // Handle authentication errors
+    if (error.response?.status === 401 || error.response?.status === 403) {
+      console.log('🔐 Authentication failed during business logo upload');
+      throw new Error('Session expired. Please log in again.');
+    }
     
-    if (error.message.includes('Network')) {
-      errorMessage = 'Network error. Please check your connection and try again.';
-    } else if (error.message.includes('timeout')) {
-      errorMessage = 'Upload timeout. Please try again.';
-    } else if (error.message.includes('Authentication')) {
-      errorMessage = 'Session expired. Please log in again.';
-    } else if (error.message) {
-      errorMessage = error.message;
+    // Handle validation errors
+    if (error.response?.status === 422) {
+      const errorMessage = error.response?.data?.message || 'Invalid file format or size';
+      throw new Error(errorMessage);
+    }
+    
+    // Handle file size errors
+    if (error.response?.status === 413) {
+      throw new Error('File too large. Please choose a smaller image.');
+    }
+    
+    // Handle other API errors
+    if (error.response?.data?.message) {
+      throw new Error(error.response.data.message);
+    }
+    
+    // Handle network/connection errors
+    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
+      throw new Error('Network error. Please check your connection and try again.');
+    }
+    
+    // Handle timeout errors
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      throw new Error('Upload timeout. Please try again with a smaller image.');
     }
 
-    return {
-      success: false,
-      message: errorMessage,
-      errors: [errorMessage]
-    };
+    // Generic error fallback
+    throw new Error(error.message || 'Failed to upload business logo');
   }
 };
