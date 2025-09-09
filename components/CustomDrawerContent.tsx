@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed with removed switch mode and proper selection persistence
+// components/CustomDrawerContent.tsx - Fixed with proper phone number display logic
 import {
   Feather,
   FontAwesome5,
@@ -108,6 +108,19 @@ export default function CustomDrawerContent(props: any) {
   const displayName = selectedBusiness?.name || getDisplayName();
   const userPhone = getUserPhone();
   
+  // FIXED: Enhanced phone number logic - show business phone if available, fallback to user phone
+  const getDisplayPhone = (): string => {
+    if (selectedBusiness?.phone_number && selectedBusiness.phone_number.trim()) {
+      console.log('🎭 Drawer: Using business phone number:', selectedBusiness.phone_number);
+      return selectedBusiness.phone_number;
+    }
+    
+    console.log('🎭 Drawer: Using user phone number (fallback):', userPhone);
+    return userPhone;
+  };
+  
+  const displayPhone = getDisplayPhone();
+  
   // Determine display mode based on selected business
   const isBusinessMode = !!selectedBusiness;
 
@@ -119,12 +132,15 @@ export default function CustomDrawerContent(props: any) {
         email: user.email,
         avatarUrl: user.avatar_url,
         selectedBusiness: selectedBusiness?.name || 'None',
+        businessPhone: selectedBusiness?.phone_number || 'None',
+        userPhone: userPhone,
+        displayPhone: displayPhone,
         isBusinessMode,
         updateTrigger: avatarUpdateTrigger,
         timestamp: Date.now()
       });
     }
-  }, [user?.avatar_url, user?.id, selectedBusiness, isBusinessMode, avatarUpdateTrigger]);
+  }, [user?.avatar_url, user?.id, selectedBusiness, isBusinessMode, avatarUpdateTrigger, userPhone, displayPhone]);
 
   // Enhanced refresh handler that triggers avatar sync
   const handleRefreshUser = useCallback(async () => {
@@ -284,6 +300,12 @@ export default function CustomDrawerContent(props: any) {
           <Text style={styles.businessType}>
             {isOwned ? 'Owned' : 'Joined'}
           </Text>
+          {/* Show business phone if available */}
+          {business.phone_number && (
+            <Text style={styles.businessPhone}>
+              {business.phone_number}
+            </Text>
+          )}
         </View>
         
         {isSelectedBusiness && (
@@ -320,6 +342,9 @@ export default function CustomDrawerContent(props: any) {
           </Text>
           <Text style={styles.businessType}>
             Personal
+          </Text>
+          <Text style={styles.businessPhone}>
+            {userPhone}
           </Text>
         </View>
         
@@ -368,7 +393,8 @@ export default function CustomDrawerContent(props: any) {
             
             <View style={styles.accountInfo}>
               <Text style={styles.userName}>{displayName}</Text>
-              <Text style={styles.userPhone}>{userPhone}</Text>
+              {/* FIXED: Show business phone when business selected, fallback to user phone */}
+              <Text style={styles.userPhone}>{displayPhone}</Text>
               {/* Updated mode indicator labels */}
               <Text style={styles.modeIndicator}>
                 {isBusinessMode ? 'Business Account' : 'Personal Account'}
@@ -664,6 +690,12 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
     marginTop: 2,
+  },
+  businessPhone: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 11,
+    marginTop: 1,
+    fontFamily: 'monospace',
   },
   checkmarkContainer: {
     width: 20,
