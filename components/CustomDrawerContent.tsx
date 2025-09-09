@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed with enhanced avatar synchronization
+// components/CustomDrawerContent.tsx - Updated with Find Us and Become a Rider
 import {
   Feather,
   FontAwesome5,
@@ -216,7 +216,19 @@ export default function CustomDrawerContent(props: any) {
     props.navigation.navigate('account');
   };
 
-
+  const handleBecomeRider = () => {
+    props.navigation.closeDrawer();
+    console.log('🎭 Navigating to become a rider...');
+    // You can implement navigation to rider registration or contact form
+    Alert.alert(
+      'Become a Rider',
+      'Contact us to learn more about becoming a rider!',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Contact Us', onPress: () => props.navigation.navigate('support') }
+      ]
+    );
+  };
 
   const renderBusinessItem = (business: any, isOwned: boolean = true) => {
     const isSelectedBusiness = selectedBusiness?.id === business.id;
@@ -249,163 +261,183 @@ export default function CustomDrawerContent(props: any) {
   };
 
   return (
-    <DrawerContentScrollView {...props} contentContainerStyle={{ flex: 1 }}>
-      <View style={styles.container}>
+    <View style={styles.drawerContainer}>
+      <DrawerContentScrollView 
+        {...props} 
+        contentContainerStyle={styles.scrollContainer}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.container}>
 
-        {/* Main Business/Account Section with synchronized avatar */}    
-        <TouchableOpacity    
-          onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
-          style={styles.accountHeader}    
-          activeOpacity={0.8}
-        >    
-          {/* Enhanced SafeAvatar component with proper synchronization */}
-          <SafeAvatar
-            size={42}
-            avatarUrl={user?.avatar_url}
-            fallbackSource={require('../assets/images/avatar_placeholder.png')}
-            style={styles.avatar}
-            updateTrigger={avatarUpdateTrigger} // Pass sync trigger
-          />
-          <View style={styles.accountInfo}>
-            <Text style={styles.userName}>{displayName}</Text>
-            <Text style={styles.userPhone}>{userPhone}</Text>
-          </View>    
-          <Feather    
-            name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
-            size={20}    
-            color="#fff"    
-          />
-        </TouchableOpacity>    
-
-        {showBusinessDropdown && (    
-          <View style={styles.accountDropdown}>
-            {/* Account */}
-            <DrawerItem    
-              label="Account"    
-              labelStyle={styles.label}    
-              icon={() => <Feather name="user" size={22} color="#fff" />}    
-              onPress={handleAccountNavigation}
+          {/* Main Business/Account Section with synchronized avatar */}    
+          <TouchableOpacity    
+            onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
+            style={styles.accountHeader}    
+            activeOpacity={0.8}
+          >    
+            {/* Enhanced SafeAvatar component with proper synchronization */}
+            <SafeAvatar
+              size={42}
+              avatarUrl={user?.avatar_url}
+              fallbackSource={require('../assets/images/avatar_placeholder.png')}
+              style={styles.avatar}
+              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
             />
-            
-            {/* Business Listings */}
-            {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
-              <View style={styles.businessesSection}>
-                <Text style={styles.sectionTitle}>Your Businesses</Text>
-                
-                {/* Owned Businesses */}
-                {businesses.owned.map(business => renderBusinessItem(business, true))}
-                
-                {/* Joined Businesses */}
-                {businesses.joined.map(business => renderBusinessItem(business, false))}
-              </View>
-            )}
-
-            {/* Business Management Button */}
-            <TouchableOpacity
-              style={styles.businessButton}
-              onPress={handleBusinessManagement}
-            >
-              <Feather name="briefcase" size={18} color="#fff" />
-              <Text style={styles.businessButtonText}>Business</Text>
-            </TouchableOpacity>
-          </View>    
-        )}    
-
-        {/* Track a Package */}    
-        <TouchableOpacity
-          style={styles.customItem}
-          onPress={() => setShowTrackDropdown((prev) => !prev)}
-          activeOpacity={0.7}
-        >
-          <View style={styles.trackHeader}>
-            <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-            <Text style={styles.trackLabel}>Track a package</Text>
-            <Feather
-              name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-              size={20}
-              color={colors.primary}
+            <View style={styles.accountInfo}>
+              <Text style={styles.userName}>{displayName}</Text>
+              <Text style={styles.userPhone}>{userPhone}</Text>
+            </View>    
+            <Feather    
+              name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
+              size={20}    
+              color="#fff"    
             />
-          </View>
-        </TouchableOpacity>
-        
-        {showTrackDropdown &&    
-          trackingStatuses.map((item) => (    
-            <DrawerItem    
-              key={item.key}    
-              label={item.label}    
-              labelStyle={styles.subLabel}    
-              icon={() => (    
-                <Feather name={item.icon as any} size={20} color={colors.primary} />    
-              )}    
-              style={styles.subItem}    
-              onPress={() =>    
-                props.navigation.navigate({    
-                  name: 'track',    
-                  params: { status: item.key },    
-                  merge: true,    
-                })    
-              }    
-            />    
-          ))}    
+          </TouchableOpacity>    
 
-        {/* General Navigation */}    
-        <DrawerItem    
-          label="Talk to a rep"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('support')}    
-        />    
-        <DrawerItem    
-          label="FAQs"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('faqs')}    
-        />    
-        <DrawerItem    
-          label="History"    
-          labelStyle={styles.label}    
-          icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('history')}    
-        />    
+          {showBusinessDropdown && (    
+            <View style={styles.accountDropdown}>
+              {/* Account */}
+              <DrawerItem    
+                label="Account"    
+                labelStyle={styles.label}    
+                icon={() => <Feather name="user" size={22} color="#fff" />}    
+                onPress={handleAccountNavigation}
+              />
+              
+              {/* Business Listings */}
+              {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
+                <View style={styles.businessesSection}>
+                  <Text style={styles.sectionTitle}>Your Businesses</Text>
+                  
+                  {/* Owned Businesses */}
+                  {businesses.owned.map(business => renderBusinessItem(business, true))}
+                  
+                  {/* Joined Businesses */}
+                  {businesses.joined.map(business => renderBusinessItem(business, false))}
+                </View>
+              )}
 
-        {/* Contacts */}    
-        <DrawerItem    
-          label="Contacts"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('contact')}    
-        />    
+              {/* Business Management Button */}
+              <TouchableOpacity
+                style={styles.businessButton}
+                onPress={handleBusinessManagement}
+              >
+                <Feather name="briefcase" size={18} color="#fff" />
+                <Text style={styles.businessButtonText}>Business</Text>
+              </TouchableOpacity>
+            </View>    
+          )}    
 
-        {/* Settings */}    
-        <DrawerItem    
-          label="Settings"    
-          labelStyle={styles.label}    
-          icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('settings')}    
-        />    
+          {/* Track a Package */}    
+          <TouchableOpacity
+            style={styles.customItem}
+            onPress={() => setShowTrackDropdown((prev) => !prev)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.trackHeader}>
+              <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
+              <Text style={styles.trackLabel}>Track a package</Text>
+              <Feather
+                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={colors.primary}
+              />
+            </View>
+          </TouchableOpacity>
+          
+          {showTrackDropdown &&    
+            trackingStatuses.map((item) => (    
+              <DrawerItem    
+                key={item.key}    
+                label={item.label}    
+                labelStyle={styles.subLabel}    
+                icon={() => (    
+                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
+                )}    
+                style={styles.subItem}    
+                onPress={() =>    
+                  props.navigation.navigate({    
+                    name: 'track',    
+                    params: { status: item.key },    
+                    merge: true,    
+                  })    
+                }    
+              />    
+            ))}    
 
-        {/* Invite Friends */}    
-        <DrawerItem    
-          label="Invite Friends"    
-          labelStyle={styles.label}    
-          icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
-          onPress={() => props.navigation.navigate('invite')}    
-        />    
+          {/* General Navigation */}    
+          <DrawerItem    
+            label="Talk to a rep"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('support')}    
+          />    
+          <DrawerItem    
+            label="FAQs"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('faqs')}    
+          />    
+          <DrawerItem    
+            label="Find us"    
+            labelStyle={styles.label}    
+            icon={() => <MaterialIcons name="location-on" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('findus')}    
+          />    
 
-        {/* Footer Icon */}    
-        <View style={styles.footerIcon}>    
-          <FontAwesome5 name="exclamation-circle" size={22} color={colors.primary} />    
+          {/* Contacts */}    
+          <DrawerItem    
+            label="Contacts"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="user" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('contact')}    
+          />    
+
+          {/* Settings */}    
+          <DrawerItem    
+            label="Settings"    
+            labelStyle={styles.label}    
+            icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('settings')}    
+          />    
+
+          {/* Invite Friends */}    
+          <DrawerItem    
+            label="Invite Friends"    
+            labelStyle={styles.label}    
+            icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
+            onPress={() => props.navigation.navigate('invite')}    
+          />    
+
         </View>    
+      </DrawerContentScrollView>
 
-      </View>    
-    </DrawerContentScrollView>
+      {/* Become a Rider Button at bottom */}
+      <View style={styles.bottomButtonContainer}>
+        <TouchableOpacity
+          style={styles.becomeRiderButton}
+          onPress={handleBecomeRider}
+          activeOpacity={0.8}
+        >
+          <Feather name="truck" size={20} color="#fff" />
+          <Text style={styles.becomeRiderButtonText}>Become a rider</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
+  drawerContainer: {
     flex: 1,
     backgroundColor: colors.background,
+  },
+  scrollContainer: {
+    flexGrow: 1,
+    paddingBottom: 20,
+  },
+  container: {
+    flex: 1,
     paddingTop: 10,
   },
   accountHeader: {
@@ -487,11 +519,6 @@ const styles = StyleSheet.create({
     fontSize: 17,
     color: colors.text,
   },
-  footerIcon: {
-    marginTop: 'auto',
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
   businessesSection: {
     paddingVertical: 8,
   },
@@ -558,5 +585,32 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     marginLeft: 12,
+  },
+  bottomButtonContainer: {
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    paddingBottom: 24,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  becomeRiderButton: {
+    backgroundColor: colors.primary,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+  },
+  becomeRiderButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginLeft: 8,
   },
 });
