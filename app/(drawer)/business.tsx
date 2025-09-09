@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Complete rewrite with business logo and edit functionality
+// app/(drawer)/Business.tsx - Fixed with proper image upload modal usage
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -35,7 +35,7 @@ import { uploadBusinessLogo } from '../../lib/helpers/uploadBusinessLogo';
 // Lazy load business modals and components
 const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
 const JoinBusinessModal = React.lazy(() => import('../../components/JoinBusinessModal'));
-const AvatarPreviewModal = React.lazy(() => import('../../components/AvatarPreviewModal'));
+const ImagePreviewModal = React.lazy(() => import('../../components/ImagePreviewModal'));
 const EditBusinessModal = React.lazy(() => import('../../components/EditBusinessModal'));
 
 interface BusinessProps {
@@ -179,9 +179,9 @@ export default function Business({ navigation }: BusinessProps) {
   const [inviteLink, setInviteLink] = useState(null);
   const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
   
-  // Avatar/Logo functionality states
-  const [previewUri, setPreviewUri] = useState(null);
-  const [avatarLoading, setAvatarLoading] = useState(false);
+  // Image upload functionality states
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [uploadType, setUploadType] = useState<'avatar' | 'business-logo'>('avatar');
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
   
   // Refresh functionality states
@@ -354,7 +354,7 @@ export default function Business({ navigation }: BusinessProps) {
 
       // Determine what we're uploading based on current context
       const isBusinessLogoUpload = !!currentBusiness;
-      const uploadType = isBusinessLogoUpload ? 'business logo' : 'avatar';
+      const selectedUploadType: 'avatar' | 'business-logo' = isBusinessLogoUpload ? 'business-logo' : 'avatar';
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -366,13 +366,14 @@ export default function Business({ navigation }: BusinessProps) {
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log(`🎭 Business: Selected ${uploadType}:`, {
+      console.log(`🎭 Business: Selected ${selectedUploadType}:`, {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
         fileSize: asset.fileSize
       });
       
+      setUploadType(selectedUploadType);
       setPreviewUri(asset.uri);
     } catch (error) {
       console.error('Business: Error picking image:', error);
@@ -385,14 +386,12 @@ export default function Business({ navigation }: BusinessProps) {
     try {
       if (!previewUri) return;
 
-      setAvatarLoading(true);
-      const isBusinessLogoUpload = !!currentBusiness;
-      const uploadType = isBusinessLogoUpload ? 'business logo' : 'avatar';
+      const isBusinessLogoUpload = uploadType === 'business-logo';
 
       console.log(`🎭 Business: Starting ${uploadType} upload process...`);
       
       let result;
-      if (isBusinessLogoUpload) {
+      if (isBusinessLogoUpload && currentBusiness) {
         // Upload business logo
         result = await uploadBusinessLogo(previewUri, currentBusiness.id);
         console.log('🎭 Business: Business logo upload result:', result);
@@ -428,7 +427,7 @@ export default function Business({ navigation }: BusinessProps) {
         
         showToast.success(
           `${isBusinessLogoUpload ? 'Business logo' : 'Avatar'} updated!`, 
-          `Your ${uploadType} has been changed`
+          `Your ${uploadType.replace('-', ' ')} has been changed`
         );
         
         console.log(`🎭 Business: ${uploadType} upload and synchronization completed`);
@@ -441,25 +440,8 @@ export default function Business({ navigation }: BusinessProps) {
       showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
-      setAvatarLoading(false);
     }
-  }, [previewUri, currentBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
-
-  // Context-aware avatar display selection
-  const getDisplayImageUrl = () => {
-    if (currentBusiness?.logo_url) {
-      return currentBusiness.logo_url;
-    }
-    return user?.avatar_url;
-  };
-
-  // Context-aware upload button text
-  const getUploadButtonText = () => {
-    if (currentBusiness) {
-      return currentBusiness.logo_url ? 'Change Logo' : 'Add Logo';
-    }
-    return user?.avatar_url ? 'Change Avatar' : 'Add Avatar';
-  };
+  }, [previewUri, uploadType, currentBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -526,9 +508,8 @@ export default function Business({ navigation }: BusinessProps) {
             <TouchableOpacity 
               style={styles.addAvatarButton}
               onPress={pickAndPreviewImage}
-              disabled={avatarLoading}
             >
-              <Feather name={avatarLoading ? "loader" : "plus"} size={20} color="#fff" />
+              <Feather name="plus" size={20} color="#fff" />
             </TouchableOpacity>
             
             {/* Context indicator */}
@@ -778,9 +759,11 @@ export default function Business({ navigation }: BusinessProps) {
         )}
 
         {previewUri && (
-          <AvatarPreviewModal
-            visible
+          <ImagePreviewModal
+            visible={true}
             uri={previewUri}
+            uploadType={uploadType}
+            businessName={uploadType === 'business-logo' ? currentBusiness?.name : undefined}
             onCancel={() => setPreviewUri(null)}
             onConfirm={confirmUploadImage}
           />
