@@ -122,7 +122,7 @@ const PACKAGE_SIZES: PackageSize[] = [
     id: 'small',
     name: 'Small Package',
     description: 'Documents, accessories, small items',
-    icon: 'package'
+    icon: 'mail' // FIXED: Changed from 'package' to 'mail' (envelope)
   },
   {
     id: 'medium',
@@ -934,7 +934,7 @@ export default function HomeScreen() {
                 style={styles.infoIconButton}
                 onPress={() => showPackageSizeInfo(size.id)}
               >
-                <Feather name="info" size={16} color="rgba(255, 255, 255, 0.7)" />
+                <Feather name="info" size={16} color="#fff" />
               </TouchableOpacity>
             </View>
           </TouchableOpacity>
@@ -971,7 +971,7 @@ export default function HomeScreen() {
     );
   };
 
-  // FIXED: FAB option rendering with solid appearance and faster animations
+  // FIXED: FAB option rendering with solid colors and white info icons
   const renderFabOption = (option: FABOption, index: number) => {
     const optionOpacity = overlayOpacity.interpolate({
       inputRange: [0, 1],
@@ -1008,7 +1008,7 @@ export default function HomeScreen() {
               {
                 borderColor: option.color,
                 borderWidth: 2,
-                backgroundColor: `${option.color}85`, // Solid appearance - 85% opacity
+                backgroundColor: option.color, // FIXED: Solid colors - removed alpha
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1020,8 +1020,8 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
-                  backgroundColor: `${option.color}90`, // Very solid - 90% opacity
-                  borderColor: option.color,
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)', // FIXED: Consistent white background
+                  borderColor: 'rgba(255, 255, 255, 0.3)',
                   borderWidth: 1,
                   shadowColor: option.glowColor,
                   shadowOffset: { width: 0, height: 0 },
@@ -1031,15 +1031,15 @@ export default function HomeScreen() {
               ]}>
                 <Feather name={option.icon as any} size={22} color="white" />
               </View>
-              <Text style={[styles.fabOptionLabel, { color: option.color }]}>{option.label}</Text>
+              <Text style={[styles.fabOptionLabel, { color: 'white' }]}>{option.label}</Text>
               <TouchableOpacity 
-                style={[styles.infoButton, { borderColor: option.color, borderWidth: 1 }]}
+                style={[styles.infoButton, { borderColor: 'white', borderWidth: 1 }]}
                 onPress={(e) => {
                   e.stopPropagation();
                   option.infoAction();
                 }}
               >
-                <Feather name="info" size={18} color={option.color} />
+                <Feather name="info" size={18} color="white" />
               </TouchableOpacity>
             </View>
           </View>
