@@ -1,4 +1,4 @@
-// app/(drawer)/cart.tsx - Cart page with package selection - FIXED: Fetch all pending_unpaid packages
+// app/(drawer)/cart.tsx - FIXED: Fetch ALL pending_unpaid packages
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -53,7 +53,7 @@ export default function CartPage() {
       .reduce((total, pkg) => total + pkg.cost, 0);
   }, [packages, selectedPackages]);
 
-  // FIXED: Load all unpaid packages without pagination limit
+  // FIXED: Load ALL unpaid packages without limit
   const loadUnpaidPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -62,58 +62,37 @@ export default function CartPage() {
         setIsLoading(true);
       }
 
-      let allPackages: any[] = [];
-      let currentPage = 1;
-      let hasMorePages = true;
-
-      // FIXED: Fetch all pages to get all pending_unpaid packages
-      while (hasMorePages) {
-        const response = await api.get('/api/v1/packages', {
-          params: {
-            state: 'pending_unpaid',
-            page: currentPage,
-            per_page: 100, // Use high per_page to minimize API calls
-          }
-        });
-        
-        if (response.data.success) {
-          const pagePackages = response.data.data || [];
-          allPackages = [...allPackages, ...pagePackages];
-          
-          // Check if there are more pages
-          const pagination = response.data.pagination;
-          if (pagination && currentPage < pagination.total_pages) {
-            currentPage++;
-          } else {
-            hasMorePages = false;
-          }
-        } else {
-          hasMorePages = false;
+      // FIXED: Request all packages by setting a high per_page limit
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          state: 'pending_unpaid',
+          per_page: 1000, // Set high limit to get all packages
+          page: 1
         }
+      });
+      
+      if (response.data.success) {
+        const unpaidPackages = response.data.data.map((pkg: any) => ({
+          id: String(pkg.id || ''),
+          code: pkg.code || '',
+          state: pkg.state || 'pending_unpaid',
+          state_display: pkg.state_display || 'Pending Payment',
+          sender_name: pkg.sender_name || 'Unknown Sender',
+          receiver_name: pkg.receiver_name || 'Unknown Receiver',
+          receiver_phone: pkg.receiver_phone || '',
+          route_description: pkg.route_description || 'Route information unavailable',
+          cost: Number(pkg.cost) || 0,
+          delivery_type: pkg.delivery_type || 'agent',
+          created_at: pkg.created_at || new Date().toISOString(),
+        }));
+        
+        setPackages(unpaidPackages);
+        console.log(`Loaded ${unpaidPackages.length} unpaid packages`);
+        
+        // Auto-select all packages by default
+        const allPackageIds = new Set(unpaidPackages.map(pkg => pkg.id));
+        setSelectedPackages(allPackageIds);
       }
-      
-      console.log(`Loaded ${allPackages.length} total unpaid packages`);
-      
-      const unpaidPackages = allPackages.map((pkg: any) => ({
-        id: String(pkg.id || ''),
-        code: pkg.code || '',
-        state: pkg.state || 'pending_unpaid',
-        state_display: pkg.state_display || 'Pending Payment',
-        sender_name: pkg.sender_name || 'Unknown Sender',
-        receiver_name: pkg.receiver_name || 'Unknown Receiver',
-        receiver_phone: pkg.receiver_phone || '',
-        route_description: pkg.route_description || 'Route information unavailable',
-        cost: Number(pkg.cost) || 0,
-        delivery_type: pkg.delivery_type || 'agent',
-        created_at: pkg.created_at || new Date().toISOString(),
-      }));
-      
-      setPackages(unpaidPackages);
-      
-      // Auto-select all packages by default
-      const allPackageIds = new Set(unpaidPackages.map(pkg => pkg.id));
-      setSelectedPackages(allPackageIds);
-      
     } catch (error: any) {
       console.error('Failed to load unpaid packages:', error);
       Toast.show({
