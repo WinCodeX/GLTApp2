@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed with instant logo updates and You mode
+// app/(drawer)/Business.tsx - Fixed header dropdown and removed plus button
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -186,6 +186,7 @@ export default function Business({ navigation }: BusinessProps) {
   // Business sharing states
   const [selectedBusinessForShare, setSelectedBusinessForShare] = useState(null);
   const [inviteLink, setInviteLink] = useState(null);
+  const [generatingInvite, setGeneratingInvite] = useState(false);
   
   // NEW: Display mode state - determines if we show user avatar or business logo
   const [displayMode, setDisplayMode] = useState<DisplayMode>('you');
@@ -279,6 +280,12 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
+  // NEW: Handle header dropdown toggle
+  const handleHeaderDropdown = () => {
+    console.log('🎭 Business: Header dropdown tapped');
+    setShowBusinessDropdown(true);
+  };
+
   // NEW: Handle display mode switching
   const handleDisplayModeSwitch = (mode: DisplayMode) => {
     console.log('🎭 Business: Switching display mode to:', mode);
@@ -305,34 +312,60 @@ export default function Business({ navigation }: BusinessProps) {
     showToast.info('Business selected', business.name);
   };
 
-  // Share business functionality
+  // Fixed share business functionality
   const handleShareBusiness = () => {
     if (displayMode === 'business' && selectedBusiness) {
+      console.log('🎭 Business: Setting business for share:', selectedBusiness.name);
       setSelectedBusinessForShare(selectedBusiness);
+      setInviteLink(null); // Reset invite link
     } else {
       showToast.warning('No business selected', 'Please select a business first');
     }
   };
 
-  // Generate invite link
+  // Fixed generate invite link with better error handling
   const generateInviteLink = async () => {
-    if (!selectedBusinessForShare) return;
+    if (!selectedBusinessForShare) {
+      showToast.error('No business selected', 'Please select a business first');
+      return;
+    }
 
     try {
+      setGeneratingInvite(true);
+      console.log('🎭 Business: Generating invite for business:', selectedBusinessForShare.id);
+      
       const result = await createInvite(selectedBusinessForShare.id);
-      setInviteLink(result?.code || 'No code generated');
-      showToast.success('Invite link generated', 'Copy and share with your team');
-    } catch (error) {
-      console.error('Error creating invite:', error);
-      showToast.error('Failed to create invite', 'Please try again');
+      console.log('🎭 Business: Invite result:', result);
+      
+      if (result?.success && result?.data?.code) {
+        setInviteLink(result.data.code);
+        showToast.success('Invite link generated', 'Copy and share with your team');
+      } else if (result?.code) {
+        // Handle legacy response format
+        setInviteLink(result.code);
+        showToast.success('Invite link generated', 'Copy and share with your team');
+      } else {
+        throw new Error('No invite code received from server');
+      }
+    } catch (error: any) {
+      console.error('🎭 Business: Error creating invite:', error);
+      const errorMessage = error.message || 'Failed to generate invite code';
+      showToast.error('Failed to create invite', errorMessage);
+    } finally {
+      setGeneratingInvite(false);
     }
   };
 
   // Copy invite link
-  const copyInviteLink = () => {
+  const copyInviteLink = async () => {
     if (inviteLink) {
-      Clipboard.setStringAsync(inviteLink);
-      showToast.success('Copied to clipboard!', 'Share this invite code');
+      try {
+        await Clipboard.setStringAsync(inviteLink);
+        showToast.success('Copied to clipboard!', 'Share this invite code');
+      } catch (error) {
+        console.error('Failed to copy to clipboard:', error);
+        showToast.error('Failed to copy', 'Please try again');
+      }
     }
   };
 
@@ -563,16 +596,21 @@ export default function Business({ navigation }: BusinessProps) {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#1a1a2e" />
       
-      {/* Header with fixed back navigation */}
+      {/* Header with functional dropdown */}
       <View style={styles.header}>
         <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         
-        <View style={styles.headerCenter}>
+        {/* Make header center touchable for dropdown */}
+        <TouchableOpacity 
+          style={styles.headerCenter}
+          onPress={handleHeaderDropdown}
+          activeOpacity={0.7}
+        >
           <Text style={styles.username}>{getCurrentDisplayName()}</Text>
           <Feather name="chevron-down" size={20} color="#fff" />
-        </View>
+        </TouchableOpacity>
         
         <View style={styles.headerRight}>
           <TouchableOpacity 
@@ -610,7 +648,7 @@ export default function Business({ navigation }: BusinessProps) {
           />
         }
       >
-        {/* Enhanced Profile Section with instant image updates */}
+        {/* Enhanced Profile Section without plus button */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <SafeLogo
@@ -621,12 +659,6 @@ export default function Business({ navigation }: BusinessProps) {
               onPress={pickAndPreviewImage}
               updateTrigger={logoUpdateTrigger + avatarUpdateTrigger}
             />
-            <TouchableOpacity 
-              style={styles.addAvatarButton}
-              onPress={pickAndPreviewImage}
-            >
-              <Feather name="plus" size={20} color="#fff" />
-            </TouchableOpacity>
             
             {/* Enhanced upload indicator */}
             <View style={styles.uploadIndicator}>
@@ -903,7 +935,7 @@ export default function Business({ navigation }: BusinessProps) {
         </Modal>
       )}
 
-      {/* Share Business Modal */}
+      {/* Fixed Share Business Modal */}
       {selectedBusinessForShare && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -919,8 +951,14 @@ export default function Business({ navigation }: BusinessProps) {
               </Text>
 
               {!inviteLink ? (
-                <TouchableOpacity style={styles.generateButton} onPress={generateInviteLink}>
-                  <Text style={styles.generateButtonText}>Generate Invite Link</Text>
+                <TouchableOpacity 
+                  style={styles.generateButton} 
+                  onPress={generateInviteLink}
+                  disabled={generatingInvite}
+                >
+                  <Text style={styles.generateButtonText}>
+                    {generatingInvite ? 'Generating...' : 'Generate Invite Link'}
+                  </Text>
                 </TouchableOpacity>
               ) : (
                 <View style={styles.inviteLinkContainer}>
@@ -1028,6 +1066,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 8,
   },
   username: {
     color: '#fff',
@@ -1063,19 +1104,6 @@ const styles = StyleSheet.create({
     width: 86,
     height: 86,
     borderRadius: 43,
-  },
-  addAvatarButton: {
-    position: 'absolute',
-    bottom: 8,
-    right: -2,
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: '#7c3aed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 3,
-    borderColor: '#1a1a2e',
   },
   uploadIndicator: {
     marginTop: 8,
@@ -1413,6 +1441,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 24,
     borderRadius: 8,
     marginBottom: 16,
+    minWidth: 150,
+    alignItems: 'center',
   },
   generateButtonText: {
     color: '#fff',
