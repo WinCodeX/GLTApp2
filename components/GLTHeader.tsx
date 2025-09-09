@@ -57,15 +57,58 @@ export default function GLTHeader({
     }
   };
 
-  // Fetch cart count (pending_unpaid packages)
+  // FIXED: Fetch ALL cart count (pending_unpaid packages) - no 20 package limit
   const fetchCartCount = async () => {
     try {
-      const response = await api.get('/api/v1/packages?state=pending_unpaid');
+      console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
+      
+      // FIXED: Add parameters to fetch ALL packages without pagination limits
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          state: 'pending_unpaid',
+          per_page: 1000, // Request a very high number to get all packages
+          page: 1
+        },
+        timeout: 15000 // Increase timeout for potentially large response
+      });
+      
       if (response.data.success) {
-        setCartCount(response.data.data?.length || 0);
+        let totalCount = response.data.data?.length || 0;
+        
+        // FIXED: Check if there are more pages and fetch them too
+        const pagination = response.data.pagination;
+        if (pagination && pagination.total_pages > 1) {
+          console.log(`🛒 Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
+          
+          // Fetch remaining pages
+          const additionalPages = [];
+          for (let page = 2; page <= pagination.total_pages; page++) {
+            additionalPages.push(
+              api.get('/api/v1/packages', {
+                params: {
+                  state: 'pending_unpaid',
+                  per_page: 1000,
+                  page: page
+                },
+                timeout: 15000
+              })
+            );
+          }
+
+          const additionalResponses = await Promise.all(additionalPages);
+          const additionalCount = additionalResponses.reduce((acc, res) => {
+            return acc + (res.data.success ? (res.data.data?.length || 0) : 0);
+          }, 0);
+
+          totalCount += additionalCount;
+          console.log(`🛒 Total cart count with all pages: ${totalCount}`);
+        }
+        
+        setCartCount(totalCount);
       }
     } catch (error) {
       console.error('Failed to fetch cart count:', error);
+      // Keep previous count on error
     }
   };
 
