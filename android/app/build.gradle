@@ -83,7 +83,7 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
 // Define app version constants for consistency
 def appName = "GLT"
-def appVersionName = "1.3.5"
+def appVersionName = "1.3.6"
 def appVersionCode = 3
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
