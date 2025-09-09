@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - UPDATED: With M-Pesa Payment Modal Integration
+// app/(drawer)/track.tsx - FIXED: Fetch ALL packages without pagination limits
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -46,7 +46,6 @@ interface Package {
   sender_email?: string;
   receiver_email?: string;
   business_name?: string;
-  // Additional fields for compatibility
   recipient_name?: string;
   receiver?: { name: string };
   recipient?: { name: string };
@@ -67,7 +66,6 @@ interface PackageResponse {
   message?: string;
 }
 
-// Drawer state type
 type DrawerState = 
   | 'pending' 
   | 'paid' 
@@ -77,15 +75,14 @@ type DrawerState =
   | 'collected' 
   | 'rejected';
 
-// State mapping based on backend expectations
 const STATE_MAPPING: Record<DrawerState, string> = {
-  'pending': 'pending_unpaid',     // Drawer "Pending" = API "pending_unpaid"
-  'paid': 'pending',               // Drawer "Paid" = API "pending"  
-  'submitted': 'submitted',        // Direct mapping
-  'in-transit': 'in_transit',      // Drawer uses hyphen, API uses underscore
-  'delivered': 'delivered',        // Direct mapping
-  'collected': 'collected',        // Direct mapping
-  'rejected': 'rejected'           // Direct mapping
+  'pending': 'pending_unpaid',
+  'paid': 'pending', 
+  'submitted': 'submitted',
+  'in-transit': 'in_transit',
+  'delivered': 'delivered',
+  'collected': 'collected',
+  'rejected': 'rejected'
 };
 
 export default function Track() {
@@ -93,32 +90,27 @@ export default function Track() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
-  // Get status from params (from drawer navigation)
   const selectedStatus = params.status as DrawerState | undefined;
   
-  // State management
   const [packages, setPackages] = useState<Package[]>([]);
   const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
-  // Search state
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAnimation] = useState(new Animated.Value(0));
   
-  // Modal state
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPackageForPayment, setSelectedPackageForPayment] = useState<Package | null>(null);
 
-  // Get packages with proper API integration
-  const getPackages = useCallback(async (filters?: { state?: string; search?: string; page?: number; per_page?: number }): Promise<PackageResponse> => {
+  // FIXED: Get ALL packages without pagination limits
+  const getPackages = useCallback(async (filters?: { state?: string; search?: string }): Promise<PackageResponse> => {
     try {
       console.log('📦 getPackages called with filters:', filters);
       
-      // Build query parameters
       const params = new URLSearchParams();
       
       if (filters?.state) {
@@ -126,13 +118,9 @@ export default function Track() {
         console.log('🎯 Adding state filter:', filters.state);
       }
       
-      if (filters?.page) {
-        params.append('page', filters.page.toString());
-      }
-      
-      if (filters?.per_page) {
-        params.append('per_page', filters.per_page.toString());
-      }
+      // FIXED: Request ALL packages by setting high per_page limit and starting from page 1
+      params.append('per_page', '1000'); // Set high limit to get all packages
+      params.append('page', '1');
       
       if (filters?.search) {
         params.append('search', filters.search);
@@ -158,7 +146,6 @@ export default function Track() {
         throw new Error(response.data.message || 'Failed to fetch packages');
       }
       
-      // Transform the response data to match expected format
       const transformedPackages = response.data.data.map((pkg: any) => ({
         id: String(pkg.id || ''),
         code: pkg.code || '',
@@ -181,7 +168,6 @@ export default function Track() {
         sender_email: pkg.sender_email,
         receiver_email: pkg.receiver_email,
         business_name: pkg.business_name,
-        // Additional fields for compatibility
         recipient_name: pkg.recipient_name || pkg.receiver_name,
         receiver: pkg.receiver || { name: pkg.receiver_name },
         recipient: pkg.recipient || { name: pkg.receiver_name },
@@ -216,7 +202,6 @@ export default function Track() {
     }
   }, []);
 
-  // Memoized state display
   const stateDisplayInfo = useMemo(() => {
     if (!selectedStatus) {
       return {
@@ -232,7 +217,7 @@ export default function Track() {
         title: 'Pending Payment',
         subtitle: 'Packages awaiting payment',
         icon: 'clock' as const,
-        color: '#f97316' // Orange for pending payment
+        color: '#f97316'
       },
       'paid': {
         title: 'Paid Packages',
@@ -275,7 +260,6 @@ export default function Track() {
     return statusConfig[selectedStatus] || statusConfig['pending'];
   }, [selectedStatus]);
 
-  // Search functionality
   const filterPackages = useCallback((packages: Package[], query: string) => {
     if (!query.trim()) {
       return packages;
@@ -284,20 +268,17 @@ export default function Track() {
     const lowercaseQuery = query.toLowerCase().trim();
     
     return packages.filter(pkg => {
-      // Get receiver name
       const receiverName = (pkg.receiver_name || 
                            pkg.recipient_name || 
                            pkg.receiver?.name ||
                            pkg.recipient?.name ||
                            pkg.to_name || '').toLowerCase();
       
-      // Get route/location info
       const routeDescription = (pkg.route_description || '').toLowerCase();
       const fromLocation = (pkg.from_location || '').toLowerCase();
       const toLocation = (pkg.to_location || '').toLowerCase();
       const packageCode = (pkg.code || '').toLowerCase();
       
-      // Search in multiple fields
       return receiverName.includes(lowercaseQuery) ||
              routeDescription.includes(lowercaseQuery) ||
              fromLocation.includes(lowercaseQuery) ||
@@ -306,13 +287,11 @@ export default function Track() {
     });
   }, []);
 
-  // Update filtered packages when search query or packages change
   useEffect(() => {
     const filtered = filterPackages(packages, searchQuery);
     setFilteredPackages(filtered);
   }, [packages, searchQuery, filterPackages]);
 
-  // Toggle search functionality
   const toggleSearch = useCallback(() => {
     const newVisible = !searchVisible;
     setSearchVisible(newVisible);
@@ -328,12 +307,10 @@ export default function Track() {
     }
   }, [searchVisible, searchAnimation]);
 
-  // Clear search
   const clearSearch = useCallback(() => {
     setSearchQuery('');
   }, []);
 
-  // Modal handlers
   const handleOpenCreateModal = useCallback(() => {
     setShowCreateModal(true);
   }, []);
@@ -347,7 +324,6 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
-  // Payment modal handlers
   const handleOpenPaymentModal = useCallback((packageItem: Package) => {
     console.log('💳 Opening payment modal for package:', packageItem.code);
     setSelectedPackageForPayment(packageItem);
@@ -370,11 +346,10 @@ export default function Track() {
       visibilityTime: 4000,
     });
     
-    // Refresh the package list
     loadPackages(true);
   }, []);
 
-  // Load packages with correct state mapping and error handling
+  // FIXED: Load ALL packages with correct state mapping and no pagination limits
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -398,7 +373,6 @@ export default function Track() {
         });
       }
       
-      // Build filters with the correctly mapped API state
       const filters = apiState ? { state: apiState } : undefined;
       
       console.log('📨 Final filters for API:', JSON.stringify(filters, null, 2));
@@ -412,14 +386,12 @@ export default function Track() {
         message: response.message
       });
 
-      // Log the actual states of returned packages to verify filtering worked
       if (response.data.length > 0) {
         const states = response.data.map(pkg => pkg.state);
         const uniqueStates = [...new Set(states)];
         console.log('📊 Actual returned package states:', uniqueStates);
         console.log('🎯 Expected state was:', apiState || 'ALL');
         
-        // Check if filtering worked correctly
         if (apiState) {
           const correctlyFiltered = states.every(state => state === apiState);
           console.log('✅ Filtering working correctly:', correctlyFiltered);
@@ -429,7 +401,6 @@ export default function Track() {
             console.error('Expected all packages to have state:', apiState);
             console.error('But got states:', uniqueStates);
             
-            // FALLBACK: Apply client-side filtering as backup
             console.log('🔧 Applying client-side filtering as fallback...');
             const clientFiltered = response.data.filter(pkg => pkg.state === apiState);
             console.log('🔧 Client-side filtered:', clientFiltered.length, 'packages');
@@ -474,17 +445,14 @@ export default function Track() {
     }
   }, [selectedStatus, getPackages]);
 
-  // Load data when component mounts or status changes
   useEffect(() => {
     loadPackages();
   }, [loadPackages]);
 
-  // Refresh handler
   const handleRefresh = useCallback(() => {
     loadPackages(true);
   }, [loadPackages]);
 
-  // Navigation handlers
   const handleBack = useCallback(() => {
     if (router.canGoBack()) {
       router.back();
@@ -493,7 +461,6 @@ export default function Track() {
     }
   }, [router]);
 
-  // Get delivery type display with all types
   const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return 'Home';
@@ -505,19 +472,17 @@ export default function Track() {
     }
   }, []);
 
-  // Get delivery type badge color with requested colors
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string) => {
     switch (deliveryType) {
-      case 'doorstep': return '#8b5cf6';    // Purple
-      case 'agent': return '#3b82f6';       // Blue (Office)
-      case 'fragile': return '#f97316';     // Orange
-      case 'collection': return '#10b981';  // Green
-      case 'mixed': return '#10b981';       // Green for mixed
+      case 'doorstep': return '#8b5cf6';
+      case 'agent': return '#3b82f6';
+      case 'fragile': return '#f97316';
+      case 'collection': return '#10b981';
+      case 'mixed': return '#10b981';
       default: return '#8b5cf6';
     }
   }, []);
 
-  // Group packages by date
   const groupPackagesByDate = useCallback((packages: Package[]) => {
     const today = new Date();
     const yesterday = new Date(today);
@@ -552,7 +517,6 @@ export default function Track() {
       }
     });
 
-    // Remove empty groups and sort packages within groups by newest first
     Object.keys(groups).forEach(key => {
       if (groups[key].length === 0) {
         delete groups[key];
@@ -564,31 +528,27 @@ export default function Track() {
     return groups;
   }, []);
   
-  // UPDATED: State badge colors as requested
   const getStateBadgeColor = useCallback((state: string) => {
     switch (state) {
-      case 'pending_unpaid': return '#ef4444';  // Red
-      case 'pending': return '#f97316';         // Orange
-      case 'submitted': return '#eab308';       // Yellow
-      case 'in_transit': return '#8b5cf6';      // Purple
-      case 'delivered': return '#10b981';       // Green
-      case 'collected': return '#2563eb';       // Royal Blue
-      case 'rejected': return '#ef4444';        // Red
+      case 'pending_unpaid': return '#ef4444';
+      case 'pending': return '#f97316';
+      case 'submitted': return '#eab308';
+      case 'in_transit': return '#8b5cf6';
+      case 'delivered': return '#10b981';
+      case 'collected': return '#2563eb';
+      case 'rejected': return '#ef4444';
       default: return colors.primary;
     }
   }, []);
 
-  // Check if package can be edited
   const canEditPackage = useCallback((state: string) => {
     return ['pending_unpaid', 'pending', 'rejected'].includes(state);
   }, []);
 
-  // Check if package needs payment
   const needsPayment = useCallback((state: string) => {
     return state === 'pending_unpaid';
   }, []);
 
-  // Handle edit package
   const handleEditPackage = useCallback((packageItem: Package) => {
     console.log('🔧 Editing package:', packageItem.code);
     router.push({
@@ -601,17 +561,14 @@ export default function Track() {
     });
   }, [router]);
 
-  // UPDATED: Handle pay for package - now opens modal instead of navigating
   const handlePayPackage = useCallback((packageItem: Package) => {
     console.log('💳 Processing payment for package:', packageItem.code);
     handleOpenPaymentModal(packageItem);
   }, [handleOpenPaymentModal]);
 
-  // Handle view tracking details
   const handleViewTracking = useCallback((packageItem: Package) => {
     console.log('🔍 Viewing tracking for package:', packageItem.code);
     
-    // Navigate directly to tracking page without QR code generation
     router.push({
       pathname: '/(drawer)/track/tracking',
       params: { 
@@ -622,7 +579,6 @@ export default function Track() {
     });
   }, [router]);
 
-  // Get receiver name display
   const getReceiverName = useCallback((packageItem: Package) => {
     return packageItem.receiver_name || 
            packageItem.recipient_name || 
@@ -632,16 +588,13 @@ export default function Track() {
            'Unknown Recipient';
   }, []);
 
-  // Render package item
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
     const showPayButton = needsPayment(item.state);
     const receiverName = getReceiverName(item);
     
-    // Build action buttons array based on state
     const actionButtons = [];
     
-    // Track button - always available
     actionButtons.push({
       key: 'track',
       icon: 'navigation',
@@ -652,7 +605,6 @@ export default function Track() {
       iconColor: '#64748b'
     });
     
-    // Edit button - only if editable
     if (canEdit) {
       actionButtons.push({
         key: 'edit',
@@ -665,7 +617,6 @@ export default function Track() {
       });
     }
     
-    // Pay button - only if needs payment
     if (showPayButton) {
       actionButtons.push({
         key: 'pay',
@@ -684,38 +635,32 @@ export default function Track() {
           colors={['rgba(26, 26, 46, 0.8)', 'rgba(22, 33, 62, 0.8)']}
           style={styles.packageCardGradient}
         >
-          {/* Package Header */}
           <View style={styles.packageHeader}>
             <View style={styles.packageInfo}>
               <Text style={styles.packageCode}>{item.code}</Text>
               <Text style={styles.routeDescription}>{item.route_description}</Text>
             </View>
             <View style={styles.badgeContainer}>
-              {/* Delivery Type Badge - transparent style */}
               <View style={[styles.deliveryTypeBadge, { borderColor: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
                 <Text style={[styles.badgeText, { color: getDeliveryTypeBadgeColor(item.delivery_type) }]}>
                   {getDeliveryTypeDisplay(item.delivery_type)}
                 </Text>
               </View>
-              {/* State Badge - solid background style */}
               <View style={[styles.stateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
                 <Text style={styles.badgeText}>{item.state_display?.toUpperCase()}</Text>
               </View>
             </View>
           </View>
 
-          {/* Receiver Section */}
           <View style={styles.receiverSection}>
             <Text style={styles.receiverText}>To: {receiverName}</Text>
           </View>
 
-          {/* Cost Section */}
           <View style={styles.costSection}>
             <Text style={styles.costLabel}>Cost</Text>
             <Text style={styles.costValue}>KES {item.cost.toLocaleString()}</Text>
           </View>
 
-          {/* Dynamic Action Buttons */}
           <View style={[
             styles.actionButtons,
             actionButtons.length === 1 && styles.singleButton,
@@ -738,7 +683,6 @@ export default function Track() {
     );
   }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking, getReceiverName]);
 
-  // Render empty state
   const renderEmptyState = useCallback(() => (
     <View style={styles.emptyStateContainer}>
       <LinearGradient
@@ -768,7 +712,6 @@ export default function Track() {
     </View>
   ), [stateDisplayInfo, selectedStatus, searchQuery, handleOpenCreateModal]);
 
-  // Render error state
   const renderErrorState = useCallback(() => (
     <View style={styles.errorContainer}>
       <LinearGradient
@@ -787,27 +730,22 @@ export default function Track() {
     </View>
   ), [error, loadPackages]);
 
-  // Use filtered packages for display
   const displayPackages = filteredPackages;
 
-  // Main render
   return (
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       
-      {/* Fixed Header with Back Button */}
       <View style={[styles.headerContainer, { paddingTop: insets.top }]}>
         <LinearGradient
           colors={[colors.background, 'rgba(22, 33, 62, 0.95)']}
           style={styles.header}
         >
           <View style={styles.headerContent}>
-            {/* Back Button */}
             <TouchableOpacity style={styles.backButton} onPress={handleBack}>
               <Feather name="arrow-left" size={24} color="#fff" />
             </TouchableOpacity>
             
-            {/* Header Info */}
             <View style={styles.headerInfo}>
               <View style={styles.headerIconContainer}>
                 <Feather 
@@ -822,12 +760,10 @@ export default function Track() {
               </View>
             </View>
             
-            {/* Search Button */}
             <TouchableOpacity style={styles.searchButton} onPress={toggleSearch}>
               <Feather name="search" size={20} color="#fff" />
             </TouchableOpacity>
             
-            {/* Package Count */}
             {displayPackages.length > 0 && (
               <View style={styles.packageCount}>
                 <Text style={styles.packageCountText}>{displayPackages.length}</Text>
@@ -836,7 +772,6 @@ export default function Track() {
           </View>
         </LinearGradient>
         
-        {/* Search Input Dropdown */}
         <Animated.View style={[
           styles.searchContainer,
           {
@@ -870,7 +805,6 @@ export default function Track() {
         </Animated.View>
       </View>
 
-      {/* Content */}
       {isLoading ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color={colors.primary} />
@@ -894,7 +828,6 @@ export default function Track() {
             />
           }
         >
-          {/* Search Results Info */}
           {searchQuery && (
             <View style={styles.searchResultsInfo}>
               <Text style={styles.searchResultsText}>
@@ -903,18 +836,15 @@ export default function Track() {
             </View>
           )}
           
-          {/* Render Grouped Packages */}
           {(() => {
             const groupedPackages = groupPackagesByDate(displayPackages);
             return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
               <View key={dateGroup} style={styles.dateGroup}>
-                {/* Date Group Header */}
                 <View style={styles.dateGroupHeader}>
                   <Text style={styles.dateGroupTitle}>{dateGroup}</Text>
                   <Text style={styles.dateGroupCount}>{packages.length} package{packages.length !== 1 ? 's' : ''}</Text>
                 </View>
                 
-                {/* Packages in this date group */}
                 {packages.map((pkg) => (
                   <View key={pkg.id}>
                     {renderPackageItem({ item: pkg })}
@@ -924,7 +854,6 @@ export default function Track() {
             ));
           })()}
           
-          {/* Load more indicator if needed */}
           <View style={styles.listFooter}>
             <Text style={styles.listFooterText}>
               Showing {displayPackages.length} packages
@@ -933,14 +862,12 @@ export default function Track() {
         </ScrollView>
       )}
       
-      {/* Package Creation Modal */}
       <PackageCreationModal
         visible={showCreateModal}
         onClose={handleCloseCreateModal}
         onPackageCreated={handlePackageCreated}
       />
 
-      {/* M-Pesa Payment Modal */}
       <MpesaPaymentModal
         visible={showPaymentModal}
         onClose={handleClosePaymentModal}
@@ -957,7 +884,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   
-  // Fixed header styles
   headerContainer: {
     position: 'relative',
     zIndex: 1000,
@@ -1034,7 +960,6 @@ const styles = StyleSheet.create({
     color: colors.primary,
   },
   
-  // Search functionality styles
   searchContainer: {
     overflow: 'hidden',
   },
@@ -1070,7 +995,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   
-  // Loading states
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1083,7 +1007,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   
-  // Error states
   errorContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1129,7 +1052,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Empty state
   emptyStateContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1175,7 +1097,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Package list
   packagesList: {
     flex: 1,
   },
@@ -1184,7 +1105,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   
-  // Date grouping styles
   dateGroup: {
     marginBottom: 20,
   },
@@ -1210,7 +1130,6 @@ const styles = StyleSheet.create({
     borderRadius: 8,
   },
   
-  // Package card styles
   packageCard: {
     marginBottom: 12,
     borderRadius: 12,
@@ -1230,7 +1149,6 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.3)',
   },
   
-  // Package header
   packageHeader: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -1252,7 +1170,6 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   
-  // Badge container and styles
   badgeContainer: {
     flexDirection: 'column',
     alignItems: 'flex-end',
@@ -1276,7 +1193,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // Receiver section
   receiverSection: {
     marginBottom: 8,
   },
@@ -1286,7 +1202,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Cost section
   costSection: {
     marginBottom: 12,
   },
@@ -1302,13 +1217,11 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  // Action buttons
   actionButtons: {
     flexDirection: 'row',
     gap: 8,
   },
   
-  // Button layout variations
   singleButton: {
     justifyContent: 'center',
   },
@@ -1319,7 +1232,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
   },
   
-  // Base action button styling
   actionButton: {
     flex: 1,
     flexDirection: 'row',
@@ -1338,7 +1250,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Track button
   trackButton: {
     borderColor: '#64748b',
     backgroundColor: 'transparent',
@@ -1347,7 +1258,6 @@ const styles = StyleSheet.create({
     color: '#64748b',
   },
   
-  // Edit button - purple outline  
   editButton: {
     borderColor: '#8b5cf6',
     backgroundColor: 'transparent',
@@ -1356,7 +1266,6 @@ const styles = StyleSheet.create({
     color: '#8b5cf6',
   },
   
-  // Pay button - solid purple background
   payButton: {
     borderColor: '#8b5cf6',
     backgroundColor: '#8b5cf6',
@@ -1366,7 +1275,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // List footer
   listFooter: {
     alignItems: 'center',
     paddingVertical: 20,
