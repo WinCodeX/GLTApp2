@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed with business logos and You option
+// components/CustomDrawerContent.tsx - Fixed with removed switch mode and proper selection persistence
 import {
   Feather,
   FontAwesome5,
@@ -143,9 +143,6 @@ export default function CustomDrawerContent(props: any) {
   useEffect(() => {
     const unsubscribe = props.navigation.addListener('drawerOpen', () => {
       console.log('🎭 Drawer opened, checking for user updates...');
-      // Optionally refresh user data when drawer opens
-      // Uncomment the line below if you want automatic refresh on drawer open
-      // handleRefreshUser();
     });
 
     return unsubscribe;
@@ -155,7 +152,6 @@ export default function CustomDrawerContent(props: any) {
   useEffect(() => {
     const unsubscribeFocus = props.navigation.addListener('focus', () => {
       console.log('🎭 Drawer focused, avatar might have been updated');
-      // Trigger a small delay refresh to catch any avatar updates
       setTimeout(() => {
         triggerAvatarRefresh();
       }, 500);
@@ -174,7 +170,7 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
   ];
 
-  // Enhanced business switching with "You" mode support
+  // Enhanced business switching
   const handleBusinessSwitch = async (business: any) => {
     try {
       setShowBusinessDropdown(false);
@@ -194,7 +190,7 @@ export default function CustomDrawerContent(props: any) {
     }
   };
 
-  // NEW: Handle switching to "You" mode (personal mode)
+  // Handle switching to "You" mode (personal mode)
   const handleSwitchToYou = async () => {
     try {
       setShowBusinessDropdown(false);
@@ -205,7 +201,7 @@ export default function CustomDrawerContent(props: any) {
       
       Toast.show({
         type: 'success',
-        text1: 'Personal mode',
+        text1: 'Personal account',
         text2: 'Now using your personal account',
       });
     } catch (error: any) {
@@ -299,7 +295,7 @@ export default function CustomDrawerContent(props: any) {
     );
   };
 
-  // NEW: Render "You" option
+  // Render "You" option
   const renderYouOption = () => {
     const isSelected = !selectedBusiness; // Selected when no business is selected
 
@@ -373,9 +369,9 @@ export default function CustomDrawerContent(props: any) {
             <View style={styles.accountInfo}>
               <Text style={styles.userName}>{displayName}</Text>
               <Text style={styles.userPhone}>{userPhone}</Text>
-              {/* Show mode indicator */}
+              {/* Updated mode indicator labels */}
               <Text style={styles.modeIndicator}>
-                {isBusinessMode ? 'Business Mode' : 'Personal Mode'}
+                {isBusinessMode ? 'Business Account' : 'Personal Account'}
               </Text>
             </View>    
             <Feather    
@@ -395,11 +391,9 @@ export default function CustomDrawerContent(props: any) {
                 onPress={handleAccountNavigation}
               />
               
-              {/* Enhanced Business/Personal Listings */}
+              {/* Simplified Business/Personal Listings - No "Switch Mode" section */}
               <View style={styles.businessesSection}>
-                <Text style={styles.sectionTitle}>Switch Mode</Text>
-                
-                {/* NEW: You option - always first */}
+                {/* You option - always first */}
                 {renderYouOption()}
                 
                 {/* Business Listings */}
@@ -568,7 +562,6 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 13,
   },
-  // NEW: Mode indicator style
   modeIndicator: {
     color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 11,
@@ -643,7 +636,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
-  // NEW: Container for business icon/logo
   businessIconContainer: {
     marginRight: 12,
   },
@@ -655,7 +647,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  // NEW: Style for business logo
   businessLogo: {
     width: 24,
     height: 24,
