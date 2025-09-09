@@ -15,6 +15,7 @@ import {
   Modal,
   FlatList,
   ActivityIndicator,
+  AppState,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -26,6 +27,7 @@ import CollectDeliverModal from '../../components/CollectDeliverModal';
 import ChangelogModal, { CHANGELOG_VERSION, CHANGELOG_KEY } from '../../components/ChangelogModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
+import UpdateService from '../../lib/services/updateService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -122,7 +124,7 @@ const PACKAGE_SIZES: PackageSize[] = [
     id: 'small',
     name: 'Small Package',
     description: 'Documents, accessories, small items',
-    icon: 'mail' // FIXED: Changed from 'package' to 'mail' (envelope)
+    icon: 'mail'
   },
   {
     id: 'medium',
@@ -457,9 +459,12 @@ export default function HomeScreen() {
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
 
-  // Check for changelog on app start
+  // Initialize app with update system
   useEffect(() => {
-    checkForChangelog();
+    initializeApp();
+    
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
   }, []);
 
   // Load additional data in background while showing default locations immediately
@@ -467,7 +472,7 @@ export default function HomeScreen() {
     loadFormDataInBackground();
   }, []);
 
-  // FIXED: Faster location scrolling animation for seamless endless loop
+  // Location scrolling animation
   useEffect(() => {
     if (locations.length === 0) return;
     
@@ -475,17 +480,14 @@ export default function HomeScreen() {
     const singleSetWidth = locations.length * locationTagWidth;
 
     const startContinuousLoop = () => {
-      // Reset position to 0
       scrollX.setValue(0);
       
-      // Animate to exactly one set width (this creates seamless loop)
       Animated.timing(scrollX, {
         toValue: -singleSetWidth,
-        duration: 12000, // Faster scrolling - reduced from 18000ms to 12000ms
+        duration: 12000,
         easing: Easing.linear,
         useNativeDriver: true,
       }).start(({ finished }) => {
-        // Only restart if animation completed (not interrupted)
         if (finished) {
           startContinuousLoop();
         }
@@ -494,25 +496,63 @@ export default function HomeScreen() {
 
     startContinuousLoop();
 
-    // Cleanup function
     return () => {
       scrollX.stopAnimation();
     };
   }, [scrollX, locations]);
 
+  // Initialize app with update system and changelog checking
+  const initializeApp = async () => {
+    try {
+      // Initialize update service
+      const updateService = UpdateService.getInstance();
+      await updateService.initialize();
+      
+      // Check if changelog should be shown
+      await checkChangelogDisplay();
+      
+      // Check for updates on app start (delay to not block UI)
+      setTimeout(checkForUpdates, 2000);
+    } catch (error) {
+      console.error('App initialization error:', error);
+    }
+  };
+
   // Check if user has seen the current changelog version
-  const checkForChangelog = async () => {
+  const checkChangelogDisplay = async () => {
     try {
       const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
       
       if (!hasSeenChangelog) {
-        // Delay showing the changelog slightly to allow the UI to load
         setTimeout(() => {
           setShowChangelogModal(true);
         }, 1000);
       }
     } catch (error) {
       console.error('Error checking changelog status:', error);
+    }
+  };
+
+  // Check for app updates
+  const checkForUpdates = async () => {
+    try {
+      const updateService = UpdateService.getInstance();
+      const { hasUpdate, metadata } = await updateService.checkForUpdates();
+      
+      if (hasUpdate) {
+        // If update is available, show the changelog modal with update info
+        setShowChangelogModal(true);
+      }
+    } catch (error) {
+      console.error('Error checking for updates:', error);
+    }
+  };
+
+  // Handle app state changes
+  const handleAppStateChange = (nextAppState: string) => {
+    if (nextAppState === 'active') {
+      // Check for updates when app becomes active
+      setTimeout(checkForUpdates, 1000);
     }
   };
 
@@ -533,13 +573,11 @@ export default function HomeScreen() {
       console.log('Loading additional location data in background...');
       const formData = await getPackageFormData();
       
-      // If we get additional locations from API, merge with defaults
       if (formData.locations && formData.locations.length > 0) {
         setLocations(formData.locations);
       }
     } catch (error) {
       console.error('Failed to load additional form data (non-critical):', error);
-      // Keep using default locations - no user-facing error
     }
   };
 
@@ -607,32 +645,32 @@ export default function HomeScreen() {
     return true;
   };
 
-  // FIXED: FAB Menu Handlers with instant animation timings
+  // FAB Menu Handlers
   const openFabMenu = () => {
     setFabMenuOpen(true);
     
     Animated.parallel([
       Animated.timing(fabRotation, {
         toValue: 1,
-        duration: 150, // 50% faster - reduced from 300ms
+        duration: 150,
         easing: Easing.bezier(0.4, 0.0, 0.2, 1),
         useNativeDriver: true,
       }),
       Animated.timing(overlayOpacity, {
         toValue: 1,
-        duration: 150, // 50% faster - reduced from 300ms
+        duration: 150,
         easing: Easing.out(Easing.quad),
         useNativeDriver: true,
       }),
       Animated.timing(optionsScale, {
         toValue: 1,
-        duration: 180, // 55% faster - reduced from 400ms
+        duration: 180,
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
       Animated.timing(optionsTranslateY, {
         toValue: 0,
-        duration: 180, // 55% faster - reduced from 400ms
+        duration: 180,
         easing: Easing.bezier(0.34, 1.56, 0.64, 1),
         useNativeDriver: true,
       }),
@@ -971,7 +1009,6 @@ export default function HomeScreen() {
     );
   };
 
-  // FIXED: FAB option rendering with solid colors and white info icons
   const renderFabOption = (option: FABOption, index: number) => {
     const optionOpacity = overlayOpacity.interpolate({
       inputRange: [0, 1],
@@ -1008,7 +1045,7 @@ export default function HomeScreen() {
               {
                 borderColor: option.color,
                 borderWidth: 2,
-                backgroundColor: option.color, // FIXED: Solid colors - removed alpha
+                backgroundColor: option.color,
                 shadowColor: option.glowColor,
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0.4,
@@ -1020,7 +1057,7 @@ export default function HomeScreen() {
               <View style={[
                 styles.fabOptionIcon,
                 {
-                  backgroundColor: 'rgba(255, 255, 255, 0.2)', // FIXED: Consistent white background
+                  backgroundColor: 'rgba(255, 255, 255, 0.2)',
                   borderColor: 'rgba(255, 255, 255, 0.3)',
                   borderWidth: 1,
                   shadowColor: option.glowColor,
@@ -1067,7 +1104,6 @@ export default function HomeScreen() {
               { transform: [{ translateX: scrollX }] },
             ]}
           >
-            {/* Create more repetitions for seamless loop - increased from 5 to 10 */}
             {Array(10).fill(locations).flat().map((location, index) => (
               <LocationTag key={`${location.name}-${index}`} location={location} />
             ))}
@@ -1235,7 +1271,7 @@ export default function HomeScreen() {
         type="destination"
       />
 
-      {/* Changelog Modal */}
+      {/* Enhanced Changelog Modal with Update System */}
       <ChangelogModal
         visible={showChangelogModal}
         onClose={handleChangelogClose}
@@ -1469,7 +1505,7 @@ const styles = StyleSheet.create({
     flex: 1 
   },
   scrollContentContainer: {
-    paddingBottom: 120, // Ensures content doesn't hide behind FAB
+    paddingBottom: 120,
   },
   calculatorContainer: { 
     padding: 20, 
