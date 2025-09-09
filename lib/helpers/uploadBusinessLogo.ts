@@ -64,7 +64,7 @@ export const uploadBusinessLogo = async (
     });
 
     // Use the api instance (which has proper file upload handling) instead of fetch
-    const response = await api.post(`/businesses/${businessId}/logo`, formData, {
+    const response = await api.post(`api/v1/businesses/${businessId}/logo`, formData, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'multipart/form-data',
