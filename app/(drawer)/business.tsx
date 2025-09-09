@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed with proper image upload modal usage
+// app/(drawer)/Business.tsx - Fixed with instant logo updates and You mode
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -41,6 +41,9 @@ const EditBusinessModal = React.lazy(() => import('../../components/EditBusiness
 interface BusinessProps {
   navigation: any;
 }
+
+// Display modes for the profile section
+type DisplayMode = 'you' | 'business';
 
 // Enhanced Safe Avatar Component with business logo support
 interface SafeAvatarProps {
@@ -168,30 +171,47 @@ export default function Business({ navigation }: BusinessProps) {
     triggerAvatarRefresh,
   } = useUser();
 
+  // Core modal states
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
-  const [selectedBusinessForShare, setSelectedBusinessForShare] = useState(null);
-  const [currentBusinessIndex, setCurrentBusinessIndex] = useState(0);
-  const [inviteLink, setInviteLink] = useState(null);
-  const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
   
-  // Image upload functionality states
+  // UI states
+  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
+  const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  
+  // Business sharing states
+  const [selectedBusinessForShare, setSelectedBusinessForShare] = useState(null);
+  const [inviteLink, setInviteLink] = useState(null);
+  
+  // NEW: Display mode state - determines if we show user avatar or business logo
+  const [displayMode, setDisplayMode] = useState<DisplayMode>('you');
+  
+  // Image upload states with enhanced context awareness
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [uploadType, setUploadType] = useState<'avatar' | 'business-logo'>('avatar');
-  const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
+  const [selectedBusinessForUpload, setSelectedBusinessForUpload] = useState<any>(null);
   
-  // Refresh functionality states
-  const [refreshing, setRefreshing] = useState(false);
+  // Update triggers for immediate visual feedback
+  const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
+  const [localAvatarUrl, setLocalAvatarUrl] = useState<string | null>(null);
+  const [localBusinessLogos, setLocalBusinessLogos] = useState<Record<number, string>>({});
 
   const displayName = getBusinessDisplayName();
   const userPhone = getUserPhone();
   const username = getDisplayName();
 
-  const currentBusiness = selectedBusiness || businesses.owned[currentBusinessIndex] || businesses.owned[0];
+  // Initialize display mode based on selected business
+  useEffect(() => {
+    if (selectedBusiness) {
+      setDisplayMode('business');
+    } else {
+      setDisplayMode('you');
+    }
+  }, [selectedBusiness]);
 
   // Enhanced refresh handler
   const onRefresh = useCallback(async () => {
@@ -210,6 +230,10 @@ export default function Business({ navigation }: BusinessProps) {
       
       triggerAvatarRefresh();
       setLogoUpdateTrigger(Date.now());
+      
+      // Clear local URLs to force refresh from server
+      setLocalAvatarUrl(null);
+      setLocalBusinessLogos({});
       
       showToast.success('Data refreshed');
     } catch (error) {
@@ -255,19 +279,36 @@ export default function Business({ navigation }: BusinessProps) {
     setTimeout(() => setShowLoginModal(true), 300);
   };
 
-  // Business dropdown selection
-  const handleBusinessSelect = (businessIndex: number) => {
-    const selectedBiz = businesses.owned[businessIndex];
-    setCurrentBusinessIndex(businessIndex);
-    setSelectedBusiness?.(selectedBiz);
+  // NEW: Handle display mode switching
+  const handleDisplayModeSwitch = (mode: DisplayMode) => {
+    console.log('🎭 Business: Switching display mode to:', mode);
+    setDisplayMode(mode);
+    
+    if (mode === 'you') {
+      setSelectedBusiness(null);
+      showToast.info('Personal mode', 'Now showing your profile');
+    } else if (mode === 'business' && businesses.owned.length > 0) {
+      const firstBusiness = businesses.owned[0];
+      setSelectedBusiness(firstBusiness);
+      showToast.info('Business mode', `Now showing ${firstBusiness.name}`);
+    }
+    
     setShowBusinessDropdown(false);
-    showToast.info('Business selected', selectedBiz?.name);
+  };
+
+  // Business dropdown selection with display mode update
+  const handleBusinessSelect = (business: any) => {
+    console.log('🎭 Business: Selecting business:', business.name);
+    setSelectedBusiness(business);
+    setDisplayMode('business');
+    setShowBusinessDropdown(false);
+    showToast.info('Business selected', business.name);
   };
 
   // Share business functionality
   const handleShareBusiness = () => {
-    if (currentBusiness) {
-      setSelectedBusinessForShare(currentBusiness);
+    if (displayMode === 'business' && selectedBusiness) {
+      setSelectedBusinessForShare(selectedBusiness);
     } else {
       showToast.warning('No business selected', 'Please select a business first');
     }
@@ -312,7 +353,7 @@ export default function Business({ navigation }: BusinessProps) {
     setShowBusinessModal(false);
     try {
       console.log('🔄 Business: Refreshing businesses after modal close');
-      await refreshBusinesses?.(true);
+      await refreshBusinesses(true);
       setLogoUpdateTrigger(Date.now());
     } catch (error) {
       console.error('Error refreshing businesses:', error);
@@ -324,18 +365,32 @@ export default function Business({ navigation }: BusinessProps) {
     setShowJoinModal(false);
     try {
       console.log('🔄 Business: Refreshing businesses after join modal close');
-      await refreshBusinesses?.(true);
+      await refreshBusinesses(true);
       setLogoUpdateTrigger(Date.now());
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
   };
 
-  // Handle business update from edit modal
+  // Handle business update from edit modal with instant logo update
   const handleBusinessUpdate = async (updatedBusiness: any) => {
     try {
-      console.log('🔄 Business: Refreshing after business update');
-      await refreshBusinesses?.(true);
+      console.log('🔄 Business: Handling business update:', updatedBusiness);
+      
+      // Update local business logo cache if logo changed
+      if (updatedBusiness.logo_url && selectedBusiness?.id === updatedBusiness.id) {
+        setLocalBusinessLogos(prev => ({
+          ...prev,
+          [updatedBusiness.id]: updatedBusiness.logo_url
+        }));
+      }
+      
+      // Update selected business if it's the one being edited
+      if (selectedBusiness?.id === updatedBusiness.id) {
+        setSelectedBusiness(updatedBusiness);
+      }
+      
+      await refreshBusinesses(true);
       setLogoUpdateTrigger(Date.now());
       triggerAvatarRefresh();
     } catch (error) {
@@ -343,7 +398,7 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  // Context-aware image picker - handles both avatar and business logo
+  // Enhanced context-aware image picker
   const pickAndPreviewImage = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -352,9 +407,16 @@ export default function Business({ navigation }: BusinessProps) {
         return;
       }
 
-      // Determine what we're uploading based on current context
-      const isBusinessLogoUpload = !!currentBusiness;
-      const selectedUploadType: 'avatar' | 'business-logo' = isBusinessLogoUpload ? 'business-logo' : 'avatar';
+      // Determine upload context based on display mode
+      const isBusinessMode = displayMode === 'business' && selectedBusiness;
+      const targetUploadType: 'avatar' | 'business-logo' = isBusinessMode ? 'business-logo' : 'avatar';
+      const targetBusiness = isBusinessMode ? selectedBusiness : null;
+
+      console.log('🎭 Business: Image picker context:', {
+        displayMode,
+        uploadType: targetUploadType,
+        business: targetBusiness?.name || 'None'
+      });
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -366,71 +428,94 @@ export default function Business({ navigation }: BusinessProps) {
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log(`🎭 Business: Selected ${selectedUploadType}:`, {
+      console.log(`🎭 Business: Selected ${targetUploadType}:`, {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
         fileSize: asset.fileSize
       });
       
-      setUploadType(selectedUploadType);
+      setUploadType(targetUploadType);
+      setSelectedBusinessForUpload(targetBusiness);
       setPreviewUri(asset.uri);
     } catch (error) {
       console.error('Business: Error picking image:', error);
       showToast.error('Failed to select image', 'Please try again');
     }
-  }, [currentBusiness]);
+  }, [displayMode, selectedBusiness]);
 
-  // Context-aware upload handler
+  // Enhanced upload handler with instant visual feedback
   const confirmUploadImage = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       const isBusinessLogoUpload = uploadType === 'business-logo';
+      const targetBusiness = selectedBusinessForUpload;
 
-      console.log(`🎭 Business: Starting ${uploadType} upload process...`);
+      console.log(`🎭 Business: Starting ${uploadType} upload process...`, {
+        business: targetBusiness?.name || 'None',
+        uploadType
+      });
       
       let result;
-      if (isBusinessLogoUpload && currentBusiness) {
+      if (isBusinessLogoUpload && targetBusiness) {
         // Upload business logo
-        result = await uploadBusinessLogo(previewUri, currentBusiness.id);
+        result = await uploadBusinessLogo(previewUri, targetBusiness.id);
         console.log('🎭 Business: Business logo upload result:', result);
+        
+        // INSTANT UPDATE: Update local logo cache immediately
+        if (result?.success && result?.logo_url) {
+          console.log('🎭 Business: Updating local business logo cache');
+          setLocalBusinessLogos(prev => ({
+            ...prev,
+            [targetBusiness.id]: result.logo_url
+          }));
+          
+          // Update selected business if it's the one we uploaded to
+          if (selectedBusiness?.id === targetBusiness.id) {
+            setSelectedBusiness({
+              ...selectedBusiness,
+              logo_url: result.logo_url
+            });
+          }
+        }
       } else {
         // Upload user avatar
         result = await uploadAvatar(previewUri);
         console.log('🎭 Business: Avatar upload result:', result);
+        
+        // INSTANT UPDATE: Update local avatar cache immediately
+        if (result?.success && result?.avatar_url) {
+          console.log('🎭 Business: Updating local avatar cache');
+          setLocalAvatarUrl(result.avatar_url);
+        }
       }
       
       // Check for success
       if (result?.success || result?.logo_url || result?.avatar_url) {
-        console.log(`🎭 Business: ${uploadType} uploaded successfully, starting synchronization...`);
+        console.log(`🎭 Business: ${uploadType} uploaded successfully, starting background sync...`);
         
-        // Clear all caches
-        console.log('🎭 Business: Clearing all caches...');
-        await clearUserCache();
-        
-        // Wait a moment for server to process
-        await new Promise(resolve => setTimeout(resolve, 500));
-        
-        // Force refresh data
-        console.log('🎭 Business: Force refreshing data...');
-        await refreshUser(true);
-        await refreshBusinesses(true);
-        
-        // Trigger UI refresh
-        console.log('🎭 Business: Triggering UI refresh...');
-        triggerAvatarRefresh();
+        // Trigger immediate UI refresh
         setLogoUpdateTrigger(Date.now());
+        triggerAvatarRefresh();
         
-        // Another small delay to ensure UI updates
-        await new Promise(resolve => setTimeout(resolve, 200));
+        // Background refresh (don't await to keep UI responsive)
+        setTimeout(async () => {
+          try {
+            await clearUserCache();
+            await refreshUser(true);
+            await refreshBusinesses(true);
+          } catch (bgError) {
+            console.error('Background refresh error:', bgError);
+          }
+        }, 1000);
         
         showToast.success(
           `${isBusinessLogoUpload ? 'Business logo' : 'Avatar'} updated!`, 
           `Your ${uploadType.replace('-', ' ')} has been changed`
         );
         
-        console.log(`🎭 Business: ${uploadType} upload and synchronization completed`);
+        console.log(`🎭 Business: ${uploadType} upload completed with instant feedback`);
       } else {
         throw new Error(`Upload successful but no ${uploadType} URL returned`);
       }
@@ -440,8 +525,39 @@ export default function Business({ navigation }: BusinessProps) {
       showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
+      setSelectedBusinessForUpload(null);
     }
-  }, [previewUri, uploadType, currentBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
+  }, [previewUri, uploadType, selectedBusinessForUpload, selectedBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
+
+  // Get the appropriate image URL based on display mode
+  const getCurrentImageUrl = () => {
+    if (displayMode === 'business' && selectedBusiness) {
+      // Check local cache first for instant updates
+      const localLogoUrl = localBusinessLogos[selectedBusiness.id];
+      return localLogoUrl || selectedBusiness.logo_url;
+    } else {
+      // Personal mode - use avatar
+      return localAvatarUrl || user?.avatar_url;
+    }
+  };
+
+  // Get the current display name based on mode
+  const getCurrentDisplayName = () => {
+    if (displayMode === 'business' && selectedBusiness) {
+      return selectedBusiness.name;
+    } else {
+      return username;
+    }
+  };
+
+  // Get upload indicator text
+  const getUploadIndicatorText = () => {
+    if (displayMode === 'business' && selectedBusiness) {
+      return `${selectedBusiness.name} Logo`;
+    } else {
+      return 'Your Avatar';
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -454,7 +570,7 @@ export default function Business({ navigation }: BusinessProps) {
         </TouchableOpacity>
         
         <View style={styles.headerCenter}>
-          <Text style={styles.username}>{username}</Text>
+          <Text style={styles.username}>{getCurrentDisplayName()}</Text>
           <Feather name="chevron-down" size={20} color="#fff" />
         </View>
         
@@ -494,13 +610,13 @@ export default function Business({ navigation }: BusinessProps) {
           />
         }
       >
-        {/* Profile Section with context-aware avatar/logo */}
+        {/* Enhanced Profile Section with instant image updates */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
             <SafeLogo
               size={86}
-              logoUrl={currentBusiness?.logo_url}
-              avatarUrl={user?.avatar_url}
+              logoUrl={getCurrentImageUrl()}
+              avatarUrl={displayMode === 'you' ? getCurrentImageUrl() : null}
               style={styles.avatar}
               onPress={pickAndPreviewImage}
               updateTrigger={logoUpdateTrigger + avatarUpdateTrigger}
@@ -512,10 +628,13 @@ export default function Business({ navigation }: BusinessProps) {
               <Feather name="plus" size={20} color="#fff" />
             </TouchableOpacity>
             
-            {/* Context indicator */}
+            {/* Enhanced upload indicator */}
             <View style={styles.uploadIndicator}>
               <Text style={styles.uploadIndicatorText}>
-                {currentBusiness ? `${currentBusiness.name} Logo` : 'Your Avatar'}
+                {getUploadIndicatorText()}
+              </Text>
+              <Text style={styles.uploadModeText}>
+                {displayMode === 'business' ? 'Business Mode' : 'Personal Mode'}
               </Text>
             </View>
           </View>
@@ -536,64 +655,133 @@ export default function Business({ navigation }: BusinessProps) {
           </View>
         </View>
 
-        {/* Current Business Info with Categories */}
-        <View style={styles.currentBusinessSection}>
-          {businesses.owned.length > 0 ? (
-            <TouchableOpacity 
-              style={styles.businessDropdownButton}
-              onPress={() => setShowBusinessDropdown(true)}
-            >
-              <Text style={styles.businessName}>{currentBusiness?.name || 'Select Business'}</Text>
-              <Feather name="chevron-down" size={20} color="#fff" />
-            </TouchableOpacity>
-          ) : (
-            <Text style={styles.businessName}>No businesses owned</Text>
-          )}
+        {/* Enhanced Mode Switcher Section */}
+        <View style={styles.modeSwitcherSection}>
+          <TouchableOpacity 
+            style={[
+              styles.modeButton,
+              displayMode === 'you' && styles.activeModeButton
+            ]}
+            onPress={() => handleDisplayModeSwitch('you')}
+          >
+            <Feather name="user" size={18} color={displayMode === 'you' ? '#fff' : '#7c3aed'} />
+            <Text style={[
+              styles.modeButtonText,
+              displayMode === 'you' && styles.activeModeButtonText
+            ]}>You</Text>
+          </TouchableOpacity>
           
-          {/* Business Categories Display */}
-          {currentBusiness?.categories && currentBusiness.categories.length > 0 ? (
-            <View style={styles.categoriesSection}>
-              <Text style={styles.categoriesTitle}>Categories</Text>
-              <View style={styles.categoriesContainer}>
-                {currentBusiness.categories.map((category, index) => (
-                  <View key={category.id} style={styles.categoryChip}>
-                    <Text style={styles.categoryText}>{category.name}</Text>
-                  </View>
-                ))}
-              </View>
-            </View>
-          ) : currentBusiness ? (
-            <View style={styles.categoriesSection}>
-              <Text style={styles.noCategoriesText}>No categories selected</Text>
-            </View>
-          ) : (
-            <View style={styles.categoriesSection}>
-              <Text style={styles.noCategoriesText}>Select a business to view categories</Text>
-            </View>
-          )}
-          
-          <View style={styles.contactInfo}>
-            <Text style={styles.phoneNumber}>{userPhone}</Text>
-          </View>
+          <TouchableOpacity 
+            style={[
+              styles.modeButton,
+              displayMode === 'business' && styles.activeModeButton
+            ]}
+            onPress={() => handleDisplayModeSwitch('business')}
+            disabled={businesses.owned.length === 0}
+          >
+            <Feather name="briefcase" size={18} color={displayMode === 'business' ? '#fff' : '#7c3aed'} />
+            <Text style={[
+              styles.modeButtonText,
+              displayMode === 'business' && styles.activeModeButtonText,
+              businesses.owned.length === 0 && styles.disabledModeButtonText
+            ]}>Business</Text>
+          </TouchableOpacity>
         </View>
 
-        {/* Business Action Buttons */}
+        {/* Dynamic Content Section based on display mode */}
+        <View style={styles.currentBusinessSection}>
+          {displayMode === 'you' ? (
+            /* Personal Mode Content */
+            <View style={styles.personalModeContent}>
+              <Text style={styles.personalModeTitle}>Personal Account</Text>
+              <Text style={styles.personalModeName}>{username}</Text>
+              <View style={styles.contactInfo}>
+                <Text style={styles.phoneNumber}>{userPhone}</Text>
+              </View>
+            </View>
+          ) : (
+            /* Business Mode Content */
+            <View style={styles.businessModeContent}>
+              {businesses.owned.length > 0 ? (
+                <TouchableOpacity 
+                  style={styles.businessDropdownButton}
+                  onPress={() => setShowBusinessDropdown(true)}
+                >
+                  <Text style={styles.businessName}>{selectedBusiness?.name || 'Select Business'}</Text>
+                  <Feather name="chevron-down" size={20} color="#fff" />
+                </TouchableOpacity>
+              ) : (
+                <Text style={styles.businessName}>No businesses owned</Text>
+              )}
+              
+              {/* Business Categories Display */}
+              {selectedBusiness?.categories && selectedBusiness.categories.length > 0 ? (
+                <View style={styles.categoriesSection}>
+                  <Text style={styles.categoriesTitle}>Categories</Text>
+                  <View style={styles.categoriesContainer}>
+                    {selectedBusiness.categories.map((category, index) => (
+                      <View key={category.id} style={styles.categoryChip}>
+                        <Text style={styles.categoryText}>{category.name}</Text>
+                      </View>
+                    ))}
+                  </View>
+                </View>
+              ) : selectedBusiness ? (
+                <View style={styles.categoriesSection}>
+                  <Text style={styles.noCategoriesText}>No categories selected</Text>
+                </View>
+              ) : (
+                <View style={styles.categoriesSection}>
+                  <Text style={styles.noCategoriesText}>Select a business to view categories</Text>
+                </View>
+              )}
+              
+              <View style={styles.contactInfo}>
+                <Text style={styles.phoneNumber}>{userPhone}</Text>
+              </View>
+            </View>
+          )}
+        </View>
+
+        {/* Enhanced Action Buttons based on mode */}
         <View style={styles.actionButtons}>
-          <TouchableOpacity 
-            style={styles.editButton}
-            disabled={!currentBusiness}
-            onPress={() => setShowEditModal(true)}
-          >
-            <Text style={styles.editButtonText}>Edit Business</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity 
-            style={styles.shareButton}
-            disabled={!currentBusiness}
-            onPress={handleShareBusiness}
-          >
-            <Text style={styles.shareButtonText}>Share Business</Text>
-          </TouchableOpacity>
+          {displayMode === 'you' ? (
+            /* Personal Mode Actions */
+            <>
+              <TouchableOpacity 
+                style={styles.editButton}
+                onPress={() => showToast.info('Edit Profile', 'Navigate to account settings')}
+              >
+                <Text style={styles.editButtonText}>Edit Profile</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.shareButton}
+                onPress={() => showToast.info('Share Profile', 'Profile sharing coming soon')}
+              >
+                <Text style={styles.shareButtonText}>Share Profile</Text>
+              </TouchableOpacity>
+            </>
+          ) : (
+            /* Business Mode Actions */
+            <>
+              <TouchableOpacity 
+                style={styles.editButton}
+                disabled={!selectedBusiness}
+                onPress={() => setShowEditModal(true)}
+              >
+                <Text style={styles.editButtonText}>Edit Business</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity 
+                style={styles.shareButton}
+                disabled={!selectedBusiness}
+                onPress={handleShareBusiness}
+              >
+                <Text style={styles.shareButtonText}>Share Business</Text>
+              </TouchableOpacity>
+            </>
+          )}
           
           <TouchableOpacity 
             style={styles.moreButton}
@@ -616,7 +804,7 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
       </ScrollView>
 
-      {/* Business Selection Dropdown */}
+      {/* Enhanced Business Selection Dropdown with You option */}
       {showBusinessDropdown && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -624,30 +812,57 @@ export default function Business({ navigation }: BusinessProps) {
             onPress={() => setShowBusinessDropdown(false)}
           >
             <View style={styles.dropdownModal}>
-              <Text style={styles.dropdownTitle}>Select Business</Text>
+              <Text style={styles.dropdownTitle}>Select Mode</Text>
+              
+              {/* You option */}
+              <TouchableOpacity
+                style={[
+                  styles.dropdownItem,
+                  displayMode === 'you' && styles.selectedDropdownItem
+                ]}
+                onPress={() => handleDisplayModeSwitch('you')}
+              >
+                <SafeAvatar
+                  size={24}
+                  avatarUrl={user?.avatar_url}
+                  style={styles.dropdownBusinessLogo}
+                  updateTrigger={avatarUpdateTrigger}
+                />
+                <Text style={[
+                  styles.dropdownItemText,
+                  displayMode === 'you' && styles.selectedDropdownItemText
+                ]}>
+                  You (Personal)
+                </Text>
+                {displayMode === 'you' && (
+                  <Feather name="check" size={16} color="#7c3aed" />
+                )}
+              </TouchableOpacity>
+              
+              {/* Business options */}
               {businesses.owned.map((business, index) => (
                 <TouchableOpacity
                   key={business.id}
                   style={[
                     styles.dropdownItem,
-                    index === currentBusinessIndex && styles.selectedDropdownItem
+                    selectedBusiness?.id === business.id && displayMode === 'business' && styles.selectedDropdownItem
                   ]}
-                  onPress={() => handleBusinessSelect(index)}
+                  onPress={() => handleBusinessSelect(business)}
                 >
                   <SafeLogo
                     size={24}
-                    logoUrl={business.logo_url}
+                    logoUrl={localBusinessLogos[business.id] || business.logo_url}
                     avatarUrl={user?.avatar_url}
                     style={styles.dropdownBusinessLogo}
                     updateTrigger={logoUpdateTrigger}
                   />
                   <Text style={[
                     styles.dropdownItemText,
-                    index === currentBusinessIndex && styles.selectedDropdownItemText
+                    selectedBusiness?.id === business.id && displayMode === 'business' && styles.selectedDropdownItemText
                   ]}>
                     {business.name}
                   </Text>
-                  {index === currentBusinessIndex && (
+                  {selectedBusiness?.id === business.id && displayMode === 'business' && (
                     <Feather name="check" size={16} color="#7c3aed" />
                   )}
                 </TouchableOpacity>
@@ -749,10 +964,10 @@ export default function Business({ navigation }: BusinessProps) {
           />
         )}
 
-        {showEditModal && currentBusiness && (
+        {showEditModal && selectedBusiness && (
           <EditBusinessModal
             visible={showEditModal}
-            business={currentBusiness}
+            business={selectedBusiness}
             onClose={() => setShowEditModal(false)}
             onUpdate={handleBusinessUpdate}
           />
@@ -763,8 +978,11 @@ export default function Business({ navigation }: BusinessProps) {
             visible={true}
             uri={previewUri}
             uploadType={uploadType}
-            businessName={uploadType === 'business-logo' ? currentBusiness?.name : undefined}
-            onCancel={() => setPreviewUri(null)}
+            businessName={uploadType === 'business-logo' ? selectedBusinessForUpload?.name : undefined}
+            onCancel={() => {
+              setPreviewUri(null);
+              setSelectedBusinessForUpload(null);
+            }}
             onConfirm={confirmUploadImage}
           />
         )}
@@ -869,6 +1087,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     maxWidth: 100,
   },
+  uploadModeText: {
+    color: '#7c3aed',
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 2,
+    fontWeight: '500',
+  },
   statsContainer: {
     flex: 1,
     flexDirection: 'row',
@@ -887,9 +1112,70 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
   },
+  
+  // NEW: Mode Switcher Styles
+  modeSwitcherSection: {
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+    paddingBottom: 16,
+    gap: 12,
+  },
+  modeButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    borderRadius: 8,
+    gap: 8,
+  },
+  activeModeButton: {
+    backgroundColor: '#7c3aed',
+    borderColor: '#7c3aed',
+  },
+  modeButtonText: {
+    color: '#7c3aed',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  activeModeButtonText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  disabledModeButtonText: {
+    color: 'rgba(124, 58, 237, 0.5)',
+  },
+  
   currentBusinessSection: {
     paddingHorizontal: 20,
     paddingBottom: 20,
+  },
+  
+  // Personal Mode Styles
+  personalModeContent: {
+    alignItems: 'center',
+    paddingVertical: 16,
+  },
+  personalModeTitle: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 8,
+  },
+  personalModeName: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  
+  // Business Mode Styles
+  businessModeContent: {
+    // Existing business content styles
   },
   businessDropdownButton: {
     flexDirection: 'row',
