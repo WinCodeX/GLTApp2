@@ -3,18 +3,14 @@
 import React, { useEffect } from 'react';
 import { Modal, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 
-export const CHANGELOG_VERSION = '1.3.6';
+export const CHANGELOG_VERSION = '1.3.7';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Added notifications and cart icons',
-'Fixed business creation nameless',
-'Fixed glitch in header',
-'Avatar upload glitch fixed',
-'Cost Calculator now working',
-'Added find us to the drawer menu',
-'Fixed fab colors now solid',
+  'Added business logo',
+'Select Business fixed',
+'Added edit business section',
 'Other bug fixes',
 ];
 
