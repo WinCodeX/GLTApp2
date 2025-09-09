@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Updated with Find Us and Become a Rider
+// components/CustomDrawerContent.tsx - Fixed with business logos and You option
 import {
   Feather,
   FontAwesome5,
@@ -21,6 +21,7 @@ import {
 import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
+import { SafeLogo } from './SafeLogo';
 import colors from '../theme/colors';
 
 // Enhanced Safe Avatar Component with comprehensive synchronization
@@ -29,7 +30,7 @@ interface SafeAvatarProps {
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
-  updateTrigger?: number; // New: Force refresh trigger
+  updateTrigger?: number;
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
@@ -43,7 +44,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
-  // Reset error state and force reload when avatarUrl or updateTrigger changes
   useEffect(() => {
     console.log('🎭 Drawer SafeAvatar: Update triggered', {
       avatarUrl,
@@ -52,10 +52,9 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     });
     
     setHasError(false);
-    setImageKey(Date.now()); // Force reload with new timestamp
+    setImageKey(Date.now());
   }, [avatarUrl, updateTrigger]);
   
-  // Use fallback if no URL or error occurred
   if (!fullAvatarUrl || hasError) {
     return (
       <Image
@@ -68,7 +67,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   return (
     <Image
       source={{ 
-        uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
+        uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`,
         headers: {
           'Cache-Control': 'no-cache, no-store, must-revalidate',
           'Pragma': 'no-cache',
@@ -101,13 +100,16 @@ export default function CustomDrawerContent(props: any) {
     getDisplayName,
     refreshUser,
     clearUserCache,
-    avatarUpdateTrigger, // New: Avatar sync trigger
-    triggerAvatarRefresh, // New: Force avatar refresh
+    avatarUpdateTrigger,
+    triggerAvatarRefresh,
   } = useUser();
 
-  // Use selected business name or fallback to user display name
+  // Enhanced display logic - show business name if selected, otherwise user name
   const displayName = selectedBusiness?.name || getDisplayName();
   const userPhone = getUserPhone();
+  
+  // Determine display mode based on selected business
+  const isBusinessMode = !!selectedBusiness;
 
   // Enhanced user data tracking with avatar sync trigger
   useEffect(() => {
@@ -116,11 +118,13 @@ export default function CustomDrawerContent(props: any) {
         userId: user.id,
         email: user.email,
         avatarUrl: user.avatar_url,
+        selectedBusiness: selectedBusiness?.name || 'None',
+        isBusinessMode,
         updateTrigger: avatarUpdateTrigger,
         timestamp: Date.now()
       });
     }
-  }, [user?.avatar_url, user?.id, avatarUpdateTrigger]); // Watch for avatar sync trigger
+  }, [user?.avatar_url, user?.id, selectedBusiness, isBusinessMode, avatarUpdateTrigger]);
 
   // Enhanced refresh handler that triggers avatar sync
   const handleRefreshUser = useCallback(async () => {
@@ -128,7 +132,7 @@ export default function CustomDrawerContent(props: any) {
       console.log('🎭 Drawer manually refreshing user data with avatar sync...');
       await clearUserCache();
       await refreshUser(true);
-      triggerAvatarRefresh(); // Ensure avatar refresh across components
+      triggerAvatarRefresh();
       console.log('🎭 Drawer user refresh with avatar sync completed');
     } catch (error) {
       console.error('🎭 Drawer user refresh error:', error);
@@ -170,6 +174,7 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
   ];
 
+  // Enhanced business switching with "You" mode support
   const handleBusinessSwitch = async (business: any) => {
     try {
       setShowBusinessDropdown(false);
@@ -186,6 +191,26 @@ export default function CustomDrawerContent(props: any) {
     } catch (error: any) {
       console.error('🎭 Drawer business switch error:', error);
       Alert.alert('Error', error.message || 'Failed to switch business');
+    }
+  };
+
+  // NEW: Handle switching to "You" mode (personal mode)
+  const handleSwitchToYou = async () => {
+    try {
+      setShowBusinessDropdown(false);
+      props.navigation.closeDrawer();
+      
+      console.log('🎭 Drawer switching to You mode (personal)');
+      setSelectedBusiness?.(null); // Clear selected business
+      
+      Toast.show({
+        type: 'success',
+        text1: 'Personal mode',
+        text2: 'Now using your personal account',
+      });
+    } catch (error: any) {
+      console.error('🎭 Drawer You mode switch error:', error);
+      Alert.alert('Error', error.message || 'Failed to switch to personal mode');
     }
   };
 
@@ -219,7 +244,6 @@ export default function CustomDrawerContent(props: any) {
   const handleBecomeRider = () => {
     props.navigation.closeDrawer();
     console.log('🎭 Navigating to become a rider...');
-    // You can implement navigation to rider registration or contact form
     Alert.alert(
       'Become a Rider',
       'Contact us to learn more about becoming a rider!',
@@ -240,9 +264,23 @@ export default function CustomDrawerContent(props: any) {
         onPress={() => handleBusinessSwitch(business)}
         activeOpacity={0.7}
       >
-        <View style={styles.businessIcon}>
-          <Feather name="briefcase" size={16} color="#fff" />
+        {/* Use business logo if available, fallback to business icon */}
+        <View style={styles.businessIconContainer}>
+          {business.logo_url ? (
+            <SafeLogo
+              size={24}
+              logoUrl={business.logo_url}
+              avatarUrl={user?.avatar_url}
+              style={styles.businessLogo}
+              updateTrigger={avatarUpdateTrigger}
+            />
+          ) : (
+            <View style={styles.businessIcon}>
+              <Feather name="briefcase" size={16} color="#fff" />
+            </View>
+          )}
         </View>
+        
         <View style={styles.businessInfo}>
           <Text style={styles.businessName}>
             {business.name}
@@ -251,7 +289,45 @@ export default function CustomDrawerContent(props: any) {
             {isOwned ? 'Owned' : 'Joined'}
           </Text>
         </View>
+        
         {isSelectedBusiness && (
+          <View style={styles.checkmarkContainer}>
+            <Feather name="check" size={14} color="#00ff00" />
+          </View>
+        )}
+      </TouchableOpacity>
+    );
+  };
+
+  // NEW: Render "You" option
+  const renderYouOption = () => {
+    const isSelected = !selectedBusiness; // Selected when no business is selected
+
+    return (
+      <TouchableOpacity
+        style={styles.businessItem}
+        onPress={handleSwitchToYou}
+        activeOpacity={0.7}
+      >
+        <View style={styles.businessIconContainer}>
+          <SafeAvatar
+            size={24}
+            avatarUrl={user?.avatar_url}
+            style={styles.businessLogo}
+            updateTrigger={avatarUpdateTrigger}
+          />
+        </View>
+        
+        <View style={styles.businessInfo}>
+          <Text style={styles.businessName}>
+            You
+          </Text>
+          <Text style={styles.businessType}>
+            Personal
+          </Text>
+        </View>
+        
+        {isSelected && (
           <View style={styles.checkmarkContainer}>
             <Feather name="check" size={14} color="#00ff00" />
           </View>
@@ -269,23 +345,38 @@ export default function CustomDrawerContent(props: any) {
       >
         <View style={styles.container}>
 
-          {/* Main Business/Account Section with synchronized avatar */}    
+          {/* Enhanced Main Business/Account Section with context-aware avatar/logo display */}    
           <TouchableOpacity    
             onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
             style={styles.accountHeader}    
             activeOpacity={0.8}
           >    
-            {/* Enhanced SafeAvatar component with proper synchronization */}
-            <SafeAvatar
-              size={42}
-              avatarUrl={user?.avatar_url}
-              fallbackSource={require('../assets/images/avatar_placeholder.png')}
-              style={styles.avatar}
-              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
-            />
+            {/* Context-aware image display: Business logo when business selected, avatar when in "You" mode */}
+            {isBusinessMode ? (
+              <SafeLogo
+                size={42}
+                logoUrl={selectedBusiness.logo_url}
+                avatarUrl={user?.avatar_url}
+                style={styles.avatar}
+                updateTrigger={avatarUpdateTrigger}
+              />
+            ) : (
+              <SafeAvatar
+                size={42}
+                avatarUrl={user?.avatar_url}
+                fallbackSource={require('../assets/images/avatar_placeholder.png')}
+                style={styles.avatar}
+                updateTrigger={avatarUpdateTrigger}
+              />
+            )}
+            
             <View style={styles.accountInfo}>
               <Text style={styles.userName}>{displayName}</Text>
               <Text style={styles.userPhone}>{userPhone}</Text>
+              {/* Show mode indicator */}
+              <Text style={styles.modeIndicator}>
+                {isBusinessMode ? 'Business Mode' : 'Personal Mode'}
+              </Text>
             </View>    
             <Feather    
               name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
@@ -304,18 +395,26 @@ export default function CustomDrawerContent(props: any) {
                 onPress={handleAccountNavigation}
               />
               
-              {/* Business Listings */}
-              {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
-                <View style={styles.businessesSection}>
-                  <Text style={styles.sectionTitle}>Your Businesses</Text>
-                  
-                  {/* Owned Businesses */}
-                  {businesses.owned.map(business => renderBusinessItem(business, true))}
-                  
-                  {/* Joined Businesses */}
-                  {businesses.joined.map(business => renderBusinessItem(business, false))}
-                </View>
-              )}
+              {/* Enhanced Business/Personal Listings */}
+              <View style={styles.businessesSection}>
+                <Text style={styles.sectionTitle}>Switch Mode</Text>
+                
+                {/* NEW: You option - always first */}
+                {renderYouOption()}
+                
+                {/* Business Listings */}
+                {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
+                  <>
+                    <Text style={styles.sectionTitle}>Your Businesses</Text>
+                    
+                    {/* Owned Businesses */}
+                    {businesses.owned.map(business => renderBusinessItem(business, true))}
+                    
+                    {/* Joined Businesses */}
+                    {businesses.joined.map(business => renderBusinessItem(business, false))}
+                  </>
+                )}
+              </View>
 
               {/* Business Management Button */}
               <TouchableOpacity
@@ -469,6 +568,13 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 13,
   },
+  // NEW: Mode indicator style
+  modeIndicator: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 11,
+    marginTop: 2,
+    fontStyle: 'italic',
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -537,6 +643,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
+  // NEW: Container for business icon/logo
+  businessIconContainer: {
+    marginRight: 12,
+  },
   businessIcon: {
     width: 24,
     height: 24,
@@ -544,7 +654,12 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(124, 58, 237, 0.8)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+  },
+  // NEW: Style for business logo
+  businessLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
   },
   businessInfo: {
     flex: 1,
