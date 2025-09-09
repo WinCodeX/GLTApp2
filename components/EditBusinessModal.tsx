@@ -1,5 +1,5 @@
-// components/EditBusinessModal.tsx - Fixed with ImagePreviewModal and category fetching
-import React, { useState, useEffect, useCallback, Suspense } from 'react';
+// components/EditBusinessModal.tsx - Fixed with ImagePreviewModal opening properly
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
   View,
@@ -20,9 +20,7 @@ import { fetchCategories, validatePhoneNumber, formatPhoneNumber } from '../lib/
 import { uploadBusinessLogo } from '../lib/helpers/uploadBusinessLogo';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
-
-// Lazy load ImagePreviewModal
-const ImagePreviewModal = React.lazy(() => import('./ImagePreviewModal'));
+import ImagePreviewModal from './ImagePreviewModal';
 
 interface Category {
   id: number;
@@ -308,187 +306,187 @@ export default function EditBusinessModal({
   };
 
   return (
-    <Modal
-      visible={visible}
-      animationType="slide"
-      presentationStyle="pageSheet"
-      onRequestClose={onClose}
-    >
-      <SafeAreaView style={styles.container}>
-        {/* Header */}
-        <View style={styles.header}>
-          <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
-            <Text style={styles.cancelText}>Cancel</Text>
-          </TouchableOpacity>
-          
-          <Text style={styles.title}>Edit Business</Text>
-          
-          <TouchableOpacity 
-            onPress={handleSave} 
-            style={styles.saveButton}
-            disabled={loading}
-          >
-            {loading ? (
-              <ActivityIndicator size="small" color="#fff" />
-            ) : (
-              <Text style={styles.saveText}>Save</Text>
-            )}
-          </TouchableOpacity>
-        </View>
-
-        <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
-          {/* Business Logo Section */}
-          <View style={styles.logoSection}>
-            <Text style={styles.sectionTitle}>Business Logo</Text>
+    <>
+      <Modal
+        visible={visible}
+        animationType="slide"
+        presentationStyle="pageSheet"
+        onRequestClose={onClose}
+      >
+        <SafeAreaView style={styles.container}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={onClose} style={styles.cancelButton}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </TouchableOpacity>
             
-            <View style={styles.logoContainer}>
-              <SafeLogo
-                size={80}
-                logoUrl={getCurrentLogoUrl()}
-                avatarUrl={user?.avatar_url}
-                style={styles.logo}
-                onPress={pickBusinessLogo}
-                updateTrigger={logoUpdateTrigger}
-              />
-              
-              <TouchableOpacity 
-                style={styles.logoButton}
-                onPress={pickBusinessLogo}
-              >
-                <Feather name="camera" size={16} color="#fff" />
-                <Text style={styles.logoButtonText}>Change Logo</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Business Name */}
-          <View style={styles.section}>
-            <Text style={styles.label}>Business Name *</Text>
-            <TextInput
-              style={styles.input}
-              value={businessName}
-              onChangeText={setBusinessName}
-              placeholder="Enter business name"
-              placeholderTextColor="rgba(255,255,255,0.5)"
-              maxLength={50}
-              editable={!loading}
-              autoCapitalize="words"
-              autoCorrect={false}
-            />
-            <Text style={styles.characterCount}>
-              {businessName.length}/50
-            </Text>
-          </View>
-
-          {/* Phone Number */}
-          <View style={styles.section}>
-            <Text style={styles.label}>Phone Number</Text>
-            <Text style={styles.helpText}>
-              Enter your business phone number (e.g., 712345678 or +254712345678)
-            </Text>
-            <View style={styles.phoneInputContainer}>
-              <View style={styles.countryCodeContainer}>
-                <Text style={styles.countryCodeText}>🇰🇪 +254</Text>
-              </View>
-              <TextInput
-                style={styles.phoneInput}
-                value={phoneNumber}
-                onChangeText={handlePhoneNumberChange}
-                placeholder="712345678"
-                placeholderTextColor="rgba(255,255,255,0.5)"
-                keyboardType="phone-pad"
-                maxLength={20}
-                editable={!loading}
-              />
-            </View>
-            <Text style={styles.phoneHint}>
-              {phoneNumber && validatePhoneNumber(phoneNumber) ? (
-                <Text style={styles.validPhone}>✓ Valid phone number</Text>
-              ) : phoneNumber ? (
-                <Text style={styles.invalidPhone}>✗ Invalid phone number</Text>
+            <Text style={styles.title}>Edit Business</Text>
+            
+            <TouchableOpacity 
+              onPress={handleSave} 
+              style={styles.saveButton}
+              disabled={loading}
+            >
+              {loading ? (
+                <ActivityIndicator size="small" color="#fff" />
               ) : (
-                <Text style={styles.phoneHintText}>Enter a valid Kenyan phone number</Text>
+                <Text style={styles.saveText}>Save</Text>
               )}
-            </Text>
+            </TouchableOpacity>
           </View>
 
-          {/* Categories */}
-          <View style={styles.section}>
-            <Text style={styles.label}>
-              Categories * ({selectedCategories.length}/5)
-            </Text>
-            <Text style={styles.helpText}>
-              Select up to 5 categories that best describe your business
-            </Text>
-            
-            {loadingCategories ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator size="small" color={colors.primary} />
-                <Text style={styles.loadingText}>Loading categories...</Text>
-              </View>
-            ) : categoriesError ? (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>{categoriesError}</Text>
-                <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
-                  <Feather name="refresh-cw" size={16} color={colors.primary} />
-                  <Text style={styles.retryButtonText}>Retry</Text>
+          <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+            {/* Business Logo Section */}
+            <View style={styles.logoSection}>
+              <Text style={styles.sectionTitle}>Business Logo</Text>
+              
+              <View style={styles.logoContainer}>
+                <SafeLogo
+                  size={80}
+                  logoUrl={getCurrentLogoUrl()}
+                  avatarUrl={user?.avatar_url}
+                  style={styles.logo}
+                  onPress={pickBusinessLogo}
+                  updateTrigger={logoUpdateTrigger}
+                />
+                
+                <TouchableOpacity 
+                  style={styles.logoButton}
+                  onPress={pickBusinessLogo}
+                >
+                  <Feather name="camera" size={16} color="#fff" />
+                  <Text style={styles.logoButtonText}>Change Logo</Text>
                 </TouchableOpacity>
               </View>
-            ) : (
-              <View style={styles.categoriesContainer}>
-                <ScrollView 
-                  showsVerticalScrollIndicator={true}
-                  nestedScrollEnabled={true}
-                  style={styles.categoriesScrollView}
-                  contentContainerStyle={styles.categoriesScrollContent}
-                >
-                  <View style={styles.categoriesGrid}>
-                    {categories.map((category) => {
-                      const isSelected = selectedCategories.includes(category.id);
-                      return (
-                        <TouchableOpacity
-                          key={`category-${category.id}`}
-                          style={[
-                            styles.categoryChip,
-                            isSelected && styles.selectedCategoryChip
-                          ]}
-                          onPress={() => toggleCategory(category.id)}
-                          disabled={loading}
-                        >
-                          <Text style={[
-                            styles.categoryChipText,
-                            isSelected && styles.selectedCategoryChipText
-                          ]}>
-                            {category.name}
-                          </Text>
-                          {isSelected && (
-                            <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
-                          )}
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-                </ScrollView>
-              </View>
-            )}
-          </View>
-        </ScrollView>
+            </View>
 
-        {/* Lazy loaded ImagePreviewModal */}
-        <Suspense fallback={<View />}>
-          {previewUri && (
-            <ImagePreviewModal
-              visible={true}
-              uri={previewUri}
-              uploadType="business-logo"
-              businessName={business.name}
-              onCancel={() => setPreviewUri(null)}
-              onConfirm={confirmUploadLogo}
-            />
-          )}
-        </Suspense>
-      </SafeAreaView>
-    </Modal>
+            {/* Business Name */}
+            <View style={styles.section}>
+              <Text style={styles.label}>Business Name *</Text>
+              <TextInput
+                style={styles.input}
+                value={businessName}
+                onChangeText={setBusinessName}
+                placeholder="Enter business name"
+                placeholderTextColor="rgba(255,255,255,0.5)"
+                maxLength={50}
+                editable={!loading}
+                autoCapitalize="words"
+                autoCorrect={false}
+              />
+              <Text style={styles.characterCount}>
+                {businessName.length}/50
+              </Text>
+            </View>
+
+            {/* Phone Number */}
+            <View style={styles.section}>
+              <Text style={styles.label}>Phone Number</Text>
+              <Text style={styles.helpText}>
+                Enter your business phone number (e.g., 712345678 or +254712345678)
+              </Text>
+              <View style={styles.phoneInputContainer}>
+                <View style={styles.countryCodeContainer}>
+                  <Text style={styles.countryCodeText}>🇰🇪 +254</Text>
+                </View>
+                <TextInput
+                  style={styles.phoneInput}
+                  value={phoneNumber}
+                  onChangeText={handlePhoneNumberChange}
+                  placeholder="712345678"
+                  placeholderTextColor="rgba(255,255,255,0.5)"
+                  keyboardType="phone-pad"
+                  maxLength={20}
+                  editable={!loading}
+                />
+              </View>
+              <Text style={styles.phoneHint}>
+                {phoneNumber && validatePhoneNumber(phoneNumber) ? (
+                  <Text style={styles.validPhone}>✓ Valid phone number</Text>
+                ) : phoneNumber ? (
+                  <Text style={styles.invalidPhone}>✗ Invalid phone number</Text>
+                ) : (
+                  <Text style={styles.phoneHintText}>Enter a valid Kenyan phone number</Text>
+                )}
+              </Text>
+            </View>
+
+            {/* Categories */}
+            <View style={styles.section}>
+              <Text style={styles.label}>
+                Categories * ({selectedCategories.length}/5)
+              </Text>
+              <Text style={styles.helpText}>
+                Select up to 5 categories that best describe your business
+              </Text>
+              
+              {loadingCategories ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator size="small" color={colors.primary} />
+                  <Text style={styles.loadingText}>Loading categories...</Text>
+                </View>
+              ) : categoriesError ? (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>{categoriesError}</Text>
+                  <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
+                    <Feather name="refresh-cw" size={16} color={colors.primary} />
+                    <Text style={styles.retryButtonText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : (
+                <View style={styles.categoriesContainer}>
+                  <ScrollView 
+                    showsVerticalScrollIndicator={true}
+                    nestedScrollEnabled={true}
+                    style={styles.categoriesScrollView}
+                    contentContainerStyle={styles.categoriesScrollContent}
+                  >
+                    <View style={styles.categoriesGrid}>
+                      {categories.map((category) => {
+                        const isSelected = selectedCategories.includes(category.id);
+                        return (
+                          <TouchableOpacity
+                            key={`category-${category.id}`}
+                            style={[
+                              styles.categoryChip,
+                              isSelected && styles.selectedCategoryChip
+                            ]}
+                            onPress={() => toggleCategory(category.id)}
+                            disabled={loading}
+                          >
+                            <Text style={[
+                              styles.categoryChipText,
+                              isSelected && styles.selectedCategoryChipText
+                            ]}>
+                              {category.name}
+                            </Text>
+                            {isSelected && (
+                              <Feather name="check" size={14} color="#fff" style={styles.categoryCheckIcon} />
+                            )}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  </ScrollView>
+                </View>
+              )}
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
+
+      {/* ImagePreviewModal - Separate from main modal */}
+      {previewUri && (
+        <ImagePreviewModal
+          visible={!!previewUri}
+          uri={previewUri}
+          uploadType="business-logo"
+          businessName={business.name}
+          onCancel={() => setPreviewUri(null)}
+          onConfirm={confirmUploadLogo}
+        />
+      )}
+    </>
   );
 }
 
