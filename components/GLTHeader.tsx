@@ -1,9 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import { useUser } from '../context/UserContext';
+import { getFullAvatarUrl } from '../lib/api';
+import { SafeLogo } from '../components/SafeLogo';
 import colors from '../theme/colors';
 import api from '../lib/api';
 
@@ -12,6 +15,70 @@ interface GLTHeaderProps {
   onBackPress?: () => void;
   title?: string;
 }
+
+// Enhanced Safe Avatar Component matching CustomDrawerContent
+interface SafeAvatarProps {
+  size: number;
+  avatarUrl?: string | null;
+  fallbackSource?: any;
+  style?: any;
+  updateTrigger?: number;
+}
+
+const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
+  size, 
+  avatarUrl, 
+  fallbackSource = require('../assets/images/avatar_placeholder.png'),
+  style,
+  updateTrigger = 0
+}) => {
+  const [hasError, setHasError] = useState(false);
+  const [imageKey, setImageKey] = useState(Date.now());
+  const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
+  
+  useEffect(() => {
+    console.log('🎭 Header SafeAvatar: Update triggered', {
+      avatarUrl,
+      updateTrigger,
+      timestamp: Date.now()
+    });
+    
+    setHasError(false);
+    setImageKey(Date.now());
+  }, [avatarUrl, updateTrigger]);
+  
+  if (!fullAvatarUrl || hasError) {
+    return (
+      <TouchableOpacity style={style} disabled>
+        <Image
+          source={fallbackSource}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+        />
+      </TouchableOpacity>
+    );
+  }
+
+  return (
+    <Image
+      source={{ 
+        uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`,
+        headers: {
+          'Cache-Control': 'no-cache, no-store, must-revalidate',
+          'Pragma': 'no-cache',
+          'Expires': '0'
+        }
+      }}
+      style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
+      onError={(error) => {
+        console.warn('🎭 Header SafeAvatar failed to load:', {
+          url: fullAvatarUrl,
+          error: error
+        });
+        setHasError(true);
+      }}
+    />
+  );
+};
 
 export default function GLTHeader({ 
   showBackButton = false, 
@@ -22,8 +89,20 @@ export default function GLTHeader({
   const router = useRouter();
   const insets = useSafeAreaInsets();
   
+  const { 
+    user, 
+    businesses,
+    selectedBusiness,
+    setSelectedBusiness,
+    avatarUpdateTrigger,
+  } = useUser();
+  
   const [notificationCount, setNotificationCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
+  
+  // Double tap detection for avatar cycling
+  const lastTapRef = useRef<number>(0);
+  const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const handleOpenDrawer = () => {
     navigation.dispatch(DrawerActions.openDrawer());
@@ -44,6 +123,78 @@ export default function GLTHeader({
   const handleCart = () => {
     router.push('/(drawer)/cart');
   };
+
+  // Navigate to business page on avatar single tap
+  const handleAvatarPress = () => {
+    const now = Date.now();
+    const timeSinceLastTap = now - lastTapRef.current;
+    
+    // Clear any existing timeout
+    if (tapTimeoutRef.current) {
+      clearTimeout(tapTimeoutRef.current);
+      tapTimeoutRef.current = null;
+    }
+    
+    // Check for double tap (within 300ms)
+    if (timeSinceLastTap < 300) {
+      console.log('🎭 Header: Double tap detected, cycling business selection');
+      handleAvatarDoubleTap();
+      lastTapRef.current = 0; // Reset to prevent triple tap
+    } else {
+      // Single tap - set timeout to navigate to business page
+      lastTapRef.current = now;
+      tapTimeoutRef.current = setTimeout(() => {
+        console.log('🎭 Header: Single tap, navigating to business page');
+        router.push('/(drawer)/Business');
+        tapTimeoutRef.current = null;
+      }, 300);
+    }
+  };
+
+  // Cycle through business selection on double tap
+  const handleAvatarDoubleTap = () => {
+    const allBusinessOptions = [
+      null, // "You" mode
+      ...businesses.owned,
+      ...businesses.joined
+    ];
+    
+    if (allBusinessOptions.length <= 1) {
+      console.log('🎭 Header: No businesses to cycle through');
+      return;
+    }
+    
+    // Find current index
+    let currentIndex = 0;
+    if (selectedBusiness) {
+      const businessIndex = allBusinessOptions.findIndex(
+        (business) => business && business.id === selectedBusiness.id
+      );
+      currentIndex = businessIndex !== -1 ? businessIndex : 0;
+    }
+    
+    // Get next index (cycle back to 0 if at end)
+    const nextIndex = (currentIndex + 1) % allBusinessOptions.length;
+    const nextSelection = allBusinessOptions[nextIndex];
+    
+    console.log('🎭 Header: Cycling selection:', {
+      from: selectedBusiness?.name || 'You',
+      to: nextSelection?.name || 'You',
+      currentIndex,
+      nextIndex
+    });
+    
+    setSelectedBusiness(nextSelection);
+  };
+
+  // Cleanup timeout on unmount
+  useEffect(() => {
+    return () => {
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
+      }
+    };
+  }, []);
 
   // Fetch notification count
   const fetchNotificationCount = async () => {
@@ -137,6 +288,9 @@ export default function GLTHeader({
     );
   };
 
+  // Determine if we're in business mode and get appropriate image
+  const isBusinessMode = !!selectedBusiness;
+
   return (
     <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
       {/* Left section: Back/Menu + Title */}
@@ -153,7 +307,7 @@ export default function GLTHeader({
         <Text style={styles.title}>{title}</Text>
       </View>
 
-      {/* Right section: Notifications + Cart */}
+      {/* Right section: Notifications + Cart + Avatar */}
       <View style={styles.rightContainer}>
         {/* Notifications */}
         <TouchableOpacity onPress={handleNotifications} style={styles.iconButton}>
@@ -168,6 +322,41 @@ export default function GLTHeader({
           <View style={styles.iconContainer}>
             <Feather name="shopping-cart" size={22} color="white" />
             {renderBadge(cartCount, '#ef4444')}
+          </View>
+        </TouchableOpacity>
+
+        {/* Avatar Preview with Business Cycling */}
+        <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarButton}>
+          <View style={styles.avatarContainer}>
+            {/* Context-aware image display: Business logo when business selected, avatar when in "You" mode */}
+            {isBusinessMode ? (
+              <SafeLogo
+                size={28}
+                logoUrl={selectedBusiness.logo_url}
+                avatarUrl={user?.avatar_url}
+                style={styles.avatar}
+                updateTrigger={avatarUpdateTrigger}
+              />
+            ) : (
+              <SafeAvatar
+                size={28}
+                avatarUrl={user?.avatar_url}
+                style={styles.avatar}
+                updateTrigger={avatarUpdateTrigger}
+              />
+            )}
+            
+            {/* Selection indicator */}
+            <View style={[
+              styles.selectionIndicator,
+              { backgroundColor: isBusinessMode ? '#7c3aed' : '#10b981' }
+            ]}>
+              <Feather 
+                name={isBusinessMode ? 'briefcase' : 'user'} 
+                size={8} 
+                color="white" 
+              />
+            </View>
           </View>
         </TouchableOpacity>
       </View>
@@ -245,5 +434,34 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  avatarButton: {
+    padding: 2,
+  },
+  avatarContainer: {
+    position: 'relative',
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  selectionIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.header,
   },
 });
