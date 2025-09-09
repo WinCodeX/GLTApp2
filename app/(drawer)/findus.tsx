@@ -15,7 +15,7 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
@@ -43,6 +43,7 @@ type SortDirection = 'asc' | 'desc';
 
 const FindUs: React.FC = () => {
   const navigation = useNavigation();
+  const insets = useSafeAreaInsets();
   const [agents, setAgents] = useState<ExtendedAgent[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -465,9 +466,9 @@ const FindUs: React.FC = () => {
   ), []);
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
       {/* Header with back navigation */}
-      <View style={styles.navigationHeader}>
+      <View style={[styles.navigationHeader, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity 
           style={styles.backButton}
           onPress={() => navigation.goBack()}
@@ -621,19 +622,18 @@ const styles = StyleSheet.create({
   navigationHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    backgroundColor: '#601DA6',
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    backgroundColor: colors.header,
+    justifyContent: 'space-between',
+    elevation: 5,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
   },
   backButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
+    padding: 4,
   },
   headerTitle: {
     flex: 1,
@@ -642,9 +642,13 @@ const styles = StyleSheet.create({
     color: '#fff',
     textAlign: 'center',
     marginHorizontal: 16,
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    fontFamily: 'System',
   },
   headerSpacer: {
-    width: 40,
+    width: 28,
   },
   header: {
     paddingHorizontal: 20,
