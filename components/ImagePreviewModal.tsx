@@ -1,7 +1,16 @@
-// components/ImagePreviewModal.tsx - Generic modal for both avatar and business logo uploads
+// components/ImagePreviewModal.tsx - Fixed to use React Native Modal instead of react-native-paper
 import React, { useState } from 'react';
-import { View, Image, Text, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
-import { Portal, Modal } from 'react-native-paper';
+import { 
+  View, 
+  Image, 
+  Text, 
+  StyleSheet, 
+  ActivityIndicator, 
+  TouchableOpacity, 
+  Modal,
+  SafeAreaView,
+  StatusBar
+} from 'react-native';
 
 interface Props {
   visible: boolean;
@@ -57,69 +66,88 @@ export default function ImagePreviewModal({
   };
 
   return (
-    <Portal>
-      <Modal
-        visible={visible}
-        onDismiss={handleCancel}
-        contentContainerStyle={styles.modal}
-      >
-        <View style={styles.container}>
-          {uploading ? (
-            <View style={styles.uploadingContainer}>
-              <ActivityIndicator size="large" color="#bd93f9" />
-              <Text style={styles.uploadingText}>{getUploadingText()}</Text>
-            </View>
-          ) : (
-            <>
-              <View style={styles.imageContainer}>
-                <Image 
-                  source={{ uri }} 
-                  style={styles.imagePreview}
-                  resizeMode="cover"
-                />
-                {uploadType === 'business-logo' && (
-                  <View style={styles.logoIndicator}>
-                    <Text style={styles.logoIndicatorText}>LOGO</Text>
+    <Modal
+      visible={visible}
+      transparent={true}
+      animationType="fade"
+      onRequestClose={handleCancel}
+      statusBarTranslucent={true}
+    >
+      <StatusBar backgroundColor="rgba(0, 0, 0, 0.8)" barStyle="light-content" />
+      <View style={styles.modalOverlay}>
+        <SafeAreaView style={styles.safeArea}>
+          <View style={styles.modalContainer}>
+            <View style={styles.container}>
+              {uploading ? (
+                <View style={styles.uploadingContainer}>
+                  <ActivityIndicator size="large" color="#bd93f9" />
+                  <Text style={styles.uploadingText}>{getUploadingText()}</Text>
+                </View>
+              ) : (
+                <>
+                  <View style={styles.imageContainer}>
+                    <Image 
+                      source={{ uri }} 
+                      style={styles.imagePreview}
+                      resizeMode="cover"
+                    />
+                    {uploadType === 'business-logo' && (
+                      <View style={styles.logoIndicator}>
+                        <Text style={styles.logoIndicatorText}>LOGO</Text>
+                      </View>
+                    )}
                   </View>
-                )}
+                  <Text style={styles.promptText}>{getPromptText()}</Text>
+                </>
+              )}
+              
+              <View style={styles.buttonRow}>
+                <TouchableOpacity
+                  style={[styles.button, styles.cancelButton]}
+                  onPress={handleCancel}
+                  disabled={uploading}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.cancelText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  style={[styles.button, styles.confirmButton]}
+                  onPress={handleConfirm}
+                  disabled={uploading}
+                  activeOpacity={0.8}
+                >
+                  <Text style={styles.confirmText}>
+                    {uploading ? 'Uploading...' : 'Confirm'}
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.promptText}>{getPromptText()}</Text>
-            </>
-          )}
-          
-          <View style={styles.buttonRow}>
-            <TouchableOpacity
-              style={[styles.button, styles.cancelButton]}
-              onPress={handleCancel}
-              disabled={uploading}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.cancelText}>Cancel</Text>
-            </TouchableOpacity>
-            
-            <TouchableOpacity
-              style={[styles.button, styles.confirmButton]}
-              onPress={handleConfirm}
-              disabled={uploading}
-              activeOpacity={0.8}
-            >
-              <Text style={styles.confirmText}>
-                {uploading ? 'Uploading...' : 'Confirm'}
-              </Text>
-            </TouchableOpacity>
+            </View>
           </View>
-        </View>
-      </Modal>
-    </Portal>
+        </SafeAreaView>
+      </View>
+    </Modal>
   );
 }
 
 const styles = StyleSheet.create({
-  modal: {
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  safeArea: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    width: '100%',
+  },
+  modalContainer: {
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    width: '100%',
   },
   container: {
     backgroundColor: '#282a36',
@@ -128,6 +156,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     width: 280,
     maxWidth: '85%',
+    elevation: 10,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 5 },
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
   },
   imageContainer: {
     position: 'relative',
