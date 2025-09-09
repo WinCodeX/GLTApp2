@@ -1,4 +1,4 @@
-// lib/helpers/packageHelpers.ts - FIXED: Fragile deliveries don't require agents
+// lib/helpers/packageHelpers.ts - FIXED: Added missing functions for tracking.tsx
 
 import api from '../api';
 
@@ -52,6 +52,21 @@ export interface Package {
   business_name?: string;
   package_size?: string;
   special_instructions?: string;
+  // ADDED: Collection-specific fields for tracking.tsx
+  shop_name?: string;
+  shop_contact?: string;
+  collection_address?: string;
+  items_to_collect?: string;
+  item_value?: number;
+  item_description?: string;
+  collection_scheduled_at?: string;
+  // ADDED: Additional fields
+  recipient_name?: string;
+  receiver?: { name: string };
+  recipient?: { name: string };
+  to_name?: string;
+  from_location?: string;
+  to_location?: string;
 }
 
 export interface PackageData {
@@ -403,6 +418,153 @@ const transformLocationData = (rawData: any): Location => {
       name: rawData.name || rawData.attributes?.name || 'Unknown Location',
       initials: rawData.initials || rawData.attributes?.initials
     };
+  }
+};
+
+/**
+ * ADDED: Get package details by ID or code - required by tracking.tsx
+ */
+export const getPackageDetails = async (packageIdOrCode: string): Promise<Package> => {
+  try {
+    console.log('📦 Getting package details for:', packageIdOrCode);
+    
+    // Try to get by ID first, then by code
+    let response;
+    try {
+      response = await api.get(`/api/v1/packages/${packageIdOrCode}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 15000
+      });
+    } catch (error: any) {
+      // If ID fails, try searching by code
+      if (error.response?.status === 404) {
+        console.log('📦 Package not found by ID, searching by code...');
+        response = await api.get('/api/v1/packages', {
+          params: { search: packageIdOrCode },
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          timeout: 15000
+        });
+        
+        if (response.data.success && response.data.data.length > 0) {
+          // Find exact match by code
+          const exactMatch = response.data.data.find((pkg: any) => 
+            pkg.code === packageIdOrCode
+          );
+          if (exactMatch) {
+            response.data.data = exactMatch;
+          } else {
+            response.data.data = response.data.data[0]; // Take first result
+          }
+        } else {
+          throw new Error('Package not found');
+        }
+      } else {
+        throw error;
+      }
+    }
+    
+    if (!response.data.success || !response.data.data) {
+      throw new Error('Package not found or invalid response');
+    }
+    
+    const rawPackage = response.data.data;
+    
+    // Transform package data to match interface
+    const packageDetails: Package = {
+      id: String(rawPackage.id || ''),
+      code: rawPackage.code || '',
+      state: rawPackage.state || 'unknown',
+      state_display: rawPackage.state_display || rawPackage.state?.charAt(0).toUpperCase() + rawPackage.state?.slice(1) || 'Unknown',
+      sender_name: rawPackage.sender_name || 'Unknown Sender',
+      receiver_name: rawPackage.receiver_name || 'Unknown Receiver',
+      receiver_phone: rawPackage.receiver_phone || '',
+      route_description: rawPackage.route_description || 'Route information unavailable',
+      cost: Number(rawPackage.cost) || 0,
+      delivery_type: rawPackage.delivery_type || 'agent',
+      created_at: rawPackage.created_at || new Date().toISOString(),
+      updated_at: rawPackage.updated_at || rawPackage.created_at || new Date().toISOString(),
+      origin_area: rawPackage.origin_area,
+      destination_area: rawPackage.destination_area,
+      origin_agent: rawPackage.origin_agent,
+      destination_agent: rawPackage.destination_agent,
+      delivery_location: rawPackage.delivery_location,
+      sender_phone: rawPackage.sender_phone,
+      sender_email: rawPackage.sender_email,
+      receiver_email: rawPackage.receiver_email,
+      business_name: rawPackage.business_name,
+      package_size: rawPackage.package_size,
+      special_instructions: rawPackage.special_instructions,
+      // Collection-specific fields
+      shop_name: rawPackage.shop_name,
+      shop_contact: rawPackage.shop_contact,
+      collection_address: rawPackage.collection_address,
+      items_to_collect: rawPackage.items_to_collect,
+      item_value: rawPackage.item_value,
+      item_description: rawPackage.item_description,
+      collection_scheduled_at: rawPackage.collection_scheduled_at,
+      // Additional compatibility fields
+      recipient_name: rawPackage.recipient_name || rawPackage.receiver_name,
+      receiver: rawPackage.receiver || { name: rawPackage.receiver_name },
+      recipient: rawPackage.recipient || { name: rawPackage.receiver_name },
+      to_name: rawPackage.to_name || rawPackage.receiver_name,
+      from_location: rawPackage.from_location || rawPackage.origin_area?.name,
+      to_location: rawPackage.to_location || rawPackage.destination_area?.name,
+    };
+    
+    console.log('✅ Package details loaded:', packageDetails.code);
+    return packageDetails;
+    
+  } catch (error: any) {
+    console.error('❌ Failed to get package details:', error);
+    throw new Error(error.response?.data?.message || error.message || 'Failed to get package details');
+  }
+};
+
+/**
+ * ADDED: Get package QR code - required by tracking.tsx
+ */
+export const getPackageQRCode = async (packageCode: string): Promise<QRCodeResponse> => {
+  try {
+    console.log('🔍 Getting QR code for package:', packageCode);
+    
+    const response = await api.get(`/api/v1/packages/${packageCode}/qr_code`, {
+      headers: {
+        'Accept': 'application/json',
+        'Content-Type': 'application/json'
+      },
+      timeout: 15000
+    });
+    
+    if (!response.data.success) {
+      throw new Error(response.data.message || 'Failed to generate QR code');
+    }
+    
+    console.log('✅ QR code generated successfully');
+    return response.data;
+    
+  } catch (error: any) {
+    console.error('❌ Failed to get QR code:', error);
+    
+    // Return fallback QR data
+    const fallbackData: QRCodeResponse = {
+      data: {
+        qr_code_base64: null,
+        tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+        package_code: packageCode,
+        package_state: 'unknown',
+        route_description: 'QR code generation failed'
+      },
+      success: false,
+      message: error.response?.data?.message || error.message || 'Failed to generate QR code'
+    };
+    
+    return fallbackData;
   }
 };
 
@@ -952,7 +1114,7 @@ export const hasOptionalAgents = (deliveryType: string): boolean => {
   return OPTIONAL_AGENT_DELIVERY_TYPES.includes(deliveryType.toLowerCase());
 };
 
-// Updated default export with all functions including pricing
+// Updated default export with all functions including pricing and tracking functions
 export default {
   // MAIN FUNCTIONS
   getPackageFormData,
@@ -961,6 +1123,10 @@ export default {
   getPackagePricing,
   calculatePackagePricing,
   getLocations,
+  
+  // ADDED: Functions required by tracking.tsx
+  getPackageDetails,
+  getPackageQRCode,
   
   // IMPORTED FUNCTIONS
   getAreas,
