@@ -13,6 +13,9 @@ const CHANGELOG_CONTENT = [
 'Fixed glitch in header',
 'Avatar upload glitch fixed',
 'Cost Calculator now working',
+'Added find us to the drawer menu',
+'Fixed fab colors now solid',
+'Other bug fixes',
 ];
 
 type Props = {
