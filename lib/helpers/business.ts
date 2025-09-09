@@ -1,4 +1,4 @@
-// lib/helpers/business.ts - Fixed error handling and authentication issues
+// lib/helpers/business.ts - Fixed invite generation and error handling
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -329,30 +329,82 @@ export const createBusiness = async (businessData: string | BusinessData) => {
   }
 };
 
-// Generate an invite code for a business with proper error handling
+// Fixed invite generation with better error handling and response parsing
 export const createInvite = async (businessId: number) => {
   try {
-    console.log('Creating invite for business ID:', businessId);
+    console.log('🔗 Creating invite for business ID:', businessId);
+    
+    if (!businessId || isNaN(businessId)) {
+      throw new Error('Invalid business ID');
+    }
     
     // Get auth token with verification
     const token = await getAuthToken();
+    console.log('🔗 Auth token found for invite creation');
     
-    const response = await api.post('/api/v1/invites', { business_id: businessId }, {
+    const requestPayload = { business_id: businessId };
+    console.log('🔗 Request payload:', requestPayload);
+    
+    const response = await api.post('/api/v1/invites', requestPayload, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 15000, // 15 second timeout
     });
     
-    console.log('Invite creation response:', response.data);
+    console.log('🔗 Invite creation response:', response.data);
     
-    return response.data;
+    // Handle various response formats
+    if (response.data) {
+      // Format 1: { success: true, data: { code: "abc123" } }
+      if (response.data.success && response.data.data?.code) {
+        console.log('🔗 Invite created successfully (format 1):', response.data.data.code);
+        return {
+          success: true,
+          data: response.data.data,
+          code: response.data.data.code
+        };
+      }
+      
+      // Format 2: { success: true, code: "abc123" }
+      if (response.data.success && response.data.code) {
+        console.log('🔗 Invite created successfully (format 2):', response.data.code);
+        return {
+          success: true,
+          data: { code: response.data.code },
+          code: response.data.code
+        };
+      }
+      
+      // Format 3: { code: "abc123" } (legacy)
+      if (response.data.code) {
+        console.log('🔗 Invite created successfully (legacy format):', response.data.code);
+        return {
+          success: true,
+          data: { code: response.data.code },
+          code: response.data.code
+        };
+      }
+      
+      // Format 4: { success: false, message: "error" }
+      if (response.data.success === false) {
+        const errorMessage = response.data.message || response.data.error || 'Failed to create invite';
+        throw new Error(errorMessage);
+      }
+    }
+    
+    // If none of the expected formats match
+    console.error('🔗 Unexpected response format:', response.data);
+    throw new Error('Unexpected response format from server');
+    
   } catch (error: any) {
-    console.error('Create Invite Error:', error?.response?.data || error?.message);
+    console.error('🔗 Create Invite Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
     if (isAuthenticationError(error)) {
+      console.log('🔗 Authentication failed during invite creation');
+      const errorMessage = 'Session expired. Please log in again.';
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -360,12 +412,73 @@ export const createInvite = async (businessId: number) => {
         position: 'bottom',
         visibilityTime: 4000,
       });
-      throw new Error('Session expired. Please log in again.');
+      throw new Error(errorMessage);
     }
     
+    // Handle validation errors
+    if (isValidationError(error)) {
+      const errorMessage = error.response?.data?.message || 
+                          error.response?.data?.error || 
+                          'Invalid business or permissions';
+      
+      console.log('🔗 Validation error during invite creation:', errorMessage);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Validation Error',
+        text2: errorMessage,
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorMessage);
+    }
+    
+    // Handle network/connection errors
+    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
+      const errorMessage = 'Network error. Please check your connection.';
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Please check your connection and try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorMessage);
+    }
+    
+    // Handle timeout errors
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      const errorMessage = 'Request timeout. Please try again.';
+      Toast.show({
+        type: 'error',
+        text1: 'Request Timeout',
+        text2: 'Please try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorMessage);
+    }
+    
+    // Handle server errors
+    if (error.response?.status >= 500) {
+      const errorMessage = 'Server error. Please try again later.';
+      Toast.show({
+        type: 'error',
+        text1: 'Server Error',
+        text2: 'Please try again later',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorMessage);
+    }
+    
+    // Handle other errors
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
-                        'Failed to generate invite';
+                        error?.message || 
+                        'Failed to generate invite code';
+    
+    console.log('🔗 Generic error during invite creation:', errorMessage);
     
     Toast.show({
       type: 'error',
@@ -375,7 +488,7 @@ export const createInvite = async (businessId: number) => {
       visibilityTime: 4000,
     });
     
-    throw error;
+    throw new Error(errorMessage);
   }
 };
 
