@@ -1,10 +1,11 @@
-// context/UserContext.tsx - Fixed with proper AsyncStorage caching
+// context/UserContext.tsx - Fixed with smart auto-selection and proper persistence
 import React, {
   createContext,
   ReactNode,
   useContext,
   useState,
   useEffect,
+  useRef,
 } from 'react';
 import { getUser } from '../lib/helpers/getUser';
 import { getBusinesses } from '../lib/helpers/business';
@@ -129,11 +130,19 @@ const CACHE_KEYS = {
   BUSINESS_DATA: 'cached_business_data',
   BUSINESS_EXPIRY: 'business_cache_expiry',
   SELECTED_BUSINESS: 'selected_business',
+  BUSINESS_SELECTION_STATE: 'business_selection_state', // NEW: Track selection state
   AVATAR_CACHE: 'avatar_cache',
 };
 
 // Cache duration (30 minutes)
 const CACHE_DURATION = 30 * 60 * 1000;
+
+// NEW: Selection state type
+type BusinessSelectionState = {
+  selectedBusinessId: number | null; // null means "You" mode
+  isExplicitUserChoice: boolean; // Whether user made explicit selection
+  timestamp: number;
+};
 
 export const UserProvider = ({ children }: { children: ReactNode }) => {
   const [user, setUser] = useState<User | null>(null);
@@ -146,17 +155,69 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
   
   // Avatar synchronization trigger
   const [avatarUpdateTrigger, setAvatarUpdateTrigger] = useState(Date.now());
+  
+  // NEW: Track initialization and user choice state
+  const isInitialLoadRef = useRef(true);
+  const hasRestoredFromCacheRef = useRef(false);
+  const isUserExplicitChoiceRef = useRef(false);
 
-  // Auto-select first business when businesses change
+  // NEW: Smart auto-selection logic that respects user choices
   useEffect(() => {
-    if (businesses.owned.length > 0 && !selectedBusiness) {
-      console.log('🔄 UserContext: Auto-selecting first business:', businesses.owned[0].name);
-      setSelectedBusinessState(businesses.owned[0]);
-    } else if (businesses.owned.length === 0 && selectedBusiness) {
-      console.log('🔄 UserContext: No businesses available, clearing selection');
-      setSelectedBusinessState(null);
+    const handleBusinessSelectionLogic = async () => {
+      // Don't run auto-selection during initial load or if user made explicit choice
+      if (isInitialLoadRef.current || loading) {
+        return;
+      }
+
+      console.log('🤖 UserContext: Evaluating business selection logic', {
+        hasBusinesses: businesses.owned.length > 0,
+        selectedBusiness: selectedBusiness?.name || 'None',
+        isUserChoice: isUserExplicitChoiceRef.current,
+        hasRestored: hasRestoredFromCacheRef.current
+      });
+
+      // If user made an explicit choice, respect it
+      if (isUserExplicitChoiceRef.current) {
+        console.log('🤖 UserContext: Respecting user explicit choice, skipping auto-selection');
+        return;
+      }
+
+      // If we haven't restored from cache yet, try to restore
+      if (!hasRestoredFromCacheRef.current) {
+        console.log('🤖 UserContext: Attempting to restore from cache');
+        await restoreBusinessSelectionState();
+        return;
+      }
+
+      // Validate current selection still exists
+      if (selectedBusiness) {
+        const stillExists = [...businesses.owned, ...businesses.joined].some(
+          b => b.id === selectedBusiness.id
+        );
+        if (!stillExists) {
+          console.log('🤖 UserContext: Selected business no longer exists, clearing selection');
+          setSelectedBusinessInternal(null, false); // Don't mark as user choice
+          return;
+        }
+      }
+
+      // Only auto-select if: no businesses were available before, now there are some, and no current selection
+      if (businesses.owned.length > 0 && !selectedBusiness) {
+        console.log('🤖 UserContext: Auto-selecting first business (no previous selection)');
+        setSelectedBusinessInternal(businesses.owned[0], false); // Don't mark as user choice
+      }
+    };
+
+    handleBusinessSelectionLogic();
+  }, [businesses.owned, businesses.joined, selectedBusiness, loading]);
+
+  // Mark initial load as complete when loading finishes
+  useEffect(() => {
+    if (!loading && isInitialLoadRef.current) {
+      console.log('🤖 UserContext: Initial load completed');
+      isInitialLoadRef.current = false;
     }
-  }, [businesses.owned, selectedBusiness]);
+  }, [loading]);
 
   // Enhanced cache management functions
   const saveUserToCache = async (userData: User) => {
@@ -237,6 +298,93 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     return null;
   };
 
+  // NEW: Enhanced business selection state management
+  const saveBusinessSelectionState = async (business: Business | null, isUserChoice: boolean) => {
+    try {
+      const selectionState: BusinessSelectionState = {
+        selectedBusinessId: business?.id || null,
+        isExplicitUserChoice: isUserChoice,
+        timestamp: Date.now()
+      };
+      
+      await AsyncStorage.multiSet([
+        [CACHE_KEYS.SELECTED_BUSINESS, JSON.stringify(business)],
+        [CACHE_KEYS.BUSINESS_SELECTION_STATE, JSON.stringify(selectionState)]
+      ]);
+      
+      console.log('💾 UserContext: Saved business selection state:', {
+        business: business?.name || 'You mode',
+        isUserChoice,
+        timestamp: new Date().toISOString()
+      });
+    } catch (error) {
+      console.error('❌ UserContext: Failed to save business selection state:', error);
+    }
+  };
+
+  const restoreBusinessSelectionState = async () => {
+    try {
+      const [cachedBusiness, cachedState] = await AsyncStorage.multiGet([
+        CACHE_KEYS.SELECTED_BUSINESS,
+        CACHE_KEYS.BUSINESS_SELECTION_STATE
+      ]);
+      
+      const businessData = cachedBusiness[1];
+      const stateData = cachedState[1];
+      
+      if (businessData && stateData) {
+        const business = JSON.parse(businessData);
+        const selectionState: BusinessSelectionState = JSON.parse(stateData);
+        
+        console.log('🔄 UserContext: Restoring business selection state:', {
+          business: business?.name || 'You mode',
+          isUserChoice: selectionState.isExplicitUserChoice,
+          timestamp: new Date(selectionState.timestamp).toISOString()
+        });
+        
+        // Validate that the business still exists if it's not null
+        if (business && businesses.owned.length > 0) {
+          const stillExists = [...businesses.owned, ...businesses.joined].some(
+            b => b.id === business.id
+          );
+          
+          if (!stillExists) {
+            console.log('🔄 UserContext: Cached business no longer exists, clearing selection');
+            setSelectedBusinessInternal(null, false);
+            hasRestoredFromCacheRef.current = true;
+            return;
+          }
+        }
+        
+        // Restore the selection
+        setSelectedBusinessState(business);
+        isUserExplicitChoiceRef.current = selectionState.isExplicitUserChoice;
+        hasRestoredFromCacheRef.current = true;
+        
+        console.log('✅ UserContext: Successfully restored business selection');
+      } else {
+        console.log('🔄 UserContext: No cached selection found');
+        hasRestoredFromCacheRef.current = true;
+      }
+    } catch (error) {
+      console.error('❌ UserContext: Failed to restore business selection state:', error);
+      hasRestoredFromCacheRef.current = true;
+    }
+  };
+
+  // NEW: Internal setter that tracks user choice
+  const setSelectedBusinessInternal = (business: Business | null, isUserChoice: boolean) => {
+    console.log('🔄 UserContext: Setting selected business (internal):', {
+      business: business?.name || 'You mode',
+      isUserChoice,
+      timestamp: new Date().toISOString()
+    });
+    
+    setSelectedBusinessState(business);
+    isUserExplicitChoiceRef.current = isUserChoice;
+    saveBusinessSelectionState(business, isUserChoice);
+  };
+
   // Sync with AccountManager
   const syncWithAccountManager = () => {
     const allAccounts = accountManager.getAllAccounts();
@@ -263,7 +411,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         CACHE_KEYS.USER_EXPIRY,
         CACHE_KEYS.BUSINESS_DATA,
         CACHE_KEYS.BUSINESS_EXPIRY,
-        CACHE_KEYS.SELECTED_BUSINESS,
         CACHE_KEYS.AVATAR_CACHE,
         'user_data', // Legacy keys
         'user_cache_expiry',
@@ -309,11 +456,9 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         console.log('⚠️ UserContext: No current account but accounts exist, clearing all');
         await accountManager.clearAllAccounts();
         await clearUserCache();
+        await clearBusinessSelectionCache(); // NEW: Clear business selection
         syncWithAccountManager();
       }
-      
-      // Try to restore selected business from cache
-      await restoreSelectedBusiness();
       
     } catch (error) {
       console.error('❌ UserContext: Failed to initialize AccountManager:', error);
@@ -321,40 +466,23 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
     }
   };
 
-  // Restore selected business from cache
-  const restoreSelectedBusiness = async () => {
+  // NEW: Clear business selection cache
+  const clearBusinessSelectionCache = async () => {
     try {
-      const cached = await AsyncStorage.getItem(CACHE_KEYS.SELECTED_BUSINESS);
-      if (cached) {
-        const business = JSON.parse(cached);
-        console.log('🔄 UserContext: Restored selected business from cache:', business.name);
-        setSelectedBusinessState(business);
-      }
+      await AsyncStorage.multiRemove([
+        CACHE_KEYS.SELECTED_BUSINESS,
+        CACHE_KEYS.BUSINESS_SELECTION_STATE
+      ]);
+      console.log('🗑️ UserContext: Cleared business selection cache');
     } catch (error) {
-      console.error('❌ UserContext: Failed to restore selected business:', error);
+      console.error('❌ UserContext: Failed to clear business selection cache:', error);
     }
   };
 
-  // Save selected business to cache
-  const saveSelectedBusiness = async (business: Business | null) => {
-    try {
-      if (business) {
-        await AsyncStorage.setItem(CACHE_KEYS.SELECTED_BUSINESS, JSON.stringify(business));
-        console.log('💾 UserContext: Saved selected business to cache:', business.name);
-      } else {
-        await AsyncStorage.removeItem(CACHE_KEYS.SELECTED_BUSINESS);
-        console.log('🗑️ UserContext: Removed selected business from cache');
-      }
-    } catch (error) {
-      console.error('❌ UserContext: Failed to save selected business:', error);
-    }
-  };
-
-  // Enhanced setSelectedBusiness with caching
+  // Enhanced setSelectedBusiness for external use (always treated as user choice)
   const setSelectedBusiness = (business: Business | null) => {
-    console.log('🔄 UserContext: Setting selected business:', business?.name || 'None');
-    setSelectedBusinessState(business);
-    saveSelectedBusiness(business);
+    console.log('🔄 UserContext: User selecting business:', business?.name || 'You mode');
+    setSelectedBusinessInternal(business, true); // Mark as explicit user choice
   };
 
   // Enhanced refresh user data with proper caching
@@ -471,17 +599,6 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
         owned: businessData.owned.length,
         joined: businessData.joined.length
       });
-
-      // Validate current selected business still exists
-      if (selectedBusiness) {
-        const stillExists = [...businessData.owned, ...businessData.joined].some(
-          b => b.id === selectedBusiness.id
-        );
-        if (!stillExists) {
-          console.log('⚠️ UserContext: Selected business no longer exists, clearing selection');
-          setSelectedBusiness(null);
-        }
-      }
       
     } catch (err) {
       console.error('❌ UserContext: Failed to fetch businesses:', err);
@@ -499,8 +616,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       
       // Clear cache and refresh data for new account
       await clearUserCache();
+      await clearBusinessSelectionCache(); // Clear business selection for new account
       await refreshUser(true);
       await refreshBusinesses(true);
+      
+      // Reset selection state for new account
+      isUserExplicitChoiceRef.current = false;
+      hasRestoredFromCacheRef.current = false;
       
       console.log('✅ UserContext: Account added successfully');
     } catch (error) {
@@ -519,8 +641,13 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       
       // Clear cache and reset data for account switch
       await clearUserCache();
+      await clearBusinessSelectionCache(); // Clear business selection for account switch
       setBusinesses({ owned: [], joined: [] });
-      setSelectedBusiness(null);
+      setSelectedBusinessState(null);
+      
+      // Reset selection state
+      isUserExplicitChoiceRef.current = false;
+      hasRestoredFromCacheRef.current = false;
       
       // Try to refresh data from API
       try {
@@ -548,9 +675,14 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       // If no accounts left, clear all data and cache
       if (!accountManager.hasAccounts()) {
         await clearUserCache();
+        await clearBusinessSelectionCache();
         setBusinesses({ owned: [], joined: [] });
-        setSelectedBusiness(null);
+        setSelectedBusinessState(null);
         setError(null);
+        
+        // Reset selection state
+        isUserExplicitChoiceRef.current = false;
+        hasRestoredFromCacheRef.current = false;
       }
       
       console.log('✅ UserContext: Account removed successfully');
@@ -567,17 +699,20 @@ export const UserProvider = ({ children }: { children: ReactNode }) => {
       
       await accountManager.clearAllAccounts();
       await clearUserCache();
+      await clearBusinessSelectionCache();
       
       // Reset all state
       setUser(null);
       setBusinesses({ owned: [], joined: [] });
-      setSelectedBusiness(null);
+      setSelectedBusinessState(null);
       setAccounts([]);
       setCurrentAccount(null);
       setError(null);
       
-      // Reset avatar trigger
+      // Reset avatar trigger and selection state
       setAvatarUpdateTrigger(Date.now());
+      isUserExplicitChoiceRef.current = false;
+      hasRestoredFromCacheRef.current = false;
       
       console.log('✅ UserContext: Logout completed');
     } catch (error) {
