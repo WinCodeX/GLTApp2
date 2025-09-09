@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Fixed with refresh feature and proper synchronization
+// app/(drawer)/Business.tsx - Complete rewrite with business logo and edit functionality
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -26,27 +26,30 @@ import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
 import { getFullAvatarUrl } from '../../lib/api';
+import { SafeLogo } from '../../components/SafeLogo';
 
-// Import the fixed upload avatar helper
+// Import the upload helpers
 import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
+import { uploadBusinessLogo } from '../../lib/helpers/uploadBusinessLogo';
 
-// Lazy load business modals and avatar components
+// Lazy load business modals and components
 const BusinessModal = React.lazy(() => import('../../components/BusinessModal'));
 const JoinBusinessModal = React.lazy(() => import('../../components/JoinBusinessModal'));
 const AvatarPreviewModal = React.lazy(() => import('../../components/AvatarPreviewModal'));
+const EditBusinessModal = React.lazy(() => import('../../components/EditBusinessModal'));
 
 interface BusinessProps {
   navigation: any;
 }
 
-// Enhanced Safe Avatar Component with synchronization support
+// Enhanced Safe Avatar Component with business logo support
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
   onPress?: () => void;
-  updateTrigger?: number; // New: Force refresh trigger
+  updateTrigger?: number;
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
@@ -61,7 +64,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
-  // Reset error state when avatarUrl or updateTrigger changes
   useEffect(() => {
     console.log('🎭 Business SafeAvatar: Update triggered', {
       avatarUrl,
@@ -70,7 +72,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     });
     
     setHasError(false);
-    setImageKey(Date.now()); // Force reload with new timestamp
+    setImageKey(Date.now());
   }, [avatarUrl, updateTrigger]);
   
   if (!fullAvatarUrl || hasError) {
@@ -88,7 +90,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     <TouchableOpacity onPress={onPress} disabled={!onPress}>
       <Image
         source={{ 
-          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
+          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`,
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
@@ -162,23 +164,25 @@ export default function Business({ navigation }: BusinessProps) {
     clearUserCache,
     selectedBusiness,
     setSelectedBusiness,
-    avatarUpdateTrigger, // Avatar sync trigger
-    triggerAvatarRefresh, // Force avatar refresh
+    avatarUpdateTrigger,
+    triggerAvatarRefresh,
   } = useUser();
 
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [showSignupModal, setShowSignupModal] = useState(false);
   const [showBusinessModal, setShowBusinessModal] = useState(false);
   const [showJoinModal, setShowJoinModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
   const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
   const [selectedBusinessForShare, setSelectedBusinessForShare] = useState(null);
   const [currentBusinessIndex, setCurrentBusinessIndex] = useState(0);
   const [inviteLink, setInviteLink] = useState(null);
   const [showAddBusinessOptions, setShowAddBusinessOptions] = useState(false);
   
-  // Avatar functionality states
+  // Avatar/Logo functionality states
   const [previewUri, setPreviewUri] = useState(null);
   const [avatarLoading, setAvatarLoading] = useState(false);
+  const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
   
   // Refresh functionality states
   const [refreshing, setRefreshing] = useState(false);
@@ -189,7 +193,7 @@ export default function Business({ navigation }: BusinessProps) {
 
   const currentBusiness = selectedBusiness || businesses.owned[currentBusinessIndex] || businesses.owned[0];
 
-  // Enhanced refresh handler similar to AccountContent
+  // Enhanced refresh handler
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
@@ -198,15 +202,14 @@ export default function Business({ navigation }: BusinessProps) {
       }
 
       setRefreshing(true);
-      console.log('🔄 Business: Manual refresh triggered - clearing cache and fetching fresh data');
+      console.log('🔄 Business: Manual refresh triggered');
       
-      // Force clear cache and refresh both user and business data
       await clearUserCache();
-      await refreshUser(true); // Force refresh with cache clearing
-      await refreshBusinesses(true); // Force refresh businesses too
+      await refreshUser(true);
+      await refreshBusinesses(true);
       
-      // Trigger avatar refresh to ensure UI sync
       triggerAvatarRefresh();
+      setLogoUpdateTrigger(Date.now());
       
       showToast.success('Data refreshed');
     } catch (error) {
@@ -239,13 +242,8 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  const handleLogin = () => {
-    setShowLoginModal(true);
-  };
-
-  const handleSignup = () => {
-    setShowSignupModal(true);
-  };
+  const handleLogin = () => setShowLoginModal(true);
+  const handleSignup = () => setShowSignupModal(true);
 
   const switchToSignup = () => {
     setShowLoginModal(false);
@@ -315,6 +313,7 @@ export default function Business({ navigation }: BusinessProps) {
     try {
       console.log('🔄 Business: Refreshing businesses after modal close');
       await refreshBusinesses?.(true);
+      setLogoUpdateTrigger(Date.now());
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
@@ -326,19 +325,36 @@ export default function Business({ navigation }: BusinessProps) {
     try {
       console.log('🔄 Business: Refreshing businesses after join modal close');
       await refreshBusinesses?.(true);
+      setLogoUpdateTrigger(Date.now());
     } catch (error) {
       console.error('Error refreshing businesses:', error);
     }
   };
 
-  // Avatar picker functionality with better validation
-  const pickAndPreviewAvatar = useCallback(async () => {
+  // Handle business update from edit modal
+  const handleBusinessUpdate = async (updatedBusiness: any) => {
+    try {
+      console.log('🔄 Business: Refreshing after business update');
+      await refreshBusinesses?.(true);
+      setLogoUpdateTrigger(Date.now());
+      triggerAvatarRefresh();
+    } catch (error) {
+      console.error('Error refreshing after business update:', error);
+    }
+  };
+
+  // Context-aware image picker - handles both avatar and business logo
+  const pickAndPreviewImage = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (!permission.granted) {
-        showToast.error('Photo access denied', 'Please allow photo access to change avatar');
+        showToast.error('Photo access denied', 'Please allow photo access to change image');
         return;
       }
+
+      // Determine what we're uploading based on current context
+      const isBusinessLogoUpload = !!currentBusiness;
+      const uploadType = isBusinessLogoUpload ? 'business logo' : 'avatar';
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
@@ -350,7 +366,7 @@ export default function Business({ navigation }: BusinessProps) {
       if (result.canceled || !result.assets?.length) return;
       
       const asset = result.assets[0];
-      console.log('🎭 Business: Selected image:', {
+      console.log(`🎭 Business: Selected ${uploadType}:`, {
         uri: asset.uri,
         width: asset.width,
         height: asset.height,
@@ -359,60 +375,91 @@ export default function Business({ navigation }: BusinessProps) {
       
       setPreviewUri(asset.uri);
     } catch (error) {
-      console.error('Business: Error picking avatar:', error);
+      console.error('Business: Error picking image:', error);
       showToast.error('Failed to select image', 'Please try again');
     }
-  }, []);
+  }, [currentBusiness]);
 
-  // Enhanced avatar upload with proper synchronization
-  const confirmUploadAvatar = useCallback(async () => {
+  // Context-aware upload handler
+  const confirmUploadImage = useCallback(async () => {
     try {
       if (!previewUri) return;
 
       setAvatarLoading(true);
-      console.log('🎭 Business: Starting coordinated avatar upload process...');
+      const isBusinessLogoUpload = !!currentBusiness;
+      const uploadType = isBusinessLogoUpload ? 'business logo' : 'avatar';
+
+      console.log(`🎭 Business: Starting ${uploadType} upload process...`);
       
-      // Step 1: Upload avatar using helper
-      const result = await uploadAvatar(previewUri);
-      console.log('🎭 Business: Upload result:', result);
+      let result;
+      if (isBusinessLogoUpload) {
+        // Upload business logo
+        result = await uploadBusinessLogo(previewUri, currentBusiness.id);
+        console.log('🎭 Business: Business logo upload result:', result);
+      } else {
+        // Upload user avatar
+        result = await uploadAvatar(previewUri);
+        console.log('🎭 Business: Avatar upload result:', result);
+      }
       
-      // Step 2: Check for success
-      if (result?.avatar_url || result?.success) {
-        console.log('🎭 Business: Avatar uploaded successfully, starting synchronization...');
+      // Check for success
+      if (result?.success || result?.logo_url || result?.avatar_url) {
+        console.log(`🎭 Business: ${uploadType} uploaded successfully, starting synchronization...`);
         
-        // Step 3: Clear all caches
+        // Clear all caches
         console.log('🎭 Business: Clearing all caches...');
         await clearUserCache();
         
-        // Step 4: Wait a moment for server to process
+        // Wait a moment for server to process
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Step 5: Force refresh user data
-        console.log('🎭 Business: Force refreshing user data...');
+        // Force refresh data
+        console.log('🎭 Business: Force refreshing data...');
         await refreshUser(true);
+        await refreshBusinesses(true);
         
-        // Step 6: Trigger avatar refresh across all components
-        console.log('🎭 Business: Triggering avatar refresh across components...');
+        // Trigger UI refresh
+        console.log('🎭 Business: Triggering UI refresh...');
         triggerAvatarRefresh();
+        setLogoUpdateTrigger(Date.now());
         
-        // Step 7: Another small delay to ensure UI updates
+        // Another small delay to ensure UI updates
         await new Promise(resolve => setTimeout(resolve, 200));
         
-        showToast.success('Avatar updated!', 'Your profile picture has been changed');
+        showToast.success(
+          `${isBusinessLogoUpload ? 'Business logo' : 'Avatar'} updated!`, 
+          `Your ${uploadType} has been changed`
+        );
         
-        console.log('🎭 Business: Avatar upload and synchronization completed');
+        console.log(`🎭 Business: ${uploadType} upload and synchronization completed`);
       } else {
-        throw new Error('Upload successful but no avatar URL returned');
+        throw new Error(`Upload successful but no ${uploadType} URL returned`);
       }
       
     } catch (error: any) {
-      console.error('🎭 Business: Error during avatar upload:', error);
+      console.error('🎭 Business: Error during image upload:', error);
       showToast.error('Upload failed', error.message || 'Please try again');
     } finally {
       setPreviewUri(null);
       setAvatarLoading(false);
     }
-  }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
+  }, [previewUri, currentBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh]);
+
+  // Context-aware avatar display selection
+  const getDisplayImageUrl = () => {
+    if (currentBusiness?.logo_url) {
+      return currentBusiness.logo_url;
+    }
+    return user?.avatar_url;
+  };
+
+  // Context-aware upload button text
+  const getUploadButtonText = () => {
+    if (currentBusiness) {
+      return currentBusiness.logo_url ? 'Change Logo' : 'Add Logo';
+    }
+    return user?.avatar_url ? 'Change Avatar' : 'Add Avatar';
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -465,24 +512,31 @@ export default function Business({ navigation }: BusinessProps) {
           />
         }
       >
-        {/* Profile Section with synchronized avatar */}
+        {/* Profile Section with context-aware avatar/logo */}
         <View style={styles.profileSection}>
           <View style={styles.avatarContainer}>
-            <SafeAvatar
+            <SafeLogo
               size={86}
+              logoUrl={currentBusiness?.logo_url}
               avatarUrl={user?.avatar_url}
-              fallbackSource={require('../../assets/images/avatar_placeholder.png')}
               style={styles.avatar}
-              onPress={pickAndPreviewAvatar}
-              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
+              onPress={pickAndPreviewImage}
+              updateTrigger={logoUpdateTrigger + avatarUpdateTrigger}
             />
             <TouchableOpacity 
               style={styles.addAvatarButton}
-              onPress={pickAndPreviewAvatar}
+              onPress={pickAndPreviewImage}
               disabled={avatarLoading}
             >
               <Feather name={avatarLoading ? "loader" : "plus"} size={20} color="#fff" />
             </TouchableOpacity>
+            
+            {/* Context indicator */}
+            <View style={styles.uploadIndicator}>
+              <Text style={styles.uploadIndicatorText}>
+                {currentBusiness ? `${currentBusiness.name} Logo` : 'Your Avatar'}
+              </Text>
+            </View>
           </View>
 
           <View style={styles.statsContainer}>
@@ -501,7 +555,7 @@ export default function Business({ navigation }: BusinessProps) {
           </View>
         </View>
 
-        {/* Current Business Info with Dropdown */}
+        {/* Current Business Info with Categories */}
         <View style={styles.currentBusinessSection}>
           {businesses.owned.length > 0 ? (
             <TouchableOpacity 
@@ -515,7 +569,27 @@ export default function Business({ navigation }: BusinessProps) {
             <Text style={styles.businessName}>No businesses owned</Text>
           )}
           
-          <Text style={styles.bio}>平凡を観察し、見えざるものを築く者。</Text>
+          {/* Business Categories Display */}
+          {currentBusiness?.categories && currentBusiness.categories.length > 0 ? (
+            <View style={styles.categoriesSection}>
+              <Text style={styles.categoriesTitle}>Categories</Text>
+              <View style={styles.categoriesContainer}>
+                {currentBusiness.categories.map((category, index) => (
+                  <View key={category.id} style={styles.categoryChip}>
+                    <Text style={styles.categoryText}>{category.name}</Text>
+                  </View>
+                ))}
+              </View>
+            </View>
+          ) : currentBusiness ? (
+            <View style={styles.categoriesSection}>
+              <Text style={styles.noCategoriesText}>No categories selected</Text>
+            </View>
+          ) : (
+            <View style={styles.categoriesSection}>
+              <Text style={styles.noCategoriesText}>Select a business to view categories</Text>
+            </View>
+          )}
           
           <View style={styles.contactInfo}>
             <Text style={styles.phoneNumber}>{userPhone}</Text>
@@ -527,9 +601,7 @@ export default function Business({ navigation }: BusinessProps) {
           <TouchableOpacity 
             style={styles.editButton}
             disabled={!currentBusiness}
-            onPress={() => {
-              showToast.info('Edit Business', 'Feature coming soon');
-            }}
+            onPress={() => setShowEditModal(true)}
           >
             <Text style={styles.editButtonText}>Edit Business</Text>
           </TouchableOpacity>
@@ -563,7 +635,7 @@ export default function Business({ navigation }: BusinessProps) {
         </View>
       </ScrollView>
 
-      {/* All the modals remain the same */}
+      {/* Business Selection Dropdown */}
       {showBusinessDropdown && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -581,6 +653,13 @@ export default function Business({ navigation }: BusinessProps) {
                   ]}
                   onPress={() => handleBusinessSelect(index)}
                 >
+                  <SafeLogo
+                    size={24}
+                    logoUrl={business.logo_url}
+                    avatarUrl={user?.avatar_url}
+                    style={styles.dropdownBusinessLogo}
+                    updateTrigger={logoUpdateTrigger}
+                  />
                   <Text style={[
                     styles.dropdownItemText,
                     index === currentBusinessIndex && styles.selectedDropdownItemText
@@ -597,6 +676,7 @@ export default function Business({ navigation }: BusinessProps) {
         </Modal>
       )}
 
+      {/* Add Business Options Modal */}
       {showAddBusinessOptions && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -627,6 +707,7 @@ export default function Business({ navigation }: BusinessProps) {
         </Modal>
       )}
 
+      {/* Share Business Modal */}
       {selectedBusinessForShare && (
         <Modal visible transparent animationType="fade">
           <TouchableOpacity 
@@ -687,12 +768,21 @@ export default function Business({ navigation }: BusinessProps) {
           />
         )}
 
+        {showEditModal && currentBusiness && (
+          <EditBusinessModal
+            visible={showEditModal}
+            business={currentBusiness}
+            onClose={() => setShowEditModal(false)}
+            onUpdate={handleBusinessUpdate}
+          />
+        )}
+
         {previewUri && (
           <AvatarPreviewModal
             visible
             uri={previewUri}
             onCancel={() => setPreviewUri(null)}
-            onConfirm={confirmUploadAvatar}
+            onConfirm={confirmUploadImage}
           />
         )}
       </Suspense>
@@ -766,6 +856,7 @@ const styles = StyleSheet.create({
   avatarContainer: {
     position: 'relative',
     marginRight: 24,
+    alignItems: 'center',
   },
   avatar: {
     width: 86,
@@ -774,7 +865,7 @@ const styles = StyleSheet.create({
   },
   addAvatarButton: {
     position: 'absolute',
-    bottom: -2,
+    bottom: 8,
     right: -2,
     width: 28,
     height: 28,
@@ -784,6 +875,16 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 3,
     borderColor: '#1a1a2e',
+  },
+  uploadIndicator: {
+    marginTop: 8,
+    alignItems: 'center',
+  },
+  uploadIndicatorText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 11,
+    textAlign: 'center',
+    maxWidth: 100,
   },
   statsContainer: {
     flex: 1,
@@ -824,11 +925,38 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '600',
   },
-  bio: {
+  categoriesSection: {
+    marginTop: 12,
+    marginBottom: 8,
+  },
+  categoriesTitle: {
     color: 'rgba(255,255,255,0.8)',
     fontSize: 14,
-    lineHeight: 20,
+    fontWeight: '500',
     marginBottom: 8,
+  },
+  categoriesContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+  },
+  categoryChip: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  categoryText: {
+    color: '#bd93f9',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  noCategoriesText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   contactInfo: {
     marginTop: 4,
@@ -933,9 +1061,13 @@ const styles = StyleSheet.create({
   selectedDropdownItem: {
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
   },
+  dropdownBusinessLogo: {
+    marginRight: 12,
+  },
   dropdownItemText: {
     color: '#fff',
     fontSize: 16,
+    flex: 1,
   },
   selectedDropdownItemText: {
     color: '#bd93f9',
