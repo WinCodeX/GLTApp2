@@ -145,7 +145,25 @@ export default function GLTHeader({
       lastTapRef.current = now;
       tapTimeoutRef.current = setTimeout(() => {
         console.log('🎭 Header: Single tap, navigating to business page');
-        router.push('/(drawer)/Business');
+        
+        // Use the same navigation pattern as CustomDrawerContent
+        try {
+          navigation.navigate('business');
+        } catch (error) {
+          console.error('🎭 Header: Navigation error:', error);
+          try {
+            navigation.navigate('Business');
+          } catch (fallbackError) {
+            console.error('🎭 Header: Fallback navigation also failed:', fallbackError);
+            // Final fallback using router
+            try {
+              router.push('/(drawer)/Business');
+            } catch (routerError) {
+              console.error('🎭 Header: Router navigation also failed:', routerError);
+            }
+          }
+        }
+        
         tapTimeoutRef.current = null;
       }, 300);
     }
