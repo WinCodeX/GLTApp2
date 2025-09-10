@@ -1,4 +1,4 @@
-// AdminSidebar.tsx - Updated with navigation support
+// AdminSidebar.tsx - Fixed with navigation support
 import React, { useState } from 'react';
 import {
   View,
@@ -34,14 +34,14 @@ interface AdminSidebarProps {
   visible: boolean;
   onClose: () => void;
   activePanel: string;
-  onNavigate: (screen: string, panelId: string) => void;
+  navigation: any; // Add navigation prop instead of onNavigate
 }
 
 const AdminSidebar: React.FC<AdminSidebarProps> = ({
   visible,
   onClose,
   activePanel,
-  onNavigate,
+  navigation,
 }) => {
   const { user } = useUser();
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
@@ -57,41 +57,51 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     }));
   };
 
+  // Admin features mapped to actual admin folder routes
   const adminFeatures: SidebarFeature[] = [
-    { icon: 'cube-outline', title: 'Warehouse', id: 'warehouse', screen: 'WarehouseScreen' },
-    { icon: 'search-outline', title: 'Search', id: 'search', screen: 'SearchScreen' },
-    { icon: 'chatbubble-outline', title: 'Communicate', id: 'communicate', screen: 'CommunicateScreen' },
-    { icon: 'grid-outline', title: 'Switchboard', id: 'switchboard', screen: 'SwitchboardScreen' },
-    { icon: 'people-outline', title: 'Users', id: 'users', screen: 'UsersScreen' },
-    { icon: 'lock-open-outline', title: 'Unlocking', id: 'unlocking', screen: 'UnlockingScreen' },
-    { icon: 'card-outline', title: 'Withdrawals', id: 'withdrawals', screen: 'WithdrawalsScreen' },
-    { icon: 'pricetag-outline', title: 'Pricing', id: 'pricing', screen: 'PricingScreen' },
+    { icon: 'cube-outline', title: 'App Manager', id: 'app-manager', screen: 'admin/AppManagerScreen' },
+    { icon: 'search-outline', title: 'Package Search', id: 'search', screen: 'admin/PackageSearchScreen' },
+    { icon: 'scan-outline', title: 'Scanning', id: 'scanning', screen: 'admin/ScanningScreen' },
+    { icon: 'person-outline', title: 'Account', id: 'account', screen: 'admin/account' },
+    { icon: 'home-outline', title: 'Admin Home', id: 'admin-home', screen: 'admin/index' },
+    { icon: 'settings-outline', title: 'Admin Settings', id: 'admin-settings', screen: 'admin/settings' },
   ];
 
+  // Support features using drawer routes
   const supportFeatures: SidebarFeature[] = [
-    { icon: 'help-circle-outline', title: 'Support', id: 'support', screen: 'SupportScreen' },
-    { icon: 'ticket-outline', title: 'Tickets', id: 'tickets', screen: 'TicketsScreen' },
-    { icon: 'business-outline', title: 'Business', id: 'business', screen: 'BusinessScreen' },
-    { icon: 'chatbubble-ellipses-outline', title: 'Feedback', id: 'feedback', screen: 'FeedbackScreen' },
-    { icon: 'diamond-outline', title: 'Enterprise', id: 'enterprise', screen: 'EnterpriseScreen' },
-    { icon: 'document-text-outline', title: 'Terms', id: 'terms', screen: 'TermsScreen' },
-    { icon: 'phone-portrait-outline', title: 'App Manager', id: 'app-manager', screen: 'AppManagerScreen' },
+    { icon: 'help-circle-outline', title: 'Support', id: 'support', screen: 'support' },
+    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', screen: 'contact' },
+    { icon: 'business-outline', title: 'Business', id: 'business', screen: 'business' },
+    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', screen: 'faqs' },
+    { icon: 'location-outline', title: 'Find Us', id: 'findus', screen: 'findus' },
   ];
 
+  // Logistics features using drawer routes
   const logisticsFeatures: SidebarFeature[] = [
-    { icon: 'location-outline', title: 'Track Package', id: 'track', screen: 'TrackScreen' },
-    { icon: 'car-outline', title: 'Currently Reaching', id: 'reaching', screen: 'ReachingScreen' },
-    { icon: 'calculator-outline', title: 'Cost Calculator', id: 'calculator', screen: 'CalculatorScreen' },
-    { icon: 'time-outline', title: 'History', id: 'history', screen: 'HistoryScreen' },
-    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', screen: 'ContactsScreen' },
+    { icon: 'location-outline', title: 'Track Package', id: 'track', screen: 'track' },
+    { icon: 'home-outline', title: 'Home', id: 'home', screen: 'home' },
+    { icon: 'cart-outline', title: 'Cart', id: 'cart', screen: 'cart' },
+    { icon: 'time-outline', title: 'History', id: 'history', screen: 'history' },
+    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', screen: 'contact' },
   ];
 
   const quickActionLocations: string[] = ['Thika', 'Machakos', 'Kisii'];
 
   const handleFeaturePress = (item: SidebarFeature) => {
-    if (item.screen) {
-      onNavigate(item.screen, item.id);
-      onClose();
+    if (item.screen && navigation) {
+      try {
+        navigation.navigate(item.screen);
+        onClose();
+      } catch (error) {
+        console.error('Navigation error:', error);
+        // Fallback navigation attempt
+        try {
+          navigation.navigate(item.screen.split('/').pop()); // Try just the screen name
+          onClose();
+        } catch (fallbackError) {
+          console.error('Fallback navigation also failed:', fallbackError);
+        }
+      }
     }
   };
 
@@ -231,8 +241,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
             </View>
           </View>
 
-          {renderSection('Logistics', 'logistics', logisticsFeatures)}
           {renderSection('Admin Features', 'admin', adminFeatures)}
+          {renderSection('Logistics', 'logistics', logisticsFeatures)}
           {renderSection('Support & More', 'hangout', supportFeatures)}
         </ScrollView>
       </LinearGradient>
