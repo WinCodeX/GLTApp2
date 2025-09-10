@@ -1,4 +1,4 @@
-// app/(drawer)/findus.tsx - Find Us screen with real agent API integration
+// app/(drawer)/findus.tsx - Find Us screen with NavigationHelper integration
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -16,12 +16,14 @@ import {
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useNavigation } from '@react-navigation/native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Toast from 'react-native-toast-message';
 import colors from '../../theme/colors';
 import { getFullAvatarUrl } from '../../lib/api';
 import { getAgents, type Agent } from '../../lib/helpers/packageHelpers';
+
+// Import NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 // Storage keys for caching
 const STORAGE_KEYS = {
@@ -42,7 +44,6 @@ interface ExtendedAgent extends Agent {
 type SortDirection = 'asc' | 'desc';
 
 const FindUs: React.FC = () => {
-  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const [agents, setAgents] = useState<ExtendedAgent[]>([]);
   const [loading, setLoading] = useState(true);
@@ -198,6 +199,16 @@ const FindUs: React.FC = () => {
       field,
       direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
     }));
+  }, []);
+
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(() => {
+    console.log('🔙 FindUs: Going back...');
+    
+    NavigationHelper.goBack({
+      fallbackRoute: '/',
+      replaceIfNoHistory: true
+    });
   }, []);
 
   // Format location string from agent data
@@ -467,11 +478,11 @@ const FindUs: React.FC = () => {
 
   return (
     <SafeAreaView style={styles.container} edges={['bottom', 'left', 'right']}>
-      {/* Header with back navigation */}
+      {/* Header with back navigation using NavigationHelper */}
       <View style={[styles.navigationHeader, { paddingTop: insets.top + 10 }]}>
         <TouchableOpacity 
           style={styles.backButton}
-          onPress={() => navigation.goBack()}
+          onPress={handleGoBack}
         >
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
