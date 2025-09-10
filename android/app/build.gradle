@@ -20,45 +20,6 @@ react {
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
 
-    /* Folders */
-     //   The root of your project, i.e. where "package.json" lives. Default is '../..'
-    // root = file("../../")
-    //   The folder where the react-native NPM package is. Default is ../../node_modules/react-native
-    // reactNativeDir = file("../../node_modules/react-native")
-    //   The folder where the react-native Codegen package is. Default is ../../node_modules/@react-native/codegen
-    // codegenDir = file("../../node_modules/@react-native/codegen")
-
-    /* Variants */
-    //   The list of variants to that are debuggable. For those we're going to
-    //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
-    //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    // debuggableVariants = ["liteDebug", "prodDebug"]
-
-    /* Bundling */
-    //   A list containing the node command and its flags. Default is just 'node'.
-    // nodeExecutableAndArgs = ["node"]
-
-    //
-    //   The path to the CLI configuration file. Default is empty.
-    // bundleConfig = file(../rn-cli.config.js)
-    //
-    //   The name of the generated asset file containing your JS bundle
-    // bundleAssetName = "MyApplication.android.bundle"
-    //
-    //   The entry file for bundle generation. Default is 'index.android.js' or 'index.js'
-    // entryFile = file("../js/MyApplication.android.js")
-    //
-    //   A list of extra flags to pass to the 'bundle' commands.
-    //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
-    // extraPackagerArgs = []
-
-    /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    //
-    //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
-    // hermesFlags = ["-O", "-output-source-map"]
-
     /* Autolinking */
     autolinkLibrariesWithApp()
 }
@@ -70,38 +31,31 @@ def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInRelea
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
- *
- * For example, to use the international variant, you can use:
- * `def jscFlavor = 'org.webkit:android-jsc-intl:+'`
- *
- * The international variant includes ICU i18n library and necessary data
- * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
- * give correct results when using with locales other than en-US. Note that
- * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-// Define app version constants for consistency
+// ✅ UNIFIED VERSION MANAGEMENT - Increment these for each APK release
 def appName = "GLT"
-def appVersionName = "1.3.7"
-def appVersionCode = 3
+def appVersionName = "1.4.0"  // ✅ Updated for APK updates - increment this
+def appVersionCode = 4        // ✅ Updated for APK updates - increment this
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
 android {
     ndkVersion rootProject.ext.ndkVersion
-
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace 'com.lvl0_x.gltapp2'
     defaultConfig {
-        applicationId 'com.lvl0_x.gltapp2'  // ✅ Consistent across all builds for OAuth compatibility
+        applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName appVersionName
         
-        // App display name and metadata - using consistent values
+        // ✅ FIXED: Use defined variables instead of hardcoded values
+        versionCode appVersionCode    // Now uses variable
+        versionName appVersionName    // Now uses variable
+        
+        // App display name and metadata
         resValue "string", "app_name", appName
         resValue "string", "app_version", appVersionName
         resValue "string", "build_number", appVersionCode.toString()
@@ -113,10 +67,10 @@ android {
         buildConfigField "String", "APP_NAME", "\"${appName}\""
         buildConfigField "String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\""
         
-        // ADDED: Enable multidex for better Bluetooth compatibility
+        // Enable multidex for better compatibility
         multiDexEnabled true
         
-        // ✅ ADDED: OAuth redirect scheme configuration for Google Auth
+        // OAuth redirect scheme configuration
         manifestPlaceholders = [
             appAuthRedirectScheme: 'com.lvl0_x.gltapp2',
             oauthRedirectHost: 'oauth',
@@ -136,25 +90,22 @@ android {
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
-            // ✅ REMOVED: applicationIdSuffix ".debug" - This was breaking OAuth!
-            // ✅ FIXED: Package name now stays consistent with Google Console registration
             
-            // 🎯 Debug identification through app name and version instead
+            // Debug identification through app name and version
             resValue "string", "app_name", "${appName} (Debug)"
-            versionNameSuffix "-debug-${buildTimestamp}"  // ✅ Version suffix instead of package suffix
+            versionNameSuffix "-debug-${buildTimestamp}"
             
             // Debug-specific build config
             buildConfigField "boolean", "IS_DEBUG", "true"
             buildConfigField "String", "BUILD_TYPE", '"debug"'
             
-            // ✅ ADDED: Debug-specific OAuth environment flag
+            // Debug-specific OAuth environment flag
             manifestPlaceholders += [
                 oauthEnvironment: 'development'
             ]
         }
         release {
-            // Caution! In production, you need to generate your own keystore file.
-            // see https://reactnative.dev/docs/signed-apk-android.
+            // Production keystore configuration
             signingConfig signingConfigs.debug
             shrinkResources (findProperty('android.enableShrinkResourcesInReleaseBuilds')?.toBoolean() ?: false)
             minifyEnabled enableProguardInReleaseBuilds
@@ -165,38 +116,38 @@ android {
             buildConfigField "boolean", "IS_DEBUG", "false"
             buildConfigField "String", "BUILD_TYPE", '"release"'
             
-            // ✅ ADDED: Production OAuth environment flag
+            // Production OAuth environment flag
             manifestPlaceholders += [
                 oauthEnvironment: 'production'
             ]
         }
     }
     
-    // ADDED: Java compatibility for better Bluetooth support
+    // Java compatibility
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
     
-    // ✅ ENHANCED: Custom APK naming configuration (now shows debug vs release clearly)
+    // ✅ APK naming for updates - now includes version for tracking
     applicationVariants.all { variant ->
         variant.outputs.all {
             def buildType = variant.buildType.name
             def versionName = variant.versionName
             def versionCode = variant.versionCode
             
-            // Create custom APK name based on build type
             if (buildType == "release") {
-                // Release APK: GLT-1.3.2-3.apk
+                // Release APK: GLT-1.4.0-4.apk (perfect for update tracking)
                 outputFileName = "${appName}-${versionName}-${versionCode}.apk"
             } else if (buildType == "debug") {
-                // Debug APK: GLT-1.3.2-debug-20250822-1430-3.apk
+                // Debug APK: GLT-1.4.0-debug-20250910-1430-4.apk
                 outputFileName = "${appName}-${versionName}-debug-${buildTimestamp}-${versionCode}.apk"
             }
             
-            // Log the output file name for verification
-            println "Generated APK name: ${outputFileName}"
-            println "Package name (OAuth): com.lvl0_x.gltapp2"  // ✅ Consistent logging
+            // Log the output for verification
+            println "Generated APK: ${outputFileName}"
+            println "Package: com.lvl0_x.gltapp2"
+            println "Version: ${versionName} (${versionCode})"
         }
     }
     
@@ -212,19 +163,13 @@ android {
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
-// Accepts values in comma delimited lists, example:
-// android.packagingOptions.pickFirsts=/LICENSE,**/picasa.ini
 ["pickFirsts", "excludes", "merges", "doNotStrip"].each { prop ->
-    // Split option: 'foo,bar' -> ['foo', 'bar']
     def options = (findProperty("android.packagingOptions.$prop") ?: "").split(",");
-    // Trim all elements in place.
     for (i in 0..<options.size()) options[i] = options[i].trim();
-    // `[] - ""` is essentially `[""].filter(Boolean)` removing all empty strings.
     options -= ""
 
     if (options.length > 0) {
         println "android.packagingOptions.$prop += $options ($options.length)"
-        // Ex: android.packagingOptions.pickFirsts += '**/SCCS/**'
         options.each {
             android.packagingOptions[prop] += it
         }
@@ -232,7 +177,6 @@ android {
 }
 
 dependencies {
-    // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
@@ -240,15 +184,12 @@ dependencies {
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
 
     if (isGifEnabled) {
-        // For animated gif support
         implementation("com.facebook.fresco:animated-gif:${expoLibs.versions.fresco.get()}")
     }
 
     if (isWebpEnabled) {
-        // For webp support
         implementation("com.facebook.fresco:webpsupport:${expoLibs.versions.fresco.get()}")
         if (isWebpAnimatedEnabled) {
-            // Animated webp support
             implementation("com.facebook.fresco:animated-webp:${expoLibs.versions.fresco.get()}")
         }
     }
@@ -259,17 +200,18 @@ dependencies {
         implementation jscFlavor
     }
     
-    // ADDED: Multidex support for better compatibility
     implementation 'androidx.multidex:multidex:2.0.1'
 }
 
 /*
- * ✅ OAUTH COMPATIBILITY SUMMARY:
- * - Package name consistent: com.lvl0_x.gltapp2 (matches Google Console)
- * - Debug builds NO LONGER use .debug suffix
- * - Debug identification through version name suffix instead
- * - Manifest placeholders added for OAuth configuration
- * - Build type accessible in code for environment-specific logic
+ * ✅ APK UPDATE CONFIGURATION SUMMARY:
+ * - Version management unified: appVersionName = "1.4.0", appVersionCode = 4
+ * - APK naming includes version for update tracking
+ * - Removed Expo Updates references (now using custom APK updates)
+ * - Version accessible via BuildConfig.VERSION_NAME at runtime
  * 
- * 🎯 RESULT: Google OAuth will now work correctly!
+ * 🎯 FOR NEXT APK RELEASE:
+ * 1. Increment appVersionName to "1.5.0"
+ * 2. Increment appVersionCode to 5
+ * 3. Create matching database entry: AppUpdate.create!(version: "1.5.0", apk_url: "...")
  */
