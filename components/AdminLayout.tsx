@@ -415,15 +415,16 @@ const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
     backgroundColor: 'transparent',
+    paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight : 0, // Extra padding for Android
   },
   header: {
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    paddingTop: Platform.OS === 'ios' ? 20 : 25, // Extra padding to clear status bar
+    paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 60,
-    // Ensure no negative margins or complex positioning
   },
   headerLeft: { 
     flexDirection: 'row', 
