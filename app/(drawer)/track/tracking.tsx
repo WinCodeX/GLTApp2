@@ -1,4 +1,4 @@
-// app/(drawer)/track/tracking.tsx - Enhanced detailed tracking with collection and fragile package support
+// app/(drawer)/track/tracking.tsx - Enhanced detailed tracking with NavigationHelper integration
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import { 
@@ -24,6 +24,9 @@ import {
   type QRCodeResponse
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
+
+// Import NavigationHelper
+import { NavigationHelper } from '@/lib/helpers/navigation';
 
 interface TimelineEvent {
   status: string;
@@ -36,7 +39,6 @@ interface TimelineEvent {
 
 export default function PackageTracking() {
   const params = useLocalSearchParams();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   
   const packageCode = params.packageCode as string;
@@ -401,18 +403,18 @@ export default function PackageTracking() {
     }
   }, [qrData]);
 
-  // Navigation handlers
+  // UPDATED: Navigation handlers using NavigationHelper
   const handleBack = useCallback(() => {
     console.log('🔙 Back button pressed');
     
     if (params.from) {
       console.log('🔙 Going to from parameter:', params.from);
-      router.replace(params.from as string);
+      NavigationHelper.replaceTo(params.from as string);
     } else {
       console.log('🔙 Going to track listing (default)');
-      router.replace('/(drawer)/track');
+      NavigationHelper.replaceTo('/(drawer)/track');
     }
-  }, [router, params]);
+  }, [params]);
 
   // Load data when component mounts
   useEffect(() => {
