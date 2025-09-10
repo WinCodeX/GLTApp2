@@ -1,3 +1,4 @@
+// Updated HomeScreen with new UpdateModal integration
 import React, { useState, useEffect, useRef } from 'react';
 import {
   SafeAreaView,
@@ -24,7 +25,7 @@ import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import CollectDeliverModal from '../../components/CollectDeliverModal';
-import ChangelogModal, { CHANGELOG_VERSION, CHANGELOG_KEY } from '../../components/ChangelogModal';
+import UpdateModal from '../../components/UpdateModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 import UpdateService from '../../lib/services/updateService';
@@ -117,6 +118,16 @@ interface SelectedLocation {
   locationName?: string;
   agentName?: string;
   phone?: string;
+}
+
+interface UpdateMetadata {
+  available: boolean;
+  version?: string;
+  changelog?: string[];
+  release_date?: string;
+  force_update?: boolean;
+  download_url?: string;
+  file_size?: number;
 }
 
 const PACKAGE_SIZES: PackageSize[] = [
@@ -432,7 +443,10 @@ export default function HomeScreen() {
   const [selectedPackageSizeInfo, setSelectedPackageSizeInfo] = useState<PackageSizeInfo | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
-  const [showChangelogModal, setShowChangelogModal] = useState(false);
+  
+  // Update modal states
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateMetadata, setUpdateMetadata] = useState<UpdateMetadata | null>(null);
   
   // New modal states for area selection
   const [showOriginModal, setShowOriginModal] = useState(false);
@@ -501,35 +515,17 @@ export default function HomeScreen() {
     };
   }, [scrollX, locations]);
 
-  // Initialize app with APK update system and changelog checking
+  // Initialize app with APK update system
   const initializeApp = async () => {
     try {
       // Initialize APK update service
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
       
-      // Check if changelog should be shown
-      await checkChangelogDisplay();
-      
       // Check for APK updates on app start (delay to not block UI)
       setTimeout(checkForAPKUpdates, 2000);
     } catch (error) {
       console.error('App initialization error:', error);
-    }
-  };
-
-  // Check if user has seen the current changelog version
-  const checkChangelogDisplay = async () => {
-    try {
-      const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
-      
-      if (!hasSeenChangelog) {
-        setTimeout(() => {
-          setShowChangelogModal(true);
-        }, 1000);
-      }
-    } catch (error) {
-      console.error('Error checking changelog status:', error);
     }
   };
 
@@ -556,17 +552,9 @@ export default function HomeScreen() {
           return;
         }
         
-        // Show update dialog
-        const shouldUpdate = await updateService.showUpdateDialog(metadata);
-        
-        if (shouldUpdate) {
-          // Clear postponed flag and start update
-          await updateService.clearPostponedUpdate();
-          await updateService.installUpdate(metadata);
-        } else if (!metadata.force_update) {
-          // Mark as postponed
-          await updateService.scheduleInstallForLater();
-        }
+        // Show update modal instead of alert
+        setUpdateMetadata(metadata);
+        setShowUpdateModal(true);
       }
     } catch (error) {
       console.error('Error checking for APK updates:', error);
@@ -575,21 +563,42 @@ export default function HomeScreen() {
 
   // Handle app state changes
   const handleAppStateChange = (nextAppState: string) => {
-    if (nextAppState === 'active') {
-      // Check for APK updates when app becomes active
+    if (nextAppState === 'background' || nextAppState === 'inactive') {
+      // App going to background - schedule any pending downloads
+      handleAppGoingBackground();
+    } else if (nextAppState === 'active') {
+      // App coming to foreground - check for updates and download status
       setTimeout(checkForAPKUpdates, 1000);
     }
   };
 
-  // Handle changelog modal close
-  const handleChangelogClose = async () => {
+  // Handle app going to background
+  const handleAppGoingBackground = async () => {
     try {
-      await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
-      setShowChangelogModal(false);
+      // If user has seen an update but didn't download, schedule background download
+      if (updateMetadata && !showUpdateModal) {
+        const updateService = UpdateService.getInstance();
+        await updateService.scheduleBackgroundDownload(updateMetadata);
+        console.log('Scheduled background download for when app is backgrounded');
+      }
     } catch (error) {
-      console.error('Error saving changelog status:', error);
-      setShowChangelogModal(false);
+      console.error('Failed to schedule background download:', error);
     }
+  };
+
+  // Handle update modal events
+  const handleUpdateStart = () => {
+    console.log('Update download started');
+  };
+
+  const handleUpdateComplete = () => {
+    console.log('Update download completed');
+    // Metadata will be cleared when modal closes
+  };
+
+  const handleUpdateModalClose = () => {
+    setShowUpdateModal(false);
+    setUpdateMetadata(null);
   };
 
   // Load form data in background without blocking UI
@@ -1296,10 +1305,13 @@ export default function HomeScreen() {
         type="destination"
       />
 
-      {/* Enhanced Changelog Modal for APK Updates */}
-      <ChangelogModal
-        visible={showChangelogModal}
-        onClose={handleChangelogClose}
+      {/* Enhanced Update Modal */}
+      <UpdateModal
+        visible={showUpdateModal}
+        onClose={handleUpdateModalClose}
+        metadata={updateMetadata}
+        onUpdateStart={handleUpdateStart}
+        onUpdateComplete={handleUpdateComplete}
       />
 
       {/* Info Modal */}
@@ -1479,6 +1491,7 @@ export default function HomeScreen() {
   );
 }
 
+// The styles remain exactly the same as before, so I'm keeping them unchanged
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
