@@ -2,7 +2,7 @@
   "expo": {
     "name": "gltapp2",
     "slug": "gltapp2",
-    "version": "1.1.0",
+    "version": "1.4.0",
     "orientation": "portrait",
     "icon": "./assets/images/Glt_icon.png",
     "scheme": "https",
@@ -36,7 +36,9 @@
         "android.permission.INTERNET",
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK"
+        "android.permission.WAKE_LOCK",
+        "android.permission.REQUEST_INSTALL_PACKAGES",
+        "android.permission.INSTALL_PACKAGES"
       ]
     },
     "web": {
@@ -74,7 +76,7 @@
       "typedRoutes": true
     },
     "extra": {
-"EXPO_PUBLIC_API_URL": "https://glt-53x8.onrender.com",
+      "EXPO_PUBLIC_API_URL": "https://glt-53x8.onrender.com",
       "expoClientId": "918422141757-hn16hqoqomoofka1l63hcbs47jt4n0o4.apps.googleusercontent.com",
       "webClientId": "918422141757-j819d3oo87i2j6o7bdrebedrtv9nusu5.apps.googleusercontent.com",
       "androidClientId": "918422141757-hn16hqoqomoofka1l63hcbs47jt4n0o4.apps.googleusercontent.com",
