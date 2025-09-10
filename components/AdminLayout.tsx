@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Fixed with proper positioning and no cutoffs
+// components/AdminLayout.tsx - Fixed with proper status bar clearance
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -225,116 +225,118 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* Status bar with gradient color */}
+      {/* Status bar configuration */}
       <StatusBar 
         barStyle="light-content" 
         backgroundColor="#667eea" 
         translucent={false}
       />
       
-      {/* Main container with SafeAreaView */}
-      <SafeAreaView style={styles.safeArea}>
-        {/* Header with gradient */}
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          {/* Left - Menu & Logo */}
-          <View style={styles.headerLeft}>
-            <TouchableOpacity 
-              onPress={toggleSidebar} 
-              style={styles.menuButton}
-              accessibilityLabel="Open menu"
-              accessibilityRole="button"
-            >
-              <Ionicons name="menu" size={24} color="white" />
-            </TouchableOpacity>
-            <View style={styles.logoContainer}>
-              <View style={styles.logoIcon}>
-                <Text style={styles.logoText}>GL</Text>
-              </View>
-              {shouldShowTitle() && (
-                <Text style={styles.panelTitle}>
-                  {getScreenTitle()}
-                </Text>
-              )}
+      {/* Status bar spacer to ensure content doesn't overlap */}
+      <View style={styles.statusBarSpacer} />
+      
+      {/* Header with gradient - positioned below status bar */}
+      <LinearGradient
+        colors={['#667eea', '#764ba2']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        {/* Left - Menu & Logo */}
+        <View style={styles.headerLeft}>
+          <TouchableOpacity 
+            onPress={toggleSidebar} 
+            style={styles.menuButton}
+            accessibilityLabel="Open menu"
+            accessibilityRole="button"
+          >
+            <Ionicons name="menu" size={24} color="white" />
+          </TouchableOpacity>
+          <View style={styles.logoContainer}>
+            <View style={styles.logoIcon}>
+              <Text style={styles.logoText}>GL</Text>
             </View>
+            {shouldShowTitle() && (
+              <Text style={styles.panelTitle}>
+                {getScreenTitle()}
+              </Text>
+            )}
           </View>
-
-          {/* Center - Search (hide on scanning screen) */}
-          {pathname !== '/admin/ScanningScreen' && (
-            <View style={styles.searchContainer}>
-              <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
-              <TextInput
-                placeholder="Search..."
-                placeholderTextColor="rgba(255,255,255,0.8)"
-                style={styles.searchInput}
-                onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
-                returnKeyType="search"
-                accessibilityLabel="Search input"
-              />
-            </View>
-          )}
-
-          {/* Right - Notifications & Avatar */}
-          <View style={styles.headerRight}>
-            <TouchableOpacity 
-              style={styles.headerAction}
-              accessibilityLabel="Notifications"
-              accessibilityRole="button"
-            >
-              <Ionicons name="notifications-outline" size={22} color="white" />
-            </TouchableOpacity>
-            <TouchableOpacity 
-              style={styles.headerAction}
-              onPress={handleAvatarPress}
-              accessibilityLabel="Open profile"
-              accessibilityRole="button"
-            >
-              <Image 
-                source={avatarSource} 
-                style={styles.avatarImage}
-                accessibilityLabel="User avatar"
-              />
-            </TouchableOpacity>
-          </View>
-        </LinearGradient>
-
-        {/* Main content area */}
-        <View style={styles.mainContent}>
-          <AdminSidebar 
-            visible={sidebarVisible} 
-            onClose={closeSidebar} 
-            activePanel={activePanel} 
-          />
-          <View style={styles.contentArea}>
-            <LinearGradient 
-              colors={['#1a1a2e', '#16213e', '#0f0f23']} 
-              style={styles.contentGradient}
-            >
-              <ScrollView 
-                style={styles.scrollView} 
-                contentContainerStyle={styles.scrollContent}
-                showsVerticalScrollIndicator={false}
-              >
-                {children}
-              </ScrollView>
-            </LinearGradient>
-          </View>
-          {sidebarVisible && (
-            <TouchableOpacity 
-              style={styles.overlay} 
-              onPress={closeSidebar}
-              accessibilityLabel="Close sidebar"
-              accessibilityRole="button"
-            />
-          )}
         </View>
 
-        {/* Bottom Tabs */}
-        {shouldShowBottomTabs() && (
+        {/* Center - Search (hide on scanning screen) */}
+        {pathname !== '/admin/ScanningScreen' && (
+          <View style={styles.searchContainer}>
+            <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
+            <TextInput
+              placeholder="Search..."
+              placeholderTextColor="rgba(255,255,255,0.8)"
+              style={styles.searchInput}
+              onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
+              returnKeyType="search"
+              accessibilityLabel="Search input"
+            />
+          </View>
+        )}
+
+        {/* Right - Notifications & Avatar */}
+        <View style={styles.headerRight}>
+          <TouchableOpacity 
+            style={styles.headerAction}
+            accessibilityLabel="Notifications"
+            accessibilityRole="button"
+          >
+            <Ionicons name="notifications-outline" size={22} color="white" />
+          </TouchableOpacity>
+          <TouchableOpacity 
+            style={styles.headerAction}
+            onPress={handleAvatarPress}
+            accessibilityLabel="Open profile"
+            accessibilityRole="button"
+          >
+            <Image 
+              source={avatarSource} 
+              style={styles.avatarImage}
+              accessibilityLabel="User avatar"
+            />
+          </TouchableOpacity>
+        </View>
+      </LinearGradient>
+
+      {/* Main content area */}
+      <View style={styles.mainContent}>
+        <AdminSidebar 
+          visible={sidebarVisible} 
+          onClose={closeSidebar} 
+          activePanel={activePanel} 
+        />
+        <View style={styles.contentArea}>
+          <LinearGradient 
+            colors={['#1a1a2e', '#16213e', '#0f0f23']} 
+            style={styles.contentGradient}
+          >
+            <ScrollView 
+              style={styles.scrollView} 
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {children}
+            </ScrollView>
+          </LinearGradient>
+        </View>
+        {sidebarVisible && (
+          <TouchableOpacity 
+            style={styles.overlay} 
+            onPress={closeSidebar}
+            accessibilityLabel="Close sidebar"
+            accessibilityRole="button"
+          />
+        )}
+      </View>
+
+      {/* Bottom Tabs */}
+      {shouldShowBottomTabs() && (
+        <SafeAreaView style={styles.bottomTabContainer}>
           <View style={styles.bottomTabBar}>
             {bottomTabs.map((tab) => {
               const isActive = activeTab === tab.id;
@@ -372,37 +374,37 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               );
             })}
           </View>
-        )}
+        </SafeAreaView>
+      )}
 
-        {/* Floating Action Button */}
-        {shouldShowFAB() && (
-          <TouchableOpacity 
-            style={styles.fab}
-            onPress={handleFABPress}
-            accessibilityLabel={
-              pathname === '/admin/ScanningScreen' ? 'Quick scan' :
-              pathname === '/admin/packages' ? 'Add new package' :
-              'Quick scan'
-            }
-            accessibilityRole="button"
+      {/* Floating Action Button */}
+      {shouldShowFAB() && (
+        <TouchableOpacity 
+          style={styles.fab}
+          onPress={handleFABPress}
+          accessibilityLabel={
+            pathname === '/admin/ScanningScreen' ? 'Quick scan' :
+            pathname === '/admin/packages' ? 'Add new package' :
+            'Quick scan'
+          }
+          accessibilityRole="button"
+        >
+          <LinearGradient 
+            colors={['#667eea', '#764ba2']} 
+            style={styles.fabGradient}
           >
-            <LinearGradient 
-              colors={['#667eea', '#764ba2']} 
-              style={styles.fabGradient}
-            >
-              <Ionicons 
-                name={
-                  pathname === '/admin/ScanningScreen' ? 'qr-code' :
-                  pathname === '/admin/packages' ? 'add' :
-                  'qr-code'
-                } 
-                size={28} 
-                color="white" 
-              />
-            </LinearGradient>
-          </TouchableOpacity>
-        )}
-      </SafeAreaView>
+            <Ionicons 
+              name={
+                pathname === '/admin/ScanningScreen' ? 'qr-code' :
+                pathname === '/admin/packages' ? 'add' :
+                'qr-code'
+              } 
+              size={28} 
+              color="white" 
+            />
+          </LinearGradient>
+        </TouchableOpacity>
+      )}
     </View>
   );
 };
@@ -412,15 +414,13 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: '#667eea' // Match status bar color
   },
-  safeArea: {
-    flex: 1,
-    backgroundColor: 'transparent',
-    paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight : 0, // Extra padding for Android
+  statusBarSpacer: {
+    height: Constants.statusBarHeight,
+    backgroundColor: '#667eea', // Match the gradient start color
   },
   header: {
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 20 : 25, // Extra padding to clear status bar
-    paddingBottom: 16,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -523,6 +523,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)', 
     zIndex: 998,
   },
+  bottomTabContainer: {
+    backgroundColor: '#16213e',
+  },
   bottomTabBar: {
     backgroundColor: '#16213e',
     borderTopWidth: 1,
@@ -532,7 +535,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingBottom: Platform.OS === 'ios' ? 12 : 8,
   },
   tabButton: { 
     alignItems: 'center', 
