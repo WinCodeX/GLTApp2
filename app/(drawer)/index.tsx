@@ -459,7 +459,7 @@ export default function HomeScreen() {
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
 
-  // Initialize app with update system
+  // Initialize app with APK update system
   useEffect(() => {
     initializeApp();
     
@@ -501,18 +501,18 @@ export default function HomeScreen() {
     };
   }, [scrollX, locations]);
 
-  // Initialize app with update system and changelog checking
+  // Initialize app with APK update system and changelog checking
   const initializeApp = async () => {
     try {
-      // Initialize update service
+      // Initialize APK update service
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
       
       // Check if changelog should be shown
       await checkChangelogDisplay();
       
-      // Check for updates on app start (delay to not block UI)
-      setTimeout(checkForUpdates, 2000);
+      // Check for APK updates on app start (delay to not block UI)
+      setTimeout(checkForAPKUpdates, 2000);
     } catch (error) {
       console.error('App initialization error:', error);
     }
@@ -533,26 +533,51 @@ export default function HomeScreen() {
     }
   };
 
-  // Check for app updates
-  const checkForUpdates = async () => {
+  // Check for APK updates
+  const checkForAPKUpdates = async () => {
     try {
       const updateService = UpdateService.getInstance();
+      
+      // Only check for updates on Android devices
+      if (!updateService.isUpdateSupported()) {
+        console.log('APK updates not supported on this platform');
+        return;
+      }
+      
       const { hasUpdate, metadata } = await updateService.checkForUpdates();
       
-      if (hasUpdate) {
-        // If update is available, show the changelog modal with update info
-        setShowChangelogModal(true);
+      if (hasUpdate && metadata) {
+        console.log('APK update available:', metadata.version);
+        
+        // Check if user previously postponed this update
+        const hasPostponed = await updateService.hasUserPostponedUpdate();
+        if (hasPostponed && !metadata.force_update) {
+          console.log('User previously postponed this update');
+          return;
+        }
+        
+        // Show update dialog
+        const shouldUpdate = await updateService.showUpdateDialog(metadata);
+        
+        if (shouldUpdate) {
+          // Clear postponed flag and start update
+          await updateService.clearPostponedUpdate();
+          await updateService.installUpdate(metadata);
+        } else if (!metadata.force_update) {
+          // Mark as postponed
+          await updateService.scheduleInstallForLater();
+        }
       }
     } catch (error) {
-      console.error('Error checking for updates:', error);
+      console.error('Error checking for APK updates:', error);
     }
   };
 
   // Handle app state changes
   const handleAppStateChange = (nextAppState: string) => {
     if (nextAppState === 'active') {
-      // Check for updates when app becomes active
-      setTimeout(checkForUpdates, 1000);
+      // Check for APK updates when app becomes active
+      setTimeout(checkForAPKUpdates, 1000);
     }
   };
 
@@ -1271,7 +1296,7 @@ export default function HomeScreen() {
         type="destination"
       />
 
-      {/* Enhanced Changelog Modal with Update System */}
+      {/* Enhanced Changelog Modal for APK Updates */}
       <ChangelogModal
         visible={showChangelogModal}
         onClose={handleChangelogClose}
