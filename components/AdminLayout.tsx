@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Fixed with Home text removed and proper scanning navigation
+// components/AdminLayout.tsx - Fixed with proper status bar integration and positioning
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Dimensions,
   StyleSheet,
   Image,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -21,7 +22,7 @@ import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
 
-// ✅ Define proper TypeScript types for Ionicons
+// Define proper TypeScript types for Ionicons
 type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
 
 interface BottomTab {
@@ -50,7 +51,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     ? { uri: user.avatar_url }
     : require('../assets/images/avatar_placeholder.png');
 
-  // ✅ Bottom tabs with correct scanning route
+  // Bottom tabs with correct scanning route
   const bottomTabs: BottomTab[] = [
     { 
       id: 'home', 
@@ -89,7 +90,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     },
   ];
 
-  // ✅ Enhanced pathname matching for scanning route
+  // Enhanced pathname matching for scanning route
   const getActiveTab = (): string => {
     // Special handling for account route
     if (pathname === '/admin/account') {
@@ -110,7 +111,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const toggleSidebar = (): void => setSidebarVisible(!sidebarVisible);
   const closeSidebar = (): void => setSidebarVisible(false);
 
-  // ✅ Updated navigation handler with proper scanning navigation
+  // Updated navigation handler with proper scanning navigation
   const handleTabPress = (tabId: string): void => {
     try {
       const tab = bottomTabs.find(t => t.id === tabId);
@@ -162,7 +163,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
-  // ✅ Navigation debug logging
+  // Navigation debug logging
   useEffect(() => {
     console.log('AdminLayout mounted, current pathname:', pathname);
     console.log('Active tab:', activeTab);
@@ -174,18 +175,18 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   }, [pathname, activeTab]);
 
-  // ✅ Handle avatar press with proper navigation
+  // Handle avatar press with proper navigation
   const handleAvatarPress = (): void => {
     handleTabPress('profile');
   };
 
-  // ✅ Handle search input with proper typing
+  // Handle search input with proper typing
   const handleSearchSubmit = (text: string): void => {
     console.log('Search submitted:', text);
     // Add your search logic here
   };
 
-  // ✅ Enhanced route checking including scanning
+  // Enhanced route checking including scanning
   const shouldShowBottomTabs = (): boolean => {
     const adminRoutes = [
       '/admin',
@@ -197,13 +198,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     return adminRoutes.includes(pathname || '') || pathname?.startsWith('/admin') || false;
   };
 
-  // ✅ Enhanced FAB visibility logic
+  // Enhanced FAB visibility logic
   const shouldShowFAB = (): boolean => {
     const fabRoutes = ['/admin', '/admin/ScanningScreen', '/admin/packages', '/admin/settings'];
     return fabRoutes.includes(pathname || '') || false;
   };
 
-  // ✅ Handle FAB press based on current screen
+  // Handle FAB press based on current screen
   const handleFABPress = (): void => {
     console.log('FAB pressed on route:', pathname);
     
@@ -227,7 +228,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
-  // ✅ Get screen title - FIXED: Removed "Home" text, now shows nothing for /admin
+  // Get screen title - FIXED: Removed "Home" text, now shows nothing for /admin
   const getScreenTitle = (): string => {
     switch (pathname) {
       case '/admin/ScanningScreen':
@@ -239,13 +240,13 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       case '/admin/account':
         return 'Account';
       case '/admin':
-        return ''; // ✅ FIXED: Empty string instead of 'Home'
+        return ''; // FIXED: Empty string instead of 'Home'
       default:
         return 'Admin';
     }
   };
 
-  // ✅ Check if we should show the title (don't show empty titles)
+  // Check if we should show the title (don't show empty titles)
   const shouldShowTitle = (): boolean => {
     const title = getScreenTitle();
     return title.trim().length > 0;
@@ -253,9 +254,26 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#667eea" />
+      {/* FIXED: Status bar with matching gradient color */}
+      <StatusBar 
+        barStyle="light-content" 
+        backgroundColor="#667eea" 
+        translucent={false}
+      />
+      
+      {/* FIXED: Proper status bar integration */}
+      <View style={styles.statusBarBackground}>
+        <LinearGradient
+          colors={['#667eea', '#764ba2']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.statusBarGradient}
+        />
+      </View>
+
+      {/* FIXED: SafeAreaView with proper styling */}
       <SafeAreaView style={styles.safeArea}>
-        {/* ✅ Header with conditional title display */}
+        {/* Header with gradient extending from status bar */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -276,7 +294,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              {/* ✅ FIXED: Only show title if it's not empty */}
+              {/* Only show title if it's not empty */}
               {shouldShowTitle() && (
                 <Text style={styles.panelTitle}>
                   {getScreenTitle()}
@@ -434,17 +452,35 @@ const styles = StyleSheet.create({
     flex: 1, 
     backgroundColor: '#1a1a2e' 
   },
-  safeArea: {
-    paddingTop: Constants.statusBarHeight,
-    backgroundColor: '#667eea',
+  // FIXED: Status bar background integration
+  statusBarBackground: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    height: Constants.statusBarHeight,
+    zIndex: 1000,
   },
+  statusBarGradient: {
+    flex: 1,
+  },
+  // FIXED: Proper SafeAreaView with consistent styling
+  safeArea: {
+    backgroundColor: 'transparent', // Let the gradient show through
+    zIndex: 999,
+  },
+  // FIXED: Header with proper positioning and gradient continuation
   header: {
     paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 0 : 8, // Adjust for different platforms
     paddingBottom: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 60,
+    // Ensure gradient extends properly
+    marginTop: Platform.OS === 'android' ? -Constants.statusBarHeight : 0,
+    paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight + 8 : 8,
   },
   headerLeft: { 
     flexDirection: 'row', 
@@ -555,7 +591,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingBottom: 12, // Account for home indicator on iOS
+    paddingBottom: Platform.OS === 'ios' ? 12 : 8, // Account for home indicator on iOS
   },
   tabButton: { 
     alignItems: 'center', 
@@ -569,7 +605,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: 'center',
   },
-  // ✅ Scanning indicator styles
+  // Scanning indicator styles
   scanningBadge: {
     position: 'absolute',
     top: -2,
