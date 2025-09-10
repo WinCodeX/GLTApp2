@@ -1,4 +1,4 @@
-// AdminSidebar.tsx - Fixed with navigation support
+// AdminSidebar.tsx - Fixed with useRouter navigation
 import React, { useState } from 'react';
 import {
   View,
@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useUser } from '../context/UserContext';
 
 const { width } = Dimensions.get('window');
@@ -21,7 +22,7 @@ interface SidebarFeature {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   id: string;
-  screen?: string;
+  route?: string;
 }
 
 interface ExpandedSections {
@@ -34,16 +35,15 @@ interface AdminSidebarProps {
   visible: boolean;
   onClose: () => void;
   activePanel: string;
-  navigation: any; // Add navigation prop instead of onNavigate
 }
 
 const AdminSidebar: React.FC<AdminSidebarProps> = ({
   visible,
   onClose,
   activePanel,
-  navigation,
 }) => {
   const { user } = useUser();
+  const router = useRouter();
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     hangout: true,
     admin: true,
@@ -59,50 +59,60 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
   // Admin features mapped to actual admin folder routes
   const adminFeatures: SidebarFeature[] = [
-    { icon: 'cube-outline', title: 'App Manager', id: 'app-manager', screen: 'admin/AppManagerScreen' },
-    { icon: 'search-outline', title: 'Package Search', id: 'search', screen: 'admin/PackageSearchScreen' },
-    { icon: 'scan-outline', title: 'Scanning', id: 'scanning', screen: 'admin/ScanningScreen' },
-    { icon: 'person-outline', title: 'Account', id: 'account', screen: 'admin/account' },
-    { icon: 'home-outline', title: 'Admin Home', id: 'admin-home', screen: 'admin/index' },
-    { icon: 'settings-outline', title: 'Admin Settings', id: 'admin-settings', screen: 'admin/settings' },
+    { icon: 'cube-outline', title: 'App Manager', id: 'app-manager', route: '/admin/AppManagerScreen' },
+    { icon: 'search-outline', title: 'Package Search', id: 'search', route: '/admin/PackageSearchScreen' },
+    { icon: 'scan-outline', title: 'Scanning', id: 'scanning', route: '/admin/ScanningScreen' },
+    { icon: 'person-outline', title: 'Account', id: 'account', route: '/admin/account' },
+    { icon: 'home-outline', title: 'Admin Home', id: 'admin-home', route: '/admin' },
+    { icon: 'settings-outline', title: 'Admin Settings', id: 'admin-settings', route: '/admin/settings' },
   ];
 
   // Support features using drawer routes
   const supportFeatures: SidebarFeature[] = [
-    { icon: 'help-circle-outline', title: 'Support', id: 'support', screen: 'support' },
-    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', screen: 'contact' },
-    { icon: 'business-outline', title: 'Business', id: 'business', screen: 'business' },
-    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', screen: 'faqs' },
-    { icon: 'location-outline', title: 'Find Us', id: 'findus', screen: 'findus' },
+    { icon: 'help-circle-outline', title: 'Support', id: 'support', route: '/support' },
+    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', route: '/contact' },
+    { icon: 'business-outline', title: 'Business', id: 'business', route: '/business' },
+    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', route: '/faqs' },
+    { icon: 'location-outline', title: 'Find Us', id: 'findus', route: '/findus' },
   ];
 
   // Logistics features using drawer routes
   const logisticsFeatures: SidebarFeature[] = [
-    { icon: 'location-outline', title: 'Track Package', id: 'track', screen: 'track' },
-    { icon: 'home-outline', title: 'Home', id: 'home', screen: 'home' },
-    { icon: 'cart-outline', title: 'Cart', id: 'cart', screen: 'cart' },
-    { icon: 'time-outline', title: 'History', id: 'history', screen: 'history' },
-    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', screen: 'contact' },
+    { icon: 'location-outline', title: 'Track Package', id: 'track', route: '/track' },
+    { icon: 'home-outline', title: 'Home', id: 'home', route: '/home' },
+    { icon: 'cart-outline', title: 'Cart', id: 'cart', route: '/cart' },
+    { icon: 'time-outline', title: 'History', id: 'history', route: '/history' },
+    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', route: '/contact' },
   ];
 
   const quickActionLocations: string[] = ['Thika', 'Machakos', 'Kisii'];
 
   const handleFeaturePress = (item: SidebarFeature) => {
-    if (item.screen && navigation) {
+    if (item.route) {
       try {
-        navigation.navigate(item.screen);
+        console.log(`Navigating to: ${item.route}`);
+        router.push(item.route as any);
         onClose();
       } catch (error) {
         console.error('Navigation error:', error);
-        // Fallback navigation attempt
-        try {
-          navigation.navigate(item.screen.split('/').pop()); // Try just the screen name
-          onClose();
-        } catch (fallbackError) {
-          console.error('Fallback navigation also failed:', fallbackError);
+        // Fallback to admin home for admin features
+        if (item.route.startsWith('/admin')) {
+          try {
+            router.push('/admin');
+            onClose();
+          } catch (fallbackError) {
+            console.error('Fallback navigation failed:', fallbackError);
+          }
         }
       }
     }
+  };
+
+  const handleQuickAction = (location: string) => {
+    console.log(`Quick action for ${location}`);
+    // You can add specific logic for each location here
+    router.push('/track');
+    onClose();
   };
 
   const renderFeatureItem = (item: SidebarFeature): JSX.Element => (
@@ -221,7 +231,15 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                   {user?.phone || '+254 000 000 000'}
                 </Text>
               </View>
-              <Ionicons name="chevron-down" size={20} color="white" />
+              <TouchableOpacity 
+                onPress={() => {
+                  router.push('/admin/account');
+                  onClose();
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="chevron-down" size={20} color="white" />
+              </TouchableOpacity>
             </LinearGradient>
           </View>
 
@@ -233,6 +251,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                 <TouchableOpacity 
                   key={location} 
                   style={styles.locationButton}
+                  onPress={() => handleQuickAction(location)}
                   activeOpacity={0.7}
                 >
                   <Text style={styles.locationButtonText}>{location}</Text>
