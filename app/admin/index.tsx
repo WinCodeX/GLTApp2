@@ -10,13 +10,14 @@ import {
   Animated,
 Modal,
 } from 'react-native';
-// ✅ CRITICAL FIX: Import from react-native-gesture-handler
+// CRITICAL FIX: Import from react-native-gesture-handler
 import { PanGestureHandler, State } from 'react-native-gesture-handler';
 import AdminLayout from '../../components/AdminLayout';
+import { useUser } from '../../context/UserContext';
 
 const { width } = Dimensions.get('window');
 
-// ✅ Define proper types for performance data
+// Define proper types for performance data
 interface PerformanceData {
   title: string;
   data: number[];
@@ -60,6 +61,10 @@ interface PendingTask {
 type PerformanceTab = 'weekly' | 'monthly' | 'yearly';
 
 const AdminIndex: React.FC = () => {
+  // Get user context for personalized welcome message
+  const { getDisplayName } = useUser();
+  const userName = getDisplayName();
+  
   const [activePerformanceTab, setActivePerformanceTab] = useState<number>(0);
   const translateX = useRef(new Animated.Value(0)).current;
   const panRef = useRef<PanGestureHandler>(null);
@@ -191,7 +196,7 @@ const AdminIndex: React.FC = () => {
     }
   };
 
-  // ✅ COMPLETELY FIXED: Clean tab navigation
+  // Clean tab navigation
   const handleTabPress = (index: number): void => {
     if (index === activePerformanceTab) return;
     
@@ -204,7 +209,7 @@ const AdminIndex: React.FC = () => {
     }).start();
   };
 
-  // ✅ FIXED: Clean gesture handling without conflicts
+  // Clean gesture handling without conflicts
   const gestureTranslationX = useRef(new Animated.Value(0)).current;
 
   const onGestureEvent = Animated.event(
@@ -212,7 +217,7 @@ const AdminIndex: React.FC = () => {
     { useNativeDriver: true }
   );
 
-  // ✅ COMPLETELY FIXED: Proper gesture state handling
+  // Proper gesture state handling
   const onHandlerStateChange = (event: any): void => {
     const { state, translationX: gestureTranslation, velocityX } = event.nativeEvent;
     
@@ -249,7 +254,7 @@ const AdminIndex: React.FC = () => {
     }
   };
 
-  // ✅ Enhanced action handlers with proper typing
+  // Enhanced action handlers with proper typing
   const handleQuickAction = (actionTitle: string): void => {
     console.log(`Quick action pressed: ${actionTitle}`);
     // Add navigation or action logic here
@@ -279,7 +284,7 @@ const AdminIndex: React.FC = () => {
     <AdminLayout activePanel="home">
       <ScrollView style={{ flex: 1 }} showsVerticalScrollIndicator={false}>
         <View style={{ padding: 16 }}>
-          {/* Welcome Section */}
+          {/* Welcome Section - UPDATED with personalized greeting */}
           <LinearGradient
             colors={['#667eea', '#764ba2']}
             start={{ x: 0, y: 0 }}
@@ -291,7 +296,7 @@ const AdminIndex: React.FC = () => {
             }}
           >
             <Text style={{ color: 'white', fontSize: 24, fontWeight: 'bold', marginBottom: 4 }}>
-              Welcome back, Admin! 👋
+              Welcome back, {userName}!
             </Text>
             <Text style={{ color: 'rgba(255,255,255,0.9)', fontSize: 16, marginBottom: 16 }}>
               Here's what's happening with GLT Logistics today
@@ -312,7 +317,7 @@ const AdminIndex: React.FC = () => {
             </TouchableOpacity>
           </LinearGradient>
 
-          {/* Performance Overview Section - COMPLETELY FIXED */}
+          {/* Performance Overview Section */}
           <View style={{ marginBottom: 24 }}>
             <Text style={{ color: 'white', fontSize: 18, fontWeight: 'bold', marginBottom: 16 }}>
               Performance Overview
@@ -349,7 +354,7 @@ const AdminIndex: React.FC = () => {
               ))}
             </View>
 
-            {/* Performance Charts Container - COMPLETELY FIXED for seamless bidirectional scrolling */}
+            {/* Performance Charts Container */}
             <View style={{ 
               overflow: 'hidden', 
               borderRadius: 12,
