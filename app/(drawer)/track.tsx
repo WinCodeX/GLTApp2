@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Track screen with NavigationHelper integration
+// app/(drawer)/track.tsx - Track screen with proper "All Packages" handling and NavigationHelper integration
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -70,6 +70,7 @@ interface PackageResponse {
 }
 
 type DrawerState = 
+  | 'all'           // NEW: Added 'all' type
   | 'pending' 
   | 'paid' 
   | 'submitted' 
@@ -78,7 +79,9 @@ type DrawerState =
   | 'collected' 
   | 'rejected';
 
-const STATE_MAPPING: Record<DrawerState, string> = {
+// UPDATED: State mapping to handle 'all' case
+const STATE_MAPPING: Record<DrawerState, string | null> = {
+  'all': null,          // NEW: null means no filtering
   'pending': 'pending_unpaid',
   'paid': 'pending', 
   'submitted': 'submitted',
@@ -144,20 +147,23 @@ export default function Track() {
     });
   }, []);
 
-  // FIXED: Get ALL packages without pagination limits
-  const getPackages = useCallback(async (filters?: { state?: string; search?: string }): Promise<PackageResponse> => {
+  // UPDATED: Get packages with proper "all" handling
+  const getPackages = useCallback(async (filters?: { state?: string | null; search?: string }): Promise<PackageResponse> => {
     try {
       console.log('📦 getPackages called with filters:', filters);
       
       const params = new URLSearchParams();
       
-      if (filters?.state) {
+      // FIXED: Only add state filter if it's not null (not "all")
+      if (filters?.state !== null && filters?.state !== undefined) {
         params.append('state', filters.state);
         console.log('🎯 Adding state filter:', filters.state);
+      } else {
+        console.log('🎯 No state filter - fetching ALL packages');
       }
       
-      // FIXED: Request ALL packages by setting high per_page limit and starting from page 1
-      params.append('per_page', '1000'); // Set high limit to get all packages
+      // Request ALL packages by setting high per_page limit
+      params.append('per_page', '1000');
       params.append('page', '1');
       
       if (filters?.search) {
@@ -240,8 +246,9 @@ export default function Track() {
     }
   }, []);
 
+  // UPDATED: Enhanced state display info to handle "all" case
   const stateDisplayInfo = useMemo(() => {
-    if (!selectedStatus) {
+    if (!selectedStatus || selectedStatus === 'all') {
       return {
         title: 'All Packages',
         subtitle: 'View all your packages',
@@ -387,7 +394,7 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
-  // FIXED: Load ALL packages with correct state mapping and no pagination limits
+  // UPDATED: Load packages with proper "all" handling
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -401,17 +408,22 @@ export default function Track() {
       console.log('📦 selectedStatus from drawer params:', selectedStatus);
       console.log('🔄 STATE_MAPPING:', STATE_MAPPING);
       
-      let apiState: string | undefined;
-      if (selectedStatus) {
+      let apiState: string | null = null;
+      
+      // FIXED: Handle 'all' case and undefined case properly
+      if (selectedStatus && selectedStatus !== 'all') {
         apiState = STATE_MAPPING[selectedStatus];
         console.log('🗺️ Mapping:', { 
           drawerState: selectedStatus, 
           apiState: apiState,
           mappingExists: apiState !== undefined 
         });
+      } else {
+        console.log('🎯 No filtering requested - loading ALL packages');
+        apiState = null; // Explicitly set to null for "all" case
       }
       
-      const filters = apiState ? { state: apiState } : undefined;
+      const filters = apiState !== null ? { state: apiState } : { state: null };
       
       console.log('📨 Final filters for API:', JSON.stringify(filters, null, 2));
       
@@ -430,7 +442,8 @@ export default function Track() {
         console.log('📊 Actual returned package states:', uniqueStates);
         console.log('🎯 Expected state was:', apiState || 'ALL');
         
-        if (apiState) {
+        // UPDATED: Only check filtering if we're not in "all" mode
+        if (apiState !== null) {
           const correctlyFiltered = states.every(state => state === apiState);
           console.log('✅ Filtering working correctly:', correctlyFiltered);
           
@@ -458,6 +471,8 @@ export default function Track() {
               });
             }
           }
+        } else {
+          console.log('✅ All packages mode - no filtering needed');
         }
       } else {
         console.log('📦 No packages returned for state:', apiState || 'ALL');
@@ -701,7 +716,7 @@ export default function Track() {
         <Text style={styles.emptyStateSubtitle}>
           {searchQuery 
             ? `No packages found matching "${searchQuery}". Try a different search term.`
-            : selectedStatus 
+            : selectedStatus && selectedStatus !== 'all'
               ? `You don't have any packages in "${stateDisplayInfo.title.toLowerCase()}" state.`
               : 'You haven\'t created any packages yet.'
           }
