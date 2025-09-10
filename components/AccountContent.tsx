@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Fixed avatar upload with enhanced synchronization
+// components/AccountContent.tsx - Updated to use changelog version from ChangelogModal
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -36,6 +36,9 @@ import {
 
 // Import the fixed upload avatar helper
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
+
+// Import changelog version from ChangelogModal instead of defining locally
+import { CHANGELOG_VERSION } from './ChangelogModal';
 
 // Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
@@ -123,9 +126,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     </TouchableOpacity>
   );
 };
-
-// Constants
-const CHANGELOG_VERSION = '1.0.0';
 
 interface AccountContentProps {
   source: 'admin' | 'drawer';
