@@ -1,4 +1,4 @@
-// app/admin/AppManagerScreen.tsx
+// app/admin/AppManagerScreen.tsx - Fixed with correct API routes
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -79,7 +79,7 @@ const AppManagerScreen: React.FC = () => {
   const fetchUpdates = useCallback(async () => {
     try {
       setLoading(true);
-      const response = await api.get('/updates');
+      const response = await api.get('/api/v1/updates');
       setUpdates(response.data || []);
       
       // Calculate stats
@@ -200,7 +200,7 @@ const AppManagerScreen: React.FC = () => {
         } as any);
       }
 
-      const response = await api.post('/updates', uploadData, {
+      const response = await api.post('/api/v1/updates', uploadData, {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
@@ -233,7 +233,7 @@ const AppManagerScreen: React.FC = () => {
 
   const publishUpdate = async (updateId: string) => {
     try {
-      await api.patch(`/updates/${updateId}/publish`);
+      await api.patch(`/api/v1/updates/${updateId}/publish`);
       Toast.show({
         type: 'success',
         text1: 'Success',
@@ -247,55 +247,6 @@ const AppManagerScreen: React.FC = () => {
         text2: 'Failed to publish update',
       });
     }
-  };
-
-  const unpublishUpdate = async (updateId: string) => {
-    try {
-      await api.patch(`/updates/${updateId}/unpublish`);
-      Toast.show({
-        type: 'success',
-        text1: 'Success',
-        text2: 'Update unpublished successfully!',
-      });
-      fetchUpdates();
-    } catch (error) {
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: 'Failed to unpublish update',
-      });
-    }
-  };
-
-  const deleteUpdate = async (updateId: string) => {
-    Alert.alert(
-      'Confirm Delete',
-      'Are you sure you want to delete this update? This action cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete(`/updates/${updateId}`);
-              Toast.show({
-                type: 'success',
-                text1: 'Success',
-                text2: 'Update deleted successfully!',
-              });
-              fetchUpdates();
-            } catch (error) {
-              Toast.show({
-                type: 'error',
-                text1: 'Error',
-                text2: 'Failed to delete update',
-              });
-            }
-          },
-        },
-      ]
-    );
   };
 
   const resetForm = () => {
@@ -444,32 +395,13 @@ const AppManagerScreen: React.FC = () => {
       </View>
       
       <View style={styles.updateActions}>
-        {!update.published ? (
-          <>
-            {update.apk_url && (
-              <TouchableOpacity 
-                style={[styles.actionButton, { backgroundColor: '#10b981' }]}
-                onPress={() => publishUpdate(update.id)}
-              >
-                <Ionicons name="rocket" size={16} color="white" />
-                <Text style={styles.actionText}>Publish</Text>
-              </TouchableOpacity>
-            )}
-            <TouchableOpacity 
-              style={[styles.actionButton, { backgroundColor: '#ef4444' }]}
-              onPress={() => deleteUpdate(update.id)}
-            >
-              <Ionicons name="trash" size={16} color="white" />
-              <Text style={styles.actionText}>Delete</Text>
-            </TouchableOpacity>
-          </>
-        ) : (
+        {!update.published && update.apk_url && (
           <TouchableOpacity 
-            style={[styles.actionButton, { backgroundColor: '#6b7280' }]}
-            onPress={() => unpublishUpdate(update.id)}
+            style={[styles.actionButton, { backgroundColor: '#10b981' }]}
+            onPress={() => publishUpdate(update.id)}
           >
-            <Ionicons name="pause" size={16} color="white" />
-            <Text style={styles.actionText}>Unpublish</Text>
+            <Ionicons name="rocket" size={16} color="white" />
+            <Text style={styles.actionText}>Publish</Text>
           </TouchableOpacity>
         )}
       </View>
