@@ -1,4 +1,4 @@
-// app/admin/AppManagerScreen.tsx - Fixed with correct API routes
+// app/admin/AppManagerScreen.tsx - Fixed with upload progress and large file support
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -47,6 +47,14 @@ interface CreateUpdateFormData {
   apkFile: DocumentPicker.DocumentPickerResult | null;
 }
 
+interface UploadProgress {
+  loaded: number;
+  total: number;
+  percentage: number;
+  speed: number; // bytes per second
+  remainingTime: number; // seconds
+}
+
 const AppManagerScreen: React.FC = () => {
   const { user } = useUser();
   const [updates, setUpdates] = useState<AppUpdate[]>([]);
@@ -56,6 +64,17 @@ const AppManagerScreen: React.FC = () => {
   const [selectedUpdate, setSelectedUpdate] = useState<AppUpdate | null>(null);
   const [showDetailsModal, setShowDetailsModal] = useState(false);
   const [uploading, setUploading] = useState(false);
+  
+  // Upload progress state
+  const [showProgressModal, setShowProgressModal] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress>({
+    loaded: 0,
+    total: 0,
+    percentage: 0,
+    speed: 0,
+    remainingTime: 0,
+  });
+  const [uploadStartTime, setUploadStartTime] = useState<number>(0);
   
   // Form state
   const [formData, setFormData] = useState<CreateUpdateFormData>({
@@ -132,10 +151,10 @@ const AppManagerScreen: React.FC = () => {
           return;
         }
 
-        // Check file size (200MB limit)
-        const maxSize = 200 * 1024 * 1024; // 200MB
+        // Check file size (250MB limit to match server config)
+        const maxSize = 250 * 1024 * 1024; // 250MB
         if (file.size && file.size > maxSize) {
-          Alert.alert('File Too Large', 'APK file must be less than 200MB.');
+          Alert.alert('File Too Large', 'APK file must be less than 250MB.');
           return;
         }
 
@@ -160,6 +179,33 @@ const AppManagerScreen: React.FC = () => {
     return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
   };
 
+  const formatSpeed = (bytesPerSecond: number): string => {
+    if (bytesPerSecond === 0) return '0 B/s';
+    const k = 1024;
+    const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
+    const i = Math.floor(Math.log(bytesPerSecond) / Math.log(k));
+    return parseFloat((bytesPerSecond / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  };
+
+  const formatTime = (seconds: number): string => {
+    if (seconds === Infinity || isNaN(seconds)) return 'calculating...';
+    if (seconds < 60) return `${Math.round(seconds)}s`;
+    const minutes = Math.floor(seconds / 60);
+    const remainingSeconds = Math.round(seconds % 60);
+    return `${minutes}m ${remainingSeconds}s`;
+  };
+
+  const calculateDynamicTimeout = (fileSize: number): number => {
+    // Base timeout of 2 minutes, plus 3 seconds per MB, with max of 15 minutes
+    const baseTimetout = 120000; // 2 minutes
+    const perMBTimeout = 3000; // 3 seconds per MB
+    const fileSizeMB = fileSize / (1024 * 1024);
+    const calculatedTimeout = baseTimetout + (fileSizeMB * perMBTimeout);
+    const maxTimeout = 900000; // 15 minutes
+    
+    return Math.min(calculatedTimeout, maxTimeout);
+  };
+
   const createUpdate = async () => {
     try {
       // Validate form
@@ -174,6 +220,17 @@ const AppManagerScreen: React.FC = () => {
       }
 
       setUploading(true);
+      setShowProgressModal(true);
+      setUploadStartTime(Date.now());
+
+      // Reset progress
+      setUploadProgress({
+        loaded: 0,
+        total: 0,
+        percentage: 0,
+        speed: 0,
+        remainingTime: 0,
+      });
 
       // Create FormData for file upload
       const uploadData = new FormData();
@@ -190,6 +247,10 @@ const AppManagerScreen: React.FC = () => {
         }
       });
 
+      // Calculate timeout based on file size
+      const fileSize = formData.apkFile?.assets?.[0]?.size || 0;
+      const timeoutMs = calculateDynamicTimeout(fileSize);
+
       // Add APK file if selected
       if (formData.apkFile && !formData.apkFile.canceled && formData.apkFile.assets) {
         const file = formData.apkFile.assets[0];
@@ -204,10 +265,29 @@ const AppManagerScreen: React.FC = () => {
         headers: {
           'Content-Type': 'multipart/form-data',
         },
-        timeout: 60000, // 60 second timeout for file uploads
+        timeout: timeoutMs,
+        onUploadProgress: (progressEvent) => {
+          const currentTime = Date.now();
+          const elapsedTime = (currentTime - uploadStartTime) / 1000; // seconds
+          const loaded = progressEvent.loaded || 0;
+          const total = progressEvent.total || 0;
+          const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          const speed = elapsedTime > 0 ? loaded / elapsedTime : 0;
+          const remainingBytes = total - loaded;
+          const remainingTime = speed > 0 ? remainingBytes / speed : 0;
+
+          setUploadProgress({
+            loaded,
+            total,
+            percentage,
+            speed,
+            remainingTime,
+          });
+        },
       });
 
       if (response.status === 201) {
+        setShowProgressModal(false);
         Toast.show({
           type: 'success',
           text1: 'Success',
@@ -220,10 +300,24 @@ const AppManagerScreen: React.FC = () => {
       }
     } catch (error: any) {
       console.error('Create update error:', error);
-      const message = error.response?.data?.message || 'Failed to create update';
+      setShowProgressModal(false);
+      
+      let message = 'Failed to create update';
+      if (error.code === 'ECONNABORTED') {
+        message = 'Upload timeout - file too large or connection too slow';
+      } else if (error.response?.status === 413) {
+        message = 'File too large for server. Try a smaller APK file.';
+      } else if (error.response?.status === 408) {
+        message = 'Upload timeout - try on a faster connection';
+      } else if (error.response?.data?.details) {
+        message = error.response.data.details;
+      } else if (error.response?.data?.message) {
+        message = error.response.data.message;
+      }
+      
       Toast.show({
         type: 'error',
-        text1: 'Error',
+        text1: 'Upload Failed',
         text2: message,
       });
     } finally {
@@ -408,6 +502,62 @@ const AppManagerScreen: React.FC = () => {
     </TouchableOpacity>
   );
 
+  const renderProgressModal = () => (
+    <Modal
+      visible={showProgressModal}
+      transparent={true}
+      animationType="fade"
+    >
+      <View style={styles.progressModalOverlay}>
+        <View style={styles.progressModalContainer}>
+          <LinearGradient
+            colors={['#667eea', '#764ba2']}
+            style={styles.progressModalHeader}
+          >
+            <Ionicons name="cloud-upload" size={32} color="white" />
+            <Text style={styles.progressModalTitle}>Uploading APK</Text>
+          </LinearGradient>
+          
+          <View style={styles.progressModalBody}>
+            <View style={styles.progressInfo}>
+              <Text style={styles.progressPercentage}>{uploadProgress.percentage}%</Text>
+              <Text style={styles.progressDetails}>
+                {formatFileSize(uploadProgress.loaded)} / {formatFileSize(uploadProgress.total)}
+              </Text>
+            </View>
+            
+            <View style={styles.progressBarContainer}>
+              <View style={styles.progressBar}>
+                <LinearGradient
+                  colors={['#667eea', '#764ba2']}
+                  style={[styles.progressBarFill, { width: `${uploadProgress.percentage}%` }]}
+                />
+              </View>
+            </View>
+            
+            <View style={styles.progressStats}>
+              <View style={styles.progressStatItem}>
+                <Text style={styles.progressStatLabel}>Speed</Text>
+                <Text style={styles.progressStatValue}>{formatSpeed(uploadProgress.speed)}</Text>
+              </View>
+              <View style={styles.progressStatItem}>
+                <Text style={styles.progressStatLabel}>Remaining</Text>
+                <Text style={styles.progressStatValue}>{formatTime(uploadProgress.remainingTime)}</Text>
+              </View>
+            </View>
+            
+            <View style={styles.progressMessage}>
+              <ActivityIndicator size="small" color="#667eea" />
+              <Text style={styles.progressMessageText}>
+                {uploadProgress.percentage < 100 ? 'Uploading to cloud storage...' : 'Processing upload...'}
+              </Text>
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderCreateModal = () => (
     <Modal
       visible={showCreateModal}
@@ -524,6 +674,17 @@ const AppManagerScreen: React.FC = () => {
                 )}
               </LinearGradient>
             </TouchableOpacity>
+            
+            {formData.apkFile?.assets?.[0] && (
+              <View style={styles.fileInfo}>
+                <Text style={styles.fileInfoText}>
+                  Size: {formatFileSize(formData.apkFile.assets[0].size || 0)}
+                </Text>
+                <Text style={styles.fileInfoText}>
+                  Estimated upload time: {formatTime(calculateDynamicTimeout(formData.apkFile.assets[0].size || 0) / 1000)}
+                </Text>
+              </View>
+            )}
           </View>
           
           {/* Options Section */}
@@ -745,6 +906,7 @@ const AppManagerScreen: React.FC = () => {
         {/* Modals */}
         {renderCreateModal()}
         {renderDetailsModal()}
+        {renderProgressModal()}
       </LinearGradient>
     </View>
   );
@@ -1043,6 +1205,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 4,
   },
+  fileInfo: {
+    backgroundColor: '#f3f4f6',
+    padding: 12,
+    borderRadius: 8,
+    marginTop: 10,
+  },
+  fileInfoText: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginBottom: 4,
+  },
   checkboxRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1133,6 +1306,98 @@ const styles = StyleSheet.create({
     color: '#4b5563',
     flex: 1,
     lineHeight: 20,
+  },
+  // Progress Modal Styles
+  progressModalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  progressModalContainer: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: 'white',
+    borderRadius: 20,
+    overflow: 'hidden',
+    elevation: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 20,
+  },
+  progressModalHeader: {
+    paddingVertical: 25,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+  },
+  progressModalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: 'white',
+    marginTop: 10,
+  },
+  progressModalBody: {
+    padding: 25,
+  },
+  progressInfo: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  progressPercentage: {
+    fontSize: 32,
+    fontWeight: 'bold',
+    color: '#1f2937',
+    marginBottom: 5,
+  },
+  progressDetails: {
+    fontSize: 14,
+    color: '#6b7280',
+  },
+  progressBarContainer: {
+    marginBottom: 20,
+  },
+  progressBar: {
+    height: 8,
+    backgroundColor: '#e5e7eb',
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressStats: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  progressStatItem: {
+    alignItems: 'center',
+  },
+  progressStatLabel: {
+    fontSize: 12,
+    color: '#6b7280',
+    marginBottom: 5,
+  },
+  progressStatValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1f2937',
+  },
+  progressMessage: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 15,
+    backgroundColor: '#f9fafb',
+    borderRadius: 8,
+  },
+  progressMessageText: {
+    fontSize: 14,
+    color: '#6b7280',
+    marginLeft: 10,
   },
 });
 
