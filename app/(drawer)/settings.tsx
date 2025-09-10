@@ -1,9 +1,12 @@
-import React, { useState } from 'react';
+// app/(drawer)/settings.tsx - Settings Screen with NavigationHelper integration
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useNavigation } from '@react-navigation/native';
-import colors from '../../theme/colors'; // Ensure your colors are imported here
+import colors from '../../theme/colors';
+
+// Import NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const SETTINGS_SECTIONS = [
   {
@@ -33,8 +36,27 @@ const SETTINGS_SECTIONS = [
 ];
 
 export default function SettingsScreen() {
-  const navigation = useNavigation();
   const [search, setSearch] = useState('');
+
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(() => {
+    console.log('🔙 Settings: Going back...');
+    
+    NavigationHelper.goBack({
+      fallbackRoute: '/',
+      replaceIfNoHistory: true
+    });
+  }, []);
+
+  // Navigation handler using NavigationHelper
+  const handleSettingNavigation = useCallback((label: string) => {
+    console.log('🔧 Settings: Navigating to:', label);
+    
+    // Convert label to route format
+    const route = label.toLowerCase().replace(/ /g, '_').replace(/&/g, 'and');
+    
+    NavigationHelper.navigateTo(`/settings/${route}`);
+  }, []);
 
   // Function to filter the settings data
   const filterSettings = (sections: any) => {
@@ -53,7 +75,7 @@ export default function SettingsScreen() {
     <View style={styles.settingItemContainer}>
       <TouchableOpacity
         style={styles.settingItem}
-        onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))} // Navigate to settings
+        onPress={() => handleSettingNavigation(item.label)}
       >
         <MaterialIcons name={item.icon} size={24} color="#fff" />
         <Text style={styles.settingText}>{item.label}</Text>
@@ -72,7 +94,7 @@ export default function SettingsScreen() {
             <View style={styles.settingItemContainer}>
               <TouchableOpacity
                 style={styles.settingItem}
-                onPress={() => navigation.navigate(item.label.toLowerCase().replace(' ', '_'))}
+                onPress={() => handleSettingNavigation(item.label)}
               >
                 <MaterialIcons name={item.icon} size={24} color="#fff" />
                 <Text style={styles.settingText}>{item.label}</Text>
@@ -88,14 +110,14 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with gradient background like account screen */}
+      {/* Header with gradient background and NavigationHelper back */}
       <LinearGradient
         colors={['#4c1d95', '#7c3aed', '#3730a3']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+        <TouchableOpacity onPress={handleGoBack} style={styles.backButton}>
           <Feather name="chevron-left" size={28} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.title}>Settings</Text>
@@ -104,13 +126,21 @@ export default function SettingsScreen() {
 
       {/* Search Bar */}
       <View style={styles.searchContainer}>
-        <TextInput
-          style={styles.searchBar}
-          placeholder="Search settings..."
-          placeholderTextColor="#888"
-          value={search}
-          onChangeText={setSearch}
-        />
+        <View style={styles.searchInputContainer}>
+          <Feather name="search" size={18} color="#888" />
+          <TextInput
+            style={styles.searchBar}
+            placeholder="Search settings..."
+            placeholderTextColor="#888"
+            value={search}
+            onChangeText={setSearch}
+          />
+          {search.length > 0 && (
+            <TouchableOpacity onPress={() => setSearch('')}>
+              <Feather name="x" size={16} color="#888" />
+            </TouchableOpacity>
+          )}
+        </View>
       </View>
 
       {/* Settings List */}
@@ -121,6 +151,7 @@ export default function SettingsScreen() {
         renderSectionHeader={renderSection}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.listContainer}
+        stickySectionHeadersEnabled={false}
       />
     </View>
   );
@@ -163,18 +194,26 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 16,
   },
-  searchBar: {
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: '#1a1a2e',
-    color: '#fff',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
     borderRadius: 12,
-    fontSize: 16,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
+    paddingHorizontal: 16,
+    minHeight: 44,
+    gap: 12,
+  },
+  searchBar: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    paddingVertical: 12,
   },
   listContainer: {
     paddingBottom: 20,
+    flexGrow: 1,
   },
   sectionContainer: {
     marginBottom: 24,
