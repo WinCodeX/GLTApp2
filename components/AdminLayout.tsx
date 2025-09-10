@@ -1,4 +1,4 @@
-// components/AdminLayout.tsx - Fixed with proper status bar integration and positioning
+// components/AdminLayout.tsx - Fixed with proper positioning and no cutoffs
 import React, { useState, ReactNode, useEffect } from 'react';
 import {
   View,
@@ -92,12 +92,10 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   // Enhanced pathname matching for scanning route
   const getActiveTab = (): string => {
-    // Special handling for account route
     if (pathname === '/admin/account') {
       return 'profile';
     }
     
-    // Special handling for scanning route
     if (pathname === '/admin/ScanningScreen') {
       return 'scan';
     }
@@ -120,7 +118,6 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         return;
       }
 
-      // Check if we're already on this route
       if (pathname === tab.route) {
         console.log(`Already on route: ${tab.route}`);
         return;
@@ -128,26 +125,25 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
       console.log(`Navigating from ${pathname} to ${tab.route}`);
       
-      // Enhanced navigation logic with proper scanning route
       switch (tabId) {
         case 'profile':
-          console.log('🚀 Navigating to admin account');
+          console.log('Navigating to admin account');
           router.push('/admin/account');
           break;
         case 'home':
-          console.log('🚀 Navigating to admin home');
+          console.log('Navigating to admin home');
           router.push('/admin');
           break;
         case 'scan':
-          console.log('🚀 Navigating to scanning screen');
+          console.log('Navigating to scanning screen');
           router.push('/admin/ScanningScreen');
           break;
         case 'packages':
-          console.log('🚀 Navigating to packages');
+          console.log('Navigating to packages');
           router.push('/admin/packages');
           break;
         case 'settings':
-          console.log('🚀 Navigating to settings');
+          console.log('Navigating to settings');
           router.push('/admin/settings');
           break;
         default:
@@ -158,35 +154,18 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       
     } catch (error) {
       console.error('Navigation error:', error);
-      // Fallback to admin home
       router.push('/admin');
     }
   };
 
-  // Navigation debug logging
-  useEffect(() => {
-    console.log('AdminLayout mounted, current pathname:', pathname);
-    console.log('Active tab:', activeTab);
-    console.log('Available tabs:', bottomTabs.map(t => `${t.id}: ${t.route}`));
-    
-    // Special logging for scanning route
-    if (pathname === '/admin/ScanningScreen') {
-      console.log('📱 Currently on Scanning Screen');
-    }
-  }, [pathname, activeTab]);
-
-  // Handle avatar press with proper navigation
   const handleAvatarPress = (): void => {
     handleTabPress('profile');
   };
 
-  // Handle search input with proper typing
   const handleSearchSubmit = (text: string): void => {
     console.log('Search submitted:', text);
-    // Add your search logic here
   };
 
-  // Enhanced route checking including scanning
   const shouldShowBottomTabs = (): boolean => {
     const adminRoutes = [
       '/admin',
@@ -198,37 +177,30 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     return adminRoutes.includes(pathname || '') || pathname?.startsWith('/admin') || false;
   };
 
-  // Enhanced FAB visibility logic
   const shouldShowFAB = (): boolean => {
     const fabRoutes = ['/admin', '/admin/ScanningScreen', '/admin/packages', '/admin/settings'];
     return fabRoutes.includes(pathname || '') || false;
   };
 
-  // Handle FAB press based on current screen
   const handleFABPress = (): void => {
     console.log('FAB pressed on route:', pathname);
     
     switch (pathname) {
       case '/admin/ScanningScreen':
-        // On scanning screen, FAB could open quick scan or bulk scan
-        console.log('🚀 Opening quick scan from FAB');
-        // You can trigger a callback or navigate to a specific scan mode
+        console.log('Opening quick scan from FAB');
         break;
       case '/admin/packages':
-        // On packages screen, FAB could create new package
-        console.log('🚀 Creating new package from FAB');
+        console.log('Creating new package from FAB');
         router.push('/admin/packages/create');
         break;
       case '/admin':
       default:
-        // Default behavior - could open a quick action menu or navigate to scan
-        console.log('🚀 Opening quick actions from FAB - navigating to scan');
+        console.log('Opening quick actions from FAB - navigating to scan');
         router.push('/admin/ScanningScreen');
         break;
     }
   };
 
-  // Get screen title - FIXED: Removed "Home" text, now shows nothing for /admin
   const getScreenTitle = (): string => {
     switch (pathname) {
       case '/admin/ScanningScreen':
@@ -240,13 +212,12 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       case '/admin/account':
         return 'Account';
       case '/admin':
-        return ''; // FIXED: Empty string instead of 'Home'
+        return '';
       default:
         return 'Admin';
     }
   };
 
-  // Check if we should show the title (don't show empty titles)
   const shouldShowTitle = (): boolean => {
     const title = getScreenTitle();
     return title.trim().length > 0;
@@ -254,26 +225,16 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 
   return (
     <View style={styles.container}>
-      {/* FIXED: Status bar with matching gradient color */}
+      {/* Status bar with gradient color */}
       <StatusBar 
         barStyle="light-content" 
         backgroundColor="#667eea" 
         translucent={false}
       />
       
-      {/* FIXED: Proper status bar integration */}
-      <View style={styles.statusBarBackground}>
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.statusBarGradient}
-        />
-      </View>
-
-      {/* FIXED: SafeAreaView with proper styling */}
+      {/* Main container with SafeAreaView */}
       <SafeAreaView style={styles.safeArea}>
-        {/* Header with gradient extending from status bar */}
+        {/* Header with gradient */}
         <LinearGradient
           colors={['#667eea', '#764ba2']}
           start={{ x: 0, y: 0 }}
@@ -294,7 +255,6 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
               <View style={styles.logoIcon}>
                 <Text style={styles.logoText}>GL</Text>
               </View>
-              {/* Only show title if it's not empty */}
               {shouldShowTitle() && (
                 <Text style={styles.panelTitle}>
                   {getScreenTitle()}
@@ -303,7 +263,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
             </View>
           </View>
 
-          {/* Center - Search (hide on scanning screen to give more space) */}
+          {/* Center - Search (hide on scanning screen) */}
           {pathname !== '/admin/ScanningScreen' && (
             <View style={styles.searchContainer}>
               <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
@@ -341,108 +301,108 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
             </TouchableOpacity>
           </View>
         </LinearGradient>
-      </SafeAreaView>
 
-      <View style={styles.mainContent}>
-        <AdminSidebar 
-          visible={sidebarVisible} 
-          onClose={closeSidebar} 
-          activePanel={activePanel} 
-        />
-        <View style={styles.contentArea}>
-          <LinearGradient 
-            colors={['#1a1a2e', '#16213e', '#0f0f23']} 
-            style={styles.contentGradient}
-          >
-            <ScrollView 
-              style={styles.scrollView} 
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {children}
-            </ScrollView>
-          </LinearGradient>
-        </View>
-        {sidebarVisible && (
-          <TouchableOpacity 
-            style={styles.overlay} 
-            onPress={closeSidebar}
-            accessibilityLabel="Close sidebar"
-            accessibilityRole="button"
+        {/* Main content area */}
+        <View style={styles.mainContent}>
+          <AdminSidebar 
+            visible={sidebarVisible} 
+            onClose={closeSidebar} 
+            activePanel={activePanel} 
           />
-        )}
-      </View>
-
-      {/* Bottom Tabs - Show on admin routes including scanning */}
-      {shouldShowBottomTabs() && (
-        <View style={styles.bottomTabBar}>
-          {bottomTabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                onPress={() => handleTabPress(tab.id)}
-                style={styles.tabButton}
-                accessibilityLabel={`${tab.label} tab`}
-                accessibilityRole="button"
-                accessibilityState={{ selected: isActive }}
+          <View style={styles.contentArea}>
+            <LinearGradient 
+              colors={['#1a1a2e', '#16213e', '#0f0f23']} 
+              style={styles.contentGradient}
+            >
+              <ScrollView 
+                style={styles.scrollView} 
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
               >
-                <Ionicons
-                  name={isActive ? tab.activeIcon : tab.icon}
-                  size={22}
-                  color={isActive ? '#667eea' : '#a0aec0'}
-                />
-                <Text
-                  style={[
-                    styles.tabLabel,
-                    {
-                      color: isActive ? '#667eea' : '#a0aec0',
-                      fontWeight: isActive ? '600' : '400',
-                    },
-                  ]}
-                >
-                  {tab.label}
-                </Text>
-                {/* Add scanning indicator badge when scanning tab is active */}
-                {tab.id === 'scan' && isActive && (
-                  <View style={styles.scanningBadge}>
-                    <View style={styles.scanningDot} />
-                  </View>
-                )}
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      )}
-
-      {/* Enhanced Floating Action Button with context-aware actions */}
-      {shouldShowFAB() && (
-        <TouchableOpacity 
-          style={styles.fab}
-          onPress={handleFABPress}
-          accessibilityLabel={
-            pathname === '/admin/ScanningScreen' ? 'Quick scan' :
-            pathname === '/admin/packages' ? 'Add new package' :
-            'Quick scan'
-          }
-          accessibilityRole="button"
-        >
-          <LinearGradient 
-            colors={['#667eea', '#764ba2']} 
-            style={styles.fabGradient}
-          >
-            <Ionicons 
-              name={
-                pathname === '/admin/ScanningScreen' ? 'qr-code' :
-                pathname === '/admin/packages' ? 'add' :
-                'qr-code'
-              } 
-              size={28} 
-              color="white" 
+                {children}
+              </ScrollView>
+            </LinearGradient>
+          </View>
+          {sidebarVisible && (
+            <TouchableOpacity 
+              style={styles.overlay} 
+              onPress={closeSidebar}
+              accessibilityLabel="Close sidebar"
+              accessibilityRole="button"
             />
-          </LinearGradient>
-        </TouchableOpacity>
-      )}
+          )}
+        </View>
+
+        {/* Bottom Tabs */}
+        {shouldShowBottomTabs() && (
+          <View style={styles.bottomTabBar}>
+            {bottomTabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  onPress={() => handleTabPress(tab.id)}
+                  style={styles.tabButton}
+                  accessibilityLabel={`${tab.label} tab`}
+                  accessibilityRole="button"
+                  accessibilityState={{ selected: isActive }}
+                >
+                  <Ionicons
+                    name={isActive ? tab.activeIcon : tab.icon}
+                    size={22}
+                    color={isActive ? '#667eea' : '#a0aec0'}
+                  />
+                  <Text
+                    style={[
+                      styles.tabLabel,
+                      {
+                        color: isActive ? '#667eea' : '#a0aec0',
+                        fontWeight: isActive ? '600' : '400',
+                      },
+                    ]}
+                  >
+                    {tab.label}
+                  </Text>
+                  {tab.id === 'scan' && isActive && (
+                    <View style={styles.scanningBadge}>
+                      <View style={styles.scanningDot} />
+                    </View>
+                  )}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        )}
+
+        {/* Floating Action Button */}
+        {shouldShowFAB() && (
+          <TouchableOpacity 
+            style={styles.fab}
+            onPress={handleFABPress}
+            accessibilityLabel={
+              pathname === '/admin/ScanningScreen' ? 'Quick scan' :
+              pathname === '/admin/packages' ? 'Add new package' :
+              'Quick scan'
+            }
+            accessibilityRole="button"
+          >
+            <LinearGradient 
+              colors={['#667eea', '#764ba2']} 
+              style={styles.fabGradient}
+            >
+              <Ionicons 
+                name={
+                  pathname === '/admin/ScanningScreen' ? 'qr-code' :
+                  pathname === '/admin/packages' ? 'add' :
+                  'qr-code'
+                } 
+                size={28} 
+                color="white" 
+              />
+            </LinearGradient>
+          </TouchableOpacity>
+        )}
+      </SafeAreaView>
     </View>
   );
 };
@@ -450,37 +410,20 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
-    backgroundColor: '#1a1a2e' 
+    backgroundColor: '#667eea' // Match status bar color
   },
-  // FIXED: Status bar background integration
-  statusBarBackground: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    height: Constants.statusBarHeight,
-    zIndex: 1000,
-  },
-  statusBarGradient: {
-    flex: 1,
-  },
-  // FIXED: Proper SafeAreaView with consistent styling
   safeArea: {
-    backgroundColor: 'transparent', // Let the gradient show through
-    zIndex: 999,
+    flex: 1,
+    backgroundColor: 'transparent',
   },
-  // FIXED: Header with proper positioning and gradient continuation
   header: {
     paddingHorizontal: 16,
-    paddingTop: Platform.OS === 'ios' ? 0 : 8, // Adjust for different platforms
-    paddingBottom: 16,
+    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     minHeight: 60,
-    // Ensure gradient extends properly
-    marginTop: Platform.OS === 'android' ? -Constants.statusBarHeight : 0,
-    paddingTop: Platform.OS === 'android' ? Constants.statusBarHeight + 8 : 8,
+    // Ensure no negative margins or complex positioning
   },
   headerLeft: { 
     flexDirection: 'row', 
@@ -553,7 +496,8 @@ const styles = StyleSheet.create({
   },
   mainContent: { 
     flex: 1, 
-    flexDirection: 'row' 
+    flexDirection: 'row',
+    backgroundColor: '#1a1a2e'
   },
   contentArea: { 
     flex: 1, 
@@ -579,10 +523,6 @@ const styles = StyleSheet.create({
     zIndex: 998,
   },
   bottomTabBar: {
-    position: 'absolute',
-    bottom: 0,
-    left: 0,
-    right: 0,
     backgroundColor: '#16213e',
     borderTopWidth: 1,
     borderTopColor: '#2d3748',
@@ -591,13 +531,13 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
-    paddingBottom: Platform.OS === 'ios' ? 12 : 8, // Account for home indicator on iOS
+    paddingBottom: Platform.OS === 'ios' ? 12 : 8,
   },
   tabButton: { 
     alignItems: 'center', 
     paddingVertical: 4, 
     paddingHorizontal: 8,
-    minWidth: width / 5 - 16, // Ensure even spacing
+    minWidth: width / 5 - 16,
     position: 'relative',
   },
   tabLabel: { 
@@ -605,7 +545,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
     textAlign: 'center',
   },
-  // Scanning indicator styles
   scanningBadge: {
     position: 'absolute',
     top: -2,
