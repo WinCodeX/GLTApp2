@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - FIXED: Fetch ALL packages without pagination limits
+// app/(drawer)/track.tsx - Track screen with NavigationHelper integration
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -15,13 +15,16 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import api from '@/lib/api';
 import colors from '@/theme/colors';
 import PackageCreationModal from '@/components/PackageCreationModal';
 import MpesaPaymentModal from '@/components/MpesaPaymentModal';
+
+// Import NavigationHelper
+import { NavigationHelper } from '@/lib/helpers/navigation';
 
 // Types
 interface Package {
@@ -87,7 +90,6 @@ const STATE_MAPPING: Record<DrawerState, string> = {
 
 export default function Track() {
   const params = useLocalSearchParams();
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   
   const selectedStatus = params.status as DrawerState | undefined;
@@ -105,6 +107,42 @@ export default function Track() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPackageForPayment, setSelectedPackageForPayment] = useState<Package | null>(null);
+
+  // Enhanced back navigation using NavigationHelper
+  const handleBack = useCallback(() => {
+    console.log('🔙 Track: Going back...');
+    
+    NavigationHelper.goBack({
+      fallbackRoute: '/',
+      replaceIfNoHistory: true
+    });
+  }, []);
+
+  // Enhanced navigation to tracking details using NavigationHelper
+  const handleViewTracking = useCallback((packageItem: Package) => {
+    console.log('🔍 Viewing tracking for package:', packageItem.code);
+    
+    NavigationHelper.navigateTo('/(drawer)/track/tracking', {
+      params: { 
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString(),
+        from: '/(drawer)/track'
+      }
+    });
+  }, []);
+
+  // Enhanced navigation to edit package using NavigationHelper
+  const handleEditPackage = useCallback((packageItem: Package) => {
+    console.log('🔧 Editing package:', packageItem.code);
+    
+    NavigationHelper.navigateTo('/(drawer)/(tabs)/send', {
+      params: { 
+        edit: 'true',
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString()
+      }
+    });
+  }, []);
 
   // FIXED: Get ALL packages without pagination limits
   const getPackages = useCallback(async (filters?: { state?: string; search?: string }): Promise<PackageResponse> => {
@@ -453,14 +491,6 @@ export default function Track() {
     loadPackages(true);
   }, [loadPackages]);
 
-  const handleBack = useCallback(() => {
-    if (router.canGoBack()) {
-      router.back();
-    } else {
-      router.push('/');
-    }
-  }, [router]);
-
   const getDeliveryTypeDisplay = useCallback((deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return 'Home';
@@ -549,35 +579,10 @@ export default function Track() {
     return state === 'pending_unpaid';
   }, []);
 
-  const handleEditPackage = useCallback((packageItem: Package) => {
-    console.log('🔧 Editing package:', packageItem.code);
-    router.push({
-      pathname: '/(drawer)/(tabs)/send',
-      params: { 
-        edit: 'true',
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString()
-      }
-    });
-  }, [router]);
-
   const handlePayPackage = useCallback((packageItem: Package) => {
     console.log('💳 Processing payment for package:', packageItem.code);
     handleOpenPaymentModal(packageItem);
   }, [handleOpenPaymentModal]);
-
-  const handleViewTracking = useCallback((packageItem: Package) => {
-    console.log('🔍 Viewing tracking for package:', packageItem.code);
-    
-    router.push({
-      pathname: '/(drawer)/track/tracking',
-      params: { 
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString(),
-        from: '/(drawer)/track'
-      }
-    });
-  }, [router]);
 
   const getReceiverName = useCallback((packageItem: Package) => {
     return packageItem.receiver_name || 
