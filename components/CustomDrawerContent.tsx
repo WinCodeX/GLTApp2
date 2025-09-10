@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Fixed with proper phone number display logic
+// components/CustomDrawerContent.tsx - Streamlined with simplified personal account structure
 import {
   Feather,
   FontAwesome5,
@@ -245,14 +245,6 @@ export default function CustomDrawerContent(props: any) {
     }
   };
 
-  const handleAccountNavigation = () => {
-    setShowBusinessDropdown(false);
-    props.navigation.closeDrawer();
-    
-    console.log('🎭 Navigating to account...');
-    props.navigation.navigate('account');
-  };
-
   const handleBecomeRider = () => {
     props.navigation.closeDrawer();
     console.log('🎭 Navigating to become a rider...');
@@ -317,7 +309,7 @@ export default function CustomDrawerContent(props: any) {
     );
   };
 
-  // Render "You" option
+  // Render "You" option - tappable like businesses
   const renderYouOption = () => {
     const isSelected = !selectedBusiness; // Selected when no business is selected
 
@@ -338,10 +330,7 @@ export default function CustomDrawerContent(props: any) {
         
         <View style={styles.businessInfo}>
           <Text style={styles.businessName}>
-            You
-          </Text>
-          <Text style={styles.businessType}>
-            Personal
+            {getDisplayName()}
           </Text>
           <Text style={styles.businessPhone}>
             {userPhone}
@@ -366,7 +355,7 @@ export default function CustomDrawerContent(props: any) {
       >
         <View style={styles.container}>
 
-          {/* Enhanced Main Business/Account Section with context-aware avatar/logo display */}    
+          {/* Simplified Personal Account Header */}    
           <TouchableOpacity    
             onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
             style={styles.accountHeader}    
@@ -392,13 +381,8 @@ export default function CustomDrawerContent(props: any) {
             )}
             
             <View style={styles.accountInfo}>
-              <Text style={styles.userName}>{displayName}</Text>
-              {/* FIXED: Show business phone when business selected, fallback to user phone */}
+              <Text style={styles.userName}>Personal</Text>
               <Text style={styles.userPhone}>{displayPhone}</Text>
-              {/* Updated mode indicator labels */}
-              <Text style={styles.modeIndicator}>
-                {isBusinessMode ? 'Business Account' : 'Personal Account'}
-              </Text>
             </View>    
             <Feather    
               name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
@@ -409,32 +393,22 @@ export default function CustomDrawerContent(props: any) {
 
           {showBusinessDropdown && (    
             <View style={styles.accountDropdown}>
-              {/* Account */}
-              <DrawerItem    
-                label="Account"    
-                labelStyle={styles.label}    
-                icon={() => <Feather name="user" size={22} color="#fff" />}    
-                onPress={handleAccountNavigation}
-              />
               
-              {/* Simplified Business/Personal Listings - No "Switch Mode" section */}
-              <View style={styles.businessesSection}>
-                {/* You option - always first */}
-                {renderYouOption()}
-                
-                {/* Business Listings */}
-                {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
-                  <>
-                    <Text style={styles.sectionTitle}>Your Businesses</Text>
-                    
-                    {/* Owned Businesses */}
-                    {businesses.owned.map(business => renderBusinessItem(business, true))}
-                    
-                    {/* Joined Businesses */}
-                    {businesses.joined.map(business => renderBusinessItem(business, false))}
-                  </>
-                )}
-              </View>
+              {/* You option - tappable like businesses */}
+              {renderYouOption()}
+              
+              {/* Business Listings */}
+              {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
+                <>
+                  <Text style={styles.sectionTitle}>Your Businesses</Text>
+                  
+                  {/* Owned Businesses */}
+                  {businesses.owned.map(business => renderBusinessItem(business, true))}
+                  
+                  {/* Joined Businesses */}
+                  {businesses.joined.map(business => renderBusinessItem(business, false))}
+                </>
+              )}
 
               {/* Business Management Button */}
               <TouchableOpacity
