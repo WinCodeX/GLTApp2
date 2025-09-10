@@ -1,3 +1,4 @@
+// AdminSidebar.tsx - Updated with navigation support
 import React, { useState } from 'react';
 import {
   View,
@@ -20,6 +21,7 @@ interface SidebarFeature {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   id: string;
+  screen?: string;
 }
 
 interface ExpandedSections {
@@ -32,14 +34,16 @@ interface AdminSidebarProps {
   visible: boolean;
   onClose: () => void;
   activePanel: string;
+  onNavigate: (screen: string, panelId: string) => void;
 }
 
 const AdminSidebar: React.FC<AdminSidebarProps> = ({
   visible,
   onClose,
   activePanel,
+  onNavigate,
 }) => {
-  const { user } = useUser(); // ✅ Correct placement
+  const { user } = useUser();
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     hangout: true,
     admin: true,
@@ -54,35 +58,42 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   };
 
   const adminFeatures: SidebarFeature[] = [
-    { icon: 'cube-outline', title: 'Warehouse', id: 'warehouse' },
-    { icon: 'search-outline', title: 'Search', id: 'search' },
-    { icon: 'chatbubble-outline', title: 'Communicate', id: 'communicate' },
-    { icon: 'grid-outline', title: 'Switchboard', id: 'switchboard' },
-    { icon: 'people-outline', title: 'Users', id: 'users' },
-    { icon: 'lock-open-outline', title: 'Unlocking', id: 'unlocking' },
-    { icon: 'card-outline', title: 'Withdrawals', id: 'withdrawals' },
-    { icon: 'pricetag-outline', title: 'Pricing', id: 'pricing' },
+    { icon: 'cube-outline', title: 'Warehouse', id: 'warehouse', screen: 'WarehouseScreen' },
+    { icon: 'search-outline', title: 'Search', id: 'search', screen: 'SearchScreen' },
+    { icon: 'chatbubble-outline', title: 'Communicate', id: 'communicate', screen: 'CommunicateScreen' },
+    { icon: 'grid-outline', title: 'Switchboard', id: 'switchboard', screen: 'SwitchboardScreen' },
+    { icon: 'people-outline', title: 'Users', id: 'users', screen: 'UsersScreen' },
+    { icon: 'lock-open-outline', title: 'Unlocking', id: 'unlocking', screen: 'UnlockingScreen' },
+    { icon: 'card-outline', title: 'Withdrawals', id: 'withdrawals', screen: 'WithdrawalsScreen' },
+    { icon: 'pricetag-outline', title: 'Pricing', id: 'pricing', screen: 'PricingScreen' },
   ];
 
   const supportFeatures: SidebarFeature[] = [
-    { icon: 'help-circle-outline', title: 'Support', id: 'support' },
-    { icon: 'ticket-outline', title: 'Tickets', id: 'tickets' },
-    { icon: 'business-outline', title: 'Business', id: 'business' },
-    { icon: 'chatbubble-ellipses-outline', title: 'Feedback', id: 'feedback' },
-    { icon: 'diamond-outline', title: 'Enterprise', id: 'enterprise' },
-    { icon: 'document-text-outline', title: 'Terms', id: 'terms' },
-    { icon: 'phone-portrait-outline', title: 'App Manager', id: 'app-manager' },
+    { icon: 'help-circle-outline', title: 'Support', id: 'support', screen: 'SupportScreen' },
+    { icon: 'ticket-outline', title: 'Tickets', id: 'tickets', screen: 'TicketsScreen' },
+    { icon: 'business-outline', title: 'Business', id: 'business', screen: 'BusinessScreen' },
+    { icon: 'chatbubble-ellipses-outline', title: 'Feedback', id: 'feedback', screen: 'FeedbackScreen' },
+    { icon: 'diamond-outline', title: 'Enterprise', id: 'enterprise', screen: 'EnterpriseScreen' },
+    { icon: 'document-text-outline', title: 'Terms', id: 'terms', screen: 'TermsScreen' },
+    { icon: 'phone-portrait-outline', title: 'App Manager', id: 'app-manager', screen: 'AppManagerScreen' },
   ];
 
   const logisticsFeatures: SidebarFeature[] = [
-    { icon: 'location-outline', title: 'Track Package', id: 'track' },
-    { icon: 'car-outline', title: 'Currently Reaching', id: 'reaching' },
-    { icon: 'calculator-outline', title: 'Cost Calculator', id: 'calculator' },
-    { icon: 'time-outline', title: 'History', id: 'history' },
-    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts' },
+    { icon: 'location-outline', title: 'Track Package', id: 'track', screen: 'TrackScreen' },
+    { icon: 'car-outline', title: 'Currently Reaching', id: 'reaching', screen: 'ReachingScreen' },
+    { icon: 'calculator-outline', title: 'Cost Calculator', id: 'calculator', screen: 'CalculatorScreen' },
+    { icon: 'time-outline', title: 'History', id: 'history', screen: 'HistoryScreen' },
+    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', screen: 'ContactsScreen' },
   ];
 
   const quickActionLocations: string[] = ['Thika', 'Machakos', 'Kisii'];
+
+  const handleFeaturePress = (item: SidebarFeature) => {
+    if (item.screen) {
+      onNavigate(item.screen, item.id);
+      onClose();
+    }
+  };
 
   const renderFeatureItem = (item: SidebarFeature): JSX.Element => (
     <TouchableOpacity
@@ -94,6 +105,8 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
             activePanel === item.id ? 'rgba(108, 92, 231, 0.2)' : 'transparent',
         },
       ]}
+      onPress={() => handleFeaturePress(item)}
+      activeOpacity={0.7}
     >
       <Ionicons
         name={item.icon}
@@ -111,6 +124,9 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       >
         {item.title}
       </Text>
+      {activePanel === item.id && (
+        <View style={styles.activeIndicator} />
+      )}
     </TouchableOpacity>
   );
 
@@ -123,6 +139,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
       <TouchableOpacity
         onPress={() => toggleSection(sectionKey)}
         style={styles.sectionHeader}
+        activeOpacity={0.7}
       >
         <Ionicons
           name={expandedSections[sectionKey] ? 'chevron-down' : 'chevron-forward'}
@@ -164,7 +181,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
                   <Text style={styles.panelLabel}>Admin Panel</Text>
                 </View>
               </View>
-              <TouchableOpacity onPress={onClose}>
+              <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
                 <Ionicons name="close" size={24} color="#a0aec0" />
               </TouchableOpacity>
             </View>
@@ -177,7 +194,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
               style={styles.profileCard}
             >
               <View style={styles.profileAvatar}>
-                {user.avatar_url ? (
+                {user?.avatar_url ? (
                   <Image
                     source={{ uri: user.avatar_url }}
                     style={styles.avatarImage}
@@ -188,10 +205,10 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
               </View>
               <View style={styles.profileInfo}>
                 <Text style={styles.profileName}>
-                  {user.name || 'Admin User'}
+                  {user?.name || 'Admin User'}
                 </Text>
                 <Text style={styles.profilePhone}>
-                  {user.phone || '+254 000 000 000'}
+                  {user?.phone || '+254 000 000 000'}
                 </Text>
               </View>
               <Ionicons name="chevron-down" size={20} color="white" />
@@ -203,7 +220,11 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
             <Text style={styles.sectionLabel}>Quick Actions</Text>
             <View style={styles.locationButtons}>
               {quickActionLocations.map((location) => (
-                <TouchableOpacity key={location} style={styles.locationButton}>
+                <TouchableOpacity 
+                  key={location} 
+                  style={styles.locationButton}
+                  activeOpacity={0.7}
+                >
                   <Text style={styles.locationButtonText}>{location}</Text>
                 </TouchableOpacity>
               ))}
@@ -365,10 +386,20 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 12,
     borderRadius: 8,
+    position: 'relative',
   },
   featureText: {
     fontSize: 14,
     marginLeft: 12,
+    flex: 1,
+  },
+  activeIndicator: {
+    position: 'absolute',
+    right: 8,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#6c5ce7',
   },
 });
 
