@@ -1,4 +1,5 @@
-import React, { useState, useRef, useEffect } from 'react';
+// app/(drawer)/support.tsx - Support Screen with NavigationHelper integration
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -25,7 +26,9 @@ import {
 import { LinearGradient } from 'expo-linear-gradient';
 import { supportApi } from '../../services/supportApi';
 import colors from '../../theme/colors';
-import { useRouter } from 'expo-router';
+
+// Import NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -42,25 +45,15 @@ interface Message {
 }
 
 export default function SupportScreen() {
-  const router = useRouter();
-
-  const handleGoBack = () => {
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(() => {
     console.log('🔙 Support screen: navigating back');
     
-    try {
-      if (router.canGoBack && router.canGoBack()) {
-        console.log('✅ Using router.back()');
-        router.back();
-      } else {
-        console.log('🏠 No back history, using router.replace(/(tabs))');
-        router.replace('/(tabs)');
-      }
-    } catch (error) {
-      console.error('❌ Navigation error:', error);
-      // Ultimate fallback
-      router.replace('/(tabs)');
-    }
-  };
+    NavigationHelper.goBack({
+      fallbackRoute: '/(tabs)',
+      replaceIfNoHistory: true
+    });
+  }, []);
 
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -175,7 +168,7 @@ export default function SupportScreen() {
       () => setKeyboardHeight(0)
     );
 
-    // Handle Android back button
+    // Handle Android back button with NavigationHelper
     const backAction = () => {
       if (showTicketModal || showInquiryModal || showPackageModal) {
         closeAllModals();
@@ -192,7 +185,7 @@ export default function SupportScreen() {
       keyboardDidShowListener.remove();
       backHandler.remove();
     };
-  }, [showTicketModal, showInquiryModal, showPackageModal]);
+  }, [showTicketModal, showInquiryModal, showPackageModal, handleGoBack]);
 
   useEffect(() => {
     if (showTicketModal || showInquiryModal || showPackageModal) {
@@ -658,7 +651,7 @@ export default function SupportScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
       
-      {/* Header */}
+      {/* Header with NavigationHelper back */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -667,10 +660,7 @@ export default function SupportScreen() {
       >
         <View style={styles.headerContent}>
           <TouchableOpacity 
-            onPress={() => {
-              console.log('Back button pressed');
-              handleGoBack();
-            }}
+            onPress={handleGoBack}
             style={styles.backButton}
             activeOpacity={0.7}
           >
