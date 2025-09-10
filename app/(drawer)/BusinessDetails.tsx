@@ -1,4 +1,4 @@
-// app/(drawer)/BusinessDetails.tsx - Business Details Screen
+// app/(drawer)/BusinessDetails.tsx - Business Details Screen with NavigationHelper
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -15,11 +15,13 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import { createInvite } from '../../lib/helpers/business';
 import { SafeLogo } from '../../components/SafeLogo';
+
+// Import NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 // Import the upload helpers
 import { uploadBusinessLogo } from '../../lib/helpers/uploadBusinessLogo';
@@ -76,7 +78,6 @@ const showToast = {
 };
 
 export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
-  const router = useRouter();
   const { 
     user, 
     getUserPhone,
@@ -113,7 +114,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   // Redirect if no business selected
   useEffect(() => {
     if (!selectedBusiness) {
-      router.replace('/(drawer)/Business');
+      NavigationHelper.replaceTo('/(drawer)/Business');
       showToast.warning('No business selected', 'Please select a business first');
     }
   }, [selectedBusiness]);
@@ -148,19 +149,15 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     }
   }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness]);
 
-  // Fixed back navigation
-  const handleGoBack = () => {
-    try {
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/(drawer)/Business');
-      }
-    } catch (error) {
-      console.error('Navigation error:', error);
-      router.replace('/(drawer)/Business');
-    }
-  };
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(() => {
+    console.log('🔙 BusinessDetails: Going back...');
+    
+    NavigationHelper.goBack({
+      fallbackRoute: '/(drawer)/Business',
+      replaceIfNoHistory: true
+    });
+  }, []);
 
   // Handle business logo picker
   const pickBusinessLogo = useCallback(async () => {
