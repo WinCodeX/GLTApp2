@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Streamlined with simplified personal account structure
+// components/CustomDrawerContent.tsx - Updated with "All" button and enhanced navigation
 import {
   Feather,
   FontAwesome5,
@@ -176,7 +176,9 @@ export default function CustomDrawerContent(props: any) {
     return unsubscribeFocus;
   }, [props.navigation, triggerAvatarRefresh]);
 
+  // Updated tracking statuses with "All" button at the top
   const trackingStatuses = [
+    { label: 'All', key: 'all', icon: 'package' }, // NEW: All packages option
     { label: 'Pending', key: 'pending', icon: 'clock' },
     { label: 'Paid', key: 'paid', icon: 'check-circle' },
     { label: 'Submitted', key: 'submitted', icon: 'upload' },
@@ -256,6 +258,21 @@ export default function CustomDrawerContent(props: any) {
         { text: 'Contact Us', onPress: () => props.navigation.navigate('support') }
       ]
     );
+  };
+
+  // Updated navigation handler for tracking - handle "all" case
+  const handleTrackNavigation = (item: any) => {
+    if (item.key === 'all') {
+      // Navigate to track screen without status filter (shows all packages)
+      props.navigation.navigate('track');
+    } else {
+      // Navigate with specific status filter
+      props.navigation.navigate({
+        name: 'track',
+        params: { status: item.key },
+        merge: true,
+      });
+    }
   };
 
   const renderBusinessItem = (business: any, isOwned: boolean = true) => {
@@ -448,13 +465,7 @@ export default function CustomDrawerContent(props: any) {
                   <Feather name={item.icon as any} size={20} color={colors.primary} />    
                 )}    
                 style={styles.subItem}    
-                onPress={() =>    
-                  props.navigation.navigate({    
-                    name: 'track',    
-                    params: { status: item.key },    
-                    merge: true,    
-                  })    
-                }    
+                onPress={() => handleTrackNavigation(item)}
               />    
             ))}    
 
