@@ -269,12 +269,18 @@ const AppManagerScreen: React.FC = () => {
         onUploadProgress: (progressEvent) => {
           const currentTime = Date.now();
           const elapsedTime = (currentTime - uploadStartTime) / 1000; // seconds
-          const loaded = progressEvent.loaded || 0;
-          const total = progressEvent.total || 0;
-          const percentage = total > 0 ? Math.round((loaded / total) * 100) : 0;
+          const loaded = Math.max(0, progressEvent.loaded || 0);
+          const total = Math.max(loaded, progressEvent.total || 0);
+          
+          // Clamp percentage between 0 and 100 to prevent display issues
+          let percentage = 0;
+          if (total > 0) {
+            percentage = Math.min(100, Math.max(0, Math.round((loaded / total) * 100)));
+          }
+          
           const speed = elapsedTime > 0 ? loaded / elapsedTime : 0;
-          const remainingBytes = total - loaded;
-          const remainingTime = speed > 0 ? remainingBytes / speed : 0;
+          const remainingBytes = Math.max(0, total - loaded);
+          const remainingTime = speed > 0 && remainingBytes > 0 ? remainingBytes / speed : 0;
 
           setUploadProgress({
             loaded,
