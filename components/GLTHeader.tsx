@@ -1,7 +1,7 @@
-// components/GLTHeader.tsx - Enhanced with update progress indicator
+// components/GLTHeader.tsx - Fixed with progress bar under header and popup modal
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -126,6 +126,7 @@ export default function GLTHeader({
     remainingTime: 0,
     status: 'checking',
   });
+  const [showInstallModal, setShowInstallModal] = useState(false);
   
   // Double tap detection for avatar cycling
   const lastTapRef = useRef<number>(0);
@@ -133,8 +134,7 @@ export default function GLTHeader({
   
   // Progress animation refs
   const progressBarAnim = useRef(new Animated.Value(0)).current;
-  const activityIndicatorAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(-60)).current;
+  const progressBarHeight = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     // Monitor download progress
@@ -163,6 +163,7 @@ export default function GLTHeader({
             status: 'complete',
             version,
           }));
+          setShowInstallModal(true);
         }
       } catch (error) {
         console.error('Failed to check download progress:', error);
@@ -177,45 +178,31 @@ export default function GLTHeader({
     return () => clearInterval(interval);
   }, []);
 
-  // Animate progress bar and activity indicator
+  // Animate progress bar
   useEffect(() => {
-    if (downloadProgress.isDownloading || downloadProgress.status === 'complete') {
-      // Show activity indicator
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(activityIndicatorAnim, {
-          toValue: 1,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
+    if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
+      // Show progress bar
+      Animated.timing(progressBarHeight, {
+        toValue: 3,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
       
-      // Update progress bar
+      // Update progress
       Animated.timing(progressBarAnim, {
         toValue: downloadProgress.progress / 100,
         duration: 300,
         useNativeDriver: false,
       }).start();
     } else {
-      // Hide activity indicator
-      Animated.parallel([
-        Animated.timing(slideAnim, {
-          toValue: -60,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-        Animated.timing(activityIndicatorAnim, {
-          toValue: 0,
-          duration: 300,
-          useNativeDriver: true,
-        }),
-      ]).start();
+      // Hide progress bar
+      Animated.timing(progressBarHeight, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
     }
-  }, [downloadProgress.isDownloading, downloadProgress.progress, downloadProgress.status]);
+  }, [downloadProgress.isDownloading, downloadProgress.progress]);
 
   const handleOpenDrawer = () => {
     navigation.dispatch(DrawerActions.openDrawer());
@@ -241,11 +228,16 @@ export default function GLTHeader({
     if (downloadProgress.status === 'complete' && downloadProgress.version) {
       try {
         const updateService = UpdateService.getInstance();
+        setShowInstallModal(false);
         await updateService.installDownloadedAPK(downloadProgress.version);
       } catch (error) {
         console.error('Failed to install update:', error);
       }
     }
+  };
+
+  const handleCloseInstallModal = () => {
+    setShowInstallModal(false);
   };
 
   // Navigate to business page on avatar single tap
@@ -438,77 +430,14 @@ export default function GLTHeader({
     return formatFileSize(bytesPerSecond) + '/s';
   };
 
-  const renderActivityIndicator = () => {
-    if (!downloadProgress.isDownloading && downloadProgress.status !== 'complete') return null;
-
-    const statusText = downloadProgress.status === 'complete' 
-      ? `Update v${downloadProgress.version} ready to install`
-      : `Downloading update v${downloadProgress.version || ''}... ${Math.round(downloadProgress.progress)}%`;
-
-    const statusIcon = downloadProgress.status === 'complete' ? 'check-circle' : 'download';
-    const statusColor = downloadProgress.status === 'complete' ? '#10b981' : '#8B5CF6';
-
-    return (
-      <Animated.View
-        style={[
-          styles.activityContainer,
-          {
-            transform: [{ translateY: slideAnim }],
-            opacity: activityIndicatorAnim,
-          },
-        ]}
-      >
-        <LinearGradient
-          colors={['rgba(26, 26, 46, 0.95)', 'rgba(45, 55, 72, 0.95)']}
-          style={styles.activityContent}
-        >
-          <View style={styles.activityInfo}>
-            <View style={[styles.activityIcon, { backgroundColor: `${statusColor}20` }]}>
-              <Feather name={statusIcon as any} size={16} color={statusColor} />
-            </View>
-            
-            <View style={styles.activityText}>
-              <Text style={styles.activityTitle}>{statusText}</Text>
-              {downloadProgress.isDownloading && downloadProgress.speed > 0 && (
-                <Text style={styles.activitySubtitle}>
-                  {formatFileSize(downloadProgress.downloadedBytes)} / {formatFileSize(downloadProgress.totalBytes)} • {formatSpeed(downloadProgress.speed)}
-                </Text>
-              )}
-            </View>
-            
-            {downloadProgress.status === 'complete' && (
-              <TouchableOpacity onPress={handleInstallUpdate} style={styles.installButton}>
-                <LinearGradient colors={['#10b981', '#059669']} style={styles.installButtonGradient}>
-                  <Text style={styles.installButtonText}>Install</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            )}
-          </View>
-          
-          {downloadProgress.isDownloading && (
-            <View style={styles.progressBarContainer}>
-              <View style={styles.progressBarBackground}>
-                <Animated.View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: progressBarAnim.interpolate({
-                        inputRange: [0, 1],
-                        outputRange: ['0%', '100%'],
-                      }),
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          )}
-        </LinearGradient>
-      </Animated.View>
-    );
-  };
-
   // Determine if we're in business mode and get appropriate image
   const isBusinessMode = !!selectedBusiness;
+
+  const getProgressBarColor = () => {
+    if (downloadProgress.status === 'complete') return '#10b981';
+    if (downloadProgress.status === 'error') return '#ef4444';
+    return '#ff6b35'; // Orange color like in the image
+  };
 
   return (
     <>
@@ -582,8 +511,73 @@ export default function GLTHeader({
         </View>
       </View>
       
-      {/* Activity Indicator for Downloads */}
-      {renderActivityIndicator()}
+      {/* Progress Bar under header */}
+      <Animated.View
+        style={[
+          styles.progressBarContainer,
+          {
+            height: progressBarHeight,
+          },
+        ]}
+      >
+        <View style={styles.progressBarBackground}>
+          <Animated.View
+            style={[
+              styles.progressBarFill,
+              {
+                backgroundColor: getProgressBarColor(),
+                width: progressBarAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%'],
+                }),
+              },
+            ]}
+          />
+        </View>
+      </Animated.View>
+
+      {/* Install Modal */}
+      <Modal
+        visible={showInstallModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={handleCloseInstallModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient
+              colors={['#1a1a2e', '#2d3748']}
+              style={styles.modalGradient}
+            >
+              <View style={styles.modalHeader}>
+                <View style={styles.modalIcon}>
+                  <Feather name="check-circle" size={24} color="#10b981" />
+                </View>
+                <Text style={styles.modalTitle}>Update Downloaded</Text>
+                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.closeButton}>
+                  <Feather name="x" size={20} color="#ccc" />
+                </TouchableOpacity>
+              </View>
+              
+              <Text style={styles.modalText}>
+                GLT version {downloadProgress.version} is ready to install.
+              </Text>
+              
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.laterButton}>
+                  <Text style={styles.laterButtonText}>Later</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity onPress={handleInstallUpdate} style={styles.installButton}>
+                  <LinearGradient colors={['#10b981', '#059669']} style={styles.installButtonGradient}>
+                    <Text style={styles.installButtonText}>Install Now</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
     </>
   );
 }
@@ -689,79 +683,104 @@ const styles = StyleSheet.create({
     borderColor: colors.header,
   },
   
-  // Activity Indicator Styles
-  activityContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
+  // Progress Bar Styles
+  progressBarContainer: {
+    width: '100%',
+    backgroundColor: colors.header,
+    overflow: 'hidden',
+  },
+  progressBarBackground: {
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: '100%',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 0,
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+  },
+  modalContent: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 16,
+    overflow: 'hidden',
     elevation: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
+    shadowRadius: 16,
   },
-  activityContent: {
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderBottomLeftRadius: 12,
-    borderBottomRightRadius: 12,
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
+  modalGradient: {
+    padding: 24,
   },
-  activityInfo: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginBottom: 8,
+    marginBottom: 16,
   },
-  activityIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  modalIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
-  activityText: {
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
     flex: 1,
   },
-  activityTitle: {
+  closeButton: {
+    padding: 4,
+  },
+  modalText: {
+    fontSize: 15,
+    color: '#ccc',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  laterButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+  },
+  laterButtonText: {
+    color: '#ccc',
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  activitySubtitle: {
-    fontSize: 12,
-    color: '#ccc',
   },
   installButton: {
-    borderRadius: 6,
+    flex: 1,
+    borderRadius: 8,
     overflow: 'hidden',
   },
   installButtonGradient: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
   },
   installButtonText: {
     color: 'white',
-    fontSize: 12,
+    fontSize: 14,
     fontWeight: '600',
-  },
-  progressBarContainer: {
-    marginTop: 4,
-  },
-  progressBarBackground: {
-    height: 3,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 1.5,
-    overflow: 'hidden',
-  },
-  progressBarFill: {
-    height: '100%',
-    backgroundColor: '#8B5CF6',
-    borderRadius: 1.5,
   },
 });
