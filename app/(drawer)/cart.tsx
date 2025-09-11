@@ -1,4 +1,4 @@
-// app/(drawer)/cart.tsx - FIXED: Fetch ALL pending_unpaid packages
+// app/(drawer)/cart.tsx - FIXED: Fetch ALL pending_unpaid packages with Enhanced NavigationHelper
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -12,7 +12,6 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Toast from 'react-native-toast-message';
 import api from '@/lib/api';
@@ -20,6 +19,9 @@ import colors from '@/theme/colors';
 import GLTHeader from '@/components/GLTHeader';
 import MpesaPaymentModal from '@/components/MpesaPaymentModal';
 import PackageTypeSelectionModal from '@/components/PackageTypeSelectionModal';
+
+// Import Enhanced NavigationHelper
+import { NavigationHelper } from '@/lib/helpers/navigation';
 
 interface Package {
   id: string;
@@ -36,7 +38,6 @@ interface Package {
 }
 
 export default function CartPage() {
-  const router = useRouter();
   const insets = useSafeAreaInsets();
   
   const [packages, setPackages] = useState<Package[]>([]);
@@ -45,6 +46,24 @@ export default function CartPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPackageTypeModal, setShowPackageTypeModal] = useState(false);
+
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(async () => {
+    console.log('🔙 Cart: Going back...');
+    
+    try {
+      const success = await NavigationHelper.goBack({
+        fallbackRoute: '/(drawer)/',
+        replaceIfNoHistory: true
+      });
+      
+      if (!success) {
+        console.log('🔙 Cart: Back navigation used fallback');
+      }
+    } catch (error) {
+      console.error('🔙 Cart: Back navigation failed:', error);
+    }
+  }, []);
 
   // Calculate total cost for selected packages
   const getTotalCost = useCallback(() => {
@@ -276,10 +295,11 @@ export default function CartPage() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       
-      {/* Header */}
+      {/* Header with Enhanced Navigation */}
       <GLTHeader 
         title="Cart"
         showBackButton={true}
+        onBack={handleGoBack}
       />
 
       {/* Content */}
