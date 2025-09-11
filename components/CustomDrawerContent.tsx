@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Updated with "All" button and enhanced navigation
+// components/CustomDrawerContent.tsx - Fixed with NavigationHelper integration
 import {
   Feather,
   FontAwesome5,
@@ -23,6 +23,9 @@ import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
 import { SafeLogo } from './SafeLogo';
 import colors from '../theme/colors';
+
+// CRITICAL: Import NavigationHelper for proper navigation tracking
+import { NavigationHelper } from '../lib/helpers/navigation';
 
 // Enhanced Safe Avatar Component with comprehensive synchronization
 interface SafeAvatarProps {
@@ -57,10 +60,12 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   
   if (!fullAvatarUrl || hasError) {
     return (
-      <Image
-        source={fallbackSource}
-        style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
-      />
+      <TouchableOpacity style={style} disabled>
+        <Image
+          source={fallbackSource}
+          style={{ width: size, height: size, borderRadius: size / 2 }}
+        />
+      </TouchableOpacity>
     );
   }
 
@@ -87,443 +92,415 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
 };
 
 export default function CustomDrawerContent(props: any) {
-  const [showTrackDropdown, setShowTrackDropdown] = useState(false);
-  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
-  
   const { 
     user, 
-    businesses, 
-    currentAccount,
+    businesses,
     selectedBusiness,
     setSelectedBusiness,
-    getUserPhone,
-    getDisplayName,
-    refreshUser,
-    clearUserCache,
     avatarUpdateTrigger,
-    triggerAvatarRefresh,
+    getDisplayName,
+    getUserPhone,
   } = useUser();
 
-  // Enhanced display logic - show business name if selected, otherwise user name
-  const displayName = selectedBusiness?.name || getDisplayName();
-  const userPhone = getUserPhone();
-  
-  // FIXED: Enhanced phone number logic - show business phone if available, fallback to user phone
-  const getDisplayPhone = (): string => {
-    if (selectedBusiness?.phone_number && selectedBusiness.phone_number.trim()) {
-      console.log('🎭 Drawer: Using business phone number:', selectedBusiness.phone_number);
-      return selectedBusiness.phone_number;
-    }
-    
-    console.log('🎭 Drawer: Using user phone number (fallback):', userPhone);
-    return userPhone;
-  };
-  
-  const displayPhone = getDisplayPhone();
-  
-  // Determine display mode based on selected business
-  const isBusinessMode = !!selectedBusiness;
+  const [showTrackDropdown, setShowTrackDropdown] = useState(false);
+  const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
 
-  // Enhanced user data tracking with avatar sync trigger
-  useEffect(() => {
-    if (user) {
-      console.log('🎭 Drawer user data updated:', {
-        userId: user.id,
-        email: user.email,
-        avatarUrl: user.avatar_url,
-        selectedBusiness: selectedBusiness?.name || 'None',
-        businessPhone: selectedBusiness?.phone_number || 'None',
-        userPhone: userPhone,
-        displayPhone: displayPhone,
-        isBusinessMode,
-        updateTrigger: avatarUpdateTrigger,
-        timestamp: Date.now()
-      });
-    }
-  }, [user?.avatar_url, user?.id, selectedBusiness, isBusinessMode, avatarUpdateTrigger, userPhone, displayPhone]);
-
-  // Enhanced refresh handler that triggers avatar sync
-  const handleRefreshUser = useCallback(async () => {
+  // FIXED: Enhanced navigation with proper tracking
+  const navigateToRoute = useCallback(async (route: string, params: any = {}) => {
     try {
-      console.log('🎭 Drawer manually refreshing user data with avatar sync...');
-      await clearUserCache();
-      await refreshUser(true);
-      triggerAvatarRefresh();
-      console.log('🎭 Drawer user refresh with avatar sync completed');
-    } catch (error) {
-      console.error('🎭 Drawer user refresh error:', error);
-    }
-  }, [refreshUser, clearUserCache, triggerAvatarRefresh]);
-
-  // Listen for drawer events and optionally refresh
-  useEffect(() => {
-    const unsubscribe = props.navigation.addListener('drawerOpen', () => {
-      console.log('🎭 Drawer opened, checking for user updates...');
-    });
-
-    return unsubscribe;
-  }, [props.navigation, handleRefreshUser]);
-
-  // Listen for focus events to detect potential avatar updates
-  useEffect(() => {
-    const unsubscribeFocus = props.navigation.addListener('focus', () => {
-      console.log('🎭 Drawer focused, avatar might have been updated');
-      setTimeout(() => {
-        triggerAvatarRefresh();
-      }, 500);
-    });
-
-    return unsubscribeFocus;
-  }, [props.navigation, triggerAvatarRefresh]);
-
-  // Updated tracking statuses with "All" button at the top
-  const trackingStatuses = [
-    { label: 'All', key: 'all', icon: 'package' }, // NEW: All packages option
-    { label: 'Pending', key: 'pending', icon: 'clock' },
-    { label: 'Paid', key: 'paid', icon: 'check-circle' },
-    { label: 'Submitted', key: 'submitted', icon: 'upload' },
-    { label: 'In transit', key: 'in-transit', icon: 'truck' },
-    { label: 'Delivered', key: 'delivered', icon: 'box' },
-    { label: 'Collected', key: 'collected', icon: 'archive' },
-    { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
-  ];
-
-  // Enhanced business switching
-  const handleBusinessSwitch = async (business: any) => {
-    try {
-      setShowBusinessDropdown(false);
+      console.log(`🧭 Drawer: Navigating to ${route}`);
+      
+      // Close drawer first
       props.navigation.closeDrawer();
       
-      console.log('🎭 Drawer switching to business:', business.name);
-      setSelectedBusiness?.(business);
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Business selected',
-        text2: `Now using ${business.name}`,
+      // CRITICAL: Use NavigationHelper instead of direct navigation
+      await NavigationHelper.navigateTo(route, {
+        params,
+        trackInHistory: true
       });
-    } catch (error: any) {
-      console.error('🎭 Drawer business switch error:', error);
-      Alert.alert('Error', error.message || 'Failed to switch business');
-    }
-  };
-
-  // Handle switching to "You" mode (personal mode)
-  const handleSwitchToYou = async () => {
-    try {
-      setShowBusinessDropdown(false);
-      props.navigation.closeDrawer();
       
-      console.log('🎭 Drawer switching to You mode (personal)');
-      setSelectedBusiness?.(null); // Clear selected business
-      
-      Toast.show({
-        type: 'success',
-        text1: 'Personal account',
-        text2: 'Now using your personal account',
-      });
-    } catch (error: any) {
-      console.error('🎭 Drawer You mode switch error:', error);
-      Alert.alert('Error', error.message || 'Failed to switch to personal mode');
-    }
-  };
-
-  const handleBusinessManagement = () => {
-    setShowBusinessDropdown(false);
-    props.navigation.closeDrawer();
-    
-    console.log('🎭 Navigating to business management...');
-    
-    try {
-      props.navigation.navigate('business');
+      console.log(`✅ Drawer: Successfully navigated to ${route}`);
     } catch (error) {
-      console.error('🎭 Navigation error:', error);
+      console.error(`❌ Drawer: Navigation to ${route} failed:`, error);
+      
+      // Fallback with tracking
       try {
-        props.navigation.navigate('Business');
+        await NavigationHelper.navigateTo('/(drawer)/', {
+          params: {},
+          trackInHistory: true
+        });
+        console.log('🔄 Drawer: Used fallback navigation to home');
       } catch (fallbackError) {
-        console.error('🎭 Fallback navigation also failed:', fallbackError);
-        Alert.alert('Navigation Error', 'Could not open business screen');
+        console.error('❌ Drawer: Fallback navigation failed:', fallbackError);
       }
     }
-  };
+  }, [props.navigation]);
 
-  const handleBecomeRider = () => {
-    props.navigation.closeDrawer();
-    console.log('🎭 Navigating to become a rider...');
-    Alert.alert(
-      'Become a Rider',
-      'Contact us to learn more about becoming a rider!',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Contact Us', onPress: () => props.navigation.navigate('support') }
-      ]
-    );
-  };
+  // Enhanced track navigation with proper route mapping
+  const handleTrackNavigation = useCallback(async (item: any) => {
+    try {
+      console.log(`🧭 Drawer: Track navigation for ${item.key}`);
+      
+      let route = '/(drawer)/track';
+      let params = {};
 
-  // Updated navigation handler for tracking - handle "all" case
-  const handleTrackNavigation = (item: any) => {
-    if (item.key === 'all') {
-      // Navigate to track screen without status filter (shows all packages)
-      props.navigation.navigate('track');
-    } else {
-      // Navigate with specific status filter
-      props.navigation.navigate({
-        name: 'track',
-        params: { status: item.key },
-        merge: true,
-      });
+      // Map track items to proper routes and params
+      switch (item.key) {
+        case 'all':
+          route = '/(drawer)/track';
+          params = {};
+          break;
+        case 'in_transit':
+          route = '/(drawer)/track';
+          params = { initialFilter: 'in_transit' };
+          break;
+        case 'delivered':
+          route = '/(drawer)/track';
+          params = { initialFilter: 'delivered' };
+          break;
+        case 'pending_payment':
+          route = '/(drawer)/track';
+          params = { initialFilter: 'pending_payment' };
+          break;
+        case 'processing':
+          route = '/(drawer)/track';
+          params = { initialFilter: 'processing' };
+          break;
+        default:
+          route = '/(drawer)/track';
+          params = {};
+      }
+
+      await navigateToRoute(route, params);
+      setShowTrackDropdown(false);
+    } catch (error) {
+      console.error(`❌ Drawer: Track navigation failed for ${item.key}:`, error);
     }
-  };
+  }, [navigateToRoute]);
 
-  const renderBusinessItem = (business: any, isOwned: boolean = true) => {
-    const isSelectedBusiness = selectedBusiness?.id === business.id;
+  // Business selection with proper state management
+  const handleBusinessSelection = useCallback(async (business: any) => {
+    try {
+      console.log('🎭 Drawer: Selecting business:', business?.name || 'You');
+      
+      setSelectedBusiness(business);
+      setShowBusinessDropdown(false);
+      
+      // Show toast feedback
+      Toast.show({
+        type: 'info',
+        text1: 'Business Selected',
+        text2: business?.name || 'Personal Account',
+        position: 'bottom',
+        visibilityTime: 2000,
+      });
+    } catch (error) {
+      console.error('❌ Drawer: Business selection failed:', error);
+    }
+  }, [setSelectedBusiness]);
 
-    return (
-      <TouchableOpacity
-        key={business.id}
-        style={styles.businessItem}
-        onPress={() => handleBusinessSwitch(business)}
-        activeOpacity={0.7}
-      >
-        {/* Use business logo if available, fallback to business icon */}
-        <View style={styles.businessIconContainer}>
-          {business.logo_url ? (
-            <SafeLogo
-              size={24}
-              logoUrl={business.logo_url}
-              avatarUrl={user?.avatar_url}
-              style={styles.businessLogo}
-              updateTrigger={avatarUpdateTrigger}
-            />
-          ) : (
-            <View style={styles.businessIcon}>
-              <Feather name="briefcase" size={16} color="#fff" />
-            </View>
-          )}
-        </View>
-        
-        <View style={styles.businessInfo}>
-          <Text style={styles.businessName}>
-            {business.name}
-          </Text>
-          <Text style={styles.businessType}>
-            {isOwned ? 'Owned' : 'Joined'}
-          </Text>
-          {/* Show business phone if available */}
-          {business.phone_number && (
-            <Text style={styles.businessPhone}>
-              {business.phone_number}
-            </Text>
-          )}
-        </View>
-        
-        {isSelectedBusiness && (
-          <View style={styles.checkmarkContainer}>
-            <Feather name="check" size={14} color="#00ff00" />
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
+  // Account navigation with business details check
+  const handleAccountNavigation = useCallback(async () => {
+    try {
+      if (selectedBusiness) {
+        console.log('🧭 Drawer: Navigating to business details');
+        await navigateToRoute('/(drawer)/BusinessDetails');
+      } else {
+        console.log('🧭 Drawer: Navigating to personal account');
+        await navigateToRoute('/(drawer)/account');
+      }
+    } catch (error) {
+      console.error('❌ Drawer: Account navigation failed:', error);
+    }
+  }, [selectedBusiness, navigateToRoute]);
 
-  // Render "You" option - tappable like businesses
-  const renderYouOption = () => {
-    const isSelected = !selectedBusiness; // Selected when no business is selected
+  // Tracking status items
+  const trackingStatuses = [
+    { key: 'all', label: 'All Packages', icon: 'package' },
+    { key: 'in_transit', label: 'In Transit', icon: 'truck' },
+    { key: 'delivered', label: 'Delivered', icon: 'check-circle' },
+    { key: 'pending_payment', label: 'Pending Payment', icon: 'clock' },
+    { key: 'processing', label: 'Processing', icon: 'refresh-cw' },
+  ];
 
-    return (
-      <TouchableOpacity
-        style={styles.businessItem}
-        onPress={handleSwitchToYou}
-        activeOpacity={0.7}
-      >
-        <View style={styles.businessIconContainer}>
-          <SafeAvatar
-            size={24}
-            avatarUrl={user?.avatar_url}
-            style={styles.businessLogo}
-            updateTrigger={avatarUpdateTrigger}
-          />
-        </View>
-        
-        <View style={styles.businessInfo}>
-          <Text style={styles.businessName}>
-            {getDisplayName()}
-          </Text>
-          <Text style={styles.businessPhone}>
-            {userPhone}
-          </Text>
-        </View>
-        
-        {isSelected && (
-          <View style={styles.checkmarkContainer}>
-            <Feather name="check" size={14} color="#00ff00" />
-          </View>
-        )}
-      </TouchableOpacity>
-    );
+  // Get current avatar based on selected business or user
+  const getCurrentAvatar = () => {
+    if (selectedBusiness?.logo) {
+      return getFullAvatarUrl(selectedBusiness.logo);
+    }
+    return user?.profile_picture ? getFullAvatarUrl(user.profile_picture) : null;
   };
 
   return (
     <View style={styles.drawerContainer}>
-      <DrawerContentScrollView 
-        {...props} 
+      <DrawerContentScrollView
+        {...props}
         contentContainerStyle={styles.scrollContainer}
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.container}>
-
-          {/* Fixed Personal Account Header - shows current user/business data */}    
-          <TouchableOpacity    
-            onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
-            style={styles.accountHeader}    
+          {/* Account Header */}
+          <TouchableOpacity
+            style={styles.accountHeader}
+            onPress={handleAccountNavigation}
             activeOpacity={0.8}
-          >    
-            {/* Context-aware image display: Business logo when business selected, avatar when in "You" mode */}
-            {isBusinessMode ? (
-              <SafeLogo
-                size={42}
-                logoUrl={selectedBusiness.logo_url}
-                avatarUrl={user?.avatar_url}
-                style={styles.avatar}
-                updateTrigger={avatarUpdateTrigger}
-              />
-            ) : (
-              <SafeAvatar
-                size={42}
-                avatarUrl={user?.avatar_url}
-                fallbackSource={require('../assets/images/avatar_placeholder.png')}
-                style={styles.avatar}
-                updateTrigger={avatarUpdateTrigger}
-              />
-            )}
+          >
+            <SafeAvatar
+              size={48}
+              avatarUrl={getCurrentAvatar()}
+              updateTrigger={avatarUpdateTrigger}
+              style={styles.avatar}
+            />
             
             <View style={styles.accountInfo}>
-              <Text style={styles.userName}>{displayName}</Text>
-              <Text style={styles.userPhone}>{displayPhone}</Text>
-            </View>    
-            <Feather    
-              name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}    
-              size={20}    
-              color="#fff"    
-            />
-          </TouchableOpacity>    
+              <Text style={styles.userName}>
+                {selectedBusiness?.name || getDisplayName()}
+              </Text>
+              <Text style={styles.userPhone}>
+                {selectedBusiness?.phone || getUserPhone()}
+              </Text>
+              {selectedBusiness && (
+                <Text style={styles.modeIndicator}>Business Mode</Text>
+              )}
+              {!selectedBusiness && (
+                <Text style={styles.modeIndicator}>Personal Account</Text>
+              )}
+            </View>
 
-          {showBusinessDropdown && (    
+            <View style={styles.headerActions}>
+              <TouchableOpacity
+                onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}
+                activeOpacity={0.7}
+              >
+                <Ionicons
+                  name={showBusinessDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color="white"
+                />
+              </TouchableOpacity>
+            </View>
+          </TouchableOpacity>
+
+          {/* Business Dropdown */}
+          {showBusinessDropdown && (
             <View style={styles.accountDropdown}>
-              
-              {/* Personal section header */}
-              <Text style={styles.sectionTitle}>Personal</Text>
-              
-              {/* You option - tappable like businesses */}
-              {renderYouOption()}
-              
-              {/* Business Listings */}
-              {(businesses.owned.length > 0 || businesses.joined.length > 0) && (
+              {/* Personal Account Option */}
+              <TouchableOpacity
+                style={styles.businessItem}
+                onPress={() => handleBusinessSelection(null)}
+                activeOpacity={0.7}
+              >
+                <View style={styles.businessIconContainer}>
+                  <SafeAvatar
+                    size={24}
+                    avatarUrl={user?.profile_picture ? getFullAvatarUrl(user.profile_picture) : null}
+                    updateTrigger={avatarUpdateTrigger}
+                  />
+                </View>
+                <View style={styles.businessInfo}>
+                  <Text style={[styles.businessName, !selectedBusiness && styles.selectedBusinessName]}>
+                    You ({getDisplayName()})
+                  </Text>
+                  <Text style={styles.businessPhone}>Personal Account</Text>
+                </View>
+                {!selectedBusiness && (
+                  <Ionicons name="checkmark" size={20} color={colors.primary} />
+                )}
+              </TouchableOpacity>
+
+              {/* Owned Businesses */}
+              {businesses.owned.length > 0 && (
                 <>
-                  <Text style={styles.sectionTitle}>Your Businesses</Text>
-                  
-                  {/* Owned Businesses */}
-                  {businesses.owned.map(business => renderBusinessItem(business, true))}
-                  
-                  {/* Joined Businesses */}
-                  {businesses.joined.map(business => renderBusinessItem(business, false))}
+                  <Text style={styles.sectionTitle}>YOUR BUSINESSES</Text>
+                  {businesses.owned.map((business: any) => (
+                    <TouchableOpacity
+                      key={business.id}
+                      style={styles.businessItem}
+                      onPress={() => handleBusinessSelection(business)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.businessIconContainer}>
+                        <SafeLogo
+                          logo={business.logo}
+                          name={business.name}
+                          size={24}
+                          style={styles.businessIcon}
+                        />
+                      </View>
+                      <View style={styles.businessInfo}>
+                        <Text style={[
+                          styles.businessName,
+                          selectedBusiness?.id === business.id && styles.selectedBusinessName
+                        ]}>
+                          {business.name}
+                        </Text>
+                        <Text style={styles.businessPhone}>{business.phone}</Text>
+                      </View>
+                      {selectedBusiness?.id === business.id && (
+                        <Ionicons name="checkmark" size={20} color={colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
                 </>
               )}
 
-              {/* Business Management Button */}
-              <TouchableOpacity
-                style={styles.businessButton}
-                onPress={handleBusinessManagement}
-              >
-                <Feather name="briefcase" size={18} color="#fff" />
-                <Text style={styles.businessButtonText}>Business</Text>
-              </TouchableOpacity>
-            </View>    
-          )}    
-
-          {/* Track a Package */}    
-          <TouchableOpacity
-            style={styles.customItem}
-            onPress={() => setShowTrackDropdown((prev) => !prev)}
-            activeOpacity={0.7}
-          >
-            <View style={styles.trackHeader}>
-              <Feather name="map-pin" size={20} color={colors.primary} style={styles.trackIcon} />
-              <Text style={styles.trackLabel}>Track a package</Text>
-              <Feather
-                name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
-                size={20}
-                color={colors.primary}
-              />
+              {/* Joined Businesses */}
+              {businesses.joined.length > 0 && (
+                <>
+                  <Text style={styles.sectionTitle}>JOINED BUSINESSES</Text>
+                  {businesses.joined.map((business: any) => (
+                    <TouchableOpacity
+                      key={business.id}
+                      style={styles.businessItem}
+                      onPress={() => handleBusinessSelection(business)}
+                      activeOpacity={0.7}
+                    >
+                      <View style={styles.businessIconContainer}>
+                        <SafeLogo
+                          logo={business.logo}
+                          name={business.name}
+                          size={24}
+                          style={styles.businessIcon}
+                        />
+                      </View>
+                      <View style={styles.businessInfo}>
+                        <Text style={[
+                          styles.businessName,
+                          selectedBusiness?.id === business.id && styles.selectedBusinessName
+                        ]}>
+                          {business.name}
+                        </Text>
+                        <Text style={styles.businessPhone}>{business.phone}</Text>
+                      </View>
+                      {selectedBusiness?.id === business.id && (
+                        <Ionicons name="checkmark" size={20} color={colors.primary} />
+                      )}
+                    </TouchableOpacity>
+                  ))}
+                </>
+              )}
             </View>
-          </TouchableOpacity>
-          
-          {showTrackDropdown &&    
-            trackingStatuses.map((item) => (    
-              <DrawerItem    
-                key={item.key}    
-                label={item.label}    
-                labelStyle={styles.subLabel}    
-                icon={() => (    
-                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
-                )}    
-                style={styles.subItem}    
-                onPress={() => handleTrackNavigation(item)}
-              />    
-            ))}    
+          )}
 
-          {/* General Navigation */}    
-          <DrawerItem    
-            label="Talk to a rep"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('support')}    
-          />    
-          <DrawerItem    
-            label="FAQs"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('faqs')}    
-          />    
-          <DrawerItem    
-            label="Find us"    
-            labelStyle={styles.label}    
-            icon={() => <MaterialIcons name="location-on" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('findus')}    
-          />    
+          {/* Navigation Items */}
+          <View style={styles.navigationSection}>
+            {/* Home */}
+            <DrawerItem
+              label="Home"
+              labelStyle={styles.label}
+              icon={() => <Feather name="home" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/')}
+            />
 
-          {/* Contacts */}    
-          <DrawerItem    
-            label="Contacts"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('contact')}    
-          />    
+            {/* Track Package with Dropdown */}
+            <TouchableOpacity
+              style={styles.customItem}
+              onPress={() => setShowTrackDropdown(!showTrackDropdown)}
+              activeOpacity={0.7}
+            >
+              <View style={styles.trackHeader}>
+                <Feather name="map-pin" size={24} color={colors.primary} style={styles.trackIcon} />
+                <Text style={styles.trackLabel}>Track Package</Text>
+                <Ionicons
+                  name={showTrackDropdown ? 'chevron-up' : 'chevron-down'}
+                  size={20}
+                  color={colors.primary}
+                />
+              </View>
+            </TouchableOpacity>
 
-          {/* Settings */}    
-          <DrawerItem    
-            label="Settings"    
-            labelStyle={styles.label}    
-            icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('settings')}    
-          />    
+            {showTrackDropdown &&
+              trackingStatuses.map((item) => (
+                <DrawerItem
+                  key={item.key}
+                  label={item.label}
+                  labelStyle={styles.subLabel}
+                  icon={() => (
+                    <Feather name={item.icon as any} size={20} color={colors.primary} />
+                  )}
+                  style={styles.subItem}
+                  onPress={() => handleTrackNavigation(item)}
+                />
+              ))}
 
-          {/* Invite Friends */}    
-          <DrawerItem    
-            label="Invite Friends"    
-            labelStyle={styles.label}    
-            icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
-            onPress={() => props.navigation.navigate('invite')}    
-          />    
+            {/* Business */}
+            <DrawerItem
+              label="Business"
+              labelStyle={styles.label}
+              icon={() => <Feather name="briefcase" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/business')}
+            />
 
-        </View>    
+            {/* Cart */}
+            <DrawerItem
+              label="Cart"
+              labelStyle={styles.label}
+              icon={() => <Feather name="shopping-cart" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/cart')}
+            />
+
+            {/* History */}
+            <DrawerItem
+              label="History"
+              labelStyle={styles.label}
+              icon={() => <MaterialIcons name="history" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/History')}
+            />
+
+            {/* General Navigation */}
+            <DrawerItem
+              label="Talk to a rep"
+              labelStyle={styles.label}
+              icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/Support')}
+            />
+
+            <DrawerItem
+              label="FAQs"
+              labelStyle={styles.label}
+              icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/FAQs')}
+            />
+
+            <DrawerItem
+              label="Find us"
+              labelStyle={styles.label}
+              icon={() => <MaterialIcons name="location-on" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/findus')}
+            />
+
+            {/* Contacts */}
+            <DrawerItem
+              label="Contacts"
+              labelStyle={styles.label}
+              icon={() => <Feather name="user" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/contacts')}
+            />
+
+            {/* Settings */}
+            <DrawerItem
+              label="Settings"
+              labelStyle={styles.label}
+              icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/(drawer)/Settings')}
+            />
+
+            {/* Invite Friends */}
+            <DrawerItem
+              label="Invite Friends"
+              labelStyle={styles.label}
+              icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}
+              onPress={() => navigateToRoute('/invite')}
+            />
+          </View>
+        </View>
       </DrawerContentScrollView>
 
       {/* Become a Rider Button at bottom */}
       <View style={styles.bottomButtonContainer}>
         <TouchableOpacity
           style={styles.becomeRiderButton}
-          onPress={handleBecomeRider}
+          onPress={() => navigateToRoute('/rider/application')}
           activeOpacity={0.8}
         >
           <Feather name="truck" size={20} color="#fff" />
@@ -601,6 +578,9 @@ const styles = StyleSheet.create({
     shadowRadius: 2,
     elevation: 2,
   },
+  navigationSection: {
+    marginTop: 10,
+  },
   label: {
     color: colors.text,
     fontSize: 17,
@@ -657,65 +637,26 @@ const styles = StyleSheet.create({
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: 'rgba(124, 58, 237, 0.8)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  businessLogo: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
   },
   businessInfo: {
     flex: 1,
   },
   businessName: {
-    color: 'white',
-    fontSize: 14,
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 15,
     fontWeight: '500',
   },
-  businessType: {
+  selectedBusinessName: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  businessPhone: {
     color: 'rgba(255, 255, 255, 0.6)',
     fontSize: 12,
     marginTop: 2,
   },
-  businessPhone: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 11,
-    marginTop: 1,
-    fontFamily: 'monospace',
-  },
-  checkmarkContainer: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: 'rgba(0, 255, 0, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#00ff00',
-  },
-  businessButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    marginHorizontal: 8,
-    marginVertical: 4,
-    borderRadius: 12,
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.5)',
-  },
-  businessButtonText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 12,
-  },
   bottomButtonContainer: {
-    paddingHorizontal: 12,
-    paddingVertical: 16,
-    paddingBottom: 24,
+    padding: 16,
     borderTopWidth: 1,
     borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
@@ -724,19 +665,14 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 14,
-    paddingHorizontal: 20,
-    borderRadius: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.1,
-    shadowRadius: 4,
-    elevation: 3,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    gap: 8,
   },
   becomeRiderButtonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    marginLeft: 8,
   },
 });
