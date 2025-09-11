@@ -1,6 +1,6 @@
-// lib/helpers/navigationTracker.ts - Enhanced navigation tracking with auto-detection
+// lib/helpers/navigationTracker.ts - Fixed navigation tracking with proper React imports
+import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'expo-router';
-import { useEffect, useRef } from 'react';
 import { NavigationHelper } from './navigation';
 
 /**
@@ -55,12 +55,12 @@ export const useNavigationTracker = () => {
 /**
  * HOC to wrap components with automatic navigation tracking
  */
-export const withNavigationTracking = <P extends object>(
+export const withNavigationTracking = <P extends Record<string, any>>(
   Component: React.ComponentType<P>
 ): React.ComponentType<P> => {
   const WrappedComponent = (props: P) => {
     useNavigationTracker();
-    return <Component {...props} />;
+    return React.createElement(Component, props);
   };
 
   WrappedComponent.displayName = `withNavigationTracking(${Component.displayName || Component.name})`;
@@ -72,5 +72,5 @@ export const withNavigationTracking = <P extends object>(
  */
 export const NavigationTracker: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   useNavigationTracker();
-  return <>{children}</>;
+  return React.createElement(React.Fragment, null, children);
 };
