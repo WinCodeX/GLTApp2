@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Updated with navigation system initialization
+// app/(drawer)/_layout.tsx - Fixed with enhanced navigation system integration
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -18,8 +18,10 @@ import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
-// IMPORTANT: Import the enhanced navigation system
+
+// CRITICAL: Import enhanced navigation system and tracker
 import { initializeNavigation } from '@/lib/helpers/navigation';
+import { NavigationTracker } from '@/lib/helpers/navigationTracker';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -41,231 +43,314 @@ export default function DrawerLayout() {
   const [navigationInitialized, setNavigationInitialized] = useState(false);
   const router = useRouter();
 
-  // Initialize navigation system first
+  // CRITICAL: Initialize navigation system first and synchronously
   useEffect(() => {
     const initializeNavigationSystem = async () => {
       try {
         console.log('🚀 DrawerLayout: Initializing enhanced navigation system...');
+        
+        // Initialize navigation synchronously before any routing can happen
         await initializeNavigation();
         setNavigationInitialized(true);
+        
         console.log('✅ DrawerLayout: Navigation system initialized successfully');
       } catch (error) {
         console.error('❌ DrawerLayout: Navigation system initialization failed:', error);
-        // Continue anyway - fallback to basic navigation
+        // Continue anyway but log the error
         setNavigationInitialized(true);
       }
     };
 
+    // Initialize immediately on mount
     initializeNavigationSystem();
   }, []);
 
-  // Handle app state changes
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active' && initState === 'loading') {
-        // Re-run initialization if app becomes active while still loading
-        console.log('App became active during loading, re-initializing...');
-        initializeApp();
-      }
-    };
-
-    const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
-  }, [initState]);
-
-  // Initialize the app - only after navigation system is ready
+  // Initialize app only after navigation system is ready
   const initializeApp = useCallback(async () => {
-    // Wait for navigation system to be initialized first
     if (!navigationInitialized) {
-      console.log('⏳ DrawerLayout: Waiting for navigation system to initialize...');
+      console.log('⏳ DrawerLayout: Waiting for navigation system...');
       return;
     }
 
-    let initializationComplete = false;
-    
     try {
-      console.log('DrawerLayout: Starting AccountManager-based authentication check...');
-      
-      // Set a maximum initialization time to prevent infinite loading
-      const initTimeout = setTimeout(() => {
-        if (!initializationComplete) {
-          console.warn('Initialization timeout - proceeding with fallback');
-          setInitState('redirect');
-          setRedirectPath('/login');
-        }
-      }, 10000); // 10 second timeout
+      console.log('🚀 DrawerLayout: Starting app initialization...');
+      setInitState('loading');
 
-      try {
-        await bootstrapApp();
-      } catch (bootstrapError) {
-        console.warn('Bootstrap warning (non-critical):', bootstrapError);
-      }
-      
-      // Initialize AccountManager
-      await accountManager.initialize();
-      
-      // Check for existing accounts
-      const currentAccount = accountManager.getCurrentAccount();
-      
-      console.log('AccountManager check:', { 
-        hasCurrentAccount: !!currentAccount,
-        totalAccounts: accountManager.getAllAccounts().length,
-        role: currentAccount?.role
-      });
+      // Bootstrap the app
+      const result = await bootstrapApp();
+      console.log('Bootstrap result:', result);
 
-      if (currentAccount) {
-        console.log('Found current account - checking role');
-        
-        if (currentAccount.role === 'admin') {
-          console.log('Admin role detected, redirecting to /admin');
-          setInitState('redirect');
-          setRedirectPath('/admin');
-        } else {
-          console.log('Client role, staying in drawer layout');
+      if (result.success) {
+        if (result.user) {
+          console.log('✅ DrawerLayout: User authenticated, proceeding to app');
           setInitState('authenticated');
-          setRedirectPath(null);
+        } else {
+          console.log('🔄 DrawerLayout: No user found, redirecting to login');
+          setRedirectPath('/auth/login');
+          setInitState('redirect');
         }
-        
-        // Verify token in background without blocking UI
-        verifyTokenInBackground(currentAccount.token, currentAccount.id);
       } else {
-        console.log('No current account found, redirecting to /login');
+        console.log('🔄 DrawerLayout: Bootstrap failed, redirecting to login');
+        setRedirectPath('/auth/login');
         setInitState('redirect');
-        setRedirectPath('/login');
       }
-      
-      clearTimeout(initTimeout);
-      initializationComplete = true;
-      
     } catch (error) {
-      console.error('Critical initialization error:', error);
-      
-      // Fallback check
-      const hasAnyAccounts = accountManager.hasAccounts();
-      
-      if (hasAnyAccounts) {
-        console.log('Error during init but found accounts - staying authenticated');
-        setInitState('authenticated');
-        setRedirectPath(null);
-      } else {
-        console.log('Error during init and no accounts - redirecting to login');
-        setInitState('redirect');
-        setRedirectPath('/login');
-      }
-      
-      initializationComplete = true;
+      console.error('❌ DrawerLayout: App initialization failed:', error);
+      setRedirectPath('/auth/login');
+      setInitState('redirect');
     }
   }, [navigationInitialized]);
 
-  // Background token verification
-  const verifyTokenInBackground = useCallback(async (token: string, userId: string) => {
-    try {
-      console.log('Background: Verifying token with server for user:', userId);
-      await api.get('/api/v1/me');
-      console.log('Background: Token verified successfully');
-    } catch (verifyError) {
-      console.warn('Background: Token verification failed (non-critical):', verifyError);
-      if (verifyError?.response?.status === 401 || verifyError?.response?.status === 422) {
-        console.log('Background: Token is invalid, removing account');
-        try {
-          const currentAccount = accountManager.getCurrentAccount();
-          if (currentAccount && currentAccount.id === userId) {
-            await accountManager.removeAccount(currentAccount.id);
-            
-            // Check if we still have accounts
-            if (!accountManager.hasAccounts()) {
-              setInitState('redirect');
-              setRedirectPath('/login');
-            }
-          }
-        } catch (removeError) {
-          console.error('Failed to remove invalid account:', removeError);
-        }
-      }
-    }
-  }, []);
-
-  // Initialize app only when navigation system is ready
+  // Run initialization when navigation system is ready
   useEffect(() => {
     if (navigationInitialized) {
       initializeApp();
     }
   }, [navigationInitialized, initializeApp]);
 
-  // Handle navigation when ready
+  // Handle redirects
   useEffect(() => {
     if (initState === 'redirect' && redirectPath) {
-      const performRedirect = async () => {
-        try {
-          // Small delay to ensure smooth transition
-          await new Promise(resolve => setTimeout(resolve, 100));
-          router.replace(redirectPath);
-        } catch (error) {
-          console.error('Navigation error:', error);
-        }
-      };
-      
-      performRedirect();
+      console.log(`🔄 DrawerLayout: Redirecting to ${redirectPath}`);
+      router.replace(redirectPath);
     }
   }, [initState, redirectPath, router]);
 
-  // Use focus effect to ensure proper state on screen focus
+  // Handle app state changes
+  useEffect(() => {
+    const handleAppStateChange = (nextAppState: AppStateStatus) => {
+      if (nextAppState === 'active' && initState === 'loading') {
+        console.log('📱 DrawerLayout: App became active during loading, re-initializing...');
+        initializeApp();
+      }
+    };
+
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    return () => subscription?.remove();
+  }, [initState, initializeApp]);
+
+  // Re-check authentication when drawer gains focus
   useFocusEffect(
     useCallback(() => {
-      // If we're still loading and screen gains focus, ensure we have proper state
-      if (initState === 'loading') {
-        console.log('Screen focused during loading state');
-      }
+      const checkAuthStatus = async () => {
+        try {
+          if (initState === 'authenticated') {
+            const isValid = await accountManager.isTokenValid();
+            if (!isValid) {
+              console.log('🔒 DrawerLayout: Token invalid, redirecting to login');
+              setRedirectPath('/auth/login');
+              setInitState('redirect');
+            }
+          }
+        } catch (error) {
+          console.error('❌ DrawerLayout: Auth check failed:', error);
+        }
+      };
+
+      checkAuthStatus();
     }, [initState])
   );
 
-  // Show loading while navigation system initializes
-  if (!navigationInitialized) {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
+  // Show loading screen while initializing
+  if (!navigationInitialized || initState === 'loading') {
+    return <LoadingSplashScreen />;
   }
 
-  // Always show loading screen during initialization
-  if (initState === 'loading') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
-  }
-
-  // Show loading screen during redirect
+  // Don't render drawer if redirecting
   if (initState === 'redirect') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
+    return <LoadingSplashScreen />;
   }
 
-  // Only render drawer when authenticated and navigation is ready
-  if (initState === 'authenticated') {
-    return (
+  // Render drawer layout with navigation tracking
+  return (
+    <NavigationTracker>
       <Drawer
-        drawerContent={(props) => 
-          <CustomDrawerContent {...props} />
-        }
-        screenOptions={({ route }) => {
-          const iconData = drawerIcons[route.name] || { name: 'circle', lib: Feather };
-          const IconComponent = iconData.lib;
-
-          return {
-            headerShown: false,
-            drawerStyle: {
-              backgroundColor: colors.background,
-              width: drawerWidth,
-            },
-            drawerActiveTintColor: colors.primary,
-            drawerInactiveTintColor: 'white',
-            drawerLabelStyle: {
-              fontSize: 16,
-              marginLeft: -10,
-            },
-            drawerIcon: ({ color }: { color: ColorValue }) => (
-              <IconComponent name={iconData.name} size={20} color={color} />
-            ),
-          };
+        drawerContent={(props) => <CustomDrawerContent {...props} />}
+        screenOptions={{
+          drawerStyle: {
+            backgroundColor: colors.background,
+            width: drawerWidth,
+          },
+          drawerActiveTintColor: colors.primary,
+          drawerInactiveTintColor: colors.textSecondary,
+          drawerLabelStyle: {
+            fontSize: 16,
+            fontWeight: '600',
+            marginLeft: -10,
+          },
+          headerStyle: {
+            backgroundColor: colors.background,
+          },
+          headerTintColor: colors.text,
+          headerTitleStyle: {
+            fontWeight: '700',
+            fontSize: 20,
+          },
+          headerShown: false,
         }}
-      />
-    );
-  }
-
-  // Fallback loading screen
-  return <LoadingSplashScreen backgroundColor={colors.background} />;
+      >
+        <Drawer.Screen
+          name="index"
+          options={{
+            title: 'Home',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.index.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.index.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="track"
+          options={{
+            title: 'Track Package',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.track.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.track.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="account"
+          options={{
+            title: 'Account',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.account.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.account.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="business"
+          options={{
+            title: 'Business',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.business.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.business.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="cart"
+          options={{
+            title: 'Cart',
+            drawerIcon: ({ color, size }) => (
+              <Feather name="shopping-cart" size={size} color={color as ColorValue} />
+            ),
+          }}
+        />
+        <Drawer.Screen
+          name="Support"
+          options={{
+            title: 'Support',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.Support.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.Support.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="FAQs"
+          options={{
+            title: 'FAQs',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.FAQs.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.FAQs.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="History"
+          options={{
+            title: 'History',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.History.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.History.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="Settings"
+          options={{
+            title: 'Settings',
+            drawerIcon: ({ color, size }) => {
+              const IconComponent = drawerIcons.Settings.lib;
+              return (
+                <IconComponent
+                  name={drawerIcons.Settings.name}
+                  size={size}
+                  color={color as ColorValue}
+                />
+              );
+            },
+          }}
+        />
+        <Drawer.Screen
+          name="contacts"
+          options={{
+            title: 'Contacts',
+            drawerIcon: ({ color, size }) => (
+              <Feather name="users" size={size} color={color as ColorValue} />
+            ),
+          }}
+        />
+        <Drawer.Screen
+          name="findus"
+          options={{
+            title: 'Find Us',
+            drawerIcon: ({ color, size }) => (
+              <Feather name="map-pin" size={size} color={color as ColorValue} />
+            ),
+          }}
+        />
+        <Drawer.Screen
+          name="BusinessDetails"
+          options={{
+            drawerItemStyle: { display: 'none' },
+          }}
+        />
+      </Drawer>
+    </NavigationTracker>
+  );
 }
