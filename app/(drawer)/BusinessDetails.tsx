@@ -1,4 +1,4 @@
-// app/(drawer)/BusinessDetails.tsx - Business Details Screen with NavigationHelper
+// app/(drawer)/BusinessDetails.tsx - Business Details Screen with Enhanced NavigationHelper
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -20,7 +20,7 @@ import colors from '../../theme/colors';
 import { createInvite } from '../../lib/helpers/business';
 import { SafeLogo } from '../../components/SafeLogo';
 
-// Import NavigationHelper
+// Import Enhanced NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
 
 // Import the upload helpers
@@ -111,11 +111,19 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
 
   const userPhone = getUserPhone();
 
-  // Redirect if no business selected
+  // Redirect if no business selected using enhanced navigation
   useEffect(() => {
     if (!selectedBusiness) {
-      NavigationHelper.replaceTo('/(drawer)/Business');
-      showToast.warning('No business selected', 'Please select a business first');
+      const redirectToBusiness = async () => {
+        try {
+          await NavigationHelper.navigateWithReset('/(drawer)/business');
+          showToast.warning('No business selected', 'Please select a business first');
+        } catch (error) {
+          console.error('Failed to redirect to business screen:', error);
+        }
+      };
+      
+      redirectToBusiness();
     }
   }, [selectedBusiness]);
 
@@ -150,13 +158,21 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness]);
 
   // Enhanced back navigation using NavigationHelper
-  const handleGoBack = useCallback(() => {
+  const handleGoBack = useCallback(async () => {
     console.log('🔙 BusinessDetails: Going back...');
     
-    NavigationHelper.goBack({
-      fallbackRoute: '/(drawer)/Business',
-      replaceIfNoHistory: true
-    });
+    try {
+      const success = await NavigationHelper.goBack({
+        fallbackRoute: '/(drawer)/business',
+        replaceIfNoHistory: true
+      });
+      
+      if (!success) {
+        console.log('🔙 BusinessDetails: Back navigation used fallback');
+      }
+    } catch (error) {
+      console.error('🔙 BusinessDetails: Back navigation failed:', error);
+    }
   }, []);
 
   // Handle business logo picker
