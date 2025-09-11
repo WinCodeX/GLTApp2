@@ -1,10 +1,9 @@
-// components/AccountContent.tsx - Updated to use changelog version from ChangelogModal
+// components/AccountContent.tsx - Updated to use changelog version from ChangelogModal with Enhanced NavigationHelper
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
 import * as FileSystem from 'expo-file-system';
-import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useState, useCallback, Suspense } from 'react';
 import {
@@ -39,6 +38,9 @@ import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 
 // Import changelog version from ChangelogModal instead of defining locally
 import { CHANGELOG_VERSION } from './ChangelogModal';
+
+// Import Enhanced NavigationHelper
+import { NavigationHelper } from '../lib/helpers/navigation';
 
 // Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
@@ -194,8 +196,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     avatarUpdateTrigger, // New: Avatar sync trigger
     triggerAvatarRefresh, // New: Force avatar refresh
   } = useUser();
-  
-  const router = useRouter();
 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
@@ -258,6 +258,25 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
+  // Enhanced navigation handlers using NavigationHelper
+  const navigateToLogin = useCallback(async () => {
+    try {
+      console.log('🧭 AccountContent: Navigating to login...');
+      await NavigationHelper.replaceTo('/login');
+    } catch (error) {
+      console.error('🧭 AccountContent: Failed to navigate to login:', error);
+    }
+  }, []);
+
+  const navigateToEditPage = useCallback(async (page: string) => {
+    try {
+      console.log(`🧭 AccountContent: Navigating to ${page}...`);
+      await NavigationHelper.navigateTo(page);
+    } catch (error) {
+      console.error(`🧭 AccountContent: Failed to navigate to ${page}:`, error);
+    }
+  }, []);
+
   // Check for user data and redirect if missing
   useEffect(() => {
     let isMounted = true;
@@ -275,7 +294,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           console.log('🎭 AccountContent: No user data in context, redirecting to login');
           setIsRedirecting(true);
           showToast.error('User session invalid', 'Please log in again');
-          router.replace('/login');
+          await navigateToLogin();
           return;
         }
 
@@ -295,7 +314,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         if (isMounted && !user) {
           setIsRedirecting(true);
           showToast.error('Authentication error', 'Please log in again');
-          router.replace('/login');
+          await navigateToLogin();
         }
       }
     }
@@ -305,7 +324,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     return () => {
       isMounted = false;
     };
-  }, [isScreenReady, user, userLoading, router, source, isRedirecting]);
+  }, [isScreenReady, user, userLoading, source, isRedirecting, navigateToLogin]);
 
   // Enhanced refresh handler with better avatar synchronization
   const onRefresh = useCallback(async () => {
@@ -421,7 +440,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
-  // Use AccountManager-backed logout from UserContext
+  // Use AccountManager-backed logout from UserContext with NavigationHelper
   const confirmLogout = useCallback(async () => {
     try {
       console.log('🎭 AccountContent: Logging out through UserContext...');
@@ -432,14 +451,14 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       showToast.info('Logged out successfully');
       setShowLogoutConfirm(false);
       
-      // Navigate to login
-      router.replace('/login');
+      // Navigate to login using NavigationHelper
+      await navigateToLogin();
       
     } catch (error) {
       console.error('🎭 AccountContent: Logout error:', error);
       showToast.error('Logout failed');
     }
-  }, [logout, router]);
+  }, [logout, navigateToLogin]);
 
   // Loading screen while initializing or redirecting
   if (!isScreenReady || isRedirecting) {
@@ -494,7 +513,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           </Button>
           <Button 
             mode="contained" 
-            onPress={() => router.replace('/login')}
+            onPress={navigateToLogin}
             style={{ marginTop: 10, backgroundColor: '#764ba2' }}
           >
             Go to Login
@@ -590,7 +609,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         <View style={styles.infoCard}>
           <Text style={styles.sectionTitle}>Account Information</Text>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-username')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => navigateToEditPage('/edit-username')}>
             <Text style={styles.infoLabel}>Username</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.username || '—'}</Text>
@@ -598,7 +617,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-display-name')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => navigateToEditPage('/edit-display-name')}>
             <Text style={styles.infoLabel}>Display Name</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.display_name || user?.first_name || 'LVL0'}</Text>
@@ -606,7 +625,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-email')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => navigateToEditPage('/edit-email')}>
             <Text style={styles.infoLabel}>Email</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.email || 'admin@example.com'}</Text>
@@ -614,7 +633,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
             </View>
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.infoRow} onPress={() => router.push('/edit-phone')}>
+          <TouchableOpacity style={styles.infoRow} onPress={() => navigateToEditPage('/edit-phone')}>
             <Text style={styles.infoLabel}>Phone</Text>
             <View style={styles.infoRight}>
               <Text style={styles.infoValue}>{user?.phone || '—'}</Text>
