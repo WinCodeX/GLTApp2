@@ -1,36 +1,36 @@
-// app/(drawer)/settings.tsx - Settings Screen with NavigationHelper integration
+// app/(drawer)/settings.tsx - Settings Screen with Enhanced NavigationHelper integration
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import colors from '../../theme/colors';
 
-// Import NavigationHelper
+// Import Enhanced NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const SETTINGS_SECTIONS = [
   {
     title: 'Account Settings',
     data: [
-      { id: '1', label: 'Account', icon: 'account-circle' },
-      { id: '2', label: 'Content & Social', icon: 'group' },
+      { id: '1', label: 'Account', icon: 'account-circle', route: '/(drawer)/account' },
+      { id: '2', label: 'Content & Social', icon: 'group', route: '/settings/content_social' },
     ],
   },
   {
     title: 'App Settings',
     data: [
-      { id: '3', label: 'Appearance', icon: 'color-lens' },
-      { id: '4', label: 'Accessibility', icon: 'accessibility' },
-      { id: '5', label: 'Notifications', icon: 'notifications' },
-      { id: '6', label: 'Advanced', icon: 'settings' },
+      { id: '3', label: 'Appearance', icon: 'color-lens', route: '/settings/appearance' },
+      { id: '4', label: 'Accessibility', icon: 'accessibility', route: '/settings/accessibility' },
+      { id: '5', label: 'Notifications', icon: 'notifications', route: '/settings/notifications' },
+      { id: '6', label: 'Advanced', icon: 'settings', route: '/settings/advanced' },
     ],
   },
   {
     title: 'Support',
     data: [
-      { id: '9', label: 'Support', icon: 'help-circle' },
-      { id: '10', label: 'Upload any Bugs you find to GLT Support', icon: 'file-upload' },
-      { id: '11', label: 'Acknowledgements', icon: 'info' },
+      { id: '9', label: 'Support', icon: 'help-circle', route: '/(drawer)/support' },
+      { id: '10', label: 'Upload any Bugs you find to GLT Support', icon: 'file-upload', route: '/settings/bug_report' },
+      { id: '11', label: 'Acknowledgements', icon: 'info', route: '/settings/acknowledgements' },
     ],
   },
 ];
@@ -39,23 +39,36 @@ export default function SettingsScreen() {
   const [search, setSearch] = useState('');
 
   // Enhanced back navigation using NavigationHelper
-  const handleGoBack = useCallback(() => {
+  const handleGoBack = useCallback(async () => {
     console.log('🔙 Settings: Going back...');
     
-    NavigationHelper.goBack({
-      fallbackRoute: '/',
-      replaceIfNoHistory: true
-    });
+    try {
+      const success = await NavigationHelper.goBack({
+        fallbackRoute: '/(drawer)/',
+        replaceIfNoHistory: true
+      });
+      
+      if (!success) {
+        console.log('🔙 Settings: Back navigation used fallback');
+      }
+    } catch (error) {
+      console.error('🔙 Settings: Back navigation failed:', error);
+    }
   }, []);
 
-  // Navigation handler using NavigationHelper
-  const handleSettingNavigation = useCallback((label: string) => {
-    console.log('🔧 Settings: Navigating to:', label);
+  // Enhanced navigation handler using NavigationHelper
+  const handleSettingNavigation = useCallback(async (item: any) => {
+    console.log('🔧 Settings: Navigating to:', item.label);
     
-    // Convert label to route format
-    const route = label.toLowerCase().replace(/ /g, '_').replace(/&/g, 'and');
-    
-    NavigationHelper.navigateTo(`/settings/${route}`);
+    try {
+      // Use predefined route if available, otherwise generate one
+      const route = item.route || `/settings/${item.label.toLowerCase().replace(/ /g, '_').replace(/&/g, 'and')}`;
+      
+      await NavigationHelper.navigateTo(route);
+      console.log('✅ Settings: Successfully navigated to:', route);
+    } catch (error) {
+      console.error('❌ Settings: Navigation failed for:', item.label, error);
+    }
   }, []);
 
   // Function to filter the settings data
@@ -70,20 +83,6 @@ export default function SettingsScreen() {
     }));
   };
 
-  // Render each item in the section list
-  const renderItem = ({ item }: any) => (
-    <View style={styles.settingItemContainer}>
-      <TouchableOpacity
-        style={styles.settingItem}
-        onPress={() => handleSettingNavigation(item.label)}
-      >
-        <MaterialIcons name={item.icon} size={24} color="#fff" />
-        <Text style={styles.settingText}>{item.label}</Text>
-        <Feather name="chevron-right" size={20} color="#888" />
-      </TouchableOpacity>
-    </View>
-  );
-
   // Render section with edge lighting effect
   const renderSection = ({ section }) => (
     <View style={styles.sectionContainer}>
@@ -94,7 +93,8 @@ export default function SettingsScreen() {
             <View style={styles.settingItemContainer}>
               <TouchableOpacity
                 style={styles.settingItem}
-                onPress={() => handleSettingNavigation(item.label)}
+                onPress={() => handleSettingNavigation(item)}
+                activeOpacity={0.7}
               >
                 <MaterialIcons name={item.icon} size={24} color="#fff" />
                 <Text style={styles.settingText}>{item.label}</Text>
@@ -110,7 +110,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with gradient background and NavigationHelper back */}
+      {/* Header with gradient background and Enhanced NavigationHelper back */}
       <LinearGradient
         colors={['#4c1d95', '#7c3aed', '#3730a3']}
         start={{ x: 0, y: 0 }}
