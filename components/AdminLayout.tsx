@@ -1,118 +1,73 @@
-// components/AdminLayout.tsx - Fixed with proper status bar clearance
-import React, { useState, ReactNode, useEffect } from 'react';
+// components/AdminLayout.tsx - Fixed with NavigationHelper integration
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
-  View,
+  StyleSheet,
   Text,
+  View,
   TouchableOpacity,
-  TextInput,
-  ScrollView,
+  Dimensions,
   SafeAreaView,
   StatusBar,
-  Dimensions,
-  StyleSheet,
-  Image,
   Platform,
+  TextInput,
+  Image,
+  Animated,
+  KeyboardAvoidingView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import Constants from 'expo-constants';
+import { Feather, MaterialIcons, Ionicons } from '@expo/vector-icons';
 import { useRouter, usePathname } from 'expo-router';
-import AdminSidebar from './AdminSidebar';
+import colors from '../theme/colors';
 import { useUser } from '../context/UserContext';
 
-const { width } = Dimensions.get('window');
+// CRITICAL: Import NavigationHelper for proper navigation tracking
+import { NavigationHelper } from '../lib/helpers/navigation';
 
-// Define proper TypeScript types for Ionicons
-type IoniconsName = React.ComponentProps<typeof Ionicons>['name'];
-
-interface BottomTab {
-  id: string;
-  icon: IoniconsName;
-  activeIcon: IoniconsName;
-  label: string;
-  route: string;
-}
+const { width, height } = Dimensions.get('window');
 
 interface AdminLayoutProps {
-  children: ReactNode;
-  activePanel?: string;
+  children: React.ReactNode;
+  title?: string;
+  showHeader?: boolean;
+  showBottomTabs?: boolean;
+  activeTab?: string;
+}
+
+interface Tab {
+  id: string;
+  label: string;
+  icon: string;
+  route: string;
+  iconLib: any;
 }
 
 const AdminLayout: React.FC<AdminLayoutProps> = ({
   children,
-  activePanel = 'home',
+  title = 'Admin Panel',
+  showHeader = true,
+  showBottomTabs = true,
+  activeTab = 'home'
 }) => {
-  const [sidebarVisible, setSidebarVisible] = useState(false);
   const { user } = useUser();
   const router = useRouter();
   const pathname = usePathname();
+  
+  const [searchText, setSearchText] = useState('');
+  const [isSearchVisible, setIsSearchVisible] = useState(false);
+  const slideAnim = useRef(new Animated.Value(-width)).current;
 
-  const avatarSource = user?.avatar_url
-    ? { uri: user.avatar_url }
-    : require('../assets/images/avatar_placeholder.png');
-
-  // Bottom tabs with correct scanning route
-  const bottomTabs: BottomTab[] = [
-    { 
-      id: 'home', 
-      icon: 'home-outline' as IoniconsName, 
-      activeIcon: 'home' as IoniconsName, 
-      label: 'Home', 
-      route: '/admin' 
-    },
-    { 
-      id: 'scan', 
-      icon: 'qr-code-outline' as IoniconsName, 
-      activeIcon: 'qr-code' as IoniconsName, 
-      label: 'Scan', 
-      route: '/admin/ScanningScreen'
-    },
-    { 
-      id: 'packages', 
-      icon: 'cube-outline' as IoniconsName, 
-      activeIcon: 'cube' as IoniconsName, 
-      label: 'Packages', 
-      route: '/admin/packages' 
-    },
-    { 
-      id: 'settings', 
-      icon: 'settings-outline' as IoniconsName, 
-      activeIcon: 'settings' as IoniconsName, 
-      label: 'Settings', 
-      route: '/admin/settings' 
-    },
-    { 
-      id: 'profile', 
-      icon: 'person-outline' as IoniconsName, 
-      activeIcon: 'person' as IoniconsName, 
-      label: 'You', 
-      route: '/admin/account' 
-    },
+  const adminTabs: Tab[] = [
+    { id: 'home', label: 'Home', icon: 'home', route: '/admin', iconLib: Feather },
+    { id: 'scan', label: 'Scan', icon: 'qr-code-scanner', route: '/admin/ScanningScreen', iconLib: MaterialIcons },
+    { id: 'packages', label: 'Packages', icon: 'package', route: '/admin/packages', iconLib: Feather },
+    { id: 'settings', label: 'Settings', icon: 'settings', route: '/admin/settings', iconLib: Feather },
+    { id: 'profile', label: 'Profile', icon: 'user', route: '/admin/account', iconLib: Feather },
   ];
 
-  // Enhanced pathname matching for scanning route
-  const getActiveTab = (): string => {
-    if (pathname === '/admin/account') {
-      return 'profile';
-    }
-    
-    if (pathname === '/admin/ScanningScreen') {
-      return 'scan';
-    }
-    
-    const currentTab = bottomTabs.find(tab => tab.route === pathname);
-    return currentTab?.id || 'home';
-  };
-
-  const activeTab = getActiveTab();
-
-  const toggleSidebar = (): void => setSidebarVisible(!sidebarVisible);
-  const closeSidebar = (): void => setSidebarVisible(false);
-
-  // Updated navigation handler with proper scanning navigation
-  const handleTabPress = (tabId: string): void => {
+  // FIXED: Enhanced navigation with proper tracking
+  const handleTabPress = useCallback(async (tabId: string): Promise<void> => {
     try {
-      const tab = bottomTabs.find(t => t.id === tabId);
+      const tab = adminTabs.find(t => t.id === tabId);
       if (!tab) {
         console.warn(`Tab with id ${tabId} not found`);
         return;
@@ -123,44 +78,28 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         return;
       }
 
-      console.log(`Navigating from ${pathname} to ${tab.route}`);
+      console.log(`🧭 AdminLayout: Navigating from ${pathname} to ${tab.route}`);
       
-      switch (tabId) {
-        case 'profile':
-          console.log('Navigating to admin account');
-          router.push('/admin/account');
-          break;
-        case 'home':
-          console.log('Navigating to admin home');
-          router.push('/admin');
-          break;
-        case 'scan':
-          console.log('Navigating to scanning screen');
-          router.push('/admin/ScanningScreen');
-          break;
-        case 'packages':
-          console.log('Navigating to packages');
-          router.push('/admin/packages');
-          break;
-        case 'settings':
-          console.log('Navigating to settings');
-          router.push('/admin/settings');
-          break;
-        default:
-          console.warn(`Unknown tab id: ${tabId}`);
-          router.push('/admin');
-          break;
-      }
+      // CRITICAL: Use NavigationHelper instead of direct router.push
+      await NavigationHelper.navigateTo(tab.route, {
+        params: {},
+        trackInHistory: true
+      });
       
     } catch (error) {
-      console.error('Navigation error:', error);
-      router.push('/admin');
+      console.error('❌ AdminLayout: Navigation error:', error);
+      // Fallback with tracking
+      try {
+        await NavigationHelper.navigateTo('/admin');
+      } catch (fallbackError) {
+        console.error('❌ AdminLayout: Fallback navigation failed:', fallbackError);
+      }
     }
-  };
+  }, [pathname, adminTabs]);
 
-  const handleAvatarPress = (): void => {
-    handleTabPress('profile');
-  };
+  const handleAvatarPress = useCallback(async (): Promise<void> => {
+    await handleTabPress('profile');
+  }, [handleTabPress]);
 
   const handleSearchSubmit = (text: string): void => {
     console.log('Search submitted:', text);
@@ -182,400 +121,332 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     return fabRoutes.includes(pathname || '') || false;
   };
 
-  const handleFABPress = (): void => {
-    console.log('FAB pressed on route:', pathname);
+  const toggleSearch = useCallback((): void => {
+    const toValue = isSearchVisible ? -width : 0;
+    setIsSearchVisible(!isSearchVisible);
     
-    switch (pathname) {
-      case '/admin/ScanningScreen':
-        console.log('Opening quick scan from FAB');
-        break;
-      case '/admin/packages':
-        console.log('Creating new package from FAB');
-        router.push('/admin/packages/create');
-        break;
-      case '/admin':
-      default:
-        console.log('Opening quick actions from FAB - navigating to scan');
-        router.push('/admin/ScanningScreen');
-        break;
-    }
-  };
+    Animated.spring(slideAnim, {
+      toValue,
+      useNativeDriver: true,
+      tension: 100,
+      friction: 8,
+    }).start();
+  }, [isSearchVisible, slideAnim]);
 
-  const getScreenTitle = (): string => {
-    switch (pathname) {
-      case '/admin/ScanningScreen':
-        return 'Package Scanning';
-      case '/admin/packages':
-        return 'Package Management';
-      case '/admin/settings':
-        return 'Settings';
-      case '/admin/account':
-        return 'Account';
-      case '/admin':
-        return '';
-      default:
-        return 'Admin';
-    }
-  };
+  const renderBottomTabs = (): JSX.Element | null => {
+    if (!shouldShowBottomTabs()) return null;
 
-  const shouldShowTitle = (): boolean => {
-    const title = getScreenTitle();
-    return title.trim().length > 0;
-  };
+    return (
+      <View style={styles.bottomTabContainer}>
+        <LinearGradient
+          colors={['rgba(26, 26, 46, 0.95)', 'rgba(26, 26, 46, 1)']}
+          style={styles.bottomTabGradient}
+        >
+          <View style={styles.bottomTabs}>
+            {adminTabs.map((tab) => {
+              const IconComponent = tab.iconLib;
+              const isActive = pathname === tab.route || 
+                             (tab.id === 'home' && pathname === '/admin') ||
+                             (pathname?.startsWith('/admin') && tab.id === activeTab);
 
-  return (
-    <View style={styles.container}>
-      {/* Status bar configuration */}
-      <StatusBar 
-        barStyle="light-content" 
-        backgroundColor="#667eea" 
-        translucent={false}
-      />
-      
-      {/* Status bar spacer to ensure content doesn't overlap */}
-      <View style={styles.statusBarSpacer} />
-      
-      {/* Header with gradient - positioned below status bar */}
-      <LinearGradient
-        colors={['#667eea', '#764ba2']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        {/* Left - Menu & Logo */}
-        <View style={styles.headerLeft}>
-          <TouchableOpacity 
-            onPress={toggleSidebar} 
-            style={styles.menuButton}
-            accessibilityLabel="Open menu"
-            accessibilityRole="button"
-          >
-            <Ionicons name="menu" size={24} color="white" />
-          </TouchableOpacity>
-          <View style={styles.logoContainer}>
-            <View style={styles.logoIcon}>
-              <Text style={styles.logoText}>GL</Text>
-            </View>
-            {shouldShowTitle() && (
-              <Text style={styles.panelTitle}>
-                {getScreenTitle()}
-              </Text>
-            )}
-          </View>
-        </View>
-
-        {/* Center - Search (hide on scanning screen) */}
-        {pathname !== '/admin/ScanningScreen' && (
-          <View style={styles.searchContainer}>
-            <Ionicons name="search" size={18} color="rgba(255,255,255,0.8)" />
-            <TextInput
-              placeholder="Search..."
-              placeholderTextColor="rgba(255,255,255,0.8)"
-              style={styles.searchInput}
-              onSubmitEditing={(event) => handleSearchSubmit(event.nativeEvent.text)}
-              returnKeyType="search"
-              accessibilityLabel="Search input"
-            />
-          </View>
-        )}
-
-        {/* Right - Notifications & Avatar */}
-        <View style={styles.headerRight}>
-          <TouchableOpacity 
-            style={styles.headerAction}
-            accessibilityLabel="Notifications"
-            accessibilityRole="button"
-          >
-            <Ionicons name="notifications-outline" size={22} color="white" />
-          </TouchableOpacity>
-          <TouchableOpacity 
-            style={styles.headerAction}
-            onPress={handleAvatarPress}
-            accessibilityLabel="Open profile"
-            accessibilityRole="button"
-          >
-            <Image 
-              source={avatarSource} 
-              style={styles.avatarImage}
-              accessibilityLabel="User avatar"
-            />
-          </TouchableOpacity>
-        </View>
-      </LinearGradient>
-
-      {/* Main content area */}
-      <View style={styles.mainContent}>
-        <AdminSidebar 
-          visible={sidebarVisible} 
-          onClose={closeSidebar} 
-          activePanel={activePanel} 
-        />
-        <View style={styles.contentArea}>
-          <LinearGradient 
-            colors={['#1a1a2e', '#16213e', '#0f0f23']} 
-            style={styles.contentGradient}
-          >
-            <ScrollView 
-              style={styles.scrollView} 
-              contentContainerStyle={styles.scrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {children}
-            </ScrollView>
-          </LinearGradient>
-        </View>
-        {sidebarVisible && (
-          <TouchableOpacity 
-            style={styles.overlay} 
-            onPress={closeSidebar}
-            accessibilityLabel="Close sidebar"
-            accessibilityRole="button"
-          />
-        )}
-      </View>
-
-      {/* Bottom Tabs */}
-      {shouldShowBottomTabs() && (
-        <SafeAreaView style={styles.bottomTabContainer}>
-          <View style={styles.bottomTabBar}>
-            {bottomTabs.map((tab) => {
-              const isActive = activeTab === tab.id;
               return (
                 <TouchableOpacity
                   key={tab.id}
+                  style={[styles.tabButton, isActive && styles.activeTabButton]}
                   onPress={() => handleTabPress(tab.id)}
-                  style={styles.tabButton}
-                  accessibilityLabel={`${tab.label} tab`}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isActive }}
+                  activeOpacity={0.7}
                 >
-                  <Ionicons
-                    name={isActive ? tab.activeIcon : tab.icon}
-                    size={22}
-                    color={isActive ? '#667eea' : '#a0aec0'}
-                  />
-                  <Text
-                    style={[
-                      styles.tabLabel,
-                      {
-                        color: isActive ? '#667eea' : '#a0aec0',
-                        fontWeight: isActive ? '600' : '400',
-                      },
-                    ]}
-                  >
+                  <View style={[styles.tabIconContainer, isActive && styles.activeTabIconContainer]}>
+                    <IconComponent
+                      name={tab.icon}
+                      size={22}
+                      color={isActive ? colors.primary : colors.textSecondary}
+                    />
+                  </View>
+                  <Text style={[
+                    styles.tabLabel,
+                    isActive && styles.activeTabLabel
+                  ]}>
                     {tab.label}
                   </Text>
-                  {tab.id === 'scan' && isActive && (
-                    <View style={styles.scanningBadge}>
-                      <View style={styles.scanningDot} />
-                    </View>
-                  )}
                 </TouchableOpacity>
               );
             })}
           </View>
-        </SafeAreaView>
-      )}
+        </LinearGradient>
+      </View>
+    );
+  };
 
-      {/* Floating Action Button */}
-      {shouldShowFAB() && (
-        <TouchableOpacity 
-          style={styles.fab}
-          onPress={handleFABPress}
-          accessibilityLabel={
-            pathname === '/admin/ScanningScreen' ? 'Quick scan' :
-            pathname === '/admin/packages' ? 'Add new package' :
-            'Quick scan'
-          }
-          accessibilityRole="button"
+  const renderFAB = (): JSX.Element | null => {
+    if (!shouldShowFAB()) return null;
+
+    return (
+      <TouchableOpacity
+        style={styles.fab}
+        onPress={() => handleTabPress('scan')}
+        activeOpacity={0.8}
+      >
+        <LinearGradient
+          colors={[colors.primary, colors.accent]}
+          style={styles.fabGradient}
         >
-          <LinearGradient 
-            colors={['#667eea', '#764ba2']} 
-            style={styles.fabGradient}
+          <MaterialIcons name="qr-code-scanner" size={28} color="#fff" />
+        </LinearGradient>
+      </TouchableOpacity>
+    );
+  };
+
+  const renderHeader = (): JSX.Element | null => {
+    if (!showHeader) return null;
+
+    return (
+      <View style={styles.headerContainer}>
+        <LinearGradient
+          colors={['rgba(26, 26, 46, 1)', 'rgba(26, 26, 46, 0.95)']}
+          style={styles.headerGradient}
+        >
+          <View style={styles.header}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.headerTitle}>{title}</Text>
+              <Text style={styles.headerSubtitle}>Admin Dashboard</Text>
+            </View>
+            
+            <View style={styles.headerRight}>
+              <TouchableOpacity
+                style={styles.headerButton}
+                onPress={toggleSearch}
+                activeOpacity={0.7}
+              >
+                <Feather name="search" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                style={styles.avatarContainer}
+                onPress={handleAvatarPress}
+                activeOpacity={0.7}
+              >
+                {user?.profile_picture ? (
+                  <Image
+                    source={{ uri: user.profile_picture }}
+                    style={styles.avatar}
+                  />
+                ) : (
+                  <View style={styles.avatarPlaceholder}>
+                    <Feather name="user" size={18} color={colors.textSecondary} />
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </LinearGradient>
+        
+        {/* Search Overlay */}
+        <Animated.View
+          style={[
+            styles.searchOverlay,
+            { transform: [{ translateX: slideAnim }] }
+          ]}
+        >
+          <LinearGradient
+            colors={['rgba(26, 26, 46, 0.98)', 'rgba(26, 26, 46, 1)']}
+            style={styles.searchGradient}
           >
-            <Ionicons 
-              name={
-                pathname === '/admin/ScanningScreen' ? 'qr-code' :
-                pathname === '/admin/packages' ? 'add' :
-                'qr-code'
-              } 
-              size={28} 
-              color="white" 
-            />
+            <View style={styles.searchContainer}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search packages, users, reports..."
+                placeholderTextColor={colors.textSecondary}
+                value={searchText}
+                onChangeText={setSearchText}
+                onSubmitEditing={() => handleSearchSubmit(searchText)}
+                autoFocus={isSearchVisible}
+              />
+              <TouchableOpacity
+                style={styles.searchCloseButton}
+                onPress={toggleSearch}
+                activeOpacity={0.7}
+              >
+                <Feather name="x" size={20} color={colors.textSecondary} />
+              </TouchableOpacity>
+            </View>
           </LinearGradient>
-        </TouchableOpacity>
-      )}
+        </Animated.View>
+      </View>
+    );
+  };
+
+  return (
+    <View style={styles.container}>
+      <StatusBar barStyle="light-content" backgroundColor={colors.background} />
+      
+      {renderHeader()}
+      
+      <KeyboardAvoidingView 
+        style={styles.content}
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        {children}
+      </KeyboardAvoidingView>
+      
+      {renderFAB()}
+      {renderBottomTabs()}
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#667eea' // Match status bar color
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
   },
-  statusBarSpacer: {
-    height: Constants.statusBarHeight,
-    backgroundColor: '#667eea', // Match the gradient start color
+  headerContainer: {
+    position: 'relative',
+    zIndex: 1000,
+  },
+  headerGradient: {
+    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
   },
   header: {
-    paddingHorizontal: 16,
-    paddingVertical: 16,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    minHeight: 60,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
   },
-  headerLeft: { 
-    flexDirection: 'row', 
-    alignItems: 'center',
+  headerLeft: {
     flex: 1,
   },
-  menuButton: { 
-    padding: 8, 
-    marginRight: 12,
-    borderRadius: 8,
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.text,
+    marginBottom: 2,
   },
-  logoContainer: { 
-    flexDirection: 'row', 
+  headerSubtitle: {
+    fontSize: 14,
+    color: colors.textSecondary,
+    fontWeight: '500',
+  },
+  headerRight: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  logoIcon: {
-    width: 32, 
-    height: 32, 
-    borderRadius: 16, 
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center', 
-    justifyContent: 'center', 
-    marginRight: 8,
+  headerButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  logoText: { 
-    color: 'white', 
-    fontWeight: 'bold', 
-    fontSize: 14 
+  avatarContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    overflow: 'hidden',
   },
-  panelTitle: { 
-    color: 'white', 
-    fontSize: 16,
-    fontWeight: '600',
+  avatar: {
+    width: '100%',
+    height: '100%',
+  },
+  avatarPlaceholder: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 1001,
+  },
+  searchGradient: {
+    flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
   },
   searchContainer: {
-    flex: 2,
-    maxWidth: 300,
-    marginHorizontal: 16,
-    backgroundColor: 'rgba(255,255,255,0.2)',
-    borderRadius: 20,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
-    height: 36,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    gap: 12,
   },
-  searchInput: { 
-    flex: 1, 
-    marginLeft: 8, 
-    color: 'white', 
-    fontSize: 14,
-    includeFontPadding: false,
+  searchInput: {
+    flex: 1,
+    height: 40,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    color: colors.text,
+    fontSize: 16,
   },
-  headerRight: { 
-    flexDirection: 'row', 
+  searchCloseButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
-    justifyContent: 'flex-end',
+    justifyContent: 'center',
+  },
+  content: {
     flex: 1,
   },
-  headerAction: { 
-    padding: 8, 
-    marginLeft: 8,
-    borderRadius: 8,
-  },
-  avatarImage: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    borderWidth: 2,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  mainContent: { 
-    flex: 1, 
-    flexDirection: 'row',
-    backgroundColor: '#1a1a2e'
-  },
-  contentArea: { 
-    flex: 1, 
-    backgroundColor: '#0f0f23' 
-  },
-  contentGradient: { 
-    flex: 1 
-  },
-  scrollView: { 
-    flex: 1 
-  },
-  scrollContent: { 
-    paddingBottom: 100,
-    flexGrow: 1,
-  },
-  overlay: {
-    position: 'absolute', 
-    top: 0, 
-    left: 0, 
-    right: 0, 
-    bottom: 0,
-    backgroundColor: 'rgba(0,0,0,0.5)', 
-    zIndex: 998,
-  },
   bottomTabContainer: {
-    backgroundColor: '#16213e',
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
   },
-  bottomTabBar: {
-    backgroundColor: '#16213e',
-    borderTopWidth: 1,
-    borderTopColor: '#2d3748',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
+  bottomTabGradient: {
+    paddingBottom: Platform.OS === 'ios' ? 34 : 0,
+  },
+  bottomTabs: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
-  tabButton: { 
-    alignItems: 'center', 
-    paddingVertical: 4, 
-    paddingHorizontal: 8,
-    minWidth: width / 5 - 16,
-    position: 'relative',
-  },
-  tabLabel: { 
-    fontSize: 10, 
-    marginTop: 2,
-    textAlign: 'center',
-  },
-  scanningBadge: {
-    position: 'absolute',
-    top: -2,
-    right: 8,
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10B981',
+  tabButton: {
     alignItems: 'center',
     justifyContent: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    minWidth: 60,
   },
-  scanningDot: {
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: '#FFFFFF',
+  activeTabButton: {
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+  },
+  tabIconContainer: {
+    marginBottom: 4,
+  },
+  activeTabIconContainer: {
+    transform: [{ scale: 1.1 }],
+  },
+  tabLabel: {
+    fontSize: 11,
+    fontWeight: '500',
+    color: colors.textSecondary,
+  },
+  activeTabLabel: {
+    color: colors.primary,
+    fontWeight: '600',
   },
   fab: {
     position: 'absolute',
-    bottom: 100,
+    bottom: Platform.OS === 'ios' ? 100 : 80,
     right: 20,
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
+    zIndex: 1001,
     elevation: 8,
-    shadowColor: '#667eea',
+    shadowColor: colors.primary,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
