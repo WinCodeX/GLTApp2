@@ -1,4 +1,4 @@
-// lib/services/updateService.ts - Enhanced with background downloads and progress tracking
+// lib/services/updateService.ts - Fixed with proper notifications and installation
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -49,6 +49,7 @@ class UpdateService {
   private downloadProgressCallback: DownloadProgressCallback | null = null;
   private downloadStartTime = 0;
   private appStateSubscription: any = null;
+  private notificationId = 'download_progress';
 
   static getInstance(): UpdateService {
     if (!UpdateService.instance) {
@@ -59,8 +60,8 @@ class UpdateService {
 
   async initialize() {
     try {
-      // Setup notification channels
-      await this.setupNotificationChannels();
+      // Setup notification channels and permissions
+      await this.setupNotifications();
       
       // Check for pending downloads
       await this.checkPendingDownloads();
@@ -74,16 +75,47 @@ class UpdateService {
     }
   }
 
-  private async setupNotificationChannels() {
-    if (Platform.OS === 'android') {
-      await Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
-        name: 'App Updates',
-        description: 'Notifications for app updates and downloads',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#8B5CF6',
-        sound: 'default',
+  private async setupNotifications() {
+    try {
+      // Request notification permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        console.warn('Notification permissions not granted');
+      }
+
+      // Configure notification behavior
+      await Notifications.setNotificationHandler({
+        handleNotification: async () => ({
+          shouldShowAlert: true,
+          shouldPlaySound: true,
+          shouldSetBadge: true,
+        }),
       });
+
+      // Setup Android notification channel
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
+          name: 'App Updates',
+          description: 'Download progress and update notifications',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#ff6b35',
+          sound: 'default',
+          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
+          bypassDnd: false,
+        });
+      }
+
+      console.log('Notifications setup completed successfully');
+    } catch (error) {
+      console.error('Failed to setup notifications:', error);
     }
   }
 
@@ -222,8 +254,8 @@ class UpdateService {
         await FileSystem.deleteAsync(fileUri);
       }
 
-      // Show initial progress notification
-      await this.showDownloadProgressNotification(0, metadata.version);
+      // Show initial progress notification in notification bar
+      await this.showDownloadStartNotification(metadata.version);
 
       // Start download with progress tracking
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -304,9 +336,9 @@ class UpdateService {
       // Store progress for persistence
       AsyncStorage.setItem(DOWNLOAD_PROGRESS_KEY, JSON.stringify(progress)).catch(console.error);
 
-      // Update progress notification every 5%
-      if (Math.floor(percentage) % 5 === 0) {
-        this.showDownloadProgressNotification(percentage, metadata.version).catch(console.error);
+      // Update progress notification every 10%
+      if (Math.floor(percentage) % 10 === 0) {
+        this.updateDownloadProgressNotification(percentage, metadata.version, loaded, total).catch(console.error);
       }
 
       // Call progress callback
@@ -316,34 +348,64 @@ class UpdateService {
     };
   }
 
-  private async showDownloadProgressNotification(percentage: number, version?: string) {
+  private async showDownloadStartNotification(version?: string) {
     try {
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Downloading GLT Update',
-          body: `Version ${version || 'latest'} - ${Math.round(percentage)}% complete`,
-          data: { type: 'download_progress', version, percentage },
+          title: 'Starting Update Download',
+          body: `Downloading GLT version ${version || 'latest'}...`,
+          data: { type: 'download_start', version },
           categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
+          sound: 'default',
         },
         trigger: null,
+        identifier: this.notificationId,
       });
     } catch (error) {
-      console.error('Failed to show progress notification:', error);
+      console.error('Failed to show start notification:', error);
+    }
+  }
+
+  private async updateDownloadProgressNotification(percentage: number, version?: string, loaded?: number, total?: number) {
+    try {
+      const progressText = `${Math.round(percentage)}% complete`;
+      const sizeText = loaded && total ? ` • ${this.formatFileSize(loaded)}/${this.formatFileSize(total)}` : '';
+      
+      await Notifications.scheduleNotificationAsync({
+        content: {
+          title: 'Downloading GLT Update',
+          body: `Version ${version || 'latest'} - ${progressText}${sizeText}`,
+          data: { type: 'download_progress', version, percentage },
+          categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
+          sound: false, // Don't play sound for progress updates
+          sticky: true, // Keep notification visible
+        },
+        trigger: null,
+        identifier: this.notificationId,
+      });
+    } catch (error) {
+      console.error('Failed to update progress notification:', error);
     }
   }
 
   private async showDownloadCompleteNotification(download: StoredDownload) {
     try {
+      // Cancel progress notification
+      await Notifications.cancelScheduledNotificationAsync(this.notificationId);
+      
+      // Show completion notification
       await Notifications.scheduleNotificationAsync({
         content: {
-          title: 'Update Downloaded',
-          body: `GLT version ${download.version} is ready to install. Tap to install.`,
+          title: 'Update Downloaded ✓',
+          body: `GLT version ${download.version} is ready to install. Tap to install now.`,
           data: { 
             type: 'download_complete', 
             version: download.version,
             filePath: download.filePath 
           },
           categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
+          sound: 'default',
+          sticky: false,
         },
         trigger: null,
       });
@@ -354,12 +416,16 @@ class UpdateService {
 
   private async showDownloadErrorNotification(version: string) {
     try {
+      // Cancel progress notification
+      await Notifications.cancelScheduledNotificationAsync(this.notificationId);
+      
       await Notifications.scheduleNotificationAsync({
         content: {
           title: 'Download Failed',
           body: `Failed to download GLT version ${version}. Please try again.`,
           data: { type: 'download_error', version },
           categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
+          sound: 'default',
         },
         trigger: null,
       });
@@ -369,7 +435,7 @@ class UpdateService {
   }
 
   /**
-   * Install downloaded APK
+   * Install downloaded APK with improved flow
    */
   async installDownloadedAPK(version?: string): Promise<boolean> {
     try {
@@ -386,20 +452,72 @@ class UpdateService {
         throw new Error('Download file no longer exists');
       }
 
-      // Install APK
-      await this.installAPK(storedDownload.filePath);
-      
-      // Mark as installed
-      await AsyncStorage.setItem('pending_apk_install', 'true');
+      // Install APK with improved user experience
+      await this.installAPKImproved(storedDownload.filePath, storedDownload.version);
       
       return true;
     } catch (error) {
       console.error('Failed to install downloaded APK:', error);
       Alert.alert(
-        'Installation Failed',
-        `Failed to install update: ${error.message}`
+        'Installation Error',
+        `Unable to install update: ${error.message}\n\nPlease check your device settings allow app installation from unknown sources.`
       );
       return false;
+    }
+  }
+
+  /**
+   * Improved APK installation with better user guidance
+   */
+  private async installAPKImproved(fileUri: string, version: string): Promise<void> {
+    try {
+      console.log('Installing APK:', fileUri);
+      
+      // Show user guidance before starting installation
+      Alert.alert(
+        'Installing Update',
+        `Installing GLT version ${version}. You may need to allow installation from unknown sources in your device settings.`,
+        [{ text: 'Continue', onPress: () => this.executeAPKInstall(fileUri) }]
+      );
+      
+    } catch (error) {
+      console.error('APK installation preparation failed:', error);
+      throw error;
+    }
+  }
+
+  private async executeAPKInstall(fileUri: string): Promise<void> {
+    try {
+      // Primary installation method
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: fileUri,
+        type: 'application/vnd.android.package-archive',
+        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        extra: {
+          'android.intent.extra.NOT_UNKNOWN_SOURCE': true,
+          'android.intent.extra.INSTALLER_PACKAGE_NAME': 'com.lvl0_x.gltapp2'
+        }
+      });
+      
+      console.log('APK installation intent launched successfully');
+      
+    } catch (error) {
+      console.error('Primary installation failed, trying alternative:', error);
+      
+      // Alternative installation method
+      try {
+        await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
+          data: fileUri,
+          type: 'application/vnd.android.package-archive',
+          flags: 1,
+        });
+        
+        console.log('Alternative APK installation launched');
+        
+      } catch (fallbackError) {
+        console.error('Alternative installation also failed:', fallbackError);
+        throw new Error('Unable to launch APK installer. Please install manually from Downloads folder.');
+      }
     }
   }
 
@@ -412,46 +530,6 @@ class UpdateService {
   }
 
   /**
-   * Install APK using Android Intent
-   */
-  private async installAPK(fileUri: string): Promise<void> {
-    try {
-      // First try the standard installation intent
-      await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
-        data: fileUri,
-        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
-        type: 'application/vnd.android.package-archive',
-      });
-      
-      Alert.alert(
-        'Installation Started',
-        'The APK installation has started. Please follow the on-screen instructions to complete the update.',
-        [{ text: 'OK' }]
-      );
-    } catch (error) {
-      console.error('Primary APK installation failed:', error);
-      
-      // Fallback: try opening with VIEW intent
-      try {
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-          data: fileUri,
-          type: 'application/vnd.android.package-archive',
-          flags: 1,
-        });
-        
-        Alert.alert(
-          'Manual Installation Required',
-          'Please tap the downloaded APK file to install the update.',
-          [{ text: 'OK' }]
-        );
-      } catch (fallbackError) {
-        console.error('Fallback installation failed:', fallbackError);
-        throw new Error('Unable to install APK. Please install manually from Downloads folder.');
-      }
-    }
-  }
-
-  /**
    * Install update - for APK updates, this triggers download and install
    */
   async installUpdate(metadata?: UpdateMetadata): Promise<void> {
@@ -461,7 +539,7 @@ class UpdateService {
     
     const success = await this.downloadUpdateWithProgress(metadata);
     if (!success) {
-      throw new Error('Failed to download and install APK update');
+      throw new Error('Failed to download APK update');
     }
   }
 
@@ -581,7 +659,7 @@ class UpdateService {
             onPress: () => resolve(false)
           }]),
           {
-            text: 'Update Now',
+            text: 'Download',
             onPress: () => resolve(true)
           }
         ],
@@ -594,7 +672,7 @@ class UpdateService {
    * Get current app version from Constants
    */
   getCurrentVersion(): string {
-    return Constants.expoConfig?.version || '1.4.0';
+    return Constants.expoConfig?.version || '1.6.0';
   }
 
   /**
