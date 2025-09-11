@@ -19,7 +19,7 @@ import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
 // IMPORTANT: Import the enhanced navigation system
-import { initializeNavigation } from '@/lib/helpers/navigation';
+import { initializeNavigation, NavigationHelper } from '@/lib/helpers/navigation';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -199,7 +199,7 @@ export default function DrawerLayout() {
         try {
           // Small delay to ensure smooth transition
           await new Promise(resolve => setTimeout(resolve, 100));
-          router.replace(redirectPath);
+          await NavigationHelper.replaceTo(redirectPath);
         } catch (error) {
           console.error('Navigation error:', error);
         }
