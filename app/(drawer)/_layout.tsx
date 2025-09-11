@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Simplified without native splash screen
+// app/(drawer)/_layout.tsx - Updated with navigation system initialization
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -18,6 +18,8 @@ import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
+// IMPORTANT: Import the enhanced navigation system
+import { initializeNavigation } from '@/lib/helpers/navigation';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -36,7 +38,26 @@ export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [initState, setInitState] = useState<InitializationState>('loading');
   const [redirectPath, setRedirectPath] = useState<string | null>(null);
+  const [navigationInitialized, setNavigationInitialized] = useState(false);
   const router = useRouter();
+
+  // Initialize navigation system first
+  useEffect(() => {
+    const initializeNavigationSystem = async () => {
+      try {
+        console.log('🚀 DrawerLayout: Initializing enhanced navigation system...');
+        await initializeNavigation();
+        setNavigationInitialized(true);
+        console.log('✅ DrawerLayout: Navigation system initialized successfully');
+      } catch (error) {
+        console.error('❌ DrawerLayout: Navigation system initialization failed:', error);
+        // Continue anyway - fallback to basic navigation
+        setNavigationInitialized(true);
+      }
+    };
+
+    initializeNavigationSystem();
+  }, []);
 
   // Handle app state changes
   useEffect(() => {
@@ -52,8 +73,14 @@ export default function DrawerLayout() {
     return () => subscription?.remove();
   }, [initState]);
 
-  // Initialize the app
+  // Initialize the app - only after navigation system is ready
   const initializeApp = useCallback(async () => {
+    // Wait for navigation system to be initialized first
+    if (!navigationInitialized) {
+      console.log('⏳ DrawerLayout: Waiting for navigation system to initialize...');
+      return;
+    }
+
     let initializationComplete = false;
     
     try {
@@ -128,7 +155,7 @@ export default function DrawerLayout() {
       
       initializationComplete = true;
     }
-  }, []);
+  }, [navigationInitialized]);
 
   // Background token verification
   const verifyTokenInBackground = useCallback(async (token: string, userId: string) => {
@@ -158,10 +185,12 @@ export default function DrawerLayout() {
     }
   }, []);
 
-  // Initialize on mount
+  // Initialize app only when navigation system is ready
   useEffect(() => {
-    initializeApp();
-  }, [initializeApp]);
+    if (navigationInitialized) {
+      initializeApp();
+    }
+  }, [navigationInitialized, initializeApp]);
 
   // Handle navigation when ready
   useEffect(() => {
@@ -190,6 +219,11 @@ export default function DrawerLayout() {
     }, [initState])
   );
 
+  // Show loading while navigation system initializes
+  if (!navigationInitialized) {
+    return <LoadingSplashScreen backgroundColor={colors.background} />;
+  }
+
   // Always show loading screen during initialization
   if (initState === 'loading') {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
@@ -200,7 +234,7 @@ export default function DrawerLayout() {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Only render drawer when authenticated
+  // Only render drawer when authenticated and navigation is ready
   if (initState === 'authenticated') {
     return (
       <Drawer
