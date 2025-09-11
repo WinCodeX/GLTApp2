@@ -1,4 +1,4 @@
-// app/_layout.tsx - Fixed with manual splash screen control
+// app/_layout.tsx - Custom splash only, no Expo splash
 import React, { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -31,44 +31,34 @@ const CustomDarkTheme = {
   },
 };
 
-// Prevent the splash screen from auto-hiding
-SplashScreen.preventAutoHideAsync().catch(() => {
-  // Ignore errors if splash screen is already hidden
-});
-
 export default function Layout() {
   const [appIsReady, setAppIsReady] = useState(false);
-  const [showCustomSplash, setShowCustomSplash] = useState(true);
 
   useEffect(() => {
     async function prepare() {
       try {
-        // Keep splash screen visible
-        await SplashScreen.preventAutoHideAsync();
+        // Immediately hide the Expo splash screen to show only our custom one
+        await SplashScreen.hideAsync();
         
-        // Simulate minimum loading time to ensure custom splash is always visible
-        // This ensures even on fast phones, users see the custom loading screen
-        const minimumLoadTime = 1500; // 1.5 seconds minimum
+        // Minimum time to show our custom splash screen
+        const minimumSplashTime = 1800; // 1.8 seconds to ensure it's visible
         const startTime = Date.now();
         
-        // Perform any necessary app initialization here
-        // For now, we'll just wait for the minimum time
-        await new Promise(resolve => setTimeout(resolve, minimumLoadTime));
+        // Perform any app-level initialization here if needed
+        // For now, just ensure minimum display time
+        await new Promise(resolve => setTimeout(resolve, minimumSplashTime));
         
-        // Ensure we've met the minimum display time
+        // Ensure minimum time has passed
         const elapsedTime = Date.now() - startTime;
-        if (elapsedTime < minimumLoadTime) {
-          await new Promise(resolve => setTimeout(resolve, minimumLoadTime - elapsedTime));
+        if (elapsedTime < minimumSplashTime) {
+          await new Promise(resolve => setTimeout(resolve, minimumSplashTime - elapsedTime));
         }
         
-        // Mark app as ready
+        // Mark app as ready to proceed to drawer layout
         setAppIsReady(true);
         
-        // Small delay to ensure custom splash is rendered before hiding Expo splash
-        await new Promise(resolve => setTimeout(resolve, 100));
-        
       } catch (error) {
-        console.warn('Splash screen preparation error:', error);
+        console.warn('App initialization error:', error);
         // Even if there's an error, mark as ready to prevent infinite loading
         setAppIsReady(true);
       }
@@ -77,30 +67,8 @@ export default function Layout() {
     prepare();
   }, []);
 
-  useEffect(() => {
-    if (appIsReady) {
-      // Hide the Expo splash screen after our custom splash is ready
-      const hideSplash = async () => {
-        try {
-          await SplashScreen.hideAsync();
-          
-          // Show custom splash for additional time
-          setTimeout(() => {
-            setShowCustomSplash(false);
-          }, 800); // Show custom splash for 0.8 more seconds
-          
-        } catch (error) {
-          console.warn('Error hiding splash screen:', error);
-          setShowCustomSplash(false);
-        }
-      };
-      
-      hideSplash();
-    }
-  }, [appIsReady]);
-
-  // Show custom loading screen until everything is ready
-  if (!appIsReady || showCustomSplash) {
+  // Show our custom loading screen until app is ready
+  if (!appIsReady) {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
