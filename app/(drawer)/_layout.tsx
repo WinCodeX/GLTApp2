@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Updated with navigation system initialization
+// app/(drawer)/_layout.tsx - Fixed with proper navigation system integration
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -26,10 +26,12 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   track: { name: 'map-pin', lib: Feather },
   account: { name: 'user', lib: Feather },
   business: { name: 'briefcase', lib: Feather },
-  Support: { name: 'message-circle', lib: Feather },
-  FAQs: { name: 'help-circle', lib: Feather },
-  History: { name: 'history', lib: MaterialIcons },
-  Settings: { name: 'settings-outline', lib: Ionicons },
+  support: { name: 'message-circle', lib: Feather },
+  faqs: { name: 'help-circle', lib: Feather },
+  history: { name: 'history', lib: MaterialIcons },
+  settings: { name: 'settings-outline', lib: Ionicons },
+  findus: { name: 'location-on', lib: MaterialIcons },
+  contact: { name: 'user', lib: Feather },
 };
 
 type InitializationState = 'loading' | 'authenticated' | 'redirect';
@@ -117,19 +119,29 @@ export default function DrawerLayout() {
         console.log('Found current account - checking role');
         
         if (currentAccount.role === 'admin') {
-          console.log('Admin role detected, redirecting to /admin');
+          console.log('Admin role detected, redirecting to admin');
           setInitState('redirect');
           setRedirectPath('/admin');
         } else {
           console.log('Client role, staying in drawer layout');
           setInitState('authenticated');
           setRedirectPath(null);
+          
+          // FIXED: Track the home screen as the initial route in navigation system
+          setTimeout(async () => {
+            try {
+              await NavigationHelper.trackRouteChange('/', {});
+              console.log('✅ DrawerLayout: Home screen tracked in navigation system');
+            } catch (error) {
+              console.error('❌ DrawerLayout: Failed to track home screen:', error);
+            }
+          }, 1000);
         }
         
         // Verify token in background without blocking UI
         verifyTokenInBackground(currentAccount.token, currentAccount.id);
       } else {
-        console.log('No current account found, redirecting to /login');
+        console.log('No current account found, redirecting to login');
         setInitState('redirect');
         setRedirectPath('/login');
       }
@@ -147,6 +159,16 @@ export default function DrawerLayout() {
         console.log('Error during init but found accounts - staying authenticated');
         setInitState('authenticated');
         setRedirectPath(null);
+        
+        // Track home screen even in error case
+        setTimeout(async () => {
+          try {
+            await NavigationHelper.trackRouteChange('/', {});
+            console.log('✅ DrawerLayout: Home screen tracked in navigation system (error recovery)');
+          } catch (error) {
+            console.error('❌ DrawerLayout: Failed to track home screen in error recovery:', error);
+          }
+        }, 1000);
       } else {
         console.log('Error during init and no accounts - redirecting to login');
         setInitState('redirect');
@@ -192,16 +214,39 @@ export default function DrawerLayout() {
     }
   }, [navigationInitialized, initializeApp]);
 
-  // Handle navigation when ready
+  // FIXED: Handle navigation when ready with proper route names
   useEffect(() => {
     if (initState === 'redirect' && redirectPath) {
       const performRedirect = async () => {
         try {
+          console.log(`🧭 DrawerLayout: Redirecting to ${redirectPath}`);
+          
           // Small delay to ensure smooth transition
           await new Promise(resolve => setTimeout(resolve, 100));
-          await NavigationHelper.replaceTo(redirectPath);
+          
+          // FIXED: Use correct route paths that match your file structure
+          if (redirectPath === '/login') {
+            // Navigate to login screen - adjust path to match your actual login route
+            router.replace('/login');
+          } else if (redirectPath === '/admin') {
+            // Navigate to admin screen - adjust path to match your actual admin route
+            router.replace('/admin');
+          } else {
+            // Fallback to provided path
+            router.replace(redirectPath);
+          }
+          
+          console.log(`✅ DrawerLayout: Successfully redirected to ${redirectPath}`);
         } catch (error) {
-          console.error('Navigation error:', error);
+          console.error('❌ DrawerLayout: Navigation error:', error);
+          
+          // Ultimate fallback - try to navigate to home
+          try {
+            console.log('🧭 DrawerLayout: Attempting fallback navigation to home');
+            router.replace('/');
+          } catch (fallbackError) {
+            console.error('❌ DrawerLayout: Fallback navigation also failed:', fallbackError);
+          }
         }
       };
       
@@ -215,6 +260,19 @@ export default function DrawerLayout() {
       // If we're still loading and screen gains focus, ensure we have proper state
       if (initState === 'loading') {
         console.log('Screen focused during loading state');
+      } else if (initState === 'authenticated') {
+        // FIXED: Ensure home screen is always tracked when drawer layout gains focus
+        setTimeout(async () => {
+          try {
+            const currentRoute = NavigationHelper.getCurrentRoute();
+            if (!currentRoute || currentRoute === null) {
+              await NavigationHelper.trackRouteChange('/', {});
+              console.log('✅ DrawerLayout: Home screen re-tracked on focus');
+            }
+          } catch (error) {
+            console.error('❌ DrawerLayout: Failed to re-track home screen on focus:', error);
+          }
+        }, 500);
       }
     }, [initState])
   );
