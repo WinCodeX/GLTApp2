@@ -1,4 +1,4 @@
-// components/AdminSidebar.tsx - Fixed with NavigationHelper integration
+// AdminSidebar.tsx - Fixed with NavigationHelper integration
 import React, { useState } from 'react';
 import {
   View,
@@ -12,9 +12,9 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { useUser } from '../context/UserContext';
-
-// CRITICAL: Import NavigationHelper for proper navigation tracking
+// FIXED: Import NavigationHelper
 import { NavigationHelper } from '../lib/helpers/navigation';
 
 const { width } = Dimensions.get('window');
@@ -45,6 +45,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   activePanel,
 }) => {
   const { user } = useUser();
+  const router = useRouter();
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     hangout: true,
     admin: true,
@@ -70,101 +71,137 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
   // Support features using drawer routes
   const supportFeatures: SidebarFeature[] = [
-    { icon: 'help-circle-outline', title: 'Support', id: 'support', route: '/(drawer)/support' },
-    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', route: '/(drawer)/contact' },
-    { icon: 'business-outline', title: 'Business', id: 'business', route: '/(drawer)/business' },
-    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', route: '/(drawer)/FAQs' },
-    { icon: 'location-outline', title: 'Find Us', id: 'findus', route: '/(drawer)/findus' },
+    { icon: 'help-circle-outline', title: 'Support', id: 'support', route: '/support' },
+    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', route: '/contact' },
+    { icon: 'business-outline', title: 'Business', id: 'business', route: '/business' },
+    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', route: '/faqs' },
+    { icon: 'location-outline', title: 'Find Us', id: 'findus', route: '/findus' },
   ];
 
   // Logistics features using drawer routes
   const logisticsFeatures: SidebarFeature[] = [
-    { icon: 'location-outline', title: 'Track Package', id: 'track', route: '/(drawer)/track' },
-    { icon: 'home-outline', title: 'Home', id: 'home', route: '/(drawer)/' },
-    { icon: 'cart-outline', title: 'Cart', id: 'cart', route: '/(drawer)/cart' },
-    { icon: 'time-outline', title: 'History', id: 'history', route: '/(drawer)/History' },
-    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', route: '/(drawer)/contacts' },
+    { icon: 'location-outline', title: 'Track Package', id: 'track', route: '/track' },
+    { icon: 'home-outline', title: 'Home', id: 'home', route: '/home' },
+    { icon: 'cart-outline', title: 'Cart', id: 'cart', route: '/cart' },
+    { icon: 'time-outline', title: 'History', id: 'history', route: '/history' },
+    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', route: '/contact' },
   ];
 
-  // FIXED: Enhanced navigation with proper tracking
-  const handleFeaturePress = async (feature: SidebarFeature): Promise<void> => {
-    if (!feature.route) {
-      console.log(`No route defined for feature: ${feature.title}`);
-      return;
-    }
+  const quickActionLocations: string[] = ['Thika', 'Machakos', 'Kisii'];
 
-    try {
-      console.log(`🧭 AdminSidebar: Navigating to ${feature.route} (${feature.title})`);
-      
-      // Close sidebar first
-      onClose();
-      
-      // CRITICAL: Use NavigationHelper instead of direct router.push
-      await NavigationHelper.navigateTo(feature.route, {
-        params: {},
-        trackInHistory: true
-      });
-      
-      console.log(`✅ AdminSidebar: Successfully navigated to ${feature.title}`);
-      
-    } catch (error) {
-      console.error(`❌ AdminSidebar: Navigation error for ${feature.title}:`, error);
-      
-      // Fallback navigation with tracking
+  // FIXED: Updated feature press handler with NavigationHelper
+  const handleFeaturePress = async (item: SidebarFeature) => {
+    if (item.route) {
       try {
-        if (feature.route.startsWith('/admin')) {
-          await NavigationHelper.navigateTo('/admin');
-        } else {
-          await NavigationHelper.navigateTo('/(drawer)/');
+        console.log(`Navigating to: ${item.route}`);
+        await NavigationHelper.navigateTo(item.route, {
+          params: {},
+          trackInHistory: true
+        });
+        onClose();
+      } catch (error) {
+        console.error('Navigation error:', error);
+        // Fallback to admin home for admin features
+        if (item.route.startsWith('/admin')) {
+          try {
+            await NavigationHelper.navigateTo('/admin', {
+              params: {},
+              trackInHistory: true
+            });
+            onClose();
+          } catch (fallbackError) {
+            console.error('Fallback navigation failed:', fallbackError);
+            // Ultimate fallback using router
+            try {
+              router.push('/admin');
+              onClose();
+            } catch (routerError) {
+              console.error('Router fallback also failed:', routerError);
+            }
+          }
         }
-        console.log(`🔄 AdminSidebar: Used fallback navigation for ${feature.title}`);
-      } catch (fallbackError) {
-        console.error(`❌ AdminSidebar: Fallback navigation failed for ${feature.title}:`, fallbackError);
       }
     }
   };
 
-  const renderFeature = (feature: SidebarFeature): JSX.Element => (
+  // FIXED: Updated quick action handler with NavigationHelper
+  const handleQuickAction = async (location: string) => {
+    console.log(`Quick action for ${location}`);
+    try {
+      // You can add specific logic for each location here
+      await NavigationHelper.navigateTo('/track', {
+        params: {},
+        trackInHistory: true
+      });
+      onClose();
+    } catch (error) {
+      console.error('Quick action navigation error:', error);
+      // Fallback using router
+      try {
+        router.push('/track');
+        onClose();
+      } catch (fallbackError) {
+        console.error('Quick action fallback navigation failed:', fallbackError);
+      }
+    }
+  };
+
+  const renderFeatureItem = (item: SidebarFeature): JSX.Element => (
     <TouchableOpacity
-      key={feature.id}
-      style={styles.featureButton}
-      onPress={() => handleFeaturePress(feature)}
+      key={item.id}
+      style={[
+        styles.featureItem,
+        {
+          backgroundColor:
+            activePanel === item.id ? 'rgba(108, 92, 231, 0.2)' : 'transparent',
+        },
+      ]}
+      onPress={() => handleFeaturePress(item)}
       activeOpacity={0.7}
     >
-      <View style={styles.featureContent}>
-        <Ionicons
-          name={feature.icon}
-          size={20}
-          color="#667eea"
-          style={styles.featureIcon}
-        />
-        <Text style={styles.featureText}>{feature.title}</Text>
-      </View>
+      <Ionicons
+        name={item.icon}
+        size={18}
+        color={activePanel === item.id ? '#6c5ce7' : '#a0aec0'}
+      />
+      <Text
+        style={[
+          styles.featureText,
+          {
+            color: activePanel === item.id ? '#6c5ce7' : '#cbd5e0',
+            fontWeight: activePanel === item.id ? '600' : '400',
+          },
+        ]}
+      >
+        {item.title}
+      </Text>
+      {activePanel === item.id && (
+        <View style={styles.activeIndicator} />
+      )}
     </TouchableOpacity>
   );
 
   const renderSection = (
     title: string,
-    features: SidebarFeature[],
-    sectionKey: keyof ExpandedSections
+    sectionKey: keyof ExpandedSections,
+    features: SidebarFeature[]
   ): JSX.Element => (
-    <View style={styles.section}>
+    <View style={styles.sectionContainer}>
       <TouchableOpacity
-        style={styles.sectionHeader}
         onPress={() => toggleSection(sectionKey)}
+        style={styles.sectionHeader}
         activeOpacity={0.7}
       >
-        <Text style={styles.sectionTitle}>{title}</Text>
         <Ionicons
-          name={expandedSections[sectionKey] ? 'chevron-up' : 'chevron-down'}
-          size={20}
-          color="#8B8B8B"
+          name={expandedSections[sectionKey] ? 'chevron-down' : 'chevron-forward'}
+          size={16}
+          color="#a0aec0"
         />
+        <Text style={styles.sectionTitle}>{title}</Text>
       </TouchableOpacity>
-      
       {expandedSections[sectionKey] && (
-        <View style={styles.featuresContainer}>
-          {features.map(renderFeature)}
+        <View style={styles.sectionContent}>
+          {features.map(renderFeatureItem)}
         </View>
       )}
     </View>
@@ -173,202 +210,270 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   if (!visible) return null;
 
   return (
-    <View style={styles.overlay}>
-      <TouchableOpacity
-        style={styles.backdrop}
-        activeOpacity={1}
-        onPress={onClose}
-      />
-      
-      <View style={styles.sidebar}>
-        <LinearGradient
-          colors={['#1a1a2e', '#16213e']}
-          style={styles.sidebarGradient}
+    <View style={styles.container}>
+      <LinearGradient
+        colors={['#2d3748', '#1a202c', '#16213e']}
+        style={styles.gradient}
+      >
+        <ScrollView
+          style={styles.scrollView}
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
         >
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerContent}>
-              <View style={styles.avatarContainer}>
-                {user?.profile_picture ? (
+              <View style={styles.headerLeft}>
+                <View style={styles.logoContainer}>
+                  <Text style={styles.logoText}>GL</Text>
+                </View>
+                <View>
+                  <Text style={styles.companyName}>GLT Logistics</Text>
+                  <Text style={styles.panelLabel}>Admin Panel</Text>
+                </View>
+              </View>
+              <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
+                <Ionicons name="close" size={24} color="#a0aec0" />
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* User Profile Section */}
+          <View style={styles.profileSection}>
+            <LinearGradient
+              colors={['#6c5ce7', '#a29bfe']}
+              style={styles.profileCard}
+            >
+              <View style={styles.profileAvatar}>
+                {user?.avatar_url ? (
                   <Image
-                    source={{ uri: user.profile_picture }}
-                    style={styles.avatar}
+                    source={{ uri: user.avatar_url }}
+                    style={styles.avatarImage}
                   />
                 ) : (
-                  <View style={styles.avatarPlaceholder}>
-                    <Ionicons name="person" size={24} color="#667eea" />
-                  </View>
+                  <Ionicons name="person" size={24} color="white" />
                 )}
               </View>
-              
-              <View style={styles.userInfo}>
-                <Text style={styles.userName}>
-                  {user?.name || user?.username || 'Admin User'}
+              <View style={styles.profileInfo}>
+                <Text style={styles.profileName}>
+                  {user?.name || 'Admin User'}
                 </Text>
-                <Text style={styles.userRole}>
-                  {user?.role || 'Administrator'}
+                <Text style={styles.profilePhone}>
+                  {user?.phone || '+254 000 000 000'}
                 </Text>
               </View>
+              <TouchableOpacity 
+                onPress={async () => {
+                  try {
+                    await NavigationHelper.navigateTo('/admin/account', {
+                      params: {},
+                      trackInHistory: true
+                    });
+                    onClose();
+                  } catch (error) {
+                    console.error('Profile navigation error:', error);
+                    // Fallback using router
+                    try {
+                      router.push('/admin/account');
+                      onClose();
+                    } catch (fallbackError) {
+                      console.error('Profile fallback navigation failed:', fallbackError);
+                    }
+                  }
+                }}
+                activeOpacity={0.7}
+              >
+                <Ionicons name="chevron-down" size={20} color="white" />
+              </TouchableOpacity>
+            </LinearGradient>
+          </View>
+
+          {/* Quick Actions */}
+          <View style={styles.quickActions}>
+            <Text style={styles.sectionLabel}>Quick Actions</Text>
+            <View style={styles.locationButtons}>
+              {quickActionLocations.map((location) => (
+                <TouchableOpacity 
+                  key={location} 
+                  style={styles.locationButton}
+                  onPress={() => handleQuickAction(location)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={styles.locationButtonText}>{location}</Text>
+                </TouchableOpacity>
+              ))}
             </View>
-            
-            <TouchableOpacity
-              style={styles.closeButton}
-              onPress={onClose}
-              activeOpacity={0.7}
-            >
-              <Ionicons name="close" size={24} color="#8B8B8B" />
-            </TouchableOpacity>
           </View>
 
-          {/* Navigation Sections */}
-          <ScrollView
-            style={styles.content}
-            showsVerticalScrollIndicator={false}
-          >
-            {renderSection('Admin Features', adminFeatures, 'admin')}
-            {renderSection('Logistics', logisticsFeatures, 'logistics')}
-            {renderSection('Support & Help', supportFeatures, 'hangout')}
-          </ScrollView>
-
-          {/* Footer */}
-          <View style={styles.footer}>
-            <Text style={styles.footerText}>GLT Admin Dashboard</Text>
-            <Text style={styles.versionText}>v2.0.0</Text>
-          </View>
-        </LinearGradient>
-      </View>
+          {renderSection('Admin Features', 'admin', adminFeatures)}
+          {renderSection('Logistics', 'logistics', logisticsFeatures)}
+          {renderSection('Support & More', 'hangout', supportFeatures)}
+        </ScrollView>
+      </LinearGradient>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 9999,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  sidebar: {
+  container: {
     position: 'absolute',
     top: 0,
     left: 0,
     bottom: 0,
     width: SIDEBAR_WIDTH,
+    zIndex: 999,
   },
-  sidebarGradient: {
+  gradient: {
+    flex: 1,
+    paddingTop: Platform.OS === 'ios' ? 0 : 0,
+  },
+  scrollView: {
     flex: 1,
   },
+  scrollContent: {
+    paddingBottom: 100,
+  },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    paddingTop: Platform.OS === 'ios' ? 60 : 40,
+    padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+    borderBottomColor: '#4a5568',
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
+    justifyContent: 'space-between',
   },
-  avatarContainer: {
-    marginRight: 12,
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  avatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-  },
-  avatarPlaceholder: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(102, 126, 234, 0.2)',
+  logoContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: '#6c5ce7',
     alignItems: 'center',
     justifyContent: 'center',
+    marginRight: 12,
   },
-  userInfo: {
-    flex: 1,
-  },
-  userName: {
+  logoText: {
+    color: 'white',
+    fontWeight: 'bold',
     fontSize: 16,
+  },
+  companyName: {
+    color: 'white',
     fontWeight: '600',
-    color: '#FFFFFF',
-    marginBottom: 2,
+    fontSize: 16,
   },
-  userRole: {
-    fontSize: 14,
-    color: '#8B8B8B',
+  panelLabel: {
+    color: '#a0aec0',
+    fontSize: 12,
   },
-  closeButton: {
-    padding: 4,
+  profileSection: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#4a5568',
   },
-  content: {
+  profileCard: {
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  profileAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarImage: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    resizeMode: 'cover',
+  },
+  profileInfo: {
     flex: 1,
-    paddingHorizontal: 20,
   },
-  section: {
-    marginVertical: 16,
+  profileName: {
+    color: 'white',
+    fontWeight: '600',
+    fontSize: 16,
+  },
+  profilePhone: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 12,
+  },
+  quickActions: {
+    padding: 16,
+  },
+  sectionLabel: {
+    color: '#a0aec0',
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 12,
+    textTransform: 'uppercase',
+  },
+  locationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+  },
+  locationButton: {
+    backgroundColor: '#2d3748',
+    borderRadius: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderColor: '#4a5568',
+  },
+  locationButtonText: {
+    color: '#a0aec0',
+    fontSize: 12,
+  },
+  sectionContainer: {
+    paddingHorizontal: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 12,
+    paddingVertical: 8,
+    marginBottom: 8,
   },
   sectionTitle: {
-    fontSize: 16,
+    color: '#a0aec0',
+    fontSize: 14,
     fontWeight: '600',
-    color: '#FFFFFF',
+    marginLeft: 8,
   },
-  featuresContainer: {
-    marginTop: 8,
+  sectionContent: {
+    marginLeft: 24,
+    marginBottom: 16,
   },
-  featureButton: {
-    marginVertical: 2,
-  },
-  featureContent: {
+  featureItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-  },
-  featureIcon: {
-    marginRight: 12,
+    position: 'relative',
   },
   featureText: {
     fontSize: 14,
-    color: '#FFFFFF',
-    fontWeight: '500',
+    marginLeft: 12,
+    flex: 1,
   },
-  footer: {
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-  },
-  footerText: {
-    fontSize: 14,
-    color: '#8B8B8B',
-    fontWeight: '500',
-  },
-  versionText: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
+  activeIndicator: {
+    position: 'absolute',
+    right: 8,
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#6c5ce7',
   },
 });
 
