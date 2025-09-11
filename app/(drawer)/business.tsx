@@ -1,4 +1,4 @@
-// app/(drawer)/Business.tsx - Redesigned Business Page
+// app/(drawer)/business.tsx - Business Screen with Enhanced NavigationHelper
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -16,13 +16,15 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as Clipboard from 'expo-clipboard';
 import * as ImagePicker from 'expo-image-picker';
-import { useRouter } from 'expo-router';
 import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import LoginModal from '../../components/LoginModal';
 import SignupModal from '../../components/SignupModal';
 import { createInvite } from '../../lib/helpers/business';
 import { SafeLogo } from '../../components/SafeLogo';
+
+// Import Enhanced NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 // Import the upload helpers
 import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
@@ -82,7 +84,6 @@ const showToast = {
 };
 
 export default function Business({ navigation }: BusinessProps) {
-  const router = useRouter();
   const { 
     user, 
     businesses,
@@ -157,27 +158,23 @@ export default function Business({ navigation }: BusinessProps) {
     }
   }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user]);
 
-  // Fixed back navigation
-  const handleGoBack = () => {
+  // Enhanced back navigation using NavigationHelper
+  const handleGoBack = useCallback(async () => {
+    console.log('🔙 Business: Going back...');
+    
     try {
-      if (router.canGoBack()) {
-        router.back();
-      } else {
-        router.replace('/');
+      const success = await NavigationHelper.goBack({
+        fallbackRoute: '/(drawer)/',
+        replaceIfNoHistory: true
+      });
+      
+      if (!success) {
+        console.log('🔙 Business: Back navigation used fallback');
       }
     } catch (error) {
-      console.error('Navigation error:', error);
-      try {
-        if (navigation?.goBack) {
-          navigation.goBack();
-        } else if (navigation?.navigate) {
-          navigation.navigate('index');
-        }
-      } catch (navError) {
-        console.error('Fallback navigation error:', navError);
-      }
+      console.error('🔙 Business: Back navigation failed:', error);
     }
-  };
+  }, []);
 
   const handleLogin = () => setShowLoginModal(true);
   const handleSignup = () => setShowSignupModal(true);
@@ -199,12 +196,18 @@ export default function Business({ navigation }: BusinessProps) {
     showToast.info('Business selected', business.name);
   };
 
-  // Navigate to business details
-  const handleBusinessDetails = (business: any) => {
+  // Enhanced navigation to business details using NavigationHelper
+  const handleBusinessDetails = useCallback(async (business: any) => {
     console.log('🎭 Business: Navigating to business details:', business.name);
     setSelectedBusiness(business);
-    router.push('/(drawer)/BusinessDetails');
-  };
+    
+    try {
+      await NavigationHelper.navigateTo('/(drawer)/BusinessDetails');
+      console.log('✅ Business: Successfully navigated to BusinessDetails');
+    } catch (error) {
+      console.error('❌ Business: Navigation to BusinessDetails failed:', error);
+    }
+  }, [setSelectedBusiness]);
 
   // Handle creating new business
   const handleCreateBusiness = () => {
@@ -435,8 +438,8 @@ export default function Business({ navigation }: BusinessProps) {
     }
   };
 
-  // Render business item
-  const renderBusinessItem = (business: any, isOwned: boolean = true) => (
+  // Render business item with enhanced navigation
+  const renderBusinessItem = useCallback((business: any, isOwned: boolean = true) => (
     <TouchableOpacity
       key={business.id}
       style={[
@@ -476,7 +479,7 @@ export default function Business({ navigation }: BusinessProps) {
         <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.5)" />
       </View>
     </TouchableOpacity>
-  );
+  ), [selectedBusiness, localBusinessLogos, user?.avatar_url, logoUpdateTrigger, handleBusinessDetails, handleBusinessSelect]);
 
   const currentInfo = getCurrentDisplayInfo();
 
