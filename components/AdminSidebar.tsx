@@ -1,4 +1,4 @@
-// AdminSidebar.tsx - Fixed with useRouter navigation
+// components/AdminSidebar.tsx - Fixed with NavigationHelper integration
 import React, { useState } from 'react';
 import {
   View,
@@ -12,8 +12,10 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
 import { useUser } from '../context/UserContext';
+
+// CRITICAL: Import NavigationHelper for proper navigation tracking
+import { NavigationHelper } from '../lib/helpers/navigation';
 
 const { width } = Dimensions.get('window');
 const SIDEBAR_WIDTH = width * 0.75;
@@ -43,7 +45,6 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   activePanel,
 }) => {
   const { user } = useUser();
-  const router = useRouter();
   const [expandedSections, setExpandedSections] = useState<ExpandedSections>({
     hangout: true,
     admin: true,
@@ -69,108 +70,101 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
 
   // Support features using drawer routes
   const supportFeatures: SidebarFeature[] = [
-    { icon: 'help-circle-outline', title: 'Support', id: 'support', route: '/support' },
-    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', route: '/contact' },
-    { icon: 'business-outline', title: 'Business', id: 'business', route: '/business' },
-    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', route: '/faqs' },
-    { icon: 'location-outline', title: 'Find Us', id: 'findus', route: '/findus' },
+    { icon: 'help-circle-outline', title: 'Support', id: 'support', route: '/(drawer)/support' },
+    { icon: 'chatbubble-ellipses-outline', title: 'Contact', id: 'contact', route: '/(drawer)/contact' },
+    { icon: 'business-outline', title: 'Business', id: 'business', route: '/(drawer)/business' },
+    { icon: 'document-text-outline', title: 'FAQs', id: 'faqs', route: '/(drawer)/FAQs' },
+    { icon: 'location-outline', title: 'Find Us', id: 'findus', route: '/(drawer)/findus' },
   ];
 
   // Logistics features using drawer routes
   const logisticsFeatures: SidebarFeature[] = [
-    { icon: 'location-outline', title: 'Track Package', id: 'track', route: '/track' },
-    { icon: 'home-outline', title: 'Home', id: 'home', route: '/home' },
-    { icon: 'cart-outline', title: 'Cart', id: 'cart', route: '/cart' },
-    { icon: 'time-outline', title: 'History', id: 'history', route: '/history' },
-    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', route: '/contact' },
+    { icon: 'location-outline', title: 'Track Package', id: 'track', route: '/(drawer)/track' },
+    { icon: 'home-outline', title: 'Home', id: 'home', route: '/(drawer)/' },
+    { icon: 'cart-outline', title: 'Cart', id: 'cart', route: '/(drawer)/cart' },
+    { icon: 'time-outline', title: 'History', id: 'history', route: '/(drawer)/History' },
+    { icon: 'contacts-outline', title: 'Contacts', id: 'contacts', route: '/(drawer)/contacts' },
   ];
 
-  const quickActionLocations: string[] = ['Thika', 'Machakos', 'Kisii'];
+  // FIXED: Enhanced navigation with proper tracking
+  const handleFeaturePress = async (feature: SidebarFeature): Promise<void> => {
+    if (!feature.route) {
+      console.log(`No route defined for feature: ${feature.title}`);
+      return;
+    }
 
-  const handleFeaturePress = (item: SidebarFeature) => {
-    if (item.route) {
+    try {
+      console.log(`🧭 AdminSidebar: Navigating to ${feature.route} (${feature.title})`);
+      
+      // Close sidebar first
+      onClose();
+      
+      // CRITICAL: Use NavigationHelper instead of direct router.push
+      await NavigationHelper.navigateTo(feature.route, {
+        params: {},
+        trackInHistory: true
+      });
+      
+      console.log(`✅ AdminSidebar: Successfully navigated to ${feature.title}`);
+      
+    } catch (error) {
+      console.error(`❌ AdminSidebar: Navigation error for ${feature.title}:`, error);
+      
+      // Fallback navigation with tracking
       try {
-        console.log(`Navigating to: ${item.route}`);
-        router.push(item.route as any);
-        onClose();
-      } catch (error) {
-        console.error('Navigation error:', error);
-        // Fallback to admin home for admin features
-        if (item.route.startsWith('/admin')) {
-          try {
-            router.push('/admin');
-            onClose();
-          } catch (fallbackError) {
-            console.error('Fallback navigation failed:', fallbackError);
-          }
+        if (feature.route.startsWith('/admin')) {
+          await NavigationHelper.navigateTo('/admin');
+        } else {
+          await NavigationHelper.navigateTo('/(drawer)/');
         }
+        console.log(`🔄 AdminSidebar: Used fallback navigation for ${feature.title}`);
+      } catch (fallbackError) {
+        console.error(`❌ AdminSidebar: Fallback navigation failed for ${feature.title}:`, fallbackError);
       }
     }
   };
 
-  const handleQuickAction = (location: string) => {
-    console.log(`Quick action for ${location}`);
-    // You can add specific logic for each location here
-    router.push('/track');
-    onClose();
-  };
-
-  const renderFeatureItem = (item: SidebarFeature): JSX.Element => (
+  const renderFeature = (feature: SidebarFeature): JSX.Element => (
     <TouchableOpacity
-      key={item.id}
-      style={[
-        styles.featureItem,
-        {
-          backgroundColor:
-            activePanel === item.id ? 'rgba(108, 92, 231, 0.2)' : 'transparent',
-        },
-      ]}
-      onPress={() => handleFeaturePress(item)}
+      key={feature.id}
+      style={styles.featureButton}
+      onPress={() => handleFeaturePress(feature)}
       activeOpacity={0.7}
     >
-      <Ionicons
-        name={item.icon}
-        size={18}
-        color={activePanel === item.id ? '#6c5ce7' : '#a0aec0'}
-      />
-      <Text
-        style={[
-          styles.featureText,
-          {
-            color: activePanel === item.id ? '#6c5ce7' : '#cbd5e0',
-            fontWeight: activePanel === item.id ? '600' : '400',
-          },
-        ]}
-      >
-        {item.title}
-      </Text>
-      {activePanel === item.id && (
-        <View style={styles.activeIndicator} />
-      )}
+      <View style={styles.featureContent}>
+        <Ionicons
+          name={feature.icon}
+          size={20}
+          color="#667eea"
+          style={styles.featureIcon}
+        />
+        <Text style={styles.featureText}>{feature.title}</Text>
+      </View>
     </TouchableOpacity>
   );
 
   const renderSection = (
     title: string,
-    sectionKey: keyof ExpandedSections,
-    features: SidebarFeature[]
+    features: SidebarFeature[],
+    sectionKey: keyof ExpandedSections
   ): JSX.Element => (
-    <View style={styles.sectionContainer}>
+    <View style={styles.section}>
       <TouchableOpacity
-        onPress={() => toggleSection(sectionKey)}
         style={styles.sectionHeader}
+        onPress={() => toggleSection(sectionKey)}
         activeOpacity={0.7}
       >
-        <Ionicons
-          name={expandedSections[sectionKey] ? 'chevron-down' : 'chevron-forward'}
-          size={16}
-          color="#a0aec0"
-        />
         <Text style={styles.sectionTitle}>{title}</Text>
+        <Ionicons
+          name={expandedSections[sectionKey] ? 'chevron-up' : 'chevron-down'}
+          size={20}
+          color="#8B8B8B"
+        />
       </TouchableOpacity>
+      
       {expandedSections[sectionKey] && (
-        <View style={styles.sectionContent}>
-          {features.map(renderFeatureItem)}
+        <View style={styles.featuresContainer}>
+          {features.map(renderFeature)}
         </View>
       )}
     </View>
@@ -179,256 +173,202 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
   if (!visible) return null;
 
   return (
-    <View style={styles.container}>
-      <LinearGradient
-        colors={['#2d3748', '#1a202c', '#16213e']}
-        style={styles.gradient}
-      >
-        <ScrollView
-          style={styles.scrollView}
-          contentContainerStyle={styles.scrollContent}
-          showsVerticalScrollIndicator={false}
+    <View style={styles.overlay}>
+      <TouchableOpacity
+        style={styles.backdrop}
+        activeOpacity={1}
+        onPress={onClose}
+      />
+      
+      <View style={styles.sidebar}>
+        <LinearGradient
+          colors={['#1a1a2e', '#16213e']}
+          style={styles.sidebarGradient}
         >
           {/* Header */}
           <View style={styles.header}>
             <View style={styles.headerContent}>
-              <View style={styles.headerLeft}>
-                <View style={styles.logoContainer}>
-                  <Text style={styles.logoText}>GL</Text>
-                </View>
-                <View>
-                  <Text style={styles.companyName}>GLT Logistics</Text>
-                  <Text style={styles.panelLabel}>Admin Panel</Text>
-                </View>
-              </View>
-              <TouchableOpacity onPress={onClose} activeOpacity={0.7}>
-                <Ionicons name="close" size={24} color="#a0aec0" />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* User Profile Section */}
-          <View style={styles.profileSection}>
-            <LinearGradient
-              colors={['#6c5ce7', '#a29bfe']}
-              style={styles.profileCard}
-            >
-              <View style={styles.profileAvatar}>
-                {user?.avatar_url ? (
+              <View style={styles.avatarContainer}>
+                {user?.profile_picture ? (
                   <Image
-                    source={{ uri: user.avatar_url }}
-                    style={styles.avatarImage}
+                    source={{ uri: user.profile_picture }}
+                    style={styles.avatar}
                   />
                 ) : (
-                  <Ionicons name="person" size={24} color="white" />
+                  <View style={styles.avatarPlaceholder}>
+                    <Ionicons name="person" size={24} color="#667eea" />
+                  </View>
                 )}
               </View>
-              <View style={styles.profileInfo}>
-                <Text style={styles.profileName}>
-                  {user?.name || 'Admin User'}
+              
+              <View style={styles.userInfo}>
+                <Text style={styles.userName}>
+                  {user?.name || user?.username || 'Admin User'}
                 </Text>
-                <Text style={styles.profilePhone}>
-                  {user?.phone || '+254 000 000 000'}
+                <Text style={styles.userRole}>
+                  {user?.role || 'Administrator'}
                 </Text>
               </View>
-              <TouchableOpacity 
-                onPress={() => {
-                  router.push('/admin/account');
-                  onClose();
-                }}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="chevron-down" size={20} color="white" />
-              </TouchableOpacity>
-            </LinearGradient>
-          </View>
-
-          {/* Quick Actions */}
-          <View style={styles.quickActions}>
-            <Text style={styles.sectionLabel}>Quick Actions</Text>
-            <View style={styles.locationButtons}>
-              {quickActionLocations.map((location) => (
-                <TouchableOpacity 
-                  key={location} 
-                  style={styles.locationButton}
-                  onPress={() => handleQuickAction(location)}
-                  activeOpacity={0.7}
-                >
-                  <Text style={styles.locationButtonText}>{location}</Text>
-                </TouchableOpacity>
-              ))}
             </View>
+            
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="close" size={24} color="#8B8B8B" />
+            </TouchableOpacity>
           </View>
 
-          {renderSection('Admin Features', 'admin', adminFeatures)}
-          {renderSection('Logistics', 'logistics', logisticsFeatures)}
-          {renderSection('Support & More', 'hangout', supportFeatures)}
-        </ScrollView>
-      </LinearGradient>
+          {/* Navigation Sections */}
+          <ScrollView
+            style={styles.content}
+            showsVerticalScrollIndicator={false}
+          >
+            {renderSection('Admin Features', adminFeatures, 'admin')}
+            {renderSection('Logistics', logisticsFeatures, 'logistics')}
+            {renderSection('Support & Help', supportFeatures, 'hangout')}
+          </ScrollView>
+
+          {/* Footer */}
+          <View style={styles.footer}>
+            <Text style={styles.footerText}>GLT Admin Dashboard</Text>
+            <Text style={styles.versionText}>v2.0.0</Text>
+          </View>
+        </LinearGradient>
+      </View>
     </View>
   );
 };
 
 const styles = StyleSheet.create({
-  container: {
+  overlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 9999,
+  },
+  backdrop: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+  },
+  sidebar: {
     position: 'absolute',
     top: 0,
     left: 0,
     bottom: 0,
     width: SIDEBAR_WIDTH,
-    zIndex: 999,
   },
-  gradient: {
+  sidebarGradient: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 0 : 0,
-  },
-  scrollView: {
-    flex: 1,
-  },
-  scrollContent: {
-    paddingBottom: 100,
   },
   header: {
-    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 20,
+    paddingTop: Platform.OS === 'ios' ? 60 : 40,
     borderBottomWidth: 1,
-    borderBottomColor: '#4a5568',
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    flex: 1,
   },
-  headerLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  logoContainer: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#6c5ce7',
-    alignItems: 'center',
-    justifyContent: 'center',
+  avatarContainer: {
     marginRight: 12,
   },
-  logoText: {
-    color: 'white',
-    fontWeight: 'bold',
-    fontSize: 16,
-  },
-  companyName: {
-    color: 'white',
-    fontWeight: '600',
-    fontSize: 16,
-  },
-  panelLabel: {
-    color: '#a0aec0',
-    fontSize: 12,
-  },
-  profileSection: {
-    padding: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: '#4a5568',
-  },
-  profileCard: {
-    borderRadius: 12,
-    padding: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  profileAvatar: {
+  avatar: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  avatarPlaceholder: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: 'rgba(102, 126, 234, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
   },
-  avatarImage: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    resizeMode: 'cover',
-  },
-  profileInfo: {
+  userInfo: {
     flex: 1,
   },
-  profileName: {
-    color: 'white',
-    fontWeight: '600',
+  userName: {
     fontSize: 16,
-  },
-  profilePhone: {
-    color: 'rgba(255,255,255,0.8)',
-    fontSize: 12,
-  },
-  quickActions: {
-    padding: 16,
-  },
-  sectionLabel: {
-    color: '#a0aec0',
-    fontSize: 12,
     fontWeight: '600',
-    marginBottom: 12,
-    textTransform: 'uppercase',
+    color: '#FFFFFF',
+    marginBottom: 2,
   },
-  locationButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
+  userRole: {
+    fontSize: 14,
+    color: '#8B8B8B',
   },
-  locationButton: {
-    backgroundColor: '#2d3748',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderWidth: 1,
-    borderColor: '#4a5568',
+  closeButton: {
+    padding: 4,
   },
-  locationButtonText: {
-    color: '#a0aec0',
-    fontSize: 12,
+  content: {
+    flex: 1,
+    paddingHorizontal: 20,
   },
-  sectionContainer: {
-    paddingHorizontal: 16,
+  section: {
+    marginVertical: 16,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
-    marginBottom: 8,
+    justifyContent: 'space-between',
+    paddingVertical: 12,
   },
   sectionTitle: {
-    color: '#a0aec0',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
-    marginLeft: 8,
+    color: '#FFFFFF',
   },
-  sectionContent: {
-    marginLeft: 24,
-    marginBottom: 16,
+  featuresContainer: {
+    marginTop: 8,
   },
-  featureItem: {
+  featureButton: {
+    marginVertical: 2,
+  },
+  featureContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
     borderRadius: 8,
-    position: 'relative',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+  },
+  featureIcon: {
+    marginRight: 12,
   },
   featureText: {
     fontSize: 14,
-    marginLeft: 12,
-    flex: 1,
+    color: '#FFFFFF',
+    fontWeight: '500',
   },
-  activeIndicator: {
-    position: 'absolute',
-    right: 8,
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#6c5ce7',
+  footer: {
+    padding: 20,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    alignItems: 'center',
+  },
+  footerText: {
+    fontSize: 14,
+    color: '#8B8B8B',
+    fontWeight: '500',
+  },
+  versionText: {
+    fontSize: 12,
+    color: '#666',
+    marginTop: 4,
   },
 });
 
