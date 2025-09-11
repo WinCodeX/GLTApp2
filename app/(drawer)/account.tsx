@@ -1,28 +1,39 @@
-// app/(drawer)/account.tsx - Drawer version (replaces your existing drawer account)
-import React from 'react';
-import { useRouter } from 'expo-router';
+// app/(drawer)/account.tsx - Fixed Drawer Account Screen with Enhanced Navigation
+import React, { useCallback } from 'react';
 import AccountContent from '../../components/AccountContent';
 
-export default function DrawerAccountScreen() {
-  const router = useRouter();
+// Import Enhanced NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
-  const handleBack = () => {
-    console.log('🔙 Drawer account: navigating back to drawer home');
+export default function DrawerAccountScreen() {
+  
+  // Enhanced back navigation handler
+  const handleBack = useCallback(async () => {
+    console.log('🔙 Drawer account: navigating back with enhanced navigation...');
     
     try {
-      if (router.canGoBack && router.canGoBack()) {
-        console.log('✅ Using router.back() to drawer');
-        router.back();
+      const success = await NavigationHelper.goBack({
+        fallbackRoute: '/(drawer)/',
+        replaceIfNoHistory: true
+      });
+      
+      if (success) {
+        console.log('✅ Drawer account: Successfully navigated back to previous screen');
       } else {
-        console.log('🏠 No back history, using router.replace(/(drawer))');
-        router.replace('/(drawer)');
+        console.log('🏠 Drawer account: Used fallback navigation to drawer home');
       }
     } catch (error) {
-      console.error('❌ Navigation error:', error);
-      // Ultimate fallback
-      router.replace('/(drawer)');
+      console.error('❌ Drawer account: Navigation error:', error);
+      
+      // Ultimate fallback using NavigationHelper
+      try {
+        await NavigationHelper.replaceTo('/(drawer)/');
+        console.log('🔄 Drawer account: Used ultimate fallback to drawer home');
+      } catch (fallbackError) {
+        console.error('❌ Drawer account: Even fallback navigation failed:', fallbackError);
+      }
     }
-  };
+  }, []);
 
   return (
     <AccountContent
