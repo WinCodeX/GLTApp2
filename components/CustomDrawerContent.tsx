@@ -372,7 +372,7 @@ export default function CustomDrawerContent(props: any) {
       >
         <View style={styles.container}>
 
-          {/* Simplified Personal Account Header */}    
+          {/* Fixed Personal Account Header - shows current user/business data */}    
           <TouchableOpacity    
             onPress={() => setShowBusinessDropdown(!showBusinessDropdown)}    
             style={styles.accountHeader}    
@@ -398,7 +398,7 @@ export default function CustomDrawerContent(props: any) {
             )}
             
             <View style={styles.accountInfo}>
-              <Text style={styles.userName}>Personal</Text>
+              <Text style={styles.userName}>{displayName}</Text>
               <Text style={styles.userPhone}>{displayPhone}</Text>
             </View>    
             <Feather    
@@ -410,6 +410,9 @@ export default function CustomDrawerContent(props: any) {
 
           {showBusinessDropdown && (    
             <View style={styles.accountDropdown}>
+              
+              {/* Personal section header */}
+              <Text style={styles.sectionTitle}>Personal</Text>
               
               {/* You option - tappable like businesses */}
               {renderYouOption()}
