@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - Fixed with NavigationHelper integration and corrected UpdateService
+// components/GLTHeader.tsx - Fixed with progress bar under header and popup modal
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
 import { SafeLogo } from '../components/SafeLogo';
+import UpdateService from '../lib/services/updateService';
 import colors from '../theme/colors';
 import api from '../lib/api';
 
@@ -119,7 +120,7 @@ export default function GLTHeader({
   
   const [notificationCount, setNotificationCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
-  const [updateProgress, setUpdateProgress] = useState<DownloadProgress>({
+  const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({
     isDownloading: false,
     progress: 0,
     downloadedBytes: 0,
@@ -128,48 +129,154 @@ export default function GLTHeader({
     remainingTime: 0,
     status: 'checking',
   });
-  const [showUpdatePopup, setShowUpdatePopup] = useState(false);
+  const [showInstallModal, setShowInstallModal] = useState(false);
   
-  // Progress animation
-  const progressWidth = useRef(new Animated.Value(0)).current;
-  
-  // Enhanced avatar tap handling with double-tap detection
-  const lastTapRef = useRef(0);
+  // Double tap detection for avatar cycling
+  const lastTapRef = useRef<number>(0);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Progress animation refs
+  const progressBarAnim = useRef(new Animated.Value(0)).current;
+  const progressBarHeight = useRef(new Animated.Value(0)).current;
 
-  // CRITICAL: Fixed navigation to business page with NavigationHelper
-  const navigateToBusinessPage = async () => {
-    try {
-      console.log('🧭 Header: Navigating to business page using NavigationHelper');
-      
-      await NavigationHelper.navigateTo('/(drawer)/business', {
-        params: {},
-        trackInHistory: true
-      });
-      
-      console.log('✅ Header: Successfully navigated to business page');
-    } catch (error) {
-      console.error('❌ Header: Navigation to business page failed:', error);
-      
-      // Fallback navigation with tracking
+  useEffect(() => {
+    // Monitor download progress
+    const checkDownloadProgress = async () => {
       try {
-        await NavigationHelper.navigateTo('/(drawer)/Business', {
-          params: {},
-          trackInHistory: true
+        const progressData = await AsyncStorage.getItem('download_progress');
+        if (progressData) {
+          const progress = JSON.parse(progressData);
+          setDownloadProgress(prev => ({
+            ...prev,
+            ...progress,
+            isDownloading: true,
+            status: 'downloading',
+          }));
+        }
+        
+        // Check for completed downloads
+        const updateService = UpdateService.getInstance();
+        const { hasDownload, version } = await updateService.hasCompletedDownload();
+        
+        if (hasDownload && version) {
+          setDownloadProgress(prev => ({
+            ...prev,
+            isDownloading: false,
+            progress: 100,
+            status: 'complete',
+            version,
+          }));
+          setShowInstallModal(true);
+        }
+      } catch (error) {
+        console.error('Failed to check download progress:', error);
+      }
+    };
+    
+    checkDownloadProgress();
+    
+    // Check progress every 2 seconds when downloading
+    const interval = setInterval(checkDownloadProgress, 2000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  // Animate progress bar
+  useEffect(() => {
+    if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
+      // Show progress bar
+      Animated.timing(progressBarHeight, {
+        toValue: 3,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+      
+      // Update progress
+      Animated.timing(progressBarAnim, {
+        toValue: downloadProgress.progress / 100,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    } else {
+      // Hide progress bar
+      Animated.timing(progressBarHeight, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [downloadProgress.isDownloading, downloadProgress.progress]);
+
+  const handleOpenDrawer = () => {
+    navigation.dispatch(DrawerActions.openDrawer());
+  };
+
+  // FIXED: Enhanced back navigation with NavigationHelper
+  const handleBackPress = async () => {
+    if (onBackPress) {
+      onBackPress();
+    } else {
+      try {
+        const success = await NavigationHelper.goBack({
+          fallbackRoute: '/(drawer)/',
+          replaceIfNoHistory: true
         });
-        console.log('🔄 Header: Used fallback navigation to Business');
-      } catch (fallbackError) {
-        console.error('❌ Header: Even fallback navigation failed:', fallbackError);
+        
+        if (!success) {
+          console.log('🔙 Header: Back navigation used fallback');
+        }
+      } catch (error) {
+        console.error('🔙 Header: Back navigation failed:', error);
       }
     }
   };
 
-  // Enhanced avatar press handler with proper navigation tracking
-  const handleAvatarPress = async () => {
+  // FIXED: Enhanced notifications navigation with NavigationHelper
+  const handleNotifications = async () => {
+    try {
+      await NavigationHelper.navigateTo('/(drawer)/notifications', {
+        params: {},
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error('Navigation to notifications failed:', error);
+    }
+  };
+
+  // FIXED: Enhanced cart navigation with NavigationHelper
+  const handleCart = async () => {
+    try {
+      await NavigationHelper.navigateTo('/(drawer)/cart', {
+        params: {},
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error('Navigation to cart failed:', error);
+    }
+  };
+
+  const handleInstallUpdate = async () => {
+    if (downloadProgress.status === 'complete' && downloadProgress.version) {
+      try {
+        const updateService = UpdateService.getInstance();
+        setShowInstallModal(false);
+        await updateService.installDownloadedAPK(downloadProgress.version);
+      } catch (error) {
+        console.error('Failed to install update:', error);
+      }
+    }
+  };
+
+  const handleCloseInstallModal = () => {
+    setShowInstallModal(false);
+  };
+
+  // FIXED: Enhanced avatar press navigation with NavigationHelper
+  const handleAvatarPress = () => {
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
     
-    // Clear existing timeout
+    // Clear any existing timeout
     if (tapTimeoutRef.current) {
       clearTimeout(tapTimeoutRef.current);
       tapTimeoutRef.current = null;
@@ -185,7 +292,25 @@ export default function GLTHeader({
       lastTapRef.current = now;
       tapTimeoutRef.current = setTimeout(async () => {
         console.log('🎭 Header: Single tap, navigating to business page');
-        await navigateToBusinessPage();
+        
+        // FIXED: Use NavigationHelper instead of direct navigation
+        try {
+          await NavigationHelper.navigateTo('/(drawer)/business', {
+            params: {},
+            trackInHistory: true
+          });
+        } catch (error) {
+          console.error('🎭 Header: Navigation error:', error);
+          try {
+            await NavigationHelper.navigateTo('/(drawer)/Business', {
+              params: {},
+              trackInHistory: true
+            });
+          } catch (fallbackError) {
+            console.error('🎭 Header: Fallback navigation also failed:', fallbackError);
+          }
+        }
+        
         tapTimeoutRef.current = null;
       }, 300);
     }
@@ -213,104 +338,118 @@ export default function GLTHeader({
       currentIndex = businessIndex !== -1 ? businessIndex : 0;
     }
     
-    // Move to next business
+    // Get next index (cycle back to 0 if at end)
     const nextIndex = (currentIndex + 1) % allBusinessOptions.length;
-    const nextBusiness = allBusinessOptions[nextIndex];
+    const nextSelection = allBusinessOptions[nextIndex];
     
-    console.log('🎭 Header: Cycling to business:', nextBusiness?.name || 'You');
-    setSelectedBusiness(nextBusiness);
+    console.log('🎭 Header: Cycling selection:', {
+      from: selectedBusiness?.name || 'You',
+      to: nextSelection?.name || 'You',
+      currentIndex,
+      nextIndex
+    });
+    
+    setSelectedBusiness(nextSelection);
   };
 
-  // FIXED: Enhanced back button handler with NavigationHelper
-  const handleBackPress = async () => {
-    if (onBackPress) {
-      onBackPress();
-      return;
-    }
-
-    try {
-      console.log('🔙 Header: Going back using NavigationHelper...');
-      
-      const success = await NavigationHelper.goBack({
-        fallbackRoute: '/(drawer)/',
-        replaceIfNoHistory: true
-      });
-      
-      if (success) {
-        console.log('✅ Header: Successfully navigated back');
-      } else {
-        console.log('🏠 Header: Used fallback navigation to home');
-      }
-    } catch (error) {
-      console.error('❌ Header: Back navigation failed:', error);
-    }
-  };
-
-  // Load notification and cart counts
+  // Cleanup timeout on unmount
   useEffect(() => {
-    const loadCounts = async () => {
-      try {
-        // Load notification count
-        const notifResponse = await api.get('/api/v1/notifications/unread-count');
-        if (notifResponse.data.success) {
-          setNotificationCount(notifResponse.data.count || 0);
-        }
-
-        // Load cart count (pending unpaid packages)
-        const cartResponse = await api.get('/api/v1/packages', {
-          params: { state: 'pending_unpaid', per_page: 1 }
-        });
-        if (cartResponse.data.success) {
-          setCartCount(cartResponse.data.pagination?.total_count || 0);
-        }
-      } catch (error) {
-        console.log('Could not load header counts:', error);
+    return () => {
+      if (tapTimeoutRef.current) {
+        clearTimeout(tapTimeoutRef.current);
       }
     };
-
-    loadCounts();
   }, []);
 
-  // FIXED: Removed problematic UpdateService integration
-  // The UpdateService.onProgress method doesn't exist as a static method
-  // If update functionality is needed, it should be implemented through proper singleton pattern
-  useEffect(() => {
-    // Check for any stored update progress on component mount
-    const checkStoredProgress = async () => {
-      try {
-        const storedProgress = await AsyncStorage.getItem('download_progress');
-        if (storedProgress) {
-          const progress = JSON.parse(storedProgress);
-          setUpdateProgress(progress);
-          
-          // Animate progress bar if download is active
-          if (progress.isDownloading) {
-            setShowUpdatePopup(true);
-            Animated.timing(progressWidth, {
-              toValue: progress.progress,
-              duration: 100,
-              useNativeDriver: false,
-            }).start();
-          }
-        }
-      } catch (error) {
-        console.log('Could not load stored update progress:', error);
+  // Fetch notification count
+  const fetchNotificationCount = async () => {
+    try {
+      const response = await api.get('/api/v1/notifications/unread_count');
+      if (response.data.success) {
+        setNotificationCount(response.data.count || 0);
       }
-    };
-
-    checkStoredProgress();
-  }, [progressWidth]);
-
-  // Get current avatar based on selected business or user
-  const getCurrentAvatar = () => {
-    if (selectedBusiness?.logo) {
-      return getFullAvatarUrl(selectedBusiness.logo);
+    } catch (error) {
+      console.error('Failed to fetch notification count:', error);
     }
-    return user?.profile_picture ? getFullAvatarUrl(user.profile_picture) : null;
   };
 
-  // Format file size
-  const formatFileSize = (bytes: number) => {
+  // Fetch cart count (all pending_unpaid packages)
+  const fetchCartCount = async () => {
+    try {
+      console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
+      
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          state: 'pending_unpaid',
+          per_page: 1000,
+          page: 1
+        },
+        timeout: 15000
+      });
+      
+      if (response.data.success) {
+        let totalCount = response.data.data?.length || 0;
+        
+        const pagination = response.data.pagination;
+        if (pagination && pagination.total_pages > 1) {
+          console.log(`🛒 Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
+          
+          const additionalPages = [];
+          for (let page = 2; page <= pagination.total_pages; page++) {
+            additionalPages.push(
+              api.get('/api/v1/packages', {
+                params: {
+                  state: 'pending_unpaid',
+                  per_page: 1000,
+                  page: page
+                },
+                timeout: 15000
+              })
+            );
+          }
+
+          const additionalResponses = await Promise.all(additionalPages);
+          const additionalCount = additionalResponses.reduce((acc, res) => {
+            return acc + (res.data.success ? (res.data.data?.length || 0) : 0);
+          }, 0);
+
+          totalCount += additionalCount;
+          console.log(`🛒 Total cart count with all pages: ${totalCount}`);
+        }
+        
+        setCartCount(totalCount);
+      }
+    } catch (error) {
+      console.error('Failed to fetch cart count:', error);
+    }
+  };
+
+  useEffect(() => {
+    fetchNotificationCount();
+    fetchCartCount();
+    
+    // Refresh counts every 30 seconds
+    const interval = setInterval(() => {
+      fetchNotificationCount();
+      fetchCartCount();
+    }, 30000);
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const renderBadge = (count: number, color: string) => {
+    if (count === 0) return null;
+    
+    return (
+      <View style={[styles.badge, { backgroundColor: color }]}>
+        <Text style={styles.badgeText}>
+          {count > 99 ? '99+' : count.toString()}
+        </Text>
+      </View>
+    );
+  };
+
+  const formatFileSize = (bytes: number): string => {
     if (bytes === 0) return '0 B';
     const k = 1024;
     const sizes = ['B', 'KB', 'MB', 'GB'];
@@ -318,173 +457,154 @@ export default function GLTHeader({
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
   };
 
-  // Format speed
-  const formatSpeed = (bytesPerSecond: number) => {
+  const formatSpeed = (bytesPerSecond: number): string => {
     return formatFileSize(bytesPerSecond) + '/s';
   };
 
-  // Format time
-  const formatTime = (seconds: number) => {
-    if (seconds < 60) return `${Math.round(seconds)}s`;
-    return `${Math.round(seconds / 60)}m`;
+  // Determine if we're in business mode and get appropriate image
+  const isBusinessMode = !!selectedBusiness;
+
+  const getProgressBarColor = () => {
+    if (downloadProgress.status === 'complete') return '#10b981';
+    if (downloadProgress.status === 'error') return '#ef4444';
+    return '#ff6b35'; // Orange color like in the image
   };
 
   return (
     <>
-      <View style={[styles.header, { paddingTop: insets.top }]}>
-        <LinearGradient
-          colors={['rgba(26, 26, 46, 1)', 'rgba(26, 26, 46, 0.95)']}
-          style={styles.headerGradient}
-        >
-          <View style={styles.headerContent}>
-            {/* Left Section */}
-            <View style={styles.leftSection}>
-              {showBackButton ? (
-                <TouchableOpacity
-                  style={styles.backButton}
-                  onPress={handleBackPress}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="arrow-left" size={24} color={colors.text} />
-                </TouchableOpacity>
+      <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
+        {/* Left section: Back/Menu + Title */}
+        <View style={styles.leftContainer}>
+          {showBackButton ? (
+            <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
+              <Feather name="arrow-left" size={24} color="white" />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity onPress={handleOpenDrawer} style={styles.menuIcon}>
+              <Feather name="menu" size={26} color="white" />
+            </TouchableOpacity>
+          )}
+          <Text style={styles.title}>{title}</Text>
+        </View>
+
+        {/* Right section: Notifications + Cart + Avatar */}
+        <View style={styles.rightContainer}>
+          {/* Notifications */}
+          <TouchableOpacity onPress={handleNotifications} style={styles.iconButton}>
+            <View style={styles.iconContainer}>
+              <Feather name="bell" size={22} color="white" />
+              {renderBadge(notificationCount, '#8b5cf6')}
+            </View>
+          </TouchableOpacity>
+
+          {/* Cart */}
+          <TouchableOpacity onPress={handleCart} style={styles.iconButton}>
+            <View style={styles.iconContainer}>
+              <Feather name="shopping-cart" size={22} color="white" />
+              {renderBadge(cartCount, '#ef4444')}
+            </View>
+          </TouchableOpacity>
+
+          {/* Avatar Preview with Business Cycling */}
+          <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarButton}>
+            <View style={styles.avatarContainer}>
+              {/* Context-aware image display: Business logo when business selected, avatar when in "You" mode */}
+              {isBusinessMode ? (
+                <SafeLogo
+                  size={28}
+                  logoUrl={selectedBusiness.logo_url}
+                  avatarUrl={user?.avatar_url}
+                  style={styles.avatar}
+                  updateTrigger={avatarUpdateTrigger}
+                />
               ) : (
-                <TouchableOpacity
-                  style={styles.menuButton}
-                  onPress={() => navigation.dispatch(DrawerActions.openDrawer())}
-                  activeOpacity={0.7}
-                >
-                  <Feather name="menu" size={24} color={colors.text} />
-                </TouchableOpacity>
+                <SafeAvatar
+                  size={28}
+                  avatarUrl={user?.avatar_url}
+                  style={styles.avatar}
+                  updateTrigger={avatarUpdateTrigger}
+                />
               )}
               
-              <View style={styles.titleContainer}>
-                <Text style={styles.headerTitle}>{title}</Text>
-                {selectedBusiness && (
-                  <Text style={styles.businessSubtitle}>
-                    {selectedBusiness.name}
-                  </Text>
-                )}
-              </View>
-            </View>
-
-            {/* Right Section */}
-            <View style={styles.rightSection}>
-              {/* Cart Icon */}
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => NavigationHelper.navigateTo('/(drawer)/cart')}
-                activeOpacity={0.7}
-              >
-                <Feather name="shopping-cart" size={20} color={colors.text} />
-                {cartCount > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>
-                      {cartCount > 99 ? '99+' : cartCount.toString()}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* Notifications Icon */}
-              <TouchableOpacity
-                style={styles.iconButton}
-                onPress={() => NavigationHelper.navigateTo('/notifications')}
-                activeOpacity={0.7}
-              >
-                <Feather name="bell" size={20} color={colors.text} />
-                {notificationCount > 0 && (
-                  <View style={styles.badge}>
-                    <Text style={styles.badgeText}>
-                      {notificationCount > 99 ? '99+' : notificationCount.toString()}
-                    </Text>
-                  </View>
-                )}
-              </TouchableOpacity>
-
-              {/* Avatar */}
-              <TouchableOpacity
-                style={styles.avatarButton}
-                onPress={handleAvatarPress}
-                activeOpacity={0.8}
-              >
-                <SafeAvatar
-                  size={32}
-                  avatarUrl={getCurrentAvatar()}
-                  updateTrigger={avatarUpdateTrigger}
-                  style={styles.avatar}
-                />
-              </TouchableOpacity>
-            </View>
-          </View>
-
-          {/* Update Progress Bar */}
-          {updateProgress.isDownloading && (
-            <View style={styles.progressContainer}>
-              <View style={styles.progressBar}>
-                <Animated.View
-                  style={[
-                    styles.progressFill,
-                    {
-                      width: progressWidth.interpolate({
-                        inputRange: [0, 100],
-                        outputRange: ['0%', '100%'],
-                        extrapolate: 'clamp',
-                      }),
-                    },
-                  ]}
+              {/* Selection indicator */}
+              <View style={[
+                styles.selectionIndicator,
+                { backgroundColor: isBusinessMode ? '#7c3aed' : '#10b981' }
+              ]}>
+                <Feather 
+                  name={isBusinessMode ? 'briefcase' : 'user'} 
+                  size={8} 
+                  color="white" 
                 />
               </View>
             </View>
-          )}
-        </LinearGradient>
+          </TouchableOpacity>
+        </View>
       </View>
+      
+      {/* Progress Bar under header */}
+      <Animated.View
+        style={[
+          styles.progressBarContainer,
+          {
+            height: progressBarHeight,
+          },
+        ]}
+      >
+        <View style={styles.progressBarBackground}>
+          <Animated.View
+            style={[
+              styles.progressBarFill,
+              {
+                backgroundColor: getProgressBarColor(),
+                width: progressBarAnim.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: ['0%', '100%'],
+                }),
+              },
+            ]}
+          />
+        </View>
+      </Animated.View>
 
-      {/* Update Popup Modal */}
+      {/* Install Modal */}
       <Modal
-        visible={showUpdatePopup}
+        visible={showInstallModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={() => setShowUpdatePopup(false)}
+        onRequestClose={handleCloseInstallModal}
       >
         <View style={styles.modalOverlay}>
-          <View style={styles.updatePopup}>
+          <View style={styles.modalContent}>
             <LinearGradient
-              colors={['#667eea', '#764ba2']}
-              style={styles.updatePopupGradient}
+              colors={['#1a1a2e', '#2d3748']}
+              style={styles.modalGradient}
             >
-              <View style={styles.updatePopupHeader}>
-                <Feather name="download" size={24} color="#fff" />
-                <Text style={styles.updatePopupTitle}>
-                  {updateProgress.status === 'downloading' ? 'Downloading Update' : 
-                   updateProgress.status === 'installing' ? 'Installing Update' :
-                   updateProgress.status === 'complete' ? 'Update Complete' : 'Checking for Updates'}
-                </Text>
+              <View style={styles.modalHeader}>
+                <View style={styles.modalIcon}>
+                  <Feather name="check-circle" size={24} color="#10b981" />
+                </View>
+                <Text style={styles.modalTitle}>Update Downloaded</Text>
+                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.closeButton}>
+                  <Feather name="x" size={20} color="#ccc" />
+                </TouchableOpacity>
               </View>
               
-              {updateProgress.status === 'downloading' && (
-                <>
-                  <View style={styles.updateProgressBar}>
-                    <View 
-                      style={[styles.updateProgressFill, { width: `${updateProgress.progress}%` }]}
-                    />
-                  </View>
-                  
-                  <View style={styles.updateStats}>
-                    <Text style={styles.updateStatsText}>
-                      {Math.round(updateProgress.progress)}% • {formatFileSize(updateProgress.downloadedBytes)} of {formatFileSize(updateProgress.totalBytes)}
-                    </Text>
-                    <Text style={styles.updateStatsText}>
-                      {formatSpeed(updateProgress.speed)} • {formatTime(updateProgress.remainingTime)} remaining
-                    </Text>
-                  </View>
-                </>
-              )}
+              <Text style={styles.modalText}>
+                GLT version {downloadProgress.version} is ready to install.
+              </Text>
               
-              {updateProgress.version && (
-                <Text style={styles.updateVersion}>
-                  Version {updateProgress.version}
-                </Text>
-              )}
+              <View style={styles.modalButtons}>
+                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.laterButton}>
+                  <Text style={styles.laterButtonText}>Later</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity onPress={handleInstallUpdate} style={styles.installButton}>
+                  <LinearGradient colors={['#10b981', '#059669']} style={styles.installButtonGradient}>
+                    <Text style={styles.installButtonText}>Install Now</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
             </LinearGradient>
           </View>
         </View>
@@ -493,157 +613,205 @@ export default function GLTHeader({
   );
 }
 
-// Styles remain the same as original
 const styles = StyleSheet.create({
-  header: {
-    backgroundColor: colors.background,
+  container: {
+    backgroundColor: colors.header,
+    paddingBottom: 15,
+    paddingHorizontal: 20,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    elevation: 5,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 4,
-    elevation: 4,
-    zIndex: 1000,
   },
-  headerGradient: {
-    paddingBottom: 12,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-  },
-  leftSection: {
+  leftContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     flex: 1,
   },
-  rightSection: {
+  rightContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
   },
-  menuButton: {
-    padding: 8,
+  menuIcon: {
     marginRight: 12,
+    padding: 4,
   },
   backButton: {
-    padding: 8,
     marginRight: 12,
+    padding: 4,
   },
-  titleContainer: {
+  title: {
+    color: 'white',
+    fontSize: 20,
+    fontWeight: 'bold',
+    textShadowColor: 'rgba(124, 58, 237, 0.5)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 4,
+    fontFamily: 'System',
     flex: 1,
   },
-  headerTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: colors.text,
-  },
-  businessSubtitle: {
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
   iconButton: {
+    padding: 4,
+  },
+  iconContainer: {
     position: 'relative',
-    padding: 8,
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   badge: {
     position: 'absolute',
-    top: 2,
-    right: 2,
-    backgroundColor: colors.accent,
-    borderRadius: 8,
-    minWidth: 16,
-    height: 16,
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
+    borderWidth: 2,
+    borderColor: colors.header,
   },
   badgeText: {
-    color: '#fff',
+    color: 'white',
     fontSize: 10,
     fontWeight: '600',
+    textAlign: 'center',
   },
   avatarButton: {
     padding: 2,
   },
+  avatarContainer: {
+    position: 'relative',
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   avatar: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
     borderWidth: 2,
-    borderColor: colors.primary,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
   },
-  progressContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 8,
+  selectionIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 2,
+    borderColor: colors.header,
   },
-  progressBar: {
-    height: 2,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    borderRadius: 1,
+  
+  // Progress Bar Styles
+  progressBarContainer: {
+    width: '100%',
+    backgroundColor: colors.header,
     overflow: 'hidden',
   },
-  progressFill: {
+  progressBarBackground: {
     height: '100%',
-    backgroundColor: colors.primary,
-    borderRadius: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    width: '100%',
   },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 0,
+  },
+
+  // Modal Styles
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'center',
     alignItems: 'center',
+    paddingHorizontal: 20,
   },
-  updatePopup: {
-    margin: 20,
-    borderRadius: 12,
+  modalContent: {
+    width: '100%',
+    maxWidth: 340,
+    borderRadius: 16,
     overflow: 'hidden',
+    elevation: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
+    shadowOffset: { width: 0, height: 8 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 8,
+    shadowRadius: 16,
   },
-  updatePopupGradient: {
-    padding: 20,
-    minWidth: screenWidth * 0.8,
+  modalGradient: {
+    padding: 24,
   },
-  updatePopupHeader: {
+  modalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 16,
   },
-  updatePopupTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginLeft: 12,
+  modalIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
   },
-  updateProgressBar: {
-    height: 6,
-    backgroundColor: 'rgba(255, 255, 255, 0.3)',
-    borderRadius: 3,
-    marginBottom: 12,
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: 'bold',
+    color: '#fff',
+    flex: 1,
+  },
+  closeButton: {
+    padding: 4,
+  },
+  modalText: {
+    fontSize: 15,
+    color: '#ccc',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  modalButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  laterButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+  },
+  laterButtonText: {
+    color: '#ccc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  installButton: {
+    flex: 1,
+    borderRadius: 8,
     overflow: 'hidden',
   },
-  updateProgressFill: {
-    height: '100%',
-    backgroundColor: '#fff',
-    borderRadius: 3,
+  installButtonGradient: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
   },
-  updateStats: {
-    marginBottom: 8,
-  },
-  updateStatsText: {
-    color: 'rgba(255, 255, 255, 0.9)',
+  installButtonText: {
+    color: 'white',
     fontSize: 14,
-    textAlign: 'center',
-    marginBottom: 2,
-  },
-  updateVersion: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 12,
-    textAlign: 'center',
-    marginTop: 4,
+    fontWeight: '600',
   },
 });
