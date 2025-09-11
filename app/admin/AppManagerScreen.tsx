@@ -1,4 +1,4 @@
-// app/admin/AppManagerScreen.tsx - Fixed with accurate upload progress calculation
+// app/admin/AppManagerScreen.tsx - Fixed with header bar and navigation helper
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -12,6 +12,8 @@ import {
   Modal,
   TextInput,
   ActivityIndicator,
+  SafeAreaView,
+  StatusBar,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -19,6 +21,8 @@ import * as DocumentPicker from 'expo-document-picker';
 import { useUser } from '../../context/UserContext';
 import api from '../../lib/api';
 import Toast from 'react-native-toast-message';
+// FIXED: Import NavigationHelper
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const { width, height } = Dimensions.get('window');
 
@@ -95,6 +99,18 @@ const AppManagerScreen: React.FC = () => {
     totalDownloads: 0,
     latestVersion: '1.0.0',
   });
+
+  // FIXED: Add back navigation handler
+  const handleBackPress = async () => {
+    try {
+      await NavigationHelper.goBack({
+        fallbackRoute: '/admin',
+        replaceIfNoHistory: true
+      });
+    } catch (error) {
+      console.error('Back navigation failed:', error);
+    }
+  };
 
   const fetchUpdates = useCallback(async () => {
     try {
@@ -449,6 +465,41 @@ const AppManagerScreen: React.FC = () => {
     });
   };
 
+  // FIXED: Add header bar component
+  const renderHeaderBar = () => (
+    <View style={styles.headerBar}>
+      <StatusBar barStyle="light-content" backgroundColor="#667eea" />
+      <SafeAreaView style={styles.headerSafeArea}>
+        <View style={styles.headerContent}>
+          <TouchableOpacity 
+            onPress={handleBackPress}
+            style={styles.backButton}
+            accessibilityLabel="Go back"
+            accessibilityRole="button"
+          >
+            <Ionicons name="arrow-back" size={24} color="white" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>App Manager</Text>
+            <Text style={styles.headerSubtitle}>Manage your app updates</Text>
+          </View>
+          
+          <View style={styles.headerActions}>
+            <TouchableOpacity 
+              style={styles.headerActionButton}
+              onPress={() => setShowCreateModal(true)}
+              accessibilityLabel="Create new update"
+              accessibilityRole="button"
+            >
+              <Ionicons name="add" size={24} color="white" />
+            </TouchableOpacity>
+          </View>
+        </View>
+      </SafeAreaView>
+    </View>
+  );
+
   const renderStatsCards = () => (
     <View style={styles.statsContainer}>
       <View style={styles.statCard}>
@@ -497,6 +548,7 @@ const AppManagerScreen: React.FC = () => {
     </View>
   );
 
+  // FIXED: Cleaned up update card - removed dark background, kept bright purple outline
   const renderUpdateCard = (update: AppUpdate) => (
     <TouchableOpacity
       key={update.id}
@@ -536,16 +588,16 @@ const AppManagerScreen: React.FC = () => {
       
       <View style={styles.updateStats}>
         <View style={styles.statItem}>
-          <Ionicons name="download-outline" size={16} color="#6b7280" />
+          <Ionicons name="download-outline" size={16} color="#8b5cf6" />
           <Text style={styles.statText}>{update.download_count}</Text>
         </View>
         <View style={styles.statItem}>
-          <Ionicons name="calendar-outline" size={16} color="#6b7280" />
+          <Ionicons name="calendar-outline" size={16} color="#8b5cf6" />
           <Text style={styles.statText}>{formatDate(update.created_at)}</Text>
         </View>
         {update.apk_size && (
           <View style={styles.statItem}>
-            <Ionicons name="document-outline" size={16} color="#6b7280" />
+            <Ionicons name="document-outline" size={16} color="#8b5cf6" />
             <Text style={styles.statText}>{formatFileSize(update.apk_size)}</Text>
           </View>
         )}
@@ -918,33 +970,11 @@ const AppManagerScreen: React.FC = () => {
         colors={['#1a1a2e', '#16213e', '#1a1a2e']}
         style={styles.background}
       >
-        {/* Header */}
-        <LinearGradient
-          colors={['#667eea', '#764ba2']}
-          style={styles.header}
-        >
-          <Text style={styles.headerTitle}>App Manager</Text>
-          <Text style={styles.headerSubtitle}>Manage your app updates and deployments</Text>
-        </LinearGradient>
+        {/* FIXED: Added header bar */}
+        {renderHeaderBar()}
 
         {/* Stats Cards */}
         {renderStatsCards()}
-
-        {/* Action Buttons */}
-        <View style={styles.actionBar}>
-          <TouchableOpacity 
-            style={styles.createButton}
-            onPress={() => setShowCreateModal(true)}
-          >
-            <LinearGradient
-              colors={['#667eea', '#764ba2']}
-              style={styles.createButtonGradient}
-            >
-              <Ionicons name="add" size={16} color="white" />
-              <Text style={styles.createButtonText}>Create Update</Text>
-            </LinearGradient>
-          </TouchableOpacity>
-        </View>
 
         {/* Updates List */}
         <ScrollView 
@@ -982,27 +1012,52 @@ const styles = StyleSheet.create({
   background: {
     flex: 1,
   },
-  header: {
-    paddingTop: 60,
-    paddingBottom: 30,
-    paddingHorizontal: 20,
-    borderBottomLeftRadius: 25,
-    borderBottomRightRadius: 25,
+  // FIXED: Added header bar styles
+  headerBar: {
+    backgroundColor: '#667eea',
+  },
+  headerSafeArea: {
+    backgroundColor: '#667eea',
+  },
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    minHeight: 56,
+  },
+  backButton: {
+    padding: 8,
+    marginRight: 8,
+    borderRadius: 8,
+  },
+  headerTitleContainer: {
+    flex: 1,
+    marginLeft: 8,
   },
   headerTitle: {
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: 'bold',
     color: 'white',
-    marginBottom: 5,
   },
   headerSubtitle: {
-    fontSize: 16,
+    fontSize: 14,
     color: 'rgba(255,255,255,0.8)',
+    marginTop: 2,
+  },
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  headerActionButton: {
+    padding: 8,
+    marginLeft: 8,
+    borderRadius: 8,
   },
   statsContainer: {
     flexDirection: 'row',
     paddingHorizontal: 20,
-    marginTop: -20,
+    marginTop: 20,
     marginBottom: 20,
   },
   statCard: {
@@ -1054,6 +1109,7 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 20,
   },
+  // FIXED: Cleaned up update card - removed background, kept bright purple outline
   updateCard: {
     backgroundColor: 'transparent',
     borderRadius: 15,
@@ -1061,11 +1117,6 @@ const styles = StyleSheet.create({
     borderColor: '#8b5cf6',
     padding: 20,
     marginBottom: 15,
-    elevation: 2,
-    shadowColor: '#8b5cf6',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
   },
   updateHeader: {
     flexDirection: 'row',
@@ -1111,6 +1162,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginRight: 15,
   },
+  // FIXED: Changed icon color to match purple theme
   statText: {
     fontSize: 12,
     color: '#a1a1aa',
