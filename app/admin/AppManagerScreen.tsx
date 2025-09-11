@@ -1,4 +1,4 @@
-// app/admin/AppManagerScreen.tsx - Fixed with upload progress and large file support
+// app/admin/AppManagerScreen.tsx - Fixed with accurate upload progress calculation
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -75,6 +75,7 @@ const AppManagerScreen: React.FC = () => {
     remainingTime: 0,
   });
   const [uploadStartTime, setUploadStartTime] = useState<number>(0);
+  const [actualFileSize, setActualFileSize] = useState<number>(0);
   
   // Form state
   const [formData, setFormData] = useState<CreateUpdateFormData>({
@@ -159,6 +160,7 @@ const AppManagerScreen: React.FC = () => {
         }
 
         setFormData(prev => ({ ...prev, apkFile: result }));
+        setActualFileSize(file.size || 0);
         Toast.show({
           type: 'success',
           text1: 'File Selected',
@@ -188,7 +190,7 @@ const AppManagerScreen: React.FC = () => {
   };
 
   const formatTime = (seconds: number): string => {
-    if (seconds === Infinity || isNaN(seconds)) return 'calculating...';
+    if (seconds === Infinity || isNaN(seconds) || seconds <= 0) return 'calculating...';
     if (seconds < 60) return `${Math.round(seconds)}s`;
     const minutes = Math.floor(seconds / 60);
     const remainingSeconds = Math.round(seconds % 60);
@@ -219,14 +221,17 @@ const AppManagerScreen: React.FC = () => {
         return;
       }
 
+      const fileSize = formData.apkFile?.assets?.[0]?.size || 0;
+      setActualFileSize(fileSize);
+
       setUploading(true);
       setShowProgressModal(true);
       setUploadStartTime(Date.now());
 
-      // Reset progress
+      // Reset progress with actual file size
       setUploadProgress({
         loaded: 0,
-        total: 0,
+        total: fileSize, // Use actual file size, not FormData size
         percentage: 0,
         speed: 0,
         remainingTime: 0,
@@ -248,7 +253,6 @@ const AppManagerScreen: React.FC = () => {
       });
 
       // Calculate timeout based on file size
-      const fileSize = formData.apkFile?.assets?.[0]?.size || 0;
       const timeoutMs = calculateDynamicTimeout(fileSize);
 
       // Add APK file if selected
@@ -261,6 +265,9 @@ const AppManagerScreen: React.FC = () => {
         } as any);
       }
 
+      let lastUpdateTime = Date.now();
+      let lastLoaded = 0;
+
       const response = await api.post('/api/v1/updates', uploadData, {
         headers: {
           'Content-Type': 'multipart/form-data',
@@ -269,40 +276,89 @@ const AppManagerScreen: React.FC = () => {
         onUploadProgress: (progressEvent) => {
           const currentTime = Date.now();
           const elapsedTime = (currentTime - uploadStartTime) / 1000; // seconds
-          const loaded = Math.max(0, progressEvent.loaded || 0);
-          const total = Math.max(loaded, progressEvent.total || 0);
           
-          // Clamp percentage between 0 and 100 to prevent display issues
-          let percentage = 0;
-          if (total > 0) {
-            percentage = Math.min(100, Math.max(0, Math.round((loaded / total) * 100)));
+          // Use the actual file size for calculations, not the FormData total
+          const rawLoaded = Math.max(0, progressEvent.loaded || 0);
+          const rawTotal = Math.max(1, progressEvent.total || 1);
+          
+          // Calculate what percentage of the multipart upload corresponds to our actual file
+          // Estimate that the file takes up about 85-90% of the total multipart data
+          const fileRatio = actualFileSize / (actualFileSize + (actualFileSize * 0.15)); // ~87%
+          
+          // Adjust loaded bytes to represent actual file progress
+          let adjustedLoaded = Math.min(actualFileSize, rawLoaded * fileRatio);
+          
+          // Ensure we don't exceed the actual file size
+          if (adjustedLoaded > actualFileSize) {
+            adjustedLoaded = actualFileSize;
           }
           
-          const speed = elapsedTime > 0 ? loaded / elapsedTime : 0;
-          const remainingBytes = Math.max(0, total - loaded);
-          const remainingTime = speed > 0 && remainingBytes > 0 ? remainingBytes / speed : 0;
+          // Calculate percentage based on actual file size
+          const percentage = Math.min(100, Math.max(0, Math.round((adjustedLoaded / actualFileSize) * 100)));
+          
+          // Calculate speed based on actual progress
+          const timeDelta = (currentTime - lastUpdateTime) / 1000;
+          const bytesDelta = adjustedLoaded - lastLoaded;
+          let instantSpeed = 0;
+          
+          if (timeDelta > 0 && bytesDelta > 0) {
+            instantSpeed = bytesDelta / timeDelta;
+          }
+          
+          // Calculate average speed for more stable display
+          const averageSpeed = elapsedTime > 0 ? adjustedLoaded / elapsedTime : 0;
+          const displaySpeed = elapsedTime < 5 ? instantSpeed : (instantSpeed + averageSpeed) / 2;
+          
+          // Calculate remaining time based on actual file progress
+          const remainingBytes = Math.max(0, actualFileSize - adjustedLoaded);
+          const remainingTime = displaySpeed > 0 && remainingBytes > 0 ? remainingBytes / displaySpeed : 0;
+
+          // Update tracking variables
+          lastUpdateTime = currentTime;
+          lastLoaded = adjustedLoaded;
 
           setUploadProgress({
-            loaded,
-            total,
+            loaded: adjustedLoaded,
+            total: actualFileSize,
             percentage,
-            speed,
+            speed: displaySpeed,
             remainingTime,
+          });
+
+          console.log('Upload Progress:', {
+            rawLoaded,
+            rawTotal,
+            adjustedLoaded,
+            actualFileSize,
+            percentage,
+            speed: formatSpeed(displaySpeed),
+            remaining: formatTime(remainingTime)
           });
         },
       });
 
       if (response.status === 201) {
-        setShowProgressModal(false);
-        Toast.show({
-          type: 'success',
-          text1: 'Success',
-          text2: 'Update created successfully!',
-        });
-        
-        setShowCreateModal(false);
-        resetForm();
-        fetchUpdates();
+        // Show 100% completion
+        setUploadProgress(prev => ({
+          ...prev,
+          loaded: actualFileSize,
+          percentage: 100,
+          remainingTime: 0,
+        }));
+
+        // Small delay to show completion before closing
+        setTimeout(() => {
+          setShowProgressModal(false);
+          Toast.show({
+            type: 'success',
+            text1: 'Success',
+            text2: 'Update created successfully!',
+          });
+          
+          setShowCreateModal(false);
+          resetForm();
+          fetchUpdates();
+        }, 1000);
       }
     } catch (error: any) {
       console.error('Create update error:', error);
@@ -359,6 +415,7 @@ const AppManagerScreen: React.FC = () => {
       published: false,
       apkFile: null,
     });
+    setActualFileSize(0);
   };
 
   const addChangelogItem = () => {
@@ -858,7 +915,7 @@ const AppManagerScreen: React.FC = () => {
   return (
     <View style={styles.container}>
       <LinearGradient
-        colors={['#f8fafc', '#e2e8f0']}
+        colors={['#1a1a2e', '#16213e', '#1a1a2e']}
         style={styles.background}
       >
         {/* Header */}
@@ -998,15 +1055,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
   },
   updateCard: {
-    backgroundColor: 'white',
+    backgroundColor: 'transparent',
     borderRadius: 15,
+    borderWidth: 2,
+    borderColor: '#8b5cf6',
     padding: 20,
     marginBottom: 15,
     elevation: 2,
-    shadowColor: '#000',
+    shadowColor: '#8b5cf6',
     shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 2,
+    shadowOpacity: 0.3,
+    shadowRadius: 4,
   },
   updateHeader: {
     flexDirection: 'row',
@@ -1017,11 +1076,11 @@ const styles = StyleSheet.create({
   updateVersion: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#1f2937',
+    color: '#ffffff',
   },
   updateRuntime: {
     fontSize: 14,
-    color: '#6b7280',
+    color: '#a1a1aa',
   },
   statusContainer: {
     flexDirection: 'row',
@@ -1039,7 +1098,7 @@ const styles = StyleSheet.create({
   },
   updateDescription: {
     fontSize: 14,
-    color: '#4b5563',
+    color: '#d4d4d8',
     marginBottom: 15,
     lineHeight: 20,
   },
@@ -1054,7 +1113,7 @@ const styles = StyleSheet.create({
   },
   statText: {
     fontSize: 12,
-    color: '#6b7280',
+    color: '#a1a1aa',
     marginLeft: 4,
   },
   updateActions: {
@@ -1081,24 +1140,25 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 20,
     fontWeight: 'bold',
-    color: '#374151',
+    color: '#ffffff',
     marginTop: 15,
     marginBottom: 5,
   },
   emptySubtitle: {
     fontSize: 16,
-    color: '#6b7280',
+    color: '#a1a1aa',
     textAlign: 'center',
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#1a1a2e',
   },
   loadingText: {
     marginTop: 10,
     fontSize: 16,
-    color: '#6b7280',
+    color: '#a1a1aa',
   },
   modalContainer: {
     flex: 1,
