@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - Fixed with NavigationHelper integration
+// components/GLTHeader.tsx - Fixed with NavigationHelper integration and corrected UpdateService
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
@@ -11,7 +11,6 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
 import { SafeLogo } from '../components/SafeLogo';
-import UpdateService from '../lib/services/updateService';
 import colors from '../theme/colors';
 import api from '../lib/api';
 
@@ -272,35 +271,35 @@ export default function GLTHeader({
     loadCounts();
   }, []);
 
-  // Update service integration
+  // FIXED: Removed problematic UpdateService integration
+  // The UpdateService.onProgress method doesn't exist as a static method
+  // If update functionality is needed, it should be implemented through proper singleton pattern
   useEffect(() => {
-    const unsubscribe = UpdateService.onProgress((progress) => {
-      setUpdateProgress(progress);
-      
-      // Animate progress bar
-      Animated.timing(progressWidth, {
-        toValue: progress.progress,
-        duration: 100,
-        useNativeDriver: false,
-      }).start();
-      
-      // Show popup for download start
-      if (progress.isDownloading && progress.status === 'downloading' && !showUpdatePopup) {
-        setShowUpdatePopup(true);
+    // Check for any stored update progress on component mount
+    const checkStoredProgress = async () => {
+      try {
+        const storedProgress = await AsyncStorage.getItem('download_progress');
+        if (storedProgress) {
+          const progress = JSON.parse(storedProgress);
+          setUpdateProgress(progress);
+          
+          // Animate progress bar if download is active
+          if (progress.isDownloading) {
+            setShowUpdatePopup(true);
+            Animated.timing(progressWidth, {
+              toValue: progress.progress,
+              duration: 100,
+              useNativeDriver: false,
+            }).start();
+          }
+        }
+      } catch (error) {
+        console.log('Could not load stored update progress:', error);
       }
-      
-      // Hide popup when complete
-      if (progress.status === 'complete' || progress.status === 'error') {
-        setTimeout(() => {
-          setShowUpdatePopup(false);
-        }, 2000);
-      }
-    });
-
-    return () => {
-      if (unsubscribe) unsubscribe();
     };
-  }, [progressWidth, showUpdatePopup]);
+
+    checkStoredProgress();
+  }, [progressWidth]);
 
   // Get current avatar based on selected business or user
   const getCurrentAvatar = () => {
