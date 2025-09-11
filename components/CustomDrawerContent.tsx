@@ -1,4 +1,4 @@
-// components/CustomDrawerContent.tsx - Updated with "All" button and enhanced navigation
+// components/CustomDrawerContent.tsx - Fixed navigation paths
 import {
   Feather,
   FontAwesome5,
@@ -231,7 +231,7 @@ export default function CustomDrawerContent(props: any) {
     }
   };
 
-  // FIXED: Enhanced business management navigation with NavigationHelper
+  // FIXED: Enhanced business management navigation with corrected route name
   const handleBusinessManagement = async () => {
     setShowBusinessDropdown(false);
     props.navigation.closeDrawer();
@@ -239,21 +239,13 @@ export default function CustomDrawerContent(props: any) {
     console.log('🎭 Navigating to business management...');
     
     try {
-      await NavigationHelper.navigateTo('/(drawer)/business', {
+      await NavigationHelper.navigateTo('business', {
         params: {},
         trackInHistory: true
       });
     } catch (error) {
       console.error('🎭 Navigation error:', error);
-      try {
-        await NavigationHelper.navigateTo('/(drawer)/Business', {
-          params: {},
-          trackInHistory: true
-        });
-      } catch (fallbackError) {
-        console.error('🎭 Fallback navigation also failed:', fallbackError);
-        Alert.alert('Navigation Error', 'Could not open business screen');
-      }
+      Alert.alert('Navigation Error', 'Could not open business screen');
     }
   };
 
@@ -270,7 +262,7 @@ export default function CustomDrawerContent(props: any) {
           text: 'Contact Us', 
           onPress: async () => {
             try {
-              await NavigationHelper.navigateTo('/(drawer)/Support', {
+              await NavigationHelper.navigateTo('support', {
                 params: {},
                 trackInHistory: true
               });
@@ -283,18 +275,18 @@ export default function CustomDrawerContent(props: any) {
     );
   };
 
-  // FIXED: Enhanced track navigation with NavigationHelper
+  // FIXED: Enhanced track navigation with corrected route name
   const handleTrackNavigation = async (item: any) => {
     try {
       if (item.key === 'all') {
         // Navigate to track screen without status filter (shows all packages)
-        await NavigationHelper.navigateTo('/(drawer)/track', {
+        await NavigationHelper.navigateTo('track', {
           params: {},
           trackInHistory: true
         });
       } else {
         // Navigate with specific status filter
-        await NavigationHelper.navigateTo('/(drawer)/track', {
+        await NavigationHelper.navigateTo('track', {
           params: { status: item.key },
           trackInHistory: true
         });
@@ -501,14 +493,14 @@ export default function CustomDrawerContent(props: any) {
               />    
             ))}    
 
-          {/* FIXED: General Navigation with NavigationHelper */}    
+          {/* FIXED: General Navigation with corrected route names */}    
           <DrawerItem    
             label="Talk to a rep"    
             labelStyle={styles.label}    
             icon={() => <Feather name="message-circle" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/(drawer)/Support', {
+                await NavigationHelper.navigateTo('support', {
                   params: {},
                   trackInHistory: true
                 });
@@ -523,7 +515,7 @@ export default function CustomDrawerContent(props: any) {
             icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/(drawer)/FAQs', {
+                await NavigationHelper.navigateTo('faqs', {
                   params: {},
                   trackInHistory: true
                 });
@@ -538,7 +530,7 @@ export default function CustomDrawerContent(props: any) {
             icon={() => <MaterialIcons name="location-on" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/(drawer)/findus', {
+                await NavigationHelper.navigateTo('findus', {
                   params: {},
                   trackInHistory: true
                 });
@@ -555,7 +547,7 @@ export default function CustomDrawerContent(props: any) {
             icon={() => <Feather name="user" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/(drawer)/contacts', {
+                await NavigationHelper.navigateTo('contact', {
                   params: {},
                   trackInHistory: true
                 });
@@ -572,7 +564,7 @@ export default function CustomDrawerContent(props: any) {
             icon={() => <Ionicons name="settings-outline" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/(drawer)/Settings', {
+                await NavigationHelper.navigateTo('settings', {
                   params: {},
                   trackInHistory: true
                 });
@@ -589,7 +581,7 @@ export default function CustomDrawerContent(props: any) {
             icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('/invite', {
+                await NavigationHelper.navigateTo('invite', {
                   params: {},
                   trackInHistory: true
                 });
