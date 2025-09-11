@@ -638,13 +638,16 @@ export default function Business({ navigation }: BusinessProps) {
                 </View>
               </TouchableOpacity>
 
-              <TouchableOpacity style={styles.optionButton} onPress={handleJoinBusiness}>
-                <Feather name="users" size={28} color="#7c3aed" />
-                <View style={styles.optionContent}>
-                  <Text style={styles.optionTitle}>Join Existing</Text>
-                  <Text style={styles.optionDescription}>Join a business</Text>
-                </View>
-              </TouchableOpacity>
+              {/* Only show Join Existing option if joined businesses < 2 */}
+              {businesses.joined.length < 2 && (
+                <TouchableOpacity style={styles.optionButton} onPress={handleJoinBusiness}>
+                  <Feather name="users" size={28} color="#7c3aed" />
+                  <View style={styles.optionContent}>
+                    <Text style={styles.optionTitle}>Join Existing</Text>
+                    <Text style={styles.optionDescription}>Join a business</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
             </View>
           </TouchableOpacity>
         </Modal>
