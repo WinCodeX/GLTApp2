@@ -562,14 +562,17 @@ export default function Business({ navigation }: BusinessProps) {
               {businesses.owned.length > 0 ? (
                 <>
                   {businesses.owned.map(business => renderBusinessItem(business, true))}
-                  <TouchableOpacity
-                    style={styles.addBusinessButton}
-                    onPress={() => setShowAddBusinessOptions(true)}
-                  >
-                    <Feather name="plus" size={20} color="#7c3aed" />
-                    <Text style={styles.addBusinessText}>Add Another Business</Text>
-                    <Feather name="chevron-right" size={20} color="#7c3aed" />
-                  </TouchableOpacity>
+                  {/* Only show Add Another Business button if owned businesses < 2 */}
+                  {businesses.owned.length < 2 && (
+                    <TouchableOpacity
+                      style={styles.addBusinessButton}
+                      onPress={() => setShowAddBusinessOptions(true)}
+                    >
+                      <Feather name="plus" size={20} color="#7c3aed" />
+                      <Text style={styles.addBusinessText}>Add Another Business</Text>
+                      <Feather name="chevron-right" size={20} color="#7c3aed" />
+                    </TouchableOpacity>
+                  )}
                 </>
               ) : (
                 <TouchableOpacity
@@ -590,14 +593,17 @@ export default function Business({ navigation }: BusinessProps) {
               {businesses.joined.length > 0 ? (
                 <>
                   {businesses.joined.map(business => renderBusinessItem(business, false))}
-                  <TouchableOpacity
-                    style={styles.joinBusinessButton}
-                    onPress={handleJoinBusiness}
-                  >
-                    <Feather name="users" size={20} color="#7c3aed" />
-                    <Text style={styles.joinBusinessText}>Join Another Business</Text>
-                    <Feather name="chevron-right" size={20} color="#7c3aed" />
-                  </TouchableOpacity>
+                  {/* Only show Join Another Business button if joined businesses < 2 */}
+                  {businesses.joined.length < 2 && (
+                    <TouchableOpacity
+                      style={styles.joinBusinessButton}
+                      onPress={handleJoinBusiness}
+                    >
+                      <Feather name="users" size={20} color="#7c3aed" />
+                      <Text style={styles.joinBusinessText}>Join Another Business</Text>
+                      <Feather name="chevron-right" size={20} color="#7c3aed" />
+                    </TouchableOpacity>
+                  )}
                 </>
               ) : (
                 <TouchableOpacity
