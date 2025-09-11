@@ -15,6 +15,8 @@ const CHANGELOG_CONTENT = [
   'Improved file handling for large updates',
   'Fixed update notification timing',
   'Better error handling and user feedback',
+'Added notifications',
+'Fixed going back in screens',
 ];
 
 type Props = {
