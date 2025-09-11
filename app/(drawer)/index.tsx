@@ -1,5 +1,5 @@
-// Updated HomeScreen with new UpdateModal integration
-import React, { useState, useEffect, useRef } from 'react';
+// app/(drawer)/index.tsx - Fixed HomeScreen with proper navigation system integration
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -21,6 +21,7 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
@@ -29,6 +30,8 @@ import UpdateModal from '../../components/UpdateModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 import UpdateService from '../../lib/services/updateService';
+// FIXED: Import navigation system
+import { NavigationHelper, useNavigation } from '../../lib/helpers/navigation';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -452,6 +455,9 @@ export default function HomeScreen() {
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   
+  // FIXED: Add navigation tracking state
+  const [navigationRegistered, setNavigationRegistered] = useState(false);
+  
   const { 
     user, 
     currentAccount,
@@ -463,6 +469,9 @@ export default function HomeScreen() {
     getCurrentUserId,
   } = useUser();
   
+  // FIXED: Use navigation hook for better integration
+  const navigation = useNavigation();
+  
   const scrollX = useRef(new Animated.Value(0)).current;
   
   // FAB Menu Animations
@@ -472,6 +481,52 @@ export default function HomeScreen() {
   const optionsTranslateY = useRef(new Animated.Value(100)).current;
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
+
+  // FIXED: Register home screen with navigation system on mount
+  useEffect(() => {
+    const registerWithNavigationSystem = async () => {
+      try {
+        if (!navigationRegistered) {
+          console.log('🏠 HomeScreen: Registering with navigation system...');
+          
+          // Ensure NavigationHelper is initialized
+          await NavigationHelper.initialize();
+          
+          // Register this screen as the home route
+          await NavigationHelper.trackRouteChange('/', {});
+          
+          setNavigationRegistered(true);
+          console.log('✅ HomeScreen: Successfully registered with navigation system');
+        }
+      } catch (error) {
+        console.error('❌ HomeScreen: Failed to register with navigation system:', error);
+        // Continue anyway - non-critical error
+        setNavigationRegistered(true);
+      }
+    };
+
+    registerWithNavigationSystem();
+  }, [navigationRegistered]);
+
+  // FIXED: Re-register when screen gains focus to ensure navigation consistency
+  useFocusEffect(
+    useCallback(() => {
+      const reRegisterOnFocus = async () => {
+        try {
+          console.log('🏠 HomeScreen: Screen gained focus, re-registering...');
+          
+          // Always track when home screen gains focus to ensure it's in navigation history
+          await NavigationHelper.trackRouteChange('/', {});
+          
+          console.log('✅ HomeScreen: Successfully re-registered on focus');
+        } catch (error) {
+          console.error('❌ HomeScreen: Failed to re-register on focus:', error);
+        }
+      };
+
+      reRegisterOnFocus();
+    }, [])
+  );
 
   // Initialize app with APK update system
   useEffect(() => {
@@ -1491,7 +1546,7 @@ export default function HomeScreen() {
   );
 }
 
-// The styles remain exactly the same as before, so I'm keeping them unchanged
+// Styles remain the same as before
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
