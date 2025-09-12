@@ -1,5 +1,5 @@
-// app/(drawer)/track/tracking.tsx - Enhanced detailed tracking with NavigationHelper integration
-import React, { useState, useEffect, useCallback } from 'react';
+// app/(drawer)/track/tracking.tsx - Enhanced tracking with real-time journey and NavigationHelper
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
   Text,
@@ -11,6 +11,8 @@ import {
   Image,
   Share,
   Linking,
+  RefreshControl,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -20,21 +22,40 @@ import Toast from 'react-native-toast-message';
 import { 
   getPackageDetails,
   getPackageQRCode,
+  getPackageTracking,
   type Package,
   type QRCodeResponse
 } from '@/lib/helpers/packageHelpers';
 import colors from '@/theme/colors';
+import api from '@/lib/api';
 
 // Import NavigationHelper
 import { NavigationHelper } from '@/lib/helpers/navigation';
 
 interface TimelineEvent {
+  id: string;
   status: string;
   timestamp: string;
   description: string;
   active: boolean;
   icon?: string;
   details?: string;
+  location?: string;
+  agent_name?: string;
+  rider_name?: string;
+  estimated_time?: string;
+  is_current?: boolean;
+}
+
+interface TrackingData {
+  current_status: string;
+  current_location?: string;
+  estimated_delivery?: string;
+  last_updated: string;
+  delivery_attempts: number;
+  special_instructions?: string;
+  timeline: TimelineEvent[];
+  real_time_updates: boolean;
 }
 
 export default function PackageTracking() {
@@ -47,25 +68,32 @@ export default function PackageTracking() {
   // State management
   const [package_, setPackage] = useState<Package | null>(null);
   const [qrData, setQrData] = useState<QRCodeResponse['data'] | null>(null);
+  const [trackingData, setTrackingData] = useState<TrackingData | null>(null);
   const [timeline, setTimeline] = useState<TimelineEvent[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingQR, setIsLoadingQR] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lastUpdateTime, setLastUpdateTime] = useState<Date>(new Date());
 
-  // Get delivery type badge color (matching track.tsx)
+  // Real-time update animation
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Get delivery type badge color
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
-      case 'collection': return '#f59e0b'; // Amber for collections
-      case 'fragile': return '#ef4444'; // Red for fragile items
-      case 'doorstep': return '#10b981'; // Green for doorstep
-      case 'office': return '#3b82f6'; // Blue for office
-      case 'agent': return '#3b82f6'; // Blue for office (legacy)
-      case 'mixed': return '#8b5cf6'; // Purple for mixed
+      case 'collection': return '#f59e0b';
+      case 'fragile': return '#ef4444';
+      case 'doorstep': return '#10b981';
+      case 'office': return '#3b82f6';
+      case 'agent': return '#3b82f6';
+      case 'mixed': return '#8b5cf6';
       default: return colors.primary;
     }
   }, []);
 
-  // Get delivery type display name (matching track.tsx)
+  // Get delivery type display name
   const getDeliveryTypeDisplay = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
       case 'collection': return 'Collection';
@@ -78,7 +106,7 @@ export default function PackageTracking() {
     }
   }, []);
 
-  // Get state badge color (enhanced)
+  // Get state badge color
   const getStateBadgeColor = useCallback((state: string): string => {
     switch (state) {
       case 'pending_unpaid': return '#f59e0b';
@@ -109,177 +137,91 @@ export default function PackageTracking() {
     }
   }, []);
 
-  // Get delivery type badge style with outline pattern (matching track.tsx)
-  const getDeliveryTypeBadgeStyle = useCallback((deliveryType: string) => {
-    const baseColor = getDeliveryTypeBadgeColor(deliveryType);
-    // Convert hex to rgba for outline effect
-    const colorMap: Record<string, { bg: string; border: string }> = {
-      '#f59e0b': { bg: 'rgba(245, 158, 11, 0.2)', border: 'rgba(245, 158, 11, 0.4)' }, // Collection
-      '#ef4444': { bg: 'rgba(239, 68, 68, 0.2)', border: 'rgba(239, 68, 68, 0.4)' },   // Fragile  
-      '#3b82f6': { bg: 'rgba(59, 130, 246, 0.2)', border: 'rgba(59, 130, 246, 0.4)' }, // Home/Office
-      '#8b5cf6': { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' }, // Mixed
-    };
-    
-    return colorMap[baseColor] || { bg: 'rgba(139, 92, 246, 0.2)', border: 'rgba(139, 92, 246, 0.4)' };
-  }, [getDeliveryTypeBadgeColor]);
+  // ENHANCED: Real-time tracking data fetch
+  const fetchTrackingData = useCallback(async (packageCodeOrId: string): Promise<TrackingData | null> => {
+    try {
+      console.log('📍 Fetching real-time tracking data for:', packageCodeOrId);
+      
+      const response = await api.get(`/api/v1/packages/${packageCodeOrId}/tracking`, {
+        timeout: 10000,
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        }
+      });
 
-  // Get status description based on package type
-  const getStatusDescription = useCallback((state: string, deliveryType: string): string => {
-    switch (state) {
-      case 'pending_unpaid':
-        return deliveryType === 'collection' ? 
-          'Collection request created - awaiting payment' :
-          'Package created - awaiting payment';
+      if (response.data && response.data.success) {
+        const data = response.data.data;
+        
+        // Transform tracking events into timeline format
+        const timelineEvents: TimelineEvent[] = (data.tracking_events || []).map((event: any, index: number) => ({
+          id: event.id || `event-${index}`,
+          status: event.event_type || event.status || 'unknown',
+          timestamp: event.created_at || event.timestamp || new Date().toISOString(),
+          description: event.description || event.event_description || 'Status update',
+          active: true,
+          icon: getEventIcon(event.event_type || event.status),
+          details: event.details || event.metadata?.details,
+          location: event.location || event.metadata?.location,
+          agent_name: event.agent_name || event.metadata?.agent_name,
+          rider_name: event.rider_name || event.metadata?.rider_name,
+          estimated_time: event.estimated_time || event.metadata?.estimated_delivery,
+          is_current: event.is_current || false
+        }));
+
+        // Sort timeline by timestamp
+        timelineEvents.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+
+        const trackingData: TrackingData = {
+          current_status: data.current_status || 'unknown',
+          current_location: data.current_location,
+          estimated_delivery: data.estimated_delivery,
+          last_updated: data.last_updated || new Date().toISOString(),
+          delivery_attempts: data.delivery_attempts || 0,
+          special_instructions: data.special_instructions,
+          timeline: timelineEvents,
+          real_time_updates: data.real_time_updates !== false
+        };
+
+        console.log('✅ Real-time tracking data loaded:', {
+          status: trackingData.current_status,
+          location: trackingData.current_location,
+          timelineEvents: timelineEvents.length,
+          realTime: trackingData.real_time_updates
+        });
+
+        return trackingData;
+      }
       
-      case 'pending':
-        return deliveryType === 'collection' ? 
-          'Collection request paid - awaiting scheduling' :
-          'Package paid - awaiting pickup scheduling';
-      
-      case 'submitted':
-        return deliveryType === 'collection' ? 
-          'Collection scheduled - rider will visit shop' :
-          deliveryType === 'fragile' ?
-            'Fragile package submitted - special handling assigned' :
-            'Package submitted and ready for pickup';
-      
-      case 'collection_scheduled':
-        return 'Collection appointment scheduled with shop';
-      
-      case 'collection_in_progress':
-        return 'Rider is currently collecting items from shop';
-      
-      case 'collection_completed':
-        return 'Items collected successfully - now in transit';
-      
-      case 'in_transit':
-        return deliveryType === 'fragile' ? 
-          'Fragile package in transit - handled with special care' :
-          'Package is being transported to destination';
-      
-      case 'out_for_delivery':
-        return deliveryType === 'fragile' ? 
-          'Fragile package out for delivery - rider will handle with care' :
-          'Package is out for delivery to final destination';
-      
-      case 'delivered':
-        return deliveryType === 'doorstep' ? 
-          'Package delivered to your home' :
-          'Package delivered to destination area';
-      
-      case 'collected':
-        return deliveryType === 'office' || deliveryType === 'agent' ? 
-          'Package collected from our office' :
-          'Package collected by recipient';
-      
-      case 'rejected':
-        return 'Package delivery was rejected or failed';
-      
-      case 'returned':
-        return 'Package returned to sender';
-      
-      default:
-        return state.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+      return null;
+    } catch (error: any) {
+      console.error('❌ Failed to fetch tracking data:', error);
+      return null;
     }
   }, []);
 
-  // Create enhanced timeline from package data
-  const createTimelineFromPackage = useCallback((pkg: Package): TimelineEvent[] => {
-    const events: TimelineEvent[] = [
-      {
-        status: 'created',
-        timestamp: pkg.created_at,
-        description: pkg.delivery_type === 'collection' ? 
-          'Collection request created' : 
-          'Package created and details submitted',
-        active: true,
-        icon: 'plus-circle',
-        details: pkg.delivery_type === 'collection' ? 
-          `Items to collect: ${pkg.items_to_collect || 'Various items'}` :
-          `From: ${pkg.sender_name}`
-      }
-    ];
-
-    // Add payment event if not pending unpaid
-    if (pkg.state !== 'pending_unpaid') {
-      events.push({
-        status: 'paid',
-        timestamp: pkg.updated_at,
-        description: pkg.delivery_type === 'collection' ?
-          'Collection fee paid successfully' :
-          'Payment processed successfully',
-        active: true,
-        icon: 'credit-card',
-        details: `Amount: KES ${pkg.cost?.toLocaleString() || '0'}`
-      });
+  // Get icon for timeline events
+  const getEventIcon = useCallback((eventType: string): string => {
+    switch (eventType) {
+      case 'created': return 'plus-circle';
+      case 'payment_received': return 'credit-card';
+      case 'submitted_for_delivery': return 'upload';
+      case 'printed_by_agent': return 'printer';
+      case 'collected_by_rider': return 'user-check';
+      case 'in_transit': return 'truck';
+      case 'out_for_delivery': return 'navigation';
+      case 'delivered_by_rider': return 'package';
+      case 'confirmed_by_receiver': return 'check-circle';
+      case 'collection_scheduled': return 'calendar';
+      case 'collection_in_progress': return 'shopping-cart';
+      case 'collection_completed': return 'check-square';
+      case 'rejected': return 'x-circle';
+      case 'returned': return 'rotate-ccw';
+      default: return 'info';
     }
+  }, []);
 
-    // Add collection-specific events
-    if (pkg.delivery_type === 'collection') {
-      if (['collection_scheduled', 'collection_in_progress', 'collection_completed', 'in_transit', 'delivered', 'collected'].includes(pkg.state)) {
-        events.push({
-          status: 'collection_scheduled',
-          timestamp: pkg.collection_scheduled_at || pkg.updated_at,
-          description: 'Collection appointment scheduled',
-          active: true,
-          icon: 'calendar',
-          details: pkg.shop_name ? `Shop: ${pkg.shop_name}` : 'Collection location confirmed'
-        });
-      }
-
-      if (['collection_in_progress', 'collection_completed', 'in_transit', 'delivered', 'collected'].includes(pkg.state)) {
-        events.push({
-          status: 'collection_in_progress',
-          timestamp: pkg.updated_at,
-          description: 'Rider collecting items from shop',
-          active: pkg.state !== 'collection_in_progress',
-          icon: 'user-check',
-          details: 'Items being collected as requested'
-        });
-      }
-
-      if (['collection_completed', 'in_transit', 'delivered', 'collected'].includes(pkg.state)) {
-        events.push({
-          status: 'collection_completed',
-          timestamp: pkg.updated_at,
-          description: 'Collection completed successfully',
-          active: pkg.state !== 'collection_completed',
-          icon: 'check-circle',
-          details: 'All items collected and verified'
-        });
-      }
-    }
-
-    // Add fragile-specific handling events
-    if (pkg.delivery_type === 'fragile') {
-      events.push({
-        status: 'special_handling',
-        timestamp: pkg.updated_at,
-        description: 'Special handling procedures applied',
-        active: true,
-        icon: 'shield',
-        details: 'Package marked for careful handling'
-      });
-    }
-
-    // Add current state if different and not already covered
-    const coveredStates = ['created', 'paid', 'collection_scheduled', 'collection_in_progress', 'collection_completed'];
-    if (!coveredStates.includes(pkg.state)) {
-      events.push({
-        status: pkg.state,
-        timestamp: pkg.updated_at,
-        description: getStatusDescription(pkg.state, pkg.delivery_type),
-        active: true,
-        icon: pkg.state === 'delivered' ? 'check-circle' : 
-              pkg.state === 'in_transit' ? 'truck' :
-              pkg.state === 'rejected' ? 'x-circle' : 'info'
-      });
-    }
-
-    return events.sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  }, [getStatusDescription]);
-
-  // Load package data
+  // ENHANCED: Load package data with real-time tracking
   const loadPackageData = useCallback(async () => {
     if (!packageCode) {
       setError('Package code is required');
@@ -291,13 +233,10 @@ export default function PackageTracking() {
       setIsLoading(true);
       setError(null);
 
-      console.log('📦 Loading package data for code:', packageCode);
-      console.log('📦 Package ID:', packageId);
-      console.log('📦 From page:', params.from);
+      console.log('📦 Loading enhanced package data for code:', packageCode);
       
-      // Try to use packageId first if available, then fallback to packageCode
+      // Load package details
       let packageData;
-      
       if (packageId) {
         console.log('📦 Attempting to load by ID:', packageId);
         try {
@@ -311,64 +250,178 @@ export default function PackageTracking() {
         packageData = await getPackageDetails(packageCode);
       }
       
-      if (packageData) {
-        console.log('✅ Package data loaded:', packageData.code || packageData.id);
-        console.log('📦 Package state:', packageData.state);
-        console.log('📦 Package type:', packageData.delivery_type);
+      if (!packageData) {
+        throw new Error('Package not found');
+      }
+
+      console.log('✅ Package data loaded:', packageData.code || packageData.id);
+      setPackage(packageData);
+      
+      // Load real-time tracking data
+      const tracking = await fetchTrackingData(packageCode);
+      if (tracking) {
+        setTrackingData(tracking);
+        setTimeline(tracking.timeline);
+        setLastUpdateTime(new Date(tracking.last_updated));
         
-        setPackage(packageData);
-        setTimeline(createTimelineFromPackage(packageData));
-        
-        // Load QR code
-        setIsLoadingQR(true);
-        try {
-          // Use package code for QR code endpoint (not package ID)
-          const qrResponse = await getPackageQRCode(packageCode);
-          if (qrResponse?.data) {
-            setQrData(qrResponse.data);
-            console.log('✅ QR code loaded for tracking');
-          }
-        } catch (qrError) {
-          console.warn('⚠️ Failed to load QR code, creating fallback:', qrError);
-          // Create fallback QR data
-          setQrData({
-            qr_code_base64: null,
-            tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
-            package_code: packageCode,
-            package_state: packageData.state,
-            route_description: packageData.route_description
-          });
-        } finally {
-          setIsLoadingQR(false);
+        // Start real-time updates if enabled
+        if (tracking.real_time_updates && ['in_transit', 'out_for_delivery', 'collection_in_progress'].includes(tracking.current_status)) {
+          startRealTimeUpdates();
         }
-        
       } else {
-        throw new Error('Package not found or invalid response');
+        // Fallback to basic timeline
+        setTimeline(createBasicTimelineFromPackage(packageData));
+      }
+      
+      // Load QR code
+      setIsLoadingQR(true);
+      try {
+        const qrResponse = await getPackageQRCode(packageCode);
+        if (qrResponse?.data) {
+          setQrData(qrResponse.data);
+          console.log('✅ QR code loaded for tracking');
+        }
+      } catch (qrError) {
+        console.warn('⚠️ Failed to load QR code, creating fallback:', qrError);
+        setQrData({
+          qr_code_base64: null,
+          tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+          package_code: packageCode,
+          package_state: packageData.state,
+          route_description: packageData.route_description
+        });
+      } finally {
+        setIsLoadingQR(false);
       }
       
     } catch (error: any) {
       console.error('❌ Failed to load package data:', error);
-      console.error('❌ Error details:', {
-        message: error.message,
-        code: error.code,
-        status: error.status,
-        response: error.response?.data
-      });
-      
-      const errorMessage = error.message || 'Failed to load package details';
-      setError(errorMessage);
+      setError(error.message || 'Failed to load package details');
       
       Toast.show({
-        type: 'errorToast',
+        type: 'error',
         text1: 'Failed to Load Package',
-        text2: errorMessage,
+        text2: error.message || 'Unable to load package details',
         position: 'top',
         visibilityTime: 3000,
       });
     } finally {
       setIsLoading(false);
     }
-  }, [packageCode, packageId, params.from, createTimelineFromPackage]);
+  }, [packageCode, packageId, fetchTrackingData]);
+
+  // Create basic timeline from package data (fallback)
+  const createBasicTimelineFromPackage = useCallback((pkg: Package): TimelineEvent[] => {
+    const events: TimelineEvent[] = [
+      {
+        id: 'created',
+        status: 'created',
+        timestamp: pkg.created_at,
+        description: pkg.delivery_type === 'collection' ? 
+          'Collection request created' : 
+          'Package created and details submitted',
+        active: true,
+        icon: 'plus-circle',
+        details: `Cost: KES ${pkg.cost?.toLocaleString() || '0'}`
+      }
+    ];
+
+    // Add current state if different
+    if (pkg.state !== 'pending_unpaid') {
+      events.push({
+        id: pkg.state,
+        status: pkg.state,
+        timestamp: pkg.updated_at,
+        description: getStatusDescription(pkg.state, pkg.delivery_type),
+        active: true,
+        icon: getEventIcon(pkg.state)
+      });
+    }
+
+    return events;
+  }, []);
+
+  // Get status description
+  const getStatusDescription = useCallback((state: string, deliveryType: string): string => {
+    switch (state) {
+      case 'pending_unpaid':
+        return deliveryType === 'collection' ? 
+          'Collection request created - awaiting payment' :
+          'Package created - awaiting payment';
+      case 'pending':
+        return 'Payment received - preparing for pickup';
+      case 'submitted':
+        return deliveryType === 'collection' ? 
+          'Collection scheduled' :
+          'Package submitted for delivery';
+      case 'in_transit':
+        return 'Package is being transported';
+      case 'out_for_delivery':
+        return 'Package is out for delivery';
+      case 'delivered':
+        return 'Package delivered successfully';
+      case 'collected':
+        return 'Package collected by recipient';
+      case 'rejected':
+        return 'Package delivery was rejected';
+      default:
+        return state.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
+    }
+  }, []);
+
+  // Start real-time updates
+  const startRealTimeUpdates = useCallback(() => {
+    console.log('🔄 Starting real-time updates...');
+    
+    // Pulse animation for real-time indicator
+    const pulseAnimation = () => {
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.2,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ]).start(() => pulseAnimation());
+    };
+    pulseAnimation();
+
+    // Update tracking data every 30 seconds
+    updateIntervalRef.current = setInterval(async () => {
+      try {
+        console.log('🔄 Fetching real-time update...');
+        const tracking = await fetchTrackingData(packageCode);
+        if (tracking) {
+          setTrackingData(tracking);
+          setTimeline(tracking.timeline);
+          setLastUpdateTime(new Date(tracking.last_updated));
+        }
+      } catch (error) {
+        console.error('❌ Real-time update failed:', error);
+      }
+    }, 30000); // 30 seconds
+
+  }, [fetchTrackingData, packageCode, pulseAnim]);
+
+  // Stop real-time updates
+  const stopRealTimeUpdates = useCallback(() => {
+    if (updateIntervalRef.current) {
+      clearInterval(updateIntervalRef.current);
+      updateIntervalRef.current = null;
+    }
+    pulseAnim.stopAnimation();
+  }, [pulseAnim]);
+
+  // Handle refresh
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    await loadPackageData();
+    setIsRefreshing(false);
+  }, [loadPackageData]);
 
   // Handle share tracking
   const handleShareTracking = useCallback(async () => {
@@ -394,7 +447,7 @@ export default function PackageTracking() {
     } catch (error) {
       console.error('Failed to open tracking URL:', error);
       Toast.show({
-        type: 'errorToast',
+        type: 'error',
         text1: 'Failed to Open Link',
         text2: 'Could not open tracking URL',
         position: 'top',
@@ -403,32 +456,55 @@ export default function PackageTracking() {
     }
   }, [qrData]);
 
-  // UPDATED: Navigation handlers using NavigationHelper
+  // ENHANCED: Navigation handlers using NavigationHelper
   const handleBack = useCallback(() => {
     console.log('🔙 Back button pressed');
     
+    // Stop real-time updates when leaving
+    stopRealTimeUpdates();
+    
     if (params.from) {
       console.log('🔙 Going to from parameter:', params.from);
-      NavigationHelper.replaceTo(params.from as string);
+      NavigationHelper.navigateTo(params.from as string);
     } else {
       console.log('🔙 Going to track listing (default)');
-      NavigationHelper.replaceTo('/(drawer)/track');
+      NavigationHelper.navigateTo('/(drawer)/track');
     }
-  }, [params]);
+  }, [params, stopRealTimeUpdates]);
+
+  // Handle report package
+  const handleReportPackage = useCallback(() => {
+    if (!package_) return;
+    
+    console.log('📋 Reporting package from tracking:', package_.code);
+    
+    // Stop real-time updates
+    stopRealTimeUpdates();
+    
+    // Navigate to support screen with package pre-filled
+    NavigationHelper.navigateTo('/(drawer)/support', {
+      params: { 
+        autoSelectPackage: 'true',
+        packageCode: package_.code,
+        packageId: package_.id.toString()
+      }
+    });
+  }, [package_, stopRealTimeUpdates]);
 
   // Load data when component mounts
   useEffect(() => {
     if (packageCode) {
-      loadPackageData().catch((error) => {
-        console.error('Failed to load package data in useEffect:', error);
-        setError(error.message || 'Failed to load package data');
-        setIsLoading(false);
-      });
+      loadPackageData();
     } else {
       setError('Package code is required');
       setIsLoading(false);
     }
-  }, [loadPackageData, packageCode]);
+
+    // Cleanup on unmount
+    return () => {
+      stopRealTimeUpdates();
+    };
+  }, [loadPackageData, packageCode, stopRealTimeUpdates]);
 
   // Format timestamp
   const formatTimestamp = useCallback((timestamp: string): string => {
@@ -445,136 +521,41 @@ export default function PackageTracking() {
     }
   }, []);
 
-  // Render collection-specific details
-  const renderCollectionDetails = useCallback(() => {
-    if (!package_ || package_.delivery_type !== 'collection') return null;
+  // Format time ago
+  const formatTimeAgo = useCallback((timestamp: string): string => {
+    try {
+      const now = new Date();
+      const time = new Date(timestamp);
+      const diffInMinutes = Math.floor((now.getTime() - time.getTime()) / (1000 * 60));
+      
+      if (diffInMinutes < 1) return 'Just now';
+      if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+      if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+      return `${Math.floor(diffInMinutes / 1440)}d ago`;
+    } catch {
+      return 'Unknown';
+    }
+  }, []);
 
-    return (
-      <View style={styles.specialDetailsCard}>
-        <LinearGradient
-          colors={['rgba(245, 158, 11, 0.1)', 'rgba(245, 158, 11, 0.05)']}
-          style={styles.specialDetailsGradient}
-        >
-          <View style={styles.specialDetailsHeader}>
-            <View style={styles.specialDetailsIcon}>
-              <Feather name="shopping-bag" size={20} color="#f59e0b" />
-            </View>
-            <Text style={styles.specialDetailsTitle}>Collection Details</Text>
-          </View>
-          
-          <View style={styles.specialDetailsContent}>
-            {package_.shop_name && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Shop/Store:</Text>
-                <Text style={styles.detailValue}>{package_.shop_name}</Text>
-              </View>
-            )}
-            
-            {package_.shop_contact && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Shop Contact:</Text>
-                <Text style={styles.detailValue}>{package_.shop_contact}</Text>
-              </View>
-            )}
-            
-            {package_.collection_address && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Collection Address:</Text>
-                <Text style={styles.detailValue}>{package_.collection_address}</Text>
-              </View>
-            )}
-            
-            {package_.items_to_collect && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Items to Collect:</Text>
-                <Text style={styles.detailValue}>{package_.items_to_collect}</Text>
-              </View>
-            )}
-            
-            {package_.item_value && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Item Value:</Text>
-                <Text style={[styles.detailValue, styles.valueText]}>
-                  KES {package_.item_value.toLocaleString()}
-                </Text>
-              </View>
-            )}
-            
-            {package_.special_instructions && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Special Instructions:</Text>
-                <Text style={styles.detailValue}>{package_.special_instructions}</Text>
-              </View>
-            )}
-          </View>
-        </LinearGradient>
-      </View>
-    );
-  }, [package_]);
-
-  // Render fragile-specific details
-  const renderFragileDetails = useCallback(() => {
-    if (!package_ || package_.delivery_type !== 'fragile') return null;
-
-    return (
-      <View style={styles.specialDetailsCard}>
-        <LinearGradient
-          colors={['rgba(239, 68, 68, 0.1)', 'rgba(239, 68, 68, 0.05)']}
-          style={styles.specialDetailsGradient}
-        >
-          <View style={styles.specialDetailsHeader}>
-            <View style={styles.specialDetailsIcon}>
-              <Feather name="shield-alert" size={20} color="#ef4444" />
-            </View>
-            <Text style={styles.specialDetailsTitle}>Fragile Item Handling</Text>
-          </View>
-          
-          <View style={styles.specialDetailsContent}>
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Special Care:</Text>
-              <Text style={styles.detailValue}>This package requires careful handling</Text>
-            </View>
-            
-            <View style={styles.detailRow}>
-              <Text style={styles.detailLabel}>Priority:</Text>
-              <Text style={[styles.detailValue, { color: '#ef4444' }]}>High Priority Delivery</Text>
-            </View>
-            
-            {package_.item_description && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Item Description:</Text>
-                <Text style={styles.detailValue}>{package_.item_description}</Text>
-              </View>
-            )}
-            
-            {package_.special_instructions && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Handling Instructions:</Text>
-                <Text style={styles.detailValue}>{package_.special_instructions}</Text>
-              </View>
-            )}
-          </View>
-        </LinearGradient>
-      </View>
-    );
-  }, [package_]);
-
-  // Render timeline item
+  // Render timeline item with enhanced styling
   const renderTimelineItem = useCallback(({ item, index }: { item: TimelineEvent; index: number }) => (
     <View style={styles.timelineItem}>
       <View style={styles.timelineIndicator}>
-        <View style={[
+        <Animated.View style={[
           styles.timelineDot,
-          { backgroundColor: item.active ? getStateBadgeColor(item.status) : '#444' }
+          { 
+            backgroundColor: item.active ? getStateBadgeColor(item.status) : '#444',
+            transform: item.is_current ? [{ scale: pulseAnim }] : [{ scale: 1 }]
+          }
         ]}>
           {item.icon && (
             <Feather 
               name={item.icon as any} 
-              size={8} 
+              size={item.is_current ? 10 : 8} 
               color={item.active ? '#fff' : '#888'} 
             />
           )}
-        </View>
+        </Animated.View>
         {index < timeline.length - 1 && (
           <View style={[
             styles.timelineLine,
@@ -587,7 +568,8 @@ export default function PackageTracking() {
         <View style={styles.timelineHeader}>
           <Text style={[
             styles.timelineDescription,
-            { color: item.active ? '#fff' : '#888' }
+            { color: item.active ? '#fff' : '#888' },
+            item.is_current && styles.currentTimelineDescription
           ]}>
             {item.description}
           </Text>
@@ -595,12 +577,38 @@ export default function PackageTracking() {
             {formatTimestamp(item.timestamp)}
           </Text>
         </View>
+        
         {item.details && (
           <Text style={styles.timelineDetails}>{item.details}</Text>
         )}
+        
+        {item.location && (
+          <View style={styles.timelineLocation}>
+            <Feather name="map-pin" size={12} color="#8b5cf6" />
+            <Text style={styles.timelineLocationText}>{item.location}</Text>
+          </View>
+        )}
+        
+        {(item.agent_name || item.rider_name) && (
+          <View style={styles.timelineAgent}>
+            <Feather name="user" size={12} color="#10b981" />
+            <Text style={styles.timelineAgentText}>
+              {item.agent_name || item.rider_name}
+            </Text>
+          </View>
+        )}
+        
+        {item.estimated_time && (
+          <View style={styles.timelineEstimate}>
+            <Feather name="clock" size={12} color="#f59e0b" />
+            <Text style={styles.timelineEstimateText}>
+              Est: {formatTimestamp(item.estimated_time)}
+            </Text>
+          </View>
+        )}
       </View>
     </View>
-  ), [timeline.length, formatTimestamp, getStateBadgeColor]);
+  ), [timeline.length, formatTimestamp, getStateBadgeColor, pulseAnim]);
 
   // Loading state
   if (isLoading) {
@@ -679,14 +687,87 @@ export default function PackageTracking() {
               <Text style={styles.headerSubtitle}>{package_.code}</Text>
             </View>
             
-            <TouchableOpacity style={styles.shareButton} onPress={handleShareTracking}>
-              <Feather name="share" size={20} color={colors.primary} />
-            </TouchableOpacity>
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerActionButton} onPress={handleReportPackage}>
+                <Feather name="flag" size={18} color="#f97316" />
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={styles.headerActionButton} onPress={handleShareTracking}>
+                <Feather name="share" size={18} color={colors.primary} />
+              </TouchableOpacity>
+            </View>
           </View>
+          
+          {/* Real-time status indicator */}
+          {trackingData?.real_time_updates && (
+            <View style={styles.realTimeIndicator}>
+              <Animated.View style={[styles.realTimeDot, { transform: [{ scale: pulseAnim }] }]} />
+              <Text style={styles.realTimeText}>
+                Live tracking • Updated {formatTimeAgo(lastUpdateTime.toISOString())}
+              </Text>
+            </View>
+          )}
         </LinearGradient>
       </View>
 
-      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView 
+        style={styles.content} 
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+          />
+        }
+      >
+        {/* Real-time Status Card */}
+        {trackingData && (
+          <View style={styles.statusCard}>
+            <LinearGradient
+              colors={['rgba(139, 92, 246, 0.15)', 'rgba(139, 92, 246, 0.05)']}
+              style={styles.statusGradient}
+            >
+              <View style={styles.statusHeader}>
+                <View style={styles.statusIcon}>
+                  <Feather name="activity" size={20} color="#8b5cf6" />
+                </View>
+                <Text style={styles.statusTitle}>Current Status</Text>
+              </View>
+              
+              <Text style={styles.statusDescription}>
+                {getStatusDescription(trackingData.current_status, package_.delivery_type)}
+              </Text>
+              
+              {trackingData.current_location && (
+                <View style={styles.statusLocation}>
+                  <Feather name="map-pin" size={14} color="#10b981" />
+                  <Text style={styles.statusLocationText}>{trackingData.current_location}</Text>
+                </View>
+              )}
+              
+              {trackingData.estimated_delivery && (
+                <View style={styles.statusEstimate}>
+                  <Feather name="clock" size={14} color="#f59e0b" />
+                  <Text style={styles.statusEstimateText}>
+                    Est. delivery: {formatTimestamp(trackingData.estimated_delivery)}
+                  </Text>
+                </View>
+              )}
+              
+              {trackingData.delivery_attempts > 0 && (
+                <View style={styles.statusAttempts}>
+                  <Feather name="repeat" size={14} color="#ef4444" />
+                  <Text style={styles.statusAttemptsText}>
+                    Delivery attempts: {trackingData.delivery_attempts}
+                  </Text>
+                </View>
+              )}
+            </LinearGradient>
+          </View>
+        )}
+
         {/* Package Summary Card */}
         <View style={styles.summaryCard}>
           <LinearGradient
@@ -703,8 +784,8 @@ export default function PackageTracking() {
                   <View style={[
                     styles.deliveryTypeBadge, 
                     { 
-                      backgroundColor: getDeliveryTypeBadgeStyle(package_.delivery_type).bg,
-                      borderColor: getDeliveryTypeBadgeStyle(package_.delivery_type).border
+                      backgroundColor: getDeliveryTypeBadgeColor(package_.delivery_type) + '30',
+                      borderColor: getDeliveryTypeBadgeColor(package_.delivery_type)
                     }
                   ]}>
                     <Feather 
@@ -757,13 +838,7 @@ export default function PackageTracking() {
           </LinearGradient>
         </View>
 
-        {/* Collection-specific details */}
-        {renderCollectionDetails()}
-
-        {/* Fragile-specific details */}
-        {renderFragileDetails()}
-
-        {/* Timeline Card */}
+        {/* Enhanced Timeline Card */}
         <View style={styles.timelineCard}>
           <LinearGradient
             colors={['rgba(26, 26, 46, 0.8)', 'rgba(22, 33, 62, 0.8)']}
@@ -772,11 +847,17 @@ export default function PackageTracking() {
             <View style={styles.timelineHeader}>
               <Feather name="clock" size={20} color={colors.primary} />
               <Text style={styles.timelineTitle}>Journey Timeline</Text>
+              {trackingData?.real_time_updates && (
+                <View style={styles.liveIndicator}>
+                  <View style={styles.liveDot} />
+                  <Text style={styles.liveText}>LIVE</Text>
+                </View>
+              )}
             </View>
             
             <View style={styles.timelineList}>
               {timeline.map((item, index) => (
-                <View key={`${item.status}-${index}`}>
+                <View key={item.id || `${item.status}-${index}`}>
                   {renderTimelineItem({ item, index })}
                 </View>
               ))}
@@ -866,7 +947,7 @@ const styles = StyleSheet.create({
     borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
   header: {
-    paddingBottom: 16,
+    paddingBottom: 12,
   },
   headerContent: {
     flexDirection: 'row',
@@ -897,14 +978,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 16,
   },
-  shareButton: {
+  headerActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginLeft: 16,
+  },
+  headerActionButton: {
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginLeft: 16,
+  },
+  
+  // Real-time indicator
+  realTimeIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+    paddingTop: 8,
+    gap: 8,
+  },
+  realTimeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
+  },
+  realTimeText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '500',
   },
   
   // Content
@@ -912,9 +1019,84 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
+  // Status card
+  statusCard: {
+    margin: 20,
+    borderRadius: 16,
+    overflow: 'hidden',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.2,
+    shadowRadius: 4,
+    elevation: 4,
+  },
+  statusGradient: {
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 12,
+  },
+  statusIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  statusDescription: {
+    fontSize: 14,
+    color: '#e5e7eb',
+    lineHeight: 20,
+    marginBottom: 12,
+  },
+  statusLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  statusLocationText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '500',
+  },
+  statusEstimate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  statusEstimateText: {
+    fontSize: 12,
+    color: '#f59e0b',
+    fontWeight: '500',
+  },
+  statusAttempts: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusAttemptsText: {
+    fontSize: 12,
+    color: '#ef4444',
+    fontWeight: '500',
+  },
+  
   // Summary card
   summaryCard: {
-    margin: 20,
+    marginHorizontal: 20,
+    marginBottom: 20,
     borderRadius: 16,
     overflow: 'hidden',
     shadowColor: '#000',
@@ -1008,63 +1190,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   
-  // Special details card
-  specialDetailsCard: {
-    marginHorizontal: 20,
-    marginBottom: 20,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.2,
-    shadowRadius: 4,
-    elevation: 4,
-  },
-  specialDetailsGradient: {
-    padding: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(245, 158, 11, 0.2)',
-  },
-  specialDetailsHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
-    gap: 12,
-  },
-  specialDetailsIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(245, 158, 11, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  specialDetailsTitle: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  specialDetailsContent: {
-    gap: 12,
-  },
-  detailRow: {
-    gap: 4,
-  },
-  detailLabel: {
-    fontSize: 12,
-    color: '#888',
-    fontWeight: '500',
-  },
-  detailValue: {
-    fontSize: 14,
-    color: '#fff',
-    lineHeight: 18,
-  },
-  valueText: {
-    color: '#10b981',
-    fontWeight: '600',
-  },
-  
   // Timeline card
   timelineCard: {
     marginHorizontal: 20,
@@ -1085,13 +1210,35 @@ const styles = StyleSheet.create({
   timelineHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    justifyContent: 'space-between',
     marginBottom: 20,
   },
   timelineTitle: {
     fontSize: 16,
     fontWeight: '600',
     color: '#fff',
+    flex: 1,
+    marginLeft: 8,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+  },
+  liveText: {
+    fontSize: 10,
+    color: '#10b981',
+    fontWeight: '600',
   },
   timelineList: {
     gap: 0,
@@ -1135,6 +1282,10 @@ const styles = StyleSheet.create({
     flex: 1,
     marginRight: 8,
   },
+  currentTimelineDescription: {
+    color: '#10b981',
+    fontWeight: '600',
+  },
   timelineTimestamp: {
     fontSize: 11,
     color: '#666',
@@ -1145,6 +1296,39 @@ const styles = StyleSheet.create({
     color: '#888',
     fontStyle: 'italic',
     marginTop: 2,
+  },
+  timelineLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineLocationText: {
+    fontSize: 12,
+    color: '#8b5cf6',
+    fontWeight: '500',
+  },
+  timelineAgent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineAgentText: {
+    fontSize: 12,
+    color: '#10b981',
+    fontWeight: '500',
+  },
+  timelineEstimate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineEstimateText: {
+    fontSize: 12,
+    color: '#f59e0b',
+    fontWeight: '500',
   },
   
   // QR Code card
