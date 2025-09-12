@@ -30,13 +30,8 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
-
-  // Modal state
   const [showTermsModal, setShowTermsModal] = useState(false);
-  const [selectedTermType, setSelectedTermType] = useState<
-    'terms_of_service' | 'privacy_policy'
-  >('terms_of_service');
-
+  const [selectedTermType, setSelectedTermType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service'); // 🔹 new state
   const [isLoading, setIsLoading] = useState(false);
 
   // Error states
@@ -88,8 +83,7 @@ export default function SignupScreen() {
         });
       }
     } catch (err: any) {
-      const msg =
-        err?.response?.data?.error || err?.message || 'Google signup failed';
+      const msg = err?.response?.data?.error || err?.message || 'Google signup failed';
       Toast.show({ type: 'error', text1: 'Google Signup Error', text2: msg });
     } finally {
       setIsLoading(false);
@@ -108,8 +102,6 @@ export default function SignupScreen() {
     };
 
     setErrors(newErrors);
-
-    // Check if any field has error
     return !Object.values(newErrors).includes(true);
   };
 
@@ -134,7 +126,7 @@ export default function SignupScreen() {
     }
 
     if (password !== confirmPassword) {
-      setErrors((prev) => ({ ...prev, confirmPassword: true }));
+      setErrors(prev => ({ ...prev, confirmPassword: true }));
       Toast.show({
         type: 'error',
         text1: 'Password Mismatch',
@@ -192,7 +184,7 @@ export default function SignupScreen() {
     }
   };
 
-  // Open Terms modal with specific type
+  // 🔹 updated showTerms to take type
   const showTerms = (type: 'terms_of_service' | 'privacy_policy') => {
     setSelectedTermType(type);
     setShowTermsModal(true);
@@ -200,7 +192,7 @@ export default function SignupScreen() {
 
   const handleFieldChange = (field: keyof typeof errors, value: string) => {
     if (errors[field] && value.trim()) {
-      setErrors((prev) => ({ ...prev, [field]: false }));
+      setErrors(prev => ({ ...prev, [field]: false }));
     }
   };
 
@@ -208,7 +200,7 @@ export default function SignupScreen() {
     const newValue = !acceptedTerms;
     setAcceptedTerms(newValue);
     if (errors.terms && newValue) {
-      setErrors((prev) => ({ ...prev, terms: false }));
+      setErrors(prev => ({ ...prev, terms: false }));
     }
   };
 
@@ -226,44 +218,34 @@ export default function SignupScreen() {
           <View style={styles.inner}>
             <Text style={styles.title}>Create Account</Text>
 
-            {/* Inputs... same as before */}
+            {/* ... all your inputs unchanged ... */}
 
             {/* Terms and Conditions Checkbox */}
-            <View
-              style={[
-                styles.termsContainer,
-                errors.terms && styles.termsContainerError,
-              ]}
-            >
+            <View style={[
+              styles.termsContainer,
+              errors.terms && styles.termsContainerError
+            ]}>
               <Checkbox
                 status={acceptedTerms ? 'checked' : 'unchecked'}
                 onPress={handleTermsChange}
                 color="#bd93f9"
-                uncheckedColor={errors.terms ? '#f87171' : '#666'}
+                uncheckedColor={errors.terms ? "#f87171" : "#666"}
               />
               <View style={styles.termsTextContainer}>
                 <View style={styles.termsTextRow}>
-                  <Text
-                    style={[styles.termsText, errors.terms && styles.termsTextError]}
-                  >
+                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
                     I agree to GLT&apos;s{' '}
                   </Text>
                   <TouchableOpacity onPress={() => showTerms('terms_of_service')}>
-                    <Text
-                      style={[styles.linkText, errors.terms && styles.linkTextError]}
-                    >
+                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
                       Terms of Service
                     </Text>
                   </TouchableOpacity>
-                  <Text
-                    style={[styles.termsText, errors.terms && styles.termsTextError]}
-                  >
+                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
                     {' '}and{' '}
                   </Text>
                   <TouchableOpacity onPress={() => showTerms('privacy_policy')}>
-                    <Text
-                      style={[styles.linkText, errors.terms && styles.linkTextError]}
-                    >
+                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
                       Privacy Policy
                     </Text>
                   </TouchableOpacity>
@@ -271,12 +253,12 @@ export default function SignupScreen() {
               </View>
             </View>
 
-            {/* Google + Signup buttons... same as before */}
+            {/* ... signup buttons unchanged ... */}
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
 
-      {/* Terms Modal */}
+      {/* Terms Modal now uses selectedTermType */}
       <TermsModal
         visible={showTermsModal}
         onClose={() => setShowTermsModal(false)}
@@ -290,12 +272,7 @@ const styles = StyleSheet.create({
   container: { flex: 1 },
   keyboardAvoid: { flex: 1 },
   scrollContent: { flexGrow: 1, paddingVertical: 20 },
-  inner: {
-    flex: 1,
-    paddingHorizontal: 24,
-    justifyContent: 'center',
-    minHeight: '100%',
-  },
+  inner: { flex: 1, paddingHorizontal: 24, justifyContent: 'center', minHeight: '100%' },
   title: {
     color: '#f8f8f2',
     fontSize: 30,
@@ -306,6 +283,24 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
+  input: { marginBottom: 14, backgroundColor: '#1e1e2f', borderRadius: 8 },
+  button: { backgroundColor: 'transparent', elevation: 0, shadowOpacity: 0 },
+  gradientBtn: { borderRadius: 25, overflow: 'hidden', marginTop: 10 },
+  disabledGradient: { opacity: 0.6 },
+  link: { marginTop: 18 },
+  googleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#20202a',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 25,
+    justifyContent: 'center',
+    gap: 8,
+    marginTop: 10,
+  },
+  disabledBtn: { opacity: 0.6 },
+  googleText: { color: '#fff', fontSize: 16, fontWeight: '600' },
   termsContainer: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -323,11 +318,6 @@ const styles = StyleSheet.create({
   termsTextRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap' },
   termsText: { color: '#ccc', fontSize: 14, lineHeight: 20 },
   termsTextError: { color: '#f87171' },
-  linkText: {
-    color: '#bd93f9',
-    textDecorationLine: 'underline',
-    fontSize: 14,
-    lineHeight: 20,
-  },
+  linkText: { color: '#bd93f9', textDecorationLine: 'underline', fontSize: 14, lineHeight: 20 },
   linkTextError: { color: '#f87171' },
 });
