@@ -1,4 +1,4 @@
-// AdminSidebar.tsx - Fixed with NavigationHelper integration
+// AdminSidebar.tsx - Updated with Terms Management integration
 import React, { useState } from 'react';
 import {
   View,
@@ -65,6 +65,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     { icon: 'search-outline', title: 'Package Search', id: 'search', route: '/admin/PackageSearchScreen' },
     { icon: 'scan-outline', title: 'Scanning', id: 'scanning', route: '/admin/ScanningScreen' },
     { icon: 'person-outline', title: 'Account', id: 'account', route: '/admin/account' },
+    { icon: 'document-text-outline', title: 'Terms Management', id: 'terms-management', route: '/admin/TermsManagementScreen' },
     { icon: 'home-outline', title: 'Admin Home', id: 'admin-home', route: '/admin' },
     { icon: 'settings-outline', title: 'Admin Settings', id: 'admin-settings', route: '/admin/settings' },
   ];
