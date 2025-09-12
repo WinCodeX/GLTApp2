@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - Fixed with correct notification API endpoint
+// components/GLTHeader.tsx - Fixed with proper error handling and fallbacks
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
@@ -240,6 +240,8 @@ export default function GLTHeader({
       });
     } catch (error) {
       console.error('Navigation to notifications failed:', error);
+      // Fallback to router navigation
+      router.push('/(drawer)/notifications');
     }
   };
 
@@ -361,28 +363,75 @@ export default function GLTHeader({
     };
   }, []);
 
-  // FIXED: Fetch notification count using the correct API endpoint
+  // FIXED: Robust notification count fetching with multiple fallbacks
   const fetchNotificationCount = async () => {
     try {
-      console.log('🔔 Fetching notification count from correct endpoint...');
-      const response = await api.get('/api/v1/notifications/unread_count');
+      console.log('🔔 Fetching notification count from API...');
       
-      console.log('🔔 Notification count response:', response.data);
-      
-      if (response.data.success) {
-        const count = response.data.count || response.data.unread_count || 0;
-        setNotificationCount(count);
-        console.log('🔔 Notification count updated:', count);
-      } else {
-        console.warn('🔔 Notification count request unsuccessful:', response.data);
+      // Method 1: Try the dedicated unread_count endpoint
+      try {
+        const response = await api.get('/api/v1/notifications/unread_count', {
+          timeout: 8000
+        });
+        console.log('🔔 Unread count endpoint response:', response.data);
+        
+        if (response.data && response.data.success) {
+          const count = response.data.unread_count || response.data.count || 0;
+          setNotificationCount(count);
+          console.log('🔔 Notification count updated from unread_count endpoint:', count);
+          return;
+        }
+      } catch (unreadCountError) {
+        console.log('🔔 Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
       }
+      
+      // Method 2: Fallback to notifications index endpoint with minimal data
+      try {
+        const response = await api.get('/api/v1/notifications', {
+          params: {
+            per_page: 1,
+            page: 1,
+            unread_only: 'true'
+          },
+          timeout: 8000
+        });
+        
+        console.log('🔔 Notifications index response:', response.data);
+        
+        if (response.data && response.data.success) {
+          const count = response.data.unread_count || response.data.pagination?.total_count || 0;
+          setNotificationCount(count);
+          console.log('🔔 Notification count updated from index endpoint:', count);
+          return;
+        }
+      } catch (indexError) {
+        console.log('🔔 Index endpoint also failed:', indexError.response?.status);
+      }
+      
+      // Method 3: Final fallback - just get all notifications and count unread manually
+      try {
+        const response = await api.get('/api/v1/notifications', {
+          params: {
+            per_page: 50, // Get enough to count unread
+            page: 1
+          },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.success && response.data.data) {
+          const unreadCount = response.data.data.filter((notification: any) => !notification.read).length;
+          setNotificationCount(unreadCount);
+          console.log('🔔 Notification count updated from manual count:', unreadCount);
+          return;
+        }
+      } catch (manualCountError) {
+        console.log('🔔 Manual count also failed:', manualCountError.response?.status);
+      }
+      
+      console.warn('🔔 All notification count methods failed, keeping previous count');
+      
     } catch (error) {
-      console.error('🔔 Failed to fetch notification count:', error);
-      // Check if error provides any insight into the correct endpoint
-      if (error.response) {
-        console.error('🔔 Response status:', error.response.status);
-        console.error('🔔 Response data:', error.response.data);
-      }
+      console.error('🔔 Unexpected error in fetchNotificationCount:', error);
     }
   };
 
