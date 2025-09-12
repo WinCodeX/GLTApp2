@@ -4,7 +4,6 @@ import {
   Text,
   View,
   TouchableOpacity,
-  Alert,
   ScrollView,
   KeyboardAvoidingView,
   Platform,
@@ -32,8 +31,18 @@ export default function SignupScreen() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [showTermsModal, setShowTermsModal] = useState(false);
-  const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service');
   const [isLoading, setIsLoading] = useState(false);
+
+  // Error states
+  const [errors, setErrors] = useState({
+    email: false,
+    phone: false,
+    firstName: false,
+    lastName: false,
+    password: false,
+    confirmPassword: false,
+    terms: false,
+  });
 
   const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
     try {
@@ -80,14 +89,52 @@ export default function SignupScreen() {
     }
   });
 
+  const validateFields = () => {
+    const newErrors = {
+      email: !email.trim(),
+      phone: !phone.trim(),
+      firstName: !firstName.trim(),
+      lastName: !lastName.trim(),
+      password: !password.trim(),
+      confirmPassword: !confirmPassword.trim(),
+      terms: !acceptedTerms,
+    };
+
+    setErrors(newErrors);
+
+    // Check if any field has error
+    return !Object.values(newErrors).includes(true);
+  };
+
   const handleSignup = async () => {
-    if (password !== confirmPassword) {
-      Alert.alert('Password mismatch', 'Please confirm your password.');
+    // Clear previous errors
+    setErrors({
+      email: false,
+      phone: false,
+      firstName: false,
+      lastName: false,
+      password: false,
+      confirmPassword: false,
+      terms: false,
+    });
+
+    // Validate all fields
+    if (!validateFields()) {
+      Toast.show({
+        type: 'error',
+        text1: 'Validation Error',
+        text2: 'Please fill in all required fields and accept the terms',
+      });
       return;
     }
 
-    if (!acceptedTerms) {
-      Alert.alert('Terms Required', 'Please accept the Terms of Service and Privacy Policy to continue.');
+    if (password !== confirmPassword) {
+      setErrors(prev => ({ ...prev, confirmPassword: true }));
+      Toast.show({
+        type: 'error',
+        text1: 'Password Mismatch',
+        text2: 'Please ensure both passwords match',
+      });
       return;
     }
 
@@ -95,10 +142,10 @@ export default function SignupScreen() {
       setIsLoading(true);
       const response = await api.post('/api/v1/signup', {
         user: {
-          email,
-          phone_number: phone,
-          first_name: firstName,
-          last_name: lastName,
+          email: email.trim(),
+          phone_number: phone.trim(),
+          first_name: firstName.trim(),
+          last_name: lastName.trim(),
           password,
           password_confirmation: confirmPassword,
         },
@@ -140,9 +187,24 @@ export default function SignupScreen() {
     }
   };
 
-  const showTerms = (type: 'terms_of_service' | 'privacy_policy') => {
-    setTermsModalType(type);
+  const showTerms = () => {
     setShowTermsModal(true);
+  };
+
+  const handleFieldChange = (field: keyof typeof errors, value: string) => {
+    // Clear error when user starts typing
+    if (errors[field] && value.trim()) {
+      setErrors(prev => ({ ...prev, [field]: false }));
+    }
+  };
+
+  const handleTermsChange = () => {
+    const newValue = !acceptedTerms;
+    setAcceptedTerms(newValue);
+    // Clear error when user accepts terms
+    if (errors.terms && newValue) {
+      setErrors(prev => ({ ...prev, terms: false }));
+    }
   };
 
   return (
@@ -162,65 +224,85 @@ export default function SignupScreen() {
             <TextInput
               label="Email"
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(value) => {
+                setEmail(value);
+                handleFieldChange('email', value);
+              }}
               keyboardType="email-address"
               autoCapitalize="none"
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.email ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.email ? "#f87171" : "#bd93f9"}
+              error={errors.email}
             />
 
             <TextInput
               label="Phone"
               value={phone}
-              onChangeText={setPhone}
+              onChangeText={(value) => {
+                setPhone(value);
+                handleFieldChange('phone', value);
+              }}
               keyboardType="phone-pad"
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.phone ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.phone ? "#f87171" : "#bd93f9"}
+              error={errors.phone}
             />
 
             <TextInput
               label="First Name"
               value={firstName}
-              onChangeText={setFirstName}
+              onChangeText={(value) => {
+                setFirstName(value);
+                handleFieldChange('firstName', value);
+              }}
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.firstName ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.firstName ? "#f87171" : "#bd93f9"}
+              error={errors.firstName}
             />
 
             <TextInput
               label="Last Name"
               value={lastName}
-              onChangeText={setLastName}
+              onChangeText={(value) => {
+                setLastName(value);
+                handleFieldChange('lastName', value);
+              }}
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.lastName ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.lastName ? "#f87171" : "#bd93f9"}
+              error={errors.lastName}
             />
 
             <TextInput
               label="Password"
               value={password}
-              onChangeText={setPassword}
+              onChangeText={(value) => {
+                setPassword(value);
+                handleFieldChange('password', value);
+              }}
               secureTextEntry={!showPassword}
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.password ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.password ? "#f87171" : "#bd93f9"}
+              error={errors.password}
               right={
                 <TextInput.Icon
                   icon={showPassword ? 'eye-off' : 'eye'}
@@ -234,14 +316,18 @@ export default function SignupScreen() {
             <TextInput
               label="Confirm Password"
               value={confirmPassword}
-              onChangeText={setConfirmPassword}
+              onChangeText={(value) => {
+                setConfirmPassword(value);
+                handleFieldChange('confirmPassword', value);
+              }}
               secureTextEntry={!showConfirm}
               mode="outlined"
               style={styles.input}
               textColor="#f8f8f2"
               placeholderTextColor="#ccc"
-              outlineColor="#44475a"
-              activeOutlineColor="#bd93f9"
+              outlineColor={errors.confirmPassword ? "#f87171" : "#44475a"}
+              activeOutlineColor={errors.confirmPassword ? "#f87171" : "#bd93f9"}
+              error={errors.confirmPassword}
               right={
                 <TextInput.Icon
                   icon={showConfirm ? 'eye-off' : 'eye'}
@@ -253,29 +339,30 @@ export default function SignupScreen() {
             />
 
             {/* Terms and Conditions Checkbox */}
-            <View style={styles.termsContainer}>
+            <View style={[
+              styles.termsContainer, 
+              errors.terms && styles.termsContainerError
+            ]}>
               <Checkbox
                 status={acceptedTerms ? 'checked' : 'unchecked'}
-                onPress={() => setAcceptedTerms(!acceptedTerms)}
+                onPress={handleTermsChange}
                 color="#bd93f9"
-                uncheckedColor="#666"
+                uncheckedColor={errors.terms ? "#f87171" : "#666"}
               />
               <View style={styles.termsTextContainer}>
-                <Text style={styles.termsText}>
+                <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
                   I agree to the{' '}
-                  <TouchableOpacity onPress={() => showTerms('terms_of_service')}>
-                    <Text style={styles.linkText}>Terms of Service</Text>
-                  </TouchableOpacity>
-                  {' '}and{' '}
-                  <TouchableOpacity onPress={() => showTerms('privacy_policy')}>
-                    <Text style={styles.linkText}>Privacy Policy</Text>
-                  </TouchableOpacity>
                 </Text>
+                <TouchableOpacity onPress={showTerms}>
+                  <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
+                    Terms of Service
+                  </Text>
+                </TouchableOpacity>
               </View>
             </View>
 
             <TouchableOpacity
-              style={styles.googleBtn}
+              style={[styles.googleBtn, isLoading && styles.disabledBtn]}
               onPress={() => promptAsync()}
               disabled={!request || isLoading}
             >
@@ -285,7 +372,7 @@ export default function SignupScreen() {
 
             <LinearGradient
               colors={['#7c3aed', '#3b82f6', '#10b981']}
-              style={styles.gradientBtn}
+              style={[styles.gradientBtn, isLoading && styles.disabledGradient]}
             >
               <Button
                 mode="contained"
@@ -315,7 +402,7 @@ export default function SignupScreen() {
       <TermsModal
         visible={showTermsModal}
         onClose={() => setShowTermsModal(false)}
-        termType={termsModalType}
+        termType="terms_of_service"
       />
     </LinearGradient>
   );
@@ -363,6 +450,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginTop: 10,
   },
+  disabledGradient: {
+    opacity: 0.6,
+  },
   link: {
     marginTop: 18,
   },
@@ -377,6 +467,9 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 10,
   },
+  disabledBtn: {
+    opacity: 0.6,
+  },
   googleText: {
     color: '#fff',
     fontSize: 16,
@@ -387,19 +480,37 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 20,
     paddingHorizontal: 4,
+    paddingVertical: 8,
+    borderRadius: 8,
+  },
+  termsContainerError: {
+    backgroundColor: 'rgba(248, 113, 113, 0.1)',
+    borderWidth: 1,
+    borderColor: '#f87171',
   },
   termsTextContainer: {
     flex: 1,
     marginLeft: 8,
     marginTop: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    alignItems: 'center',
   },
   termsText: {
     color: '#ccc',
     fontSize: 14,
     lineHeight: 20,
   },
+  termsTextError: {
+    color: '#f87171',
+  },
   linkText: {
     color: '#bd93f9',
     textDecorationLine: 'underline',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  linkTextError: {
+    color: '#f87171',
   },
 });
