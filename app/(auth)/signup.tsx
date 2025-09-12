@@ -187,9 +187,8 @@ export default function SignupScreen() {
     }    
   };    
     
-  const showTerms = () => {    
-    setShowTermsModal(true);    
-  };    
+  const showTerms = (type: 'terms_of_service' | 'privacy_policy') => {
+    setTermsModalType(type);
     
   const handleFieldChange = (field: keyof typeof errors, value: string) => {    
     // Clear error when user starts typing    
