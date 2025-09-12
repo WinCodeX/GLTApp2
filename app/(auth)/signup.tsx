@@ -411,7 +411,7 @@ export default function SignupScreen() {
       <TermsModal    
         visible={showTermsModal}    
         onClose={() => setShowTermsModal(false)}    
-        termType="terms_of_service"    
+        termType={termsModalType}    
       />    
     </LinearGradient>    
   );    
