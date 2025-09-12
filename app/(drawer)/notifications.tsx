@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Fixed notifications screen with proper error handling
+// app/(drawer)/notifications.tsx - Purple-themed notifications screen
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -73,13 +73,9 @@ export default function NotificationsScreen() {
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
 
-  // Safe gradient colors with fallback
+  // Purple gradient colors
   const getGradientColors = () => {
-    if (colors?.gradientBackground && Array.isArray(colors.gradientBackground)) {
-      return colors.gradientBackground;
-    }
-    // Fallback gradient colors
-    return ['#f3f4f6', '#e5e7eb'];
+    return ['#1a1b3d', '#2d1b4e', '#4c1d95'];
   };
 
   // Fetch notifications from API
@@ -246,7 +242,7 @@ export default function NotificationsScreen() {
 
   // Get notification color based on type and read status
   const getNotificationColor = (type: string, read: boolean) => {
-    if (read) return '#64748b'; // Gray for read notifications
+    if (read) return '#a78bfa'; // Light purple for read notifications
 
     switch (type) {
       case 'package_delivered':
@@ -256,9 +252,9 @@ export default function NotificationsScreen() {
       case 'final_warning':
         return '#f59e0b'; // Amber
       case 'payment_received':
-        return '#8b5cf6'; // Purple
+        return '#c084fc'; // Purple
       default:
-        return '#3b82f6'; // Blue
+        return '#8b5cf6'; // Purple
     }
   };
 
@@ -324,7 +320,7 @@ export default function NotificationsScreen() {
           <View
             style={[
               styles.iconBackground,
-              { backgroundColor: getNotificationColor(item.notification_type, item.read) + '20' }
+              { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
             ]}
           >
             <Feather
@@ -348,7 +344,7 @@ export default function NotificationsScreen() {
           {/* Package info if available */}
           {item.package && (
             <View style={styles.packageInfo}>
-              <Feather name="package" size={12} color="#64748b" />
+              <Feather name="package" size={12} color="#c4b5fd" />
               <Text style={styles.packageCode}>{item.package.code}</Text>
               <View style={styles.packageStateBadge}>
                 <Text style={styles.packageStateText}>{item.package.state_display}</Text>
@@ -381,7 +377,7 @@ export default function NotificationsScreen() {
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
-        <Feather name="bell-off" size={48} color="#64748b" />
+        <Feather name="bell-off" size={48} color="#a78bfa" />
       </View>
       <Text style={styles.emptyTitle}>
         {filter === 'unread' ? 'No Unread Notifications' : 'No Notifications'}
@@ -415,7 +411,7 @@ export default function NotificationsScreen() {
     
     return (
       <View style={styles.loadingFooter}>
-        <ActivityIndicator size="small" color={colors?.primary || '#3b82f6'} />
+        <ActivityIndicator size="small" color="#c084fc" />
         <Text style={styles.loadingText}>Loading more...</Text>
       </View>
     );
@@ -455,7 +451,7 @@ export default function NotificationsScreen() {
 
           {unreadCount > 0 && (
             <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
-              <Feather name="check-square" size={16} color={colors?.primary || '#3b82f6'} />
+              <Feather name="check-square" size={16} color="#c084fc" />
               <Text style={styles.markAllButtonText}>Mark All Read</Text>
             </TouchableOpacity>
           )}
@@ -464,7 +460,7 @@ export default function NotificationsScreen() {
         {/* Notifications List */}
         {loading && notifications.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors?.primary || '#3b82f6'} />
+            <ActivityIndicator size="large" color="#c084fc" />
             <Text style={styles.loadingText}>Loading notifications...</Text>
           </View>
         ) : error ? (
@@ -484,8 +480,8 @@ export default function NotificationsScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                colors={[colors?.primary || '#3b82f6']}
-                tintColor={colors?.primary || '#3b82f6'}
+                colors={['#c084fc']}
+                tintColor="#c084fc"
               />
             }
             onEndReached={handleLoadMore}
@@ -501,7 +497,7 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors?.background || '#f9fafb',
+    backgroundColor: '#1a1b3d',
   },
   gradient: {
     flex: 1,
@@ -512,13 +508,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
     paddingVertical: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.95)',
+    backgroundColor: 'rgba(138, 92, 246, 0.15)',
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(0, 0, 0, 0.1)',
+    borderBottomColor: 'rgba(168, 123, 250, 0.3)',
   },
   filterButtons: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    backgroundColor: 'rgba(138, 92, 246, 0.2)',
     borderRadius: 8,
     padding: 2,
   },
@@ -528,12 +524,12 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   activeFilterButton: {
-    backgroundColor: colors?.primary || '#3b82f6',
+    backgroundColor: '#8b5cf6',
   },
   filterButtonText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#64748b',
+    color: '#c4b5fd',
   },
   activeFilterButtonText: {
     color: 'white',
@@ -544,15 +540,15 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 6,
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    backgroundColor: 'rgba(192, 132, 252, 0.2)',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.2)',
+    borderColor: 'rgba(192, 132, 252, 0.4)',
   },
   markAllButtonText: {
     fontSize: 12,
     fontWeight: '500',
-    color: colors?.primary || '#3b82f6',
+    color: '#c084fc',
   },
   listContainer: {
     paddingHorizontal: 20,
@@ -570,7 +566,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#64748b',
+    color: '#c4b5fd',
   },
   loadingFooter: {
     flexDirection: 'row',
@@ -580,19 +576,17 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   notificationCard: {
-    backgroundColor: 'white',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
     borderRadius: 12,
     marginBottom: 12,
     overflow: 'hidden',
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.1,
-    shadowRadius: 3,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.2)',
   },
   unreadCard: {
     borderLeftWidth: 4,
-    borderLeftColor: colors?.primary || '#3b82f6',
+    borderLeftColor: '#c084fc',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
   },
   expiredCard: {
     opacity: 0.6,
@@ -619,7 +613,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors?.primary || '#3b82f6',
+    backgroundColor: '#c084fc',
   },
   contentContainer: {
     flex: 1,
@@ -627,20 +621,20 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#1f2937',
+    color: '#e5e7eb',
     marginBottom: 4,
   },
   unreadTitle: {
-    color: '#111827',
+    color: '#f3f4f6',
   },
   message: {
     fontSize: 14,
-    color: '#64748b',
+    color: '#c4b5fd',
     lineHeight: 20,
     marginBottom: 8,
   },
   unreadMessage: {
-    color: '#374151',
+    color: '#ddd6fe',
   },
   packageInfo: {
     flexDirection: 'row',
@@ -651,10 +645,10 @@ const styles = StyleSheet.create({
   packageCode: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#64748b',
+    color: '#c4b5fd',
   },
   packageStateBadge: {
-    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+    backgroundColor: 'rgba(192, 132, 252, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -662,7 +656,7 @@ const styles = StyleSheet.create({
   packageStateText: {
     fontSize: 10,
     fontWeight: '500',
-    color: colors?.primary || '#3b82f6',
+    color: '#c084fc',
   },
   metaContainer: {
     flexDirection: 'row',
@@ -671,10 +665,10 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 12,
-    color: '#9ca3af',
+    color: '#a78bfa',
   },
   priorityBadge: {
-    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    backgroundColor: 'rgba(239, 68, 68, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -685,7 +679,7 @@ const styles = StyleSheet.create({
     color: '#ef4444',
   },
   expiredBadge: {
-    backgroundColor: 'rgba(156, 163, 175, 0.2)',
+    backgroundColor: 'rgba(156, 163, 175, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -693,7 +687,7 @@ const styles = StyleSheet.create({
   expiredText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#6b7280',
+    color: '#9ca3af',
   },
   emptyContainer: {
     flex: 1,
@@ -705,7 +699,7 @@ const styles = StyleSheet.create({
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(0, 0, 0, 0.05)',
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -713,13 +707,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#374151',
+    color: '#e5e7eb',
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#64748b',
+    color: '#c4b5fd',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -727,7 +721,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: colors?.primary || '#3b82f6',
+    backgroundColor: '#8b5cf6',
     borderRadius: 8,
   },
   retryButtonText: {
