@@ -10,17 +10,40 @@ import {
   StatusBar,
   Alert,
   Linking,
+  ActivityIndicator,
 } from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Contacts from 'expo-contacts';
 import { Ionicons } from '@expo/vector-icons';
-import { checkRegisteredContacts, handleApiError } from '../../lib/api';
+import GLTHeader from '../../components/GLTHeader';
+import { NavigationHelper } from '../../lib/helpers/navigation';
+import api from '../../lib/api';
 
-const ContactsScreen = ({ navigation }) => {
-  const [contacts, setContacts] = useState([]);
-  const [filteredContacts, setFilteredContacts] = useState([]);
+interface Contact {
+  id: string;
+  name: string;
+  phoneNumbers: Array<{ number: string }>;
+  imageUri?: string;
+  primaryPhone: string;
+  section?: string;
+}
+
+interface SectionHeader {
+  type: 'header';
+  id: string;
+  title: string;
+  count: number;
+}
+
+type ListItem = Contact | SectionHeader;
+
+const ContactsScreen = () => {
+  const [contacts, setContacts] = useState<Contact[]>([]);
+  const [filteredContacts, setFilteredContacts] = useState<Contact[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [registeredNumbers, setRegisteredNumbers] = useState(new Set());
+  const [registeredNumbers, setRegisteredNumbers] = useState(new Set<string>());
   const [loading, setLoading] = useState(true);
+  const [checkingRegistered, setCheckingRegistered] = useState(false);
 
   useEffect(() => {
     loadContacts();
@@ -44,7 +67,7 @@ const ContactsScreen = ({ navigation }) => {
         });
 
         // Process contacts and remove duplicates
-        const processedContacts = data
+        const processedContacts: Contact[] = data
           .filter(contact => contact.phoneNumbers && contact.phoneNumbers.length > 0)
           .map(contact => ({
             id: contact.id,
@@ -52,7 +75,7 @@ const ContactsScreen = ({ navigation }) => {
             phoneNumbers: contact.phoneNumbers,
             imageUri: contact.imageUri,
             // Get the first phone number for primary display
-            primaryPhone: contact.phoneNumbers[0]?.number?.replace(/\s+/g, ''),
+            primaryPhone: contact.phoneNumbers[0]?.number?.replace(/\s+/g, '') || '',
           }))
           .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -72,10 +95,12 @@ const ContactsScreen = ({ navigation }) => {
     }
   };
 
-  const checkRegisteredContactsApi = async (contactList) => {
+  const checkRegisteredContactsApi = async (contactList: Contact[]) => {
     try {
+      setCheckingRegistered(true);
+      
       // Extract all phone numbers from contacts
-      const phoneNumbers = contactList.reduce((acc, contact) => {
+      const phoneNumbers = contactList.reduce<string[]>((acc, contact) => {
         contact.phoneNumbers.forEach(phone => {
           const cleanNumber = phone.number?.replace(/\D/g, ''); // Remove non-digits
           if (cleanNumber) acc.push(cleanNumber);
@@ -83,13 +108,23 @@ const ContactsScreen = ({ navigation }) => {
         return acc;
       }, []);
 
-      // Call your Rails backend using the imported API function
-      const data = await checkRegisteredContacts(phoneNumbers);
-      setRegisteredNumbers(new Set(data.registered_numbers || []));
+      console.log('Checking registered contacts for phone numbers:', phoneNumbers.length);
+
+      // Call your Rails backend
+      const response = await api.post('/api/v1/contacts/check_registered', {
+        phone_numbers: phoneNumbers
+      });
+
+      if (response.data && response.data.success) {
+        setRegisteredNumbers(new Set(response.data.registered_numbers || []));
+        console.log('Found registered numbers:', response.data.registered_numbers?.length || 0);
+      }
       
     } catch (error) {
-      const errorMessage = handleApiError(error, 'checking registered contacts');
-      Alert.alert('Error', errorMessage);
+      console.error('Error checking registered contacts:', error);
+      Alert.alert('Error', 'Failed to check registered contacts');
+    } finally {
+      setCheckingRegistered(false);
     }
   };
 
@@ -109,17 +144,17 @@ const ContactsScreen = ({ navigation }) => {
     setFilteredContacts(filtered);
   };
 
-  const isContactRegistered = (contact) => {
+  const isContactRegistered = (contact: Contact) => {
     return contact.phoneNumbers.some(phone => {
       const cleanNumber = phone.number?.replace(/\D/g, '');
-      return registeredNumbers.has(cleanNumber);
+      return cleanNumber && registeredNumbers.has(cleanNumber);
     });
   };
 
-  const handleContactPress = (contact) => {
+  const handleContactPress = (contact: Contact) => {
     if (isContactRegistered(contact)) {
       // Navigate to chat or user profile
-      navigation.navigate('Chat', { contact });
+      Alert.alert('GLT User', `${contact.name} is on GLT! Chat feature coming soon.`);
     } else {
       // Show invite options
       Alert.alert(
@@ -136,19 +171,20 @@ const ContactsScreen = ({ navigation }) => {
     }
   };
 
-  const inviteViaSMS = (phoneNumber) => {
-    const message = 'Hey! Join me on GLT - download it here: [YOUR_APP_STORE_LINK]';
+  const inviteViaSMS = (phoneNumber: string) => {
+    const message = 'Hey! Join me on GLT for package deliveries - download it here: [YOUR_APP_STORE_LINK]';
     const url = `sms:${phoneNumber}?body=${encodeURIComponent(message)}`;
     Linking.openURL(url);
   };
 
-  const renderContact = ({ item }) => {
+  const renderContact = ({ item }: { item: Contact }) => {
     const isRegistered = isContactRegistered(item);
     
     return (
       <TouchableOpacity
         style={styles.contactItem}
         onPress={() => handleContactPress(item)}
+        activeOpacity={0.7}
       >
         <View style={styles.avatarContainer}>
           {item.imageUri ? (
@@ -158,6 +194,11 @@ const ContactsScreen = ({ navigation }) => {
               <Text style={styles.avatarText}>
                 {item.name.charAt(0).toUpperCase()}
               </Text>
+            </View>
+          )}
+          {isRegistered && (
+            <View style={styles.registeredIndicator}>
+              <Ionicons name="checkmark-circle" size={16} color="#10b981" />
             </View>
           )}
         </View>
@@ -175,7 +216,7 @@ const ContactsScreen = ({ navigation }) => {
         <View style={styles.statusContainer}>
           {isRegistered ? (
             <View style={styles.registeredBadge}>
-              <Ionicons name="checkmark-circle" size={20} color="#7B2CBF" />
+              <Text style={styles.registeredBadgeText}>GLT</Text>
             </View>
           ) : (
             <TouchableOpacity 
@@ -190,87 +231,131 @@ const ContactsScreen = ({ navigation }) => {
     );
   };
 
-  const renderSectionHeaders = () => {
-    const registeredContacts = filteredContacts.filter(contact => isContactRegistered(contact));
-    const unregisteredContacts = filteredContacts.filter(contact => !isContactRegistered(contact));
-    
-    return {
-      registeredContacts,
-      unregisteredContacts
-    };
-  };
-
-  const renderSectionHeader = (title, count) => (
+  const renderSectionHeader = (title: string, count: number) => (
     <View style={styles.sectionHeaderContainer}>
       <Text style={styles.sectionTitle}>{title}</Text>
       <Text style={styles.sectionCount}>({count})</Text>
     </View>
   );
 
+  const renderItem = ({ item }: { item: ListItem }) => {
+    if ('type' in item && item.type === 'header') {
+      return renderSectionHeader(item.title, item.count);
+    }
+    return renderContact({ item: item as Contact });
+  };
+
+  const getListData = (): ListItem[] => {
+    const registeredContacts = filteredContacts.filter(contact => isContactRegistered(contact));
+    const unregisteredContacts = filteredContacts.filter(contact => !isContactRegistered(contact));
+    
+    const sections: ListItem[] = [];
+    
+    // Add registered contacts section
+    if (registeredContacts.length > 0) {
+      sections.push({
+        type: 'header',
+        id: 'registered-header',
+        title: 'Contacts on GLT',
+        count: registeredContacts.length
+      });
+      sections.push(...registeredContacts.map(contact => ({ ...contact, section: 'registered' })));
+    }
+    
+    // Add unregistered contacts section
+    if (unregisteredContacts.length > 0) {
+      sections.push({
+        type: 'header',
+        id: 'unregistered-header',
+        title: 'Invite to GLT',
+        count: unregisteredContacts.length
+      });
+      sections.push(...unregisteredContacts.map(contact => ({ ...contact, section: 'unregistered' })));
+    }
+    
+    return sections;
+  };
+
+  const renderEmptyState = () => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconContainer}>
+        <Ionicons name="people-outline" size={48} color="#a78bfa" />
+      </View>
+      <Text style={styles.emptyTitle}>No Contacts Found</Text>
+      <Text style={styles.emptySubtitle}>
+        {searchQuery ? 'Try adjusting your search.' : 'Grant contacts permission to see your contacts.'}
+      </Text>
+    </View>
+  );
+
   if (loading) {
     return (
-      <View style={[styles.container, styles.centered]}>
-        <Text style={styles.loadingText}>Loading contacts...</Text>
+      <View style={styles.container}>
+        <GLTHeader 
+          title="Contacts" 
+          showBackButton={true}
+          onBackPress={() => NavigationHelper.goBack()}
+        />
+        <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#c084fc" />
+            <Text style={styles.loadingText}>Loading contacts...</Text>
+          </View>
+        </LinearGradient>
       </View>
     );
   }
 
   return (
     <View style={styles.container}>
-      <StatusBar barStyle="light-content" backgroundColor="#7B2CBF" />
-      
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#9CA3AF" style={styles.searchIcon} />
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search contacts..."
-          placeholderTextColor="#9CA3AF"
-          value={searchQuery}
-          onChangeText={setSearchQuery}
-        />
-      </View>
-
-      {/* Contacts Sections */}
-      <FlatList
-        data={(() => {
-          const { registeredContacts, unregisteredContacts } = renderSectionHeaders();
-          const sections = [];
-          
-          // Add registered contacts section
-          if (registeredContacts.length > 0) {
-            sections.push({
-              type: 'header',
-              id: 'registered-header',
-              title: 'Contacts on GLT',
-              count: registeredContacts.length
-            });
-            sections.push(...registeredContacts.map(contact => ({ ...contact, section: 'registered' })));
-          }
-          
-          // Add unregistered contacts section
-          if (unregisteredContacts.length > 0) {
-            sections.push({
-              type: 'header',
-              id: 'unregistered-header',
-              title: 'Invite to GLT',
-              count: unregisteredContacts.length
-            });
-            sections.push(...unregisteredContacts.map(contact => ({ ...contact, section: 'unregistered' })));
-          }
-          
-          return sections;
-        })()}
-        renderItem={({ item }) => {
-          if (item.type === 'header') {
-            return renderSectionHeader(item.title, item.count);
-          }
-          return renderContact({ item });
-        }}
-        keyExtractor={(item) => item.type === 'header' ? item.id : item.id}
-        style={styles.contactsList}
-        showsVerticalScrollIndicator={false}
+      <GLTHeader 
+        title="Contacts" 
+        showBackButton={true}
+        onBackPress={() => NavigationHelper.goBack()}
       />
+      
+      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
+        {/* Search Bar */}
+        <View style={styles.searchContainer}>
+          <Ionicons name="search" size={20} color="#a78bfa" style={styles.searchIcon} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search contacts..."
+            placeholderTextColor="#a78bfa"
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+          />
+          {checkingRegistered && (
+            <ActivityIndicator size="small" color="#c084fc" style={styles.searchLoader} />
+          )}
+        </View>
+
+        {/* Contact Count Summary */}
+        <View style={styles.summaryContainer}>
+          <Text style={styles.summaryText}>
+            {filteredContacts.length} contacts
+            {registeredNumbers.size > 0 && (
+              <Text style={styles.summaryHighlight}>
+                {' • '}{Array.from(registeredNumbers).length} on GLT
+              </Text>
+            )}
+          </Text>
+        </View>
+
+        {/* Contacts List */}
+        <FlatList
+          data={getListData()}
+          renderItem={renderItem}
+          keyExtractor={(item) => 'type' in item ? item.id : item.id}
+          style={styles.contactsList}
+          contentContainerStyle={[
+            styles.listContainer,
+            getListData().length === 0 && styles.emptyListContainer
+          ]}
+          ListEmptyComponent={renderEmptyState}
+          showsVerticalScrollIndicator={false}
+        />
+      </LinearGradient>
     </View>
   );
 };
@@ -278,59 +363,85 @@ const ContactsScreen = ({ navigation }) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: '#1a1b3d',
   },
-  centered: {
+  gradient: {
+    flex: 1,
+  },
+  loadingContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 12,
   },
   loadingText: {
-    color: '#E5E7EB',
+    color: '#c4b5fd',
     fontSize: 16,
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#1F1F1F',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
     marginHorizontal: 16,
     marginTop: 8,
-    marginBottom: 16,
+    marginBottom: 8,
     borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderWidth: 1,
-    borderColor: '#374151',
+    borderColor: 'rgba(168, 123, 250, 0.3)',
   },
   searchIcon: {
     marginRight: 12,
   },
   searchInput: {
     flex: 1,
-    color: '#E5E7EB',
+    color: '#e5e7eb',
     fontSize: 16,
+  },
+  searchLoader: {
+    marginLeft: 12,
+  },
+  summaryContainer: {
+    paddingHorizontal: 16,
+    paddingBottom: 12,
+  },
+  summaryText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+  },
+  summaryHighlight: {
+    color: '#c084fc',
+    fontWeight: '600',
   },
   sectionHeaderContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#1F1F1F',
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
     borderBottomWidth: 1,
-    borderBottomColor: '#374151',
+    borderBottomColor: 'rgba(168, 123, 250, 0.3)',
   },
   sectionTitle: {
-    color: '#7B2CBF',
+    color: '#c084fc',
     fontSize: 16,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
   sectionCount: {
-    color: '#9CA3AF',
+    color: '#a78bfa',
     fontSize: 14,
     marginLeft: 8,
   },
   contactsList: {
+    flex: 1,
+  },
+  listContainer: {
+    paddingBottom: 20,
+  },
+  emptyListContainer: {
     flex: 1,
   },
   contactItem: {
@@ -338,12 +449,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 14,
-    backgroundColor: '#0F0F0F',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
     borderBottomWidth: 1,
-    borderBottomColor: '#1F1F1F',
+    borderBottomColor: 'rgba(168, 123, 250, 0.2)',
   },
   avatarContainer: {
     marginRight: 16,
+    position: 'relative',
   },
   avatar: {
     width: 50,
@@ -351,32 +463,40 @@ const styles = StyleSheet.create({
     borderRadius: 25,
   },
   defaultAvatar: {
-    backgroundColor: '#374151',
+    backgroundColor: 'rgba(139, 92, 246, 0.3)',
     justifyContent: 'center',
     alignItems: 'center',
     borderWidth: 2,
-    borderColor: '#7B2CBF',
+    borderColor: '#8b5cf6',
   },
   avatarText: {
-    color: '#E5E7EB',
+    color: '#e5e7eb',
     fontSize: 20,
     fontWeight: 'bold',
+  },
+  registeredIndicator: {
+    position: 'absolute',
+    bottom: -2,
+    right: -2,
+    backgroundColor: '#1a1b3d',
+    borderRadius: 10,
+    padding: 2,
   },
   contactInfo: {
     flex: 1,
   },
   contactName: {
-    color: '#E5E7EB',
+    color: '#e5e7eb',
     fontSize: 16,
     fontWeight: '500',
   },
   contactPhone: {
-    color: '#9CA3AF',
+    color: '#c4b5fd',
     fontSize: 14,
     marginTop: 2,
   },
   inviteText: {
-    color: '#A855F7',
+    color: '#c084fc',
     fontSize: 12,
     marginTop: 2,
     fontWeight: '500',
@@ -386,24 +506,63 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   registeredBadge: {
-    padding: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(16, 185, 129, 0.3)',
+  },
+  registeredBadgeText: {
+    color: '#10b981',
+    fontSize: 10,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
   },
   inviteButton: {
-    backgroundColor: '#7B2CBF',
+    backgroundColor: '#8b5cf6',
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
-    shadowColor: '#7B2CBF',
+    shadowColor: '#8b5cf6',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.3,
     shadowRadius: 4,
     elevation: 4,
   },
   inviteButtonText: {
-    color: '#FFFFFF',
+    color: '#ffffff',
     fontSize: 12,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  emptyContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 40,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  emptyTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#e5e7eb',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  emptySubtitle: {
+    fontSize: 14,
+    color: '#c4b5fd',
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
 
