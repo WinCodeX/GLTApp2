@@ -1,4 +1,4 @@
-// Updated Login Screen to use AccountManager
+// Updated Login Screen to use AccountManager with darkened background
 import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -351,7 +351,7 @@ export default function LoginScreen() {
 
   return (
     <>
-      <LinearGradient colors={['#0a0a0f', '#1a1a2e']} style={styles.container}>
+      <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
         <View style={styles.inner}>
           <View style={styles.formContainer}>
             <View style={styles.titleContainer}>
@@ -531,8 +531,8 @@ const styles = StyleSheet.create({
   },
   input: {
     marginBottom: 16,
-    backgroundColor: 'rgba(30, 30, 47, 0.8)',
-    borderRadius: 12,
+    backgroundColor: '#1e1e2f',
+    borderRadius: 8,
   },
   button: {
     backgroundColor: 'transparent',
@@ -557,7 +557,7 @@ const styles = StyleSheet.create({
   googleBtn: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(32, 32, 42, 0.9)',
+    backgroundColor: '#20202a',
     paddingVertical: 14,
     paddingHorizontal: 24,
     borderRadius: 25,
