@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Complete Notifications Screen
+// app/(drawer)/notifications.tsx - Fixed notifications screen with proper error handling
 
 import React, { useState, useEffect, useCallback } from 'react';
 import {
@@ -73,6 +73,15 @@ export default function NotificationsScreen() {
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
 
+  // Safe gradient colors with fallback
+  const getGradientColors = () => {
+    if (colors?.gradientBackground && Array.isArray(colors.gradientBackground)) {
+      return colors.gradientBackground;
+    }
+    // Fallback gradient colors
+    return ['#f3f4f6', '#e5e7eb'];
+  };
+
   // Fetch notifications from API
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
@@ -103,17 +112,20 @@ export default function NotificationsScreen() {
 
       console.log('🔔 Notifications response:', response.data);
 
-      if (response.data.success) {
+      if (response.data && response.data.success) {
         const newNotifications = response.data.data || [];
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
         } else {
           // Append new notifications for pagination
-          setNotifications(prev => [...prev, ...newNotifications]);
+          setNotifications(prev => {
+            if (!Array.isArray(prev)) return newNotifications;
+            return [...prev, ...newNotifications];
+          });
         }
         
-        setPagination(response.data.pagination);
+        setPagination(response.data.pagination || null);
         setCurrentPage(page);
       } else {
         setError('Failed to load notifications');
@@ -135,15 +147,16 @@ export default function NotificationsScreen() {
       
       const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       
-      if (response.data.success) {
+      if (response.data && response.data.success) {
         // Update the notification in the local state
-        setNotifications(prev =>
-          prev.map(notification =>
+        setNotifications(prev => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map(notification =>
             notification.id === notificationId
               ? { ...notification, read: true }
               : notification
-          )
-        );
+          );
+        });
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
@@ -157,11 +170,12 @@ export default function NotificationsScreen() {
       
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
       
-      if (response.data.success) {
+      if (response.data && response.data.success) {
         // Update all notifications in the local state
-        setNotifications(prev =>
-          prev.map(notification => ({ ...notification, read: true }))
-        );
+        setNotifications(prev => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map(notification => ({ ...notification, read: true }));
+        });
         
         Alert.alert('Success', 'All notifications marked as read');
       }
@@ -401,13 +415,13 @@ export default function NotificationsScreen() {
     
     return (
       <View style={styles.loadingFooter}>
-        <ActivityIndicator size="small" color={colors.primary} />
+        <ActivityIndicator size="small" color={colors?.primary || '#3b82f6'} />
         <Text style={styles.loadingText}>Loading more...</Text>
       </View>
     );
   };
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0;
 
   return (
     <View style={styles.container}>
@@ -417,7 +431,7 @@ export default function NotificationsScreen() {
         onBackPress={() => NavigationHelper.goBack()}
       />
       
-      <LinearGradient colors={colors.gradientBackground} style={styles.gradient}>
+      <LinearGradient colors={getGradientColors()} style={styles.gradient}>
         {/* Filter and Actions Bar */}
         <View style={styles.filterContainer}>
           <View style={styles.filterButtons}>
@@ -441,7 +455,7 @@ export default function NotificationsScreen() {
 
           {unreadCount > 0 && (
             <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
-              <Feather name="check-square" size={16} color={colors.primary} />
+              <Feather name="check-square" size={16} color={colors?.primary || '#3b82f6'} />
               <Text style={styles.markAllButtonText}>Mark All Read</Text>
             </TouchableOpacity>
           )}
@@ -450,7 +464,7 @@ export default function NotificationsScreen() {
         {/* Notifications List */}
         {loading && notifications.length === 0 ? (
           <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color={colors.primary} />
+            <ActivityIndicator size="large" color={colors?.primary || '#3b82f6'} />
             <Text style={styles.loadingText}>Loading notifications...</Text>
           </View>
         ) : error ? (
@@ -470,8 +484,8 @@ export default function NotificationsScreen() {
               <RefreshControl
                 refreshing={refreshing}
                 onRefresh={handleRefresh}
-                colors={[colors.primary]}
-                tintColor={colors.primary}
+                colors={[colors?.primary || '#3b82f6']}
+                tintColor={colors?.primary || '#3b82f6'}
               />
             }
             onEndReached={handleLoadMore}
@@ -487,7 +501,7 @@ export default function NotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors?.background || '#f9fafb',
   },
   gradient: {
     flex: 1,
@@ -514,7 +528,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   activeFilterButton: {
-    backgroundColor: colors.primary,
+    backgroundColor: colors?.primary || '#3b82f6',
   },
   filterButtonText: {
     fontSize: 14,
@@ -538,7 +552,7 @@ const styles = StyleSheet.create({
   markAllButtonText: {
     fontSize: 12,
     fontWeight: '500',
-    color: colors.primary,
+    color: colors?.primary || '#3b82f6',
   },
   listContainer: {
     paddingHorizontal: 20,
@@ -578,7 +592,7 @@ const styles = StyleSheet.create({
   },
   unreadCard: {
     borderLeftWidth: 4,
-    borderLeftColor: colors.primary,
+    borderLeftColor: colors?.primary || '#3b82f6',
   },
   expiredCard: {
     opacity: 0.6,
@@ -605,7 +619,7 @@ const styles = StyleSheet.create({
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: colors.primary,
+    backgroundColor: colors?.primary || '#3b82f6',
   },
   contentContainer: {
     flex: 1,
@@ -648,7 +662,7 @@ const styles = StyleSheet.create({
   packageStateText: {
     fontSize: 10,
     fontWeight: '500',
-    color: colors.primary,
+    color: colors?.primary || '#3b82f6',
   },
   metaContainer: {
     flexDirection: 'row',
@@ -713,7 +727,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: colors.primary,
+    backgroundColor: colors?.primary || '#3b82f6',
     borderRadius: 8,
   },
   retryButtonText: {
