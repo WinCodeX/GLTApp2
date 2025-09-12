@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - Fixed with progress bar under header and popup modal
+// components/GLTHeader.tsx - Fixed with correct notification API endpoint
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
@@ -361,15 +361,28 @@ export default function GLTHeader({
     };
   }, []);
 
-  // Fetch notification count
+  // FIXED: Fetch notification count using the correct API endpoint
   const fetchNotificationCount = async () => {
     try {
+      console.log('🔔 Fetching notification count from correct endpoint...');
       const response = await api.get('/api/v1/notifications/unread_count');
+      
+      console.log('🔔 Notification count response:', response.data);
+      
       if (response.data.success) {
-        setNotificationCount(response.data.count || 0);
+        const count = response.data.count || response.data.unread_count || 0;
+        setNotificationCount(count);
+        console.log('🔔 Notification count updated:', count);
+      } else {
+        console.warn('🔔 Notification count request unsuccessful:', response.data);
       }
     } catch (error) {
-      console.error('Failed to fetch notification count:', error);
+      console.error('🔔 Failed to fetch notification count:', error);
+      // Check if error provides any insight into the correct endpoint
+      if (error.response) {
+        console.error('🔔 Response status:', error.response.status);
+        console.error('🔔 Response data:', error.response.data);
+      }
     }
   };
 
