@@ -5,18 +5,15 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.7.1';
+export const CHANGELOG_VERSION = '1.7.2';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Migrated to APK-based updates for better reliability',
-  'Enhanced update system with progress tracking',
-  'Improved file handling for large updates',
-  'Fixed update notification timing',
   'Better error handling and user feedback',
 'Added notifications',
 'Fixed going back in screens',
+'Terms and conditions update',
 ];
 
 type Props = {
