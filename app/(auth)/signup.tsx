@@ -339,29 +339,37 @@ export default function SignupScreen() {
             />
 
             {/* Terms and Conditions Checkbox */}
-            <View style={[
-              styles.termsContainer, 
-              errors.terms && styles.termsContainerError
-            ]}>
-              <Checkbox
-                status={acceptedTerms ? 'checked' : 'unchecked'}
-                onPress={handleTermsChange}
-                color="#bd93f9"
-                uncheckedColor={errors.terms ? "#f87171" : "#666"}
-              />
-              <View style={styles.termsTextContainer}>
-                <View style={styles.termsTextRow}>
-                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
-                    I agree to the{' '}
-                  </Text>
-                  <TouchableOpacity onPress={showTerms}>
-                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
-                      Terms of Service
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
+<View style={[
+  styles.termsContainer, 
+  errors.terms && styles.termsContainerError
+]}>
+  <Checkbox
+    status={acceptedTerms ? 'checked' : 'unchecked'}
+    onPress={handleTermsChange}
+    color="#bd93f9"
+    uncheckedColor={errors.terms ? "#f87171" : "#666"}
+  />
+  <View style={styles.termsTextContainer}>
+    <View style={styles.termsTextRow}>
+      <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
+        I agree to GLT&apos;s{' '}
+      </Text>
+      <TouchableOpacity onPress={showTerms}>
+        <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
+          Terms of Service
+        </Text>
+      </TouchableOpacity>
+      <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
+        {' '}and{' '}
+      </Text>
+      <TouchableOpacity onPress={showTerms}>
+        <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
+          Privacy Policy
+        </Text>
+      </TouchableOpacity>
+    </View>
+  </View>
+</View>
 
             <TouchableOpacity
               style={[styles.googleBtn, isLoading && styles.disabledBtn]}
