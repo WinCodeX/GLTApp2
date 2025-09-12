@@ -1,4 +1,4 @@
-// components/TermsModal.tsx
+// components/TermsModal.tsx - Simplified version with cleaner display
 import React, { useEffect, useState } from 'react';
 import {
   Modal,
@@ -8,7 +8,6 @@ import {
   ScrollView,
   TouchableOpacity,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import api from '../lib/api';
@@ -80,6 +79,81 @@ export default function TermsModal({
     fetchTerms();
   };
 
+  const formatContent = (content: string) => {
+    // Split content into lines and process each one
+    const lines = content.split('\n');
+    let formattedSections: JSX.Element[] = [];
+    let currentParagraph: string[] = [];
+    let key = 0;
+
+    const flushParagraph = () => {
+      if (currentParagraph.length > 0) {
+        const paragraphText = currentParagraph.join(' ').trim();
+        if (paragraphText) {
+          formattedSections.push(
+            <Text key={key++} style={styles.contentText}>
+              {paragraphText}
+            </Text>
+          );
+        }
+        currentParagraph = [];
+      }
+    };
+
+    lines.forEach(line => {
+      const trimmedLine = line.trim();
+      
+      if (!trimmedLine) {
+        // Empty line - flush current paragraph
+        flushParagraph();
+        return;
+      }
+
+      // Check if it's a main section header (just numbers like "1. INTRODUCTION")
+      if (/^\d+\.\s+[A-Z\s]+$/.test(trimmedLine)) {
+        flushParagraph();
+        formattedSections.push(
+          <Text key={key++} style={styles.sectionHeader}>
+            {trimmedLine}
+          </Text>
+        );
+        return;
+      }
+
+      // Check if it's a subsection header (like "4.1 Payment Requirements")
+      if (/^\d+\.\d+\s+/.test(trimmedLine)) {
+        flushParagraph();
+        formattedSections.push(
+          <Text key={key++} style={styles.subSectionHeader}>
+            {trimmedLine}
+          </Text>
+        );
+        return;
+      }
+
+      // Check if it's a bullet point
+      if (trimmedLine.startsWith('- ') || trimmedLine.startsWith('• ')) {
+        flushParagraph();
+        const bulletText = trimmedLine.substring(2);
+        formattedSections.push(
+          <View key={key++} style={styles.bulletContainer}>
+            <Text style={styles.bullet}>•</Text>
+            <Text style={styles.bulletText}>{bulletText}</Text>
+          </View>
+        );
+        return;
+      }
+
+      // Regular content line - add to current paragraph
+      currentParagraph.push(trimmedLine);
+    });
+
+    // Flush any remaining paragraph
+    flushParagraph();
+
+    return formattedSections;
+  };
+
   const renderContent = () => {
     if (loading) {
       return (
@@ -110,58 +184,11 @@ export default function TermsModal({
       );
     }
 
-    // Parse markdown-style content for basic formatting
-    const formatContent = (content: string) => {
-      const sections = content.split(/\n\s*\n/);
-      
-      return sections.map((section, index) => {
-        if (section.trim().startsWith('**') && section.trim().endsWith('**')) {
-          // Header
-          const headerText = section.replace(/\*\*/g, '').trim();
-          return (
-            <Text key={index} style={styles.headerText}>
-              {headerText}
-            </Text>
-          );
-        } else if (section.trim().startsWith('*') && section.trim().endsWith('*')) {
-          // Italic/footer
-          const italicText = section.replace(/\*/g, '').trim();
-          return (
-            <Text key={index} style={styles.italicText}>
-              {italicText}
-            </Text>
-          );
-        } else {
-          // Regular paragraph
-          return (
-            <Text key={index} style={styles.contentText}>
-              {section.trim()}
-            </Text>
-          );
-        }
-      });
-    };
-
     return (
       <ScrollView style={styles.scrollView} showsVerticalScrollIndicator={false}>
         <Text style={styles.title}>
           {title || termsData.title}
         </Text>
-        
-        {termsData.summary && (
-          <View style={styles.summaryContainer}>
-            <Text style={styles.summaryText}>{termsData.summary}</Text>
-          </View>
-        )}
-        
-        <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Version: {termsData.version}</Text>
-          {termsData.effective_date && (
-            <Text style={styles.versionText}>
-              Effective: {new Date(termsData.effective_date).toLocaleDateString()}
-            </Text>
-          )}
-        </View>
         
         <View style={styles.contentContainer}>
           {formatContent(termsData.content)}
@@ -268,42 +295,23 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#fff',
     marginTop: 20,
-    marginBottom: 16,
+    marginBottom: 24,
     textAlign: 'center',
-  },
-  summaryContainer: {
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-    padding: 16,
-    borderRadius: 8,
-    marginBottom: 16,
-    borderLeftWidth: 4,
-    borderLeftColor: '#7c3aed',
-  },
-  summaryText: {
-    color: '#d1d5db',
-    fontSize: 14,
-    fontStyle: 'italic',
-    lineHeight: 20,
-  },
-  versionContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginBottom: 20,
-    paddingBottom: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  versionText: {
-    color: '#9ca3af',
-    fontSize: 12,
   },
   contentContainer: {
     marginBottom: 32,
   },
-  headerText: {
+  sectionHeader: {
     color: '#fff',
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
+    marginTop: 24,
+    marginBottom: 16,
+  },
+  subSectionHeader: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
     marginTop: 20,
     marginBottom: 12,
   },
@@ -313,15 +321,27 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 16,
   },
-  italicText: {
-    color: '#9ca3af',
-    fontSize: 12,
-    fontStyle: 'italic',
-    marginBottom: 16,
-    textAlign: 'center',
+  bulletContainer: {
+    flexDirection: 'row',
+    marginBottom: 8,
+    marginLeft: 16,
+  },
+  bullet: {
+    color: '#7c3aed',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginRight: 8,
+    marginTop: 2,
+  },
+  bulletText: {
+    flex: 1,
+    color: '#d1d5db',
+    fontSize: 14,
+    lineHeight: 20,
   },
   buttonContainer: {
     paddingBottom: 32,
+    paddingTop: 16,
   },
   acceptButton: {
     backgroundColor: '#10b981',
