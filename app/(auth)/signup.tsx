@@ -350,14 +350,16 @@ export default function SignupScreen() {
                 uncheckedColor={errors.terms ? "#f87171" : "#666"}
               />
               <View style={styles.termsTextContainer}>
-                <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
-                  I agree to the{' '}
-                </Text>
-                <TouchableOpacity onPress={showTerms}>
-                  <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
-                    Terms of Service
+                <View style={styles.termsTextRow}>
+                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
+                    I agree to the{' '}
                   </Text>
-                </TouchableOpacity>
+                  <TouchableOpacity onPress={showTerms}>
+                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
+                      Terms of Service
+                    </Text>
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 
@@ -477,7 +479,7 @@ const styles = StyleSheet.create({
   },
   termsContainer: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
+    alignItems: 'center',
     marginBottom: 20,
     paddingHorizontal: 4,
     paddingVertical: 8,
@@ -489,12 +491,13 @@ const styles = StyleSheet.create({
     borderColor: '#f87171',
   },
   termsTextContainer: {
-    flex: 1,
     marginLeft: 8,
-    marginTop: 2,
+    justifyContent: 'center',
+  },
+  termsTextRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     alignItems: 'center',
+    flexWrap: 'wrap',
   },
   termsText: {
     color: '#ccc',
