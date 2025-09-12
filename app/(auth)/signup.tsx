@@ -30,7 +30,8 @@ export default function SignupScreen() {
   const [showPassword, setShowPassword] = useState(false);    
   const [showConfirm, setShowConfirm] = useState(false);    
   const [acceptedTerms, setAcceptedTerms] = useState(false);    
-  const [showTermsModal, setShowTermsModal] = useState(false);    
+  const [showTermsModal, setShowTermsModal] = useState(false);
+const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service');    
   const [isLoading, setIsLoading] = useState(false);    
     
   // Error states    
