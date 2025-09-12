@@ -5,15 +5,19 @@ import {
   View,
   TouchableOpacity,
   Alert,
+  ScrollView,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Button, TextInput } from 'react-native-paper';
+import { Button, TextInput, Checkbox } from 'react-native-paper';
 import { AntDesign } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as SecureStore from 'expo-secure-store';
 import api from '../../lib/api';
 import { useGoogleAuth } from '../../lib/useGoogleAuth';
+import TermsModal from '../../components/TermsModal';
 
 export default function SignupScreen() {
   const router = useRouter();
@@ -26,9 +30,14 @@ export default function SignupScreen() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [showTermsModal, setShowTermsModal] = useState(false);
+  const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service');
+  const [isLoading, setIsLoading] = useState(false);
 
   const { promptAsync, request } = useGoogleAuth(async (googleUser) => {
     try {
+      setIsLoading(true);
       const response = await api.post('/api/v1/google_login', {
         user: {
           email: googleUser.email,
@@ -63,9 +72,11 @@ export default function SignupScreen() {
           text2: 'Missing token or user ID',
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Google signup failed';
       Toast.show({ type: 'error', text1: 'Google Signup Error', text2: msg });
+    } finally {
+      setIsLoading(false);
     }
   });
 
@@ -75,7 +86,13 @@ export default function SignupScreen() {
       return;
     }
 
+    if (!acceptedTerms) {
+      Alert.alert('Terms Required', 'Please accept the Terms of Service and Privacy Policy to continue.');
+      return;
+    }
+
     try {
+      setIsLoading(true);
       const response = await api.post('/api/v1/signup', {
         user: {
           email,
@@ -114,152 +131,212 @@ export default function SignupScreen() {
           text2: 'Missing authentication data',
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       const msg = err?.response?.data?.error || err?.message || 'Signup failed';
       Toast.show({ type: 'error', text1: 'Signup error', text2: msg });
       console.error('Signup error:', msg);
+    } finally {
+      setIsLoading(false);
     }
+  };
+
+  const showTerms = (type: 'terms_of_service' | 'privacy_policy') => {
+    setTermsModalType(type);
+    setShowTermsModal(true);
   };
 
   return (
     <LinearGradient colors={['#0a0a0f', '#0a0a0f']} style={styles.container}>
-      <View style={styles.inner}>
-        <Text style={styles.title}>Create Account</Text>
+      <KeyboardAvoidingView 
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'} 
+        style={styles.keyboardAvoid}
+      >
+        <ScrollView 
+          contentContainerStyle={styles.scrollContent}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          <View style={styles.inner}>
+            <Text style={styles.title}>Create Account</Text>
 
-        <TextInput
-          label="Email"
-          value={email}
-          onChangeText={setEmail}
-          keyboardType="email-address"
-          autoCapitalize="none"
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-        />
-
-        <TextInput
-          label="Phone"
-          value={phone}
-          onChangeText={setPhone}
-          keyboardType="phone-pad"
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-        />
-
-        <TextInput
-          label="First Name"
-          value={firstName}
-          onChangeText={setFirstName}
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-        />
-
-        <TextInput
-          label="Last Name"
-          value={lastName}
-          onChangeText={setLastName}
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-        />
-
-        <TextInput
-          label="Password"
-          value={password}
-          onChangeText={setPassword}
-          secureTextEntry={!showPassword}
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-          right={
-            <TextInput.Icon
-              icon={showPassword ? 'eye-off' : 'eye'}
-              onPress={() => setShowPassword(!showPassword)}
-              color="#aaa"
-              forceTextInputFocus={false}
+            <TextInput
+              label="Email"
+              value={email}
+              onChangeText={setEmail}
+              keyboardType="email-address"
+              autoCapitalize="none"
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
             />
-          }
-        />
 
-        <TextInput
-          label="Confirm Password"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          secureTextEntry={!showConfirm}
-          mode="outlined"
-          style={styles.input}
-          textColor="#f8f8f2"
-          placeholderTextColor="#ccc"
-          outlineColor="#44475a"
-          activeOutlineColor="#bd93f9"
-          right={
-            <TextInput.Icon
-              icon={showConfirm ? 'eye-off' : 'eye'}
-              onPress={() => setShowConfirm(!showConfirm)}
-              color="#aaa"
-              forceTextInputFocus={false}
+            <TextInput
+              label="Phone"
+              value={phone}
+              onChangeText={setPhone}
+              keyboardType="phone-pad"
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
             />
-          }
-        />
 
-        <TouchableOpacity
-          style={styles.googleBtn}
-          onPress={() => promptAsync()}
-          disabled={!request}
-        >
-          <AntDesign name="google" size={20} color="white" />
-          <Text style={styles.googleText}>Sign up with Google</Text>
-        </TouchableOpacity>
+            <TextInput
+              label="First Name"
+              value={firstName}
+              onChangeText={setFirstName}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+            />
 
-        <LinearGradient
-          colors={['#7c3aed', '#3b82f6', '#10b981']}
-          style={styles.gradientBtn}
-        >
-          <Button
-            mode="contained"
-            onPress={handleSignup}
-            style={styles.button}
-            labelStyle={{ color: '#fff', fontWeight: 'bold' }}
-          >
-            Sign Up
-          </Button>
-        </LinearGradient>
+            <TextInput
+              label="Last Name"
+              value={lastName}
+              onChangeText={setLastName}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+            />
 
-        <Button
-          onPress={() => router.replace('/login')}
-          textColor="#bd93f9"
-          style={styles.link}
-        >
-          Already have an account? Log in
-        </Button>
-      </View>
+            <TextInput
+              label="Password"
+              value={password}
+              onChangeText={setPassword}
+              secureTextEntry={!showPassword}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+              right={
+                <TextInput.Icon
+                  icon={showPassword ? 'eye-off' : 'eye'}
+                  onPress={() => setShowPassword(!showPassword)}
+                  color="#aaa"
+                  forceTextInputFocus={false}
+                />
+              }
+            />
+
+            <TextInput
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              secureTextEntry={!showConfirm}
+              mode="outlined"
+              style={styles.input}
+              textColor="#f8f8f2"
+              placeholderTextColor="#ccc"
+              outlineColor="#44475a"
+              activeOutlineColor="#bd93f9"
+              right={
+                <TextInput.Icon
+                  icon={showConfirm ? 'eye-off' : 'eye'}
+                  onPress={() => setShowConfirm(!showConfirm)}
+                  color="#aaa"
+                  forceTextInputFocus={false}
+                />
+              }
+            />
+
+            {/* Terms and Conditions Checkbox */}
+            <View style={styles.termsContainer}>
+              <Checkbox
+                status={acceptedTerms ? 'checked' : 'unchecked'}
+                onPress={() => setAcceptedTerms(!acceptedTerms)}
+                color="#bd93f9"
+                uncheckedColor="#666"
+              />
+              <View style={styles.termsTextContainer}>
+                <Text style={styles.termsText}>
+                  I agree to the{' '}
+                  <TouchableOpacity onPress={() => showTerms('terms_of_service')}>
+                    <Text style={styles.linkText}>Terms of Service</Text>
+                  </TouchableOpacity>
+                  {' '}and{' '}
+                  <TouchableOpacity onPress={() => showTerms('privacy_policy')}>
+                    <Text style={styles.linkText}>Privacy Policy</Text>
+                  </TouchableOpacity>
+                </Text>
+              </View>
+            </View>
+
+            <TouchableOpacity
+              style={styles.googleBtn}
+              onPress={() => promptAsync()}
+              disabled={!request || isLoading}
+            >
+              <AntDesign name="google" size={20} color="white" />
+              <Text style={styles.googleText}>Sign up with Google</Text>
+            </TouchableOpacity>
+
+            <LinearGradient
+              colors={['#7c3aed', '#3b82f6', '#10b981']}
+              style={styles.gradientBtn}
+            >
+              <Button
+                mode="contained"
+                onPress={handleSignup}
+                style={styles.button}
+                labelStyle={{ color: '#fff', fontWeight: 'bold' }}
+                loading={isLoading}
+                disabled={isLoading}
+              >
+                {isLoading ? 'Creating Account...' : 'Sign Up'}
+              </Button>
+            </LinearGradient>
+
+            <Button
+              onPress={() => router.replace('/login')}
+              textColor="#bd93f9"
+              style={styles.link}
+              disabled={isLoading}
+            >
+              Already have an account? Log in
+            </Button>
+          </View>
+        </ScrollView>
+      </KeyboardAvoidingView>
+
+      {/* Terms Modal */}
+      <TermsModal
+        visible={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+        termType={termsModalType}
+      />
     </LinearGradient>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1 },
+  container: { 
+    flex: 1 
+  },
+  keyboardAvoid: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingVertical: 20,
+  },
   inner: {
     flex: 1,
     paddingHorizontal: 24,
     justifyContent: 'center',
+    minHeight: '100%',
   },
   title: {
     color: '#f8f8f2',
@@ -304,5 +381,25 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
+  },
+  termsContainer: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 20,
+    paddingHorizontal: 4,
+  },
+  termsTextContainer: {
+    flex: 1,
+    marginLeft: 8,
+    marginTop: 2,
+  },
+  termsText: {
+    color: '#ccc',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  linkText: {
+    color: '#bd93f9',
+    textDecorationLine: 'underline',
   },
 });
