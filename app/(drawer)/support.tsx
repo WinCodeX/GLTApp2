@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Support Screen with NavigationHelper integration
+// app/(drawer)/support.tsx - Enhanced Support Screen with package search dropdown
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -17,6 +17,7 @@ import {
   Animated,
   Dimensions,
   BackHandler,
+  ActivityIndicator,
 } from 'react-native';
 import {
   Feather,
@@ -24,8 +25,10 @@ import {
   Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useLocalSearchParams } from 'expo-router';
 import { supportApi } from '../../services/supportApi';
 import colors from '../../theme/colors';
+import api from '../../lib/api';
 
 // Import NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
@@ -44,8 +47,26 @@ interface Message {
   isTagged?: boolean;
 }
 
+interface Package {
+  id: string;
+  code: string;
+  state: string;
+  state_display: string;
+  receiver_name: string;
+  route_description: string;
+  cost: number;
+  delivery_type: string;
+  created_at: string;
+}
+
 export default function SupportScreen() {
-  // Enhanced back navigation using NavigationHelper
+  const params = useLocalSearchParams();
+  
+  // Check if we should auto-select package inquiry (from report button)
+  const autoSelectPackage = params.autoSelectPackage === 'true';
+  const preFilledPackageCode = params.packageCode as string;
+  const preFilledPackageId = params.packageId as string;
+
   const handleGoBack = useCallback(() => {
     console.log('🔙 Support screen: navigating back');
     
@@ -63,100 +84,116 @@ export default function SupportScreen() {
       isSupport: true,
       type: 'text',
     },
-    {
-      id: '2',
-      text: 'Hi, I have an issue with my recent order. The tracking shows it was delivered but I never received it.',
-      timestamp: '09:07',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '3',
-      text: 'I\'m sorry to hear about this issue. Let me help you track down your package. Could you please provide me with your order number?',
-      timestamp: '09:08',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '4',
-      text: '',
-      timestamp: '09:09',
-      isSupport: false,
-      type: 'voice',
-      duration: '0:15',
-    },
-    {
-      id: '5',
-      text: 'Thank you for the voice message. I can see your order #12345. Let me check the delivery details for you.',
-      timestamp: '09:10',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '6',
-      text: 'I can see that the package was marked as delivered to your front door yesterday at 2:30 PM. Did you check with neighbors or any safe delivery locations?',
-      timestamp: '09:11',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '7',
-      text: 'Yes, I checked everywhere. No one has seen it. This is really frustrating 😤',
-      timestamp: '09:12',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '8',
-      text: '',
-      timestamp: '09:13',
-      isSupport: true,
-      type: 'voice',
-      duration: '0:32',
-    },
-    {
-      id: '9',
-      text: 'I completely understand your frustration. I\'m going to initiate a delivery investigation and process a replacement order for you right away.',
-      timestamp: '09:14',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '10',
-      text: 'Thank you so much! That would be great. How long will the replacement take?',
-      timestamp: '09:15',
-      isSupport: false,
-      type: 'text',
-    },
-    {
-      id: '11',
-      text: 'Your replacement order will be shipped within 24 hours with priority delivery. You should receive it by Friday. I\'ll also email you the new tracking number.',
-      timestamp: '09:16',
-      isSupport: true,
-      type: 'text',
-    },
-    {
-      id: '12',
-      text: 'Perfect! Thank you for the excellent customer service 👍',
-      timestamp: '09:17',
-      isSupport: false,
-      type: 'text',
-    },
   ]);
 
   const [inputText, setInputText] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
-  const [showTicketModal, setShowTicketModal] = useState(true);
+  const [showTicketModal, setShowTicketModal] = useState(!autoSelectPackage);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
-  const [showPackageModal, setShowPackageModal] = useState(false);
+  const [showPackageModal, setShowPackageModal] = useState(autoSelectPackage);
   const [inquiryText, setInquiryText] = useState('');
-  const [packageCode, setPackageCode] = useState('');
+  const [packageCode, setPackageCode] = useState(preFilledPackageCode || '');
   const [packageInquiry, setPackageInquiry] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
 
+  // NEW: Package search functionality
+  const [userPackages, setUserPackages] = useState<Package[]>([]);
+  const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
+  const [packageSearchQuery, setPackageSearchQuery] = useState('');
+  const [showPackageDropdown, setShowPackageDropdown] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+  const [loadingPackages, setLoadingPackages] = useState(false);
+
   const flatListRef = useRef<FlatList>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+
+  // Load user packages for dropdown
+  const loadUserPackages = useCallback(async () => {
+    try {
+      setLoadingPackages(true);
+      
+      console.log('📦 Loading user packages for dropdown...');
+      
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          per_page: 100,
+          page: 1
+        }
+      });
+
+      if (response.data && response.data.success) {
+        const packages = response.data.data.map((pkg: any) => ({
+          id: String(pkg.id || ''),
+          code: pkg.code || '',
+          state: pkg.state || 'unknown',
+          state_display: pkg.state_display || 'Unknown',
+          receiver_name: pkg.receiver_name || 'Unknown Receiver',
+          route_description: pkg.route_description || 'Route information unavailable',
+          cost: Number(pkg.cost) || 0,
+          delivery_type: pkg.delivery_type || 'agent',
+          created_at: pkg.created_at || new Date().toISOString(),
+        }));
+
+        setUserPackages(packages);
+        setFilteredPackages(packages);
+        
+        console.log('✅ Loaded packages for dropdown:', packages.length);
+
+        // If we have a pre-filled package code, try to find and select it
+        if (preFilledPackageCode) {
+          const preSelectedPackage = packages.find((pkg: Package) => 
+            pkg.code === preFilledPackageCode || pkg.id === preFilledPackageId
+          );
+          
+          if (preSelectedPackage) {
+            setSelectedPackage(preSelectedPackage);
+            setPackageCode(preSelectedPackage.code);
+            setPackageSearchQuery(preSelectedPackage.code);
+            console.log('✅ Pre-selected package:', preSelectedPackage.code);
+          }
+        }
+      }
+    } catch (error) {
+      console.error('❌ Failed to load user packages:', error);
+    } finally {
+      setLoadingPackages(false);
+    }
+  }, [preFilledPackageCode, preFilledPackageId]);
+
+  // Filter packages based on search query
+  const filterPackagesDropdown = useCallback((query: string) => {
+    if (!query.trim()) {
+      setFilteredPackages(userPackages);
+      return;
+    }
+
+    const lowercaseQuery = query.toLowerCase();
+    const filtered = userPackages.filter(pkg => 
+      pkg.code.toLowerCase().includes(lowercaseQuery) ||
+      pkg.receiver_name.toLowerCase().includes(lowercaseQuery) ||
+      pkg.route_description.toLowerCase().includes(lowercaseQuery) ||
+      pkg.state_display.toLowerCase().includes(lowercaseQuery)
+    );
+
+    setFilteredPackages(filtered);
+  }, [userPackages]);
+
+  // Handle package search input change
+  const handlePackageSearchChange = useCallback((text: string) => {
+    setPackageSearchQuery(text);
+    setPackageCode(text);
+    filterPackagesDropdown(text);
+    setShowPackageDropdown(true);
+  }, [filterPackagesDropdown]);
+
+  // Handle package selection from dropdown
+  const handlePackageSelect = useCallback((pkg: Package) => {
+    setSelectedPackage(pkg);
+    setPackageCode(pkg.code);
+    setPackageSearchQuery(pkg.code);
+    setShowPackageDropdown(false);
+  }, []);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -168,7 +205,6 @@ export default function SupportScreen() {
       () => setKeyboardHeight(0)
     );
 
-    // Handle Android back button with NavigationHelper
     const backAction = () => {
       if (showTicketModal || showInquiryModal || showPackageModal) {
         closeAllModals();
@@ -203,13 +239,23 @@ export default function SupportScreen() {
     }
   }, [showTicketModal, showInquiryModal, showPackageModal]);
 
+  // Load packages when package modal opens
+  useEffect(() => {
+    if (showPackageModal && userPackages.length === 0) {
+      loadUserPackages();
+    }
+  }, [showPackageModal, userPackages.length, loadUserPackages]);
+
   const closeAllModals = () => {
     setShowTicketModal(false);
     setShowInquiryModal(false);
     setShowPackageModal(false);
+    setShowPackageDropdown(false);
     setInquiryText('');
     setPackageCode('');
     setPackageInquiry('');
+    setPackageSearchQuery('');
+    setSelectedPackage(null);
   };
 
   const handleBasicInquiry = () => {
@@ -227,7 +273,6 @@ export default function SupportScreen() {
 
     setIsLoading(true);
     
-    // Add message to local state immediately for seamless experience
     const newMessage: Message = {
       id: Date.now().toString(),
       text: inquiryText.trim(),
@@ -247,7 +292,6 @@ export default function SupportScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
 
-    // Simulate support response immediately
     setTimeout(() => {
       const supportResponse: Message = {
         id: (Date.now() + 1).toString(),
@@ -269,14 +313,12 @@ export default function SupportScreen() {
 
     setIsLoading(false);
 
-    // Handle API calls in background without blocking UI
     try {
       const result = await supportApi.createSupportTicket('basic_inquiry');
       
       if (result.success && result.data) {
         setConversationId(result.data.conversation_id);
         
-        // Send the inquiry message in background
         await supportApi.sendMessage(
           result.data.conversation_id,
           inquiryText.trim(),
@@ -285,7 +327,6 @@ export default function SupportScreen() {
       }
     } catch (error) {
       console.log('Ticket cached for later retry');
-      // Error is handled silently by supportApi caching
     }
   };
 
@@ -294,7 +335,6 @@ export default function SupportScreen() {
 
     setIsLoading(true);
     
-    // Add tagged message to local state immediately for seamless experience
     const newMessage: Message = {
       id: Date.now().toString(),
       text: packageInquiry.trim(),
@@ -316,7 +356,6 @@ export default function SupportScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
 
-    // Simulate support response immediately
     setTimeout(() => {
       const supportResponse: Message = {
         id: (Date.now() + 1).toString(),
@@ -338,14 +377,12 @@ export default function SupportScreen() {
 
     setIsLoading(false);
 
-    // Handle API calls in background without blocking UI
     try {
       const result = await supportApi.createSupportTicket('package_inquiry', packageCode.trim());
       
       if (result.success && result.data) {
         setConversationId(result.data.conversation_id);
         
-        // Send the package inquiry message in background
         await supportApi.sendMessage(
           result.data.conversation_id,
           packageInquiry.trim(),
@@ -355,7 +392,6 @@ export default function SupportScreen() {
       }
     } catch (error) {
       console.log('Package inquiry cached for later retry');
-      // Error is handled silently by supportApi caching
     }
   };
 
@@ -378,12 +414,10 @@ export default function SupportScreen() {
       setMessages(prev => [...prev, newMessage]);
       setInputText('');
       
-      // Auto-scroll to bottom
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      // Simulate support response after 2 seconds
       setTimeout(() => {
         const supportResponse: Message = {
           id: (Date.now() + 1).toString(),
@@ -411,7 +445,6 @@ export default function SupportScreen() {
         styles.messageContainer,
         item.isSupport ? styles.supportMessage : styles.userMessage
       ]}>
-        {/* Tagged message header for package inquiries */}
         {item.isTagged && item.packageCode && (
           <View style={styles.taggedHeader}>
             <View style={styles.taggedQuote} />
@@ -461,6 +494,44 @@ export default function SupportScreen() {
     </View>
   );
 
+  // NEW: Render package dropdown item
+  const renderPackageDropdownItem = ({ item }: { item: Package }) => (
+    <TouchableOpacity
+      style={styles.packageDropdownItem}
+      onPress={() => handlePackageSelect(item)}
+    >
+      <View style={styles.packageDropdownContent}>
+        <View style={styles.packageDropdownHeader}>
+          <Text style={styles.packageDropdownCode}>{item.code}</Text>
+          <View style={[styles.packageDropdownStateBadge, { backgroundColor: getStateBadgeColor(item.state) }]}>
+            <Text style={styles.packageDropdownStateText}>{item.state_display}</Text>
+          </View>
+        </View>
+        <Text style={styles.packageDropdownReceiver} numberOfLines={1}>
+          To: {item.receiver_name}
+        </Text>
+        <Text style={styles.packageDropdownRoute} numberOfLines={1}>
+          {item.route_description}
+        </Text>
+        <Text style={styles.packageDropdownCost}>KES {item.cost.toLocaleString()}</Text>
+      </View>
+    </TouchableOpacity>
+  );
+
+  // Helper function to get state badge color
+  const getStateBadgeColor = (state: string) => {
+    switch (state) {
+      case 'pending_unpaid': return '#ef4444';
+      case 'pending': return '#f97316';
+      case 'submitted': return '#eab308';
+      case 'in_transit': return '#8b5cf6';
+      case 'delivered': return '#10b981';
+      case 'collected': return '#2563eb';
+      case 'rejected': return '#ef4444';
+      default: return '#8b5cf6';
+    }
+  };
+
   const renderTicketModal = () => (
     <Modal
       visible={showTicketModal || showInquiryModal || showPackageModal}
@@ -485,7 +556,6 @@ export default function SupportScreen() {
             colors={['#1F2C34', '#0B141B']}
             style={styles.modalContent}
           >
-            {/* Header Handle */}
             <View style={styles.modalHandle} />
 
             {/* Ticket Selection Modal */}
@@ -583,23 +653,80 @@ export default function SupportScreen() {
               </>
             )}
 
-            {/* Package Inquiry Modal */}
+            {/* Package Inquiry Modal - ENHANCED with searchable dropdown */}
             {showPackageModal && (
               <>
                 <Text style={styles.modalTitle}>Package Inquiry</Text>
-                <Text style={styles.modalSubtitle}>Please provide your package code and inquiry</Text>
+                <Text style={styles.modalSubtitle}>Select your package and describe your inquiry</Text>
 
                 <View style={styles.inputContainer}>
-                  <Text style={styles.inputLabel}>Package Code</Text>
-                  <TextInput
-                    style={styles.modalTextInputSmall}
-                    placeholder="Enter package code..."
-                    placeholderTextColor="#8E8E93"
-                    value={packageCode}
-                    onChangeText={setPackageCode}
-                    autoCapitalize="characters"
-                    maxLength={20}
-                  />
+                  <Text style={styles.inputLabel}>Select Package</Text>
+                  <View style={styles.packageSearchContainer}>
+                    <TextInput
+                      style={styles.packageSearchInput}
+                      placeholder={loadingPackages ? "Loading packages..." : "Search your packages..."}
+                      placeholderTextColor="#8E8E93"
+                      value={packageSearchQuery}
+                      onChangeText={handlePackageSearchChange}
+                      onFocus={() => setShowPackageDropdown(true)}
+                      editable={!loadingPackages}
+                    />
+                    {loadingPackages && (
+                      <ActivityIndicator size="small" color="#8b5cf6" style={styles.packageSearchLoader} />
+                    )}
+                    <TouchableOpacity
+                      style={styles.packageSearchIcon}
+                      onPress={() => setShowPackageDropdown(!showPackageDropdown)}
+                    >
+                      <Feather 
+                        name={showPackageDropdown ? "chevron-up" : "chevron-down"} 
+                        size={20} 
+                        color="#8E8E93" 
+                      />
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Package Dropdown */}
+                  {showPackageDropdown && !loadingPackages && (
+                    <View style={styles.packageDropdown}>
+                      {filteredPackages.length > 0 ? (
+                        <FlatList
+                          data={filteredPackages}
+                          renderItem={renderPackageDropdownItem}
+                          keyExtractor={(item) => item.id}
+                          style={styles.packageDropdownList}
+                          showsVerticalScrollIndicator={false}
+                          maxHeight={200}
+                        />
+                      ) : (
+                        <View style={styles.packageDropdownEmpty}>
+                          <Text style={styles.packageDropdownEmptyText}>
+                            {packageSearchQuery ? 'No packages found matching your search' : 'No packages available'}
+                          </Text>
+                        </View>
+                      )}
+                    </View>
+                  )}
+
+                  {/* Selected Package Display */}
+                  {selectedPackage && (
+                    <View style={styles.selectedPackageDisplay}>
+                      <View style={styles.selectedPackageHeader}>
+                        <Feather name="package" size={16} color="#8b5cf6" />
+                        <Text style={styles.selectedPackageCode}>{selectedPackage.code}</Text>
+                        <TouchableOpacity onPress={() => {
+                          setSelectedPackage(null);
+                          setPackageCode('');
+                          setPackageSearchQuery('');
+                        }}>
+                          <Feather name="x" size={16} color="#8E8E93" />
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.selectedPackageDetails}>
+                        {selectedPackage.route_description} • KES {selectedPackage.cost.toLocaleString()}
+                      </Text>
+                    </View>
+                  )}
                 </View>
 
                 <View style={styles.inputContainer}>
@@ -651,7 +778,6 @@ export default function SupportScreen() {
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
       
-      {/* Header with NavigationHelper back */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -691,13 +817,11 @@ export default function SupportScreen() {
         </View>
       </LinearGradient>
 
-      {/* Messages Container with Keyboard Avoidance */}
       <KeyboardAvoidingView 
         style={styles.flex}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
       >
-        {/* Messages */}
         <View style={[styles.messagesContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
           <FlatList
             ref={flatListRef}
@@ -711,7 +835,6 @@ export default function SupportScreen() {
           />
         </View>
 
-        {/* Input Area - Fixed at bottom */}
         <View style={[
           styles.inputContainerFixed,
           { 
@@ -735,7 +858,6 @@ export default function SupportScreen() {
                 multiline
                 maxLength={1000}
                 onFocus={() => {
-                  // Auto-scroll to bottom when input is focused
                   setTimeout(() => {
                     flatListRef.current?.scrollToEnd({ animated: true });
                   }, 100);
@@ -767,7 +889,6 @@ export default function SupportScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Ticket Creation Modal */}
       {renderTicketModal()}
     </SafeAreaView>
   );
@@ -1031,7 +1152,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   modalContainer: {
-    height: SCREEN_HEIGHT * 0.6,
+    height: SCREEN_HEIGHT * 0.7,
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     overflow: 'hidden',
@@ -1123,16 +1244,122 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(123, 63, 152, 0.3)',
   },
-  modalTextInputSmall: {
+
+  // NEW: Package search styles
+  packageSearchContainer: {
+    position: 'relative',
+  },
+  packageSearchInput: {
     backgroundColor: '#1F2C34',
     borderRadius: 12,
     padding: 16,
+    paddingRight: 50,
     color: '#fff',
     fontSize: 16,
-    height: 50,
     borderWidth: 1,
     borderColor: 'rgba(123, 63, 152, 0.3)',
   },
+  packageSearchLoader: {
+    position: 'absolute',
+    right: 40,
+    top: 15,
+  },
+  packageSearchIcon: {
+    position: 'absolute',
+    right: 12,
+    top: 12,
+    padding: 4,
+  },
+  packageDropdown: {
+    backgroundColor: '#1F2C34',
+    borderRadius: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(123, 63, 152, 0.3)',
+    maxHeight: 200,
+  },
+  packageDropdownList: {
+    maxHeight: 200,
+  },
+  packageDropdownItem: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(123, 63, 152, 0.2)',
+  },
+  packageDropdownContent: {
+    padding: 12,
+  },
+  packageDropdownHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  packageDropdownCode: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  packageDropdownStateBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  packageDropdownStateText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  packageDropdownReceiver: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  packageDropdownRoute: {
+    color: '#8E8E93',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  packageDropdownCost: {
+    color: '#8b5cf6',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  packageDropdownEmpty: {
+    padding: 20,
+    alignItems: 'center',
+  },
+  packageDropdownEmptyText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  selectedPackageDisplay: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  selectedPackageHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 4,
+  },
+  selectedPackageCode: {
+    color: '#8b5cf6',
+    fontSize: 14,
+    fontWeight: '600',
+    flex: 1,
+    marginLeft: 8,
+  },
+  selectedPackageDetails: {
+    color: '#E5E7EB',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+
   modalButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
