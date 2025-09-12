@@ -354,7 +354,7 @@ export default function SignupScreen() {
       <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
         I agree to GLT&apos;s{' '}
       </Text>
-      <TouchableOpacity onPress={showTerms}>
+        <TouchableOpacity onPress={() => showTerms('terms_of_service')}>
         <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
           Terms of Service
         </Text>
@@ -362,7 +362,7 @@ export default function SignupScreen() {
       <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>
         {' '}and{' '}
       </Text>
-      <TouchableOpacity onPress={showTerms}>
+      <TouchableOpacity onPress={() => showTerms('privacy_policy')}>
         <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>
           Privacy Policy
         </Text>
