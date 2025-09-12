@@ -411,11 +411,12 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
       </KeyboardAvoidingView>    
     
       {/* Terms Modal */}    
-      <TermsModal    
-        visible={showTermsModal}    
-        onClose={() => setShowTermsModal(false)}    
-        termType={termsModalType}    
-      />    
+      <TermsModal
+  key={termsModalType}   // 🔑 force remount when type changes
+  visible={showTermsModal}
+  onClose={() => setShowTermsModal(false)}
+  termType={termsModalType}
+/>    
     </LinearGradient>    
   );    
 }    
