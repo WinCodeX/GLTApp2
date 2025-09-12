@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Track screen with proper "All Packages" handling and NavigationHelper integration
+// app/(drawer)/track.tsx - Track screen with Report button and enhanced rejected package handling
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -70,7 +70,7 @@ interface PackageResponse {
 }
 
 type DrawerState = 
-  | 'all'           // NEW: Added 'all' type
+  | 'all'           
   | 'pending' 
   | 'paid' 
   | 'submitted' 
@@ -79,9 +79,8 @@ type DrawerState =
   | 'collected' 
   | 'rejected';
 
-// UPDATED: State mapping to handle 'all' case
 const STATE_MAPPING: Record<DrawerState, string | null> = {
-  'all': null,          // NEW: null means no filtering
+  'all': null,          
   'pending': 'pending_unpaid',
   'paid': 'pending', 
   'submitted': 'submitted',
@@ -147,14 +146,40 @@ export default function Track() {
     });
   }, []);
 
-  // UPDATED: Get packages with proper "all" handling
+  // NEW: Handle resubmit package (for rejected packages)
+  const handleResubmitPackage = useCallback((packageItem: Package) => {
+    console.log('🔄 Resubmitting package:', packageItem.code);
+    
+    NavigationHelper.navigateTo('/(drawer)/(tabs)/send', {
+      params: { 
+        resubmit: 'true',
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString()
+      }
+    });
+  }, []);
+
+  // NEW: Handle report package
+  const handleReportPackage = useCallback((packageItem: Package) => {
+    console.log('📋 Reporting package:', packageItem.code);
+    
+    // Navigate to support screen with package pre-filled
+    NavigationHelper.navigateTo('/(drawer)/support', {
+      params: { 
+        autoSelectPackage: 'true',
+        packageCode: packageItem.code,
+        packageId: packageItem.id.toString()
+      }
+    });
+  }, []);
+
+  // Get packages with proper "all" handling
   const getPackages = useCallback(async (filters?: { state?: string | null; search?: string }): Promise<PackageResponse> => {
     try {
       console.log('📦 getPackages called with filters:', filters);
       
       const params = new URLSearchParams();
       
-      // FIXED: Only add state filter if it's not null (not "all")
       if (filters?.state !== null && filters?.state !== undefined) {
         params.append('state', filters.state);
         console.log('🎯 Adding state filter:', filters.state);
@@ -162,7 +187,6 @@ export default function Track() {
         console.log('🎯 No state filter - fetching ALL packages');
       }
       
-      // Request ALL packages by setting high per_page limit
       params.append('per_page', '1000');
       params.append('page', '1');
       
@@ -246,7 +270,7 @@ export default function Track() {
     }
   }, []);
 
-  // UPDATED: Enhanced state display info to handle "all" case
+  // Enhanced state display info to handle "all" case
   const stateDisplayInfo = useMemo(() => {
     if (!selectedStatus || selectedStatus === 'all') {
       return {
@@ -394,7 +418,7 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
-  // UPDATED: Load packages with proper "all" handling
+  // Load packages with proper "all" handling
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -410,7 +434,6 @@ export default function Track() {
       
       let apiState: string | null = null;
       
-      // FIXED: Handle 'all' case and undefined case properly
       if (selectedStatus && selectedStatus !== 'all') {
         apiState = STATE_MAPPING[selectedStatus];
         console.log('🗺️ Mapping:', { 
@@ -420,7 +443,7 @@ export default function Track() {
         });
       } else {
         console.log('🎯 No filtering requested - loading ALL packages');
-        apiState = null; // Explicitly set to null for "all" case
+        apiState = null;
       }
       
       const filters = apiState !== null ? { state: apiState } : { state: null };
@@ -442,7 +465,6 @@ export default function Track() {
         console.log('📊 Actual returned package states:', uniqueStates);
         console.log('🎯 Expected state was:', apiState || 'ALL');
         
-        // UPDATED: Only check filtering if we're not in "all" mode
         if (apiState !== null) {
           const correctlyFiltered = states.every(state => state === apiState);
           console.log('✅ Filtering working correctly:', correctlyFiltered);
@@ -587,7 +609,11 @@ export default function Track() {
   }, []);
 
   const canEditPackage = useCallback((state: string) => {
-    return ['pending_unpaid', 'pending', 'rejected'].includes(state);
+    return ['pending_unpaid', 'pending'].includes(state);
+  }, []);
+
+  const canResubmitPackage = useCallback((state: string) => {
+    return state === 'rejected';
   }, []);
 
   const needsPayment = useCallback((state: string) => {
@@ -610,11 +636,13 @@ export default function Track() {
 
   const renderPackageItem = useCallback(({ item }: { item: Package }) => {
     const canEdit = canEditPackage(item.state);
+    const canResubmit = canResubmitPackage(item.state);
     const showPayButton = needsPayment(item.state);
     const receiverName = getReceiverName(item);
     
     const actionButtons = [];
     
+    // Track button (always present)
     actionButtons.push({
       key: 'track',
       icon: 'navigation',
@@ -625,6 +653,7 @@ export default function Track() {
       iconColor: '#64748b'
     });
     
+    // Edit button (for pending packages)
     if (canEdit) {
       actionButtons.push({
         key: 'edit',
@@ -636,7 +665,21 @@ export default function Track() {
         iconColor: '#8b5cf6'
       });
     }
+
+    // Resubmit button (for rejected packages) - UPDATED: Orange color
+    if (canResubmit) {
+      actionButtons.push({
+        key: 'resubmit',
+        icon: 'refresh-cw',
+        text: 'Resubmit',
+        onPress: () => handleResubmitPackage(item),
+        style: [styles.actionButton, styles.resubmitButton],
+        textStyle: [styles.actionButtonText, styles.resubmitButtonText],
+        iconColor: '#f97316'
+      });
+    }
     
+    // Pay button (for unpaid packages)
     if (showPayButton) {
       actionButtons.push({
         key: 'pay',
@@ -648,6 +691,17 @@ export default function Track() {
         iconColor: '#fff'
       });
     }
+
+    // Report button (always present) - NEW: Orange color
+    actionButtons.push({
+      key: 'report',
+      icon: 'flag',
+      text: 'Report',
+      onPress: () => handleReportPackage(item),
+      style: [styles.actionButton, styles.reportButton],
+      textStyle: [styles.actionButtonText, styles.reportButtonText],
+      iconColor: '#f97316'
+    });
     
     return (
       <View style={styles.packageCard}>
@@ -685,7 +739,8 @@ export default function Track() {
             styles.actionButtons,
             actionButtons.length === 1 && styles.singleButton,
             actionButtons.length === 2 && styles.doubleButtons,
-            actionButtons.length === 3 && styles.tripleButtons
+            actionButtons.length === 3 && styles.tripleButtons,
+            actionButtons.length === 4 && styles.quadrupleButtons
           ]}>
             {actionButtons.map((button) => (
               <TouchableOpacity 
@@ -701,7 +756,7 @@ export default function Track() {
         </LinearGradient>
       </View>
     );
-  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, needsPayment, handleEditPackage, handlePayPackage, handleViewTracking, getReceiverName]);
+  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, canResubmitPackage, needsPayment, handleEditPackage, handleResubmitPackage, handlePayPackage, handleViewTracking, handleReportPackage, getReceiverName]);
 
   const renderEmptyState = useCallback(() => (
     <View style={styles.emptyStateContainer}>
@@ -1251,6 +1306,9 @@ const styles = StyleSheet.create({
   tripleButtons: {
     justifyContent: 'space-between',
   },
+  quadrupleButtons: {
+    justifyContent: 'space-between',
+  },
   
   actionButton: {
     flex: 1,
@@ -1258,15 +1316,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 6,
     borderWidth: 1.5,
-    gap: 6,
+    gap: 4,
     minHeight: 36,
   },
   
   actionButtonText: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '500',
   },
   
@@ -1285,6 +1343,15 @@ const styles = StyleSheet.create({
   editButtonText: {
     color: '#8b5cf6',
   },
+
+  // NEW: Resubmit button styles (orange theme)
+  resubmitButton: {
+    borderColor: '#f97316',
+    backgroundColor: 'transparent',
+  },
+  resubmitButtonText: {
+    color: '#f97316',
+  },
   
   payButton: {
     borderColor: '#8b5cf6',
@@ -1293,6 +1360,15 @@ const styles = StyleSheet.create({
   payButtonText: {
     color: '#fff',
     fontWeight: '600',
+  },
+
+  // NEW: Report button styles (orange theme)
+  reportButton: {
+    borderColor: '#f97316',
+    backgroundColor: 'transparent',
+  },
+  reportButtonText: {
+    color: '#f97316',
   },
   
   listFooter: {
