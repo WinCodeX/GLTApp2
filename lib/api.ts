@@ -1,4 +1,4 @@
-// lib/api.ts - Fixed to properly handle file uploads
+// lib/api.ts - Fixed to properly handle authentication errors without auto-logout
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
 import { router } from 'expo-router';
@@ -169,6 +169,40 @@ const isFileUpload = (config: any): boolean => {
   return false;
 };
 
+// FIXED: Helper to determine if error is genuinely authentication-related
+const isGenuineAuthError = (error: any): boolean => {
+  const errorMessage = error.response?.data?.message || error.response?.data?.error || '';
+  const errorCode = error.response?.data?.code || '';
+  
+  // Check for specific JWT/authentication error indicators
+  const jwtErrors = [
+    'jwt expired',
+    'jwt malformed', 
+    'invalid token',
+    'token expired',
+    'unauthorized',
+    'authentication failed',
+    'invalid credentials',
+    'session expired',
+    'token invalid',
+    'jwt decode error'
+  ];
+  
+  const lowerMessage = errorMessage.toLowerCase();
+  const lowerCode = errorCode.toLowerCase();
+  
+  // Only treat as genuine auth error if message explicitly mentions JWT/token issues
+  return jwtErrors.some(jwtError => 
+    lowerMessage.includes(jwtError) || lowerCode.includes(jwtError)
+  );
+};
+
+// FIXED: Helper to check if endpoint is authentication-related
+const isAuthEndpoint = (url: string): boolean => {
+  const authEndpoints = ['/login', '/signup', '/logout', '/auth/', '/sessions'];
+  return authEndpoints.some(endpoint => url.includes(endpoint));
+};
+
 // Create the main API instance with conditional headers
 const api = axios.create({
   baseURL: PROD_BASE,
@@ -245,7 +279,7 @@ api.interceptors.request.use(
   }
 );
 
-// Response interceptor - Updated to handle AccountManager
+// FIXED: Response interceptor with intelligent authentication error handling
 api.interceptors.response.use(
   (response) => {
     const currentAccount = accountManager.getCurrentAccount();
@@ -268,6 +302,11 @@ api.interceptors.response.use(
 
     console.error(`❌ Request failed${accountInfo}: ${config?.method?.toUpperCase()} ${config?.url} - Status: ${status}`);
 
+    // Log detailed error information for debugging
+    if (error.response?.data) {
+      console.error('❌ Error response data:', error.response.data);
+    }
+
     // Log response content type for debugging HTML/JSON issues
     if (error.response?.headers?.['content-type']) {
       const contentType = error.response.headers['content-type'];
@@ -278,35 +317,59 @@ api.interceptors.response.use(
       }
     }
 
-    // Handle 401/422 Unauthorized
+    // FIXED: Smart handling of 401/422 errors - Only logout for genuine auth failures
     if (status === 401 || status === 422) {
-      console.log('🔐 Authentication failed - handling account cleanup');
+      const url = config?.url || '';
+      const isAuthRequest = isAuthEndpoint(url);
+      const isGenuineAuth = isGenuineAuthError(error);
       
-      if (currentAccount) {
-        console.log('🗑️ Removing invalid account:', currentAccount.email);
+      console.log(`🔍 Analyzing ${status} error:`, {
+        url,
+        isAuthRequest,
+        isGenuineAuth,
+        errorMessage: error.response?.data?.message,
+        errorCode: error.response?.data?.code
+      });
+
+      // Only trigger logout for genuine authentication errors
+      if (isGenuineAuth && currentAccount) {
+        console.log('🔐 Genuine authentication failure detected - cleaning up account');
+        
         try {
           await accountManager.removeAccount(currentAccount.id);
+          
+          // Show toast and redirect if no accounts remain
+          if (!accountManager.hasAccounts()) {
+            Toast.show({ 
+              type: 'error', 
+              text1: 'Session expired',
+              text2: 'Please log in again'
+            });
+            
+            setTimeout(() => {
+              router.replace('/login');
+            }, 2000);
+          } else {
+            Toast.show({ 
+              type: 'warning', 
+              text1: 'Account session expired',
+              text2: 'Switched to another account'
+            });
+          }
         } catch (removeError) {
           console.error('❌ Failed to remove invalid account:', removeError);
         }
-      }
-      
-      // Show toast and redirect if no accounts remain
-      if (!accountManager.hasAccounts()) {
-        Toast.show({ 
-          type: 'error', 
-          text1: 'Session expired',
-          text2: 'Please log in again'
-        });
-        
-        setTimeout(() => {
-          router.replace('/login');
-        }, 2000);
       } else {
-        Toast.show({ 
-          type: 'warning', 
-          text1: 'Account session expired',
-          text2: 'Switched to another account'
+        // Handle non-authentication 401/422 errors gracefully
+        console.log('⚠️ Non-authentication 401/422 error - not triggering logout');
+        
+        // Show specific error message without logging out
+        const errorMessage = error.response?.data?.message || 'Request failed';
+        Toast.show({
+          type: 'error',
+          text1: 'Request Failed',
+          text2: errorMessage,
+          visibilityTime: 4000,
         });
       }
       
