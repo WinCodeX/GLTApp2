@@ -1,5 +1,5 @@
-// lib/helpers/hardwareBackHandler.ts - Fixed TypeScript syntax errors
-import { useEffect, useRef, useCallback } from 'react';
+// lib/helpers/hardwareBackHandler.ts - Fixed for single press response
+import { useEffect, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { NavigationHelper } from './navigation';
 import React from 'react';
@@ -12,7 +12,7 @@ interface HardwareBackOptions {
 }
 
 /**
- * Hook to handle hardware back button with your custom navigation system
+ * Hook to handle hardware back button with immediate single press response
  */
 export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
   const {
@@ -22,46 +22,45 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
     enableOnIOS = false
   } = options;
 
-  const isHandlingRef = useRef(false);
+  const handleHardwareBack = useCallback((): boolean => {
+    console.log('📱 Hardware Back: Button pressed');
 
-  const handleHardwareBack = useCallback(async (): Promise<boolean> => {
-    // Prevent multiple simultaneous back operations
-    if (isHandlingRef.current) {
-      console.log('🔒 Hardware Back: Already handling back operation');
-      return true;
-    }
-
-    try {
-      isHandlingRef.current = true;
-      
-      console.log('📱 Hardware Back: Button pressed');
-
-      // Use custom handler if provided
-      if (customHandler) {
-        const customResult = await customHandler();
-        console.log('🎯 Hardware Back: Custom handler result:', customResult);
-        return customResult;
+    // Use custom handler if provided (synchronous check first)
+    if (customHandler) {
+      try {
+        const customResult = customHandler();
+        
+        // Handle both sync and async custom handlers
+        if (customResult instanceof Promise) {
+          customResult.then(result => {
+            console.log('🎯 Hardware Back: Async custom handler result:', result);
+          }).catch(error => {
+            console.error('❌ Hardware Back: Custom handler error:', error);
+          });
+        } else {
+          console.log('🎯 Hardware Back: Sync custom handler result:', customResult);
+          return customResult;
+        }
+        
+        // For async handlers, prevent default and let handler manage navigation
+        return true;
+      } catch (error) {
+        console.error('❌ Hardware Back: Custom handler error:', error);
       }
-
-      // Use NavigationHelper for back navigation
-      const backResult = await NavigationHelper.goBack({
-        fallbackRoute,
-        replaceIfNoHistory
-      });
-
-      console.log('🧭 Hardware Back: NavigationHelper result:', backResult);
-      
-      // Always return true to prevent default behavior since NavigationHelper handles it
-      return true;
-
-    } catch (error) {
-      console.error('❌ Hardware Back: Error handling back button:', error);
-      
-      // On error, allow default behavior as fallback
-      return false;
-    } finally {
-      isHandlingRef.current = false;
     }
+
+    // Use NavigationHelper for back navigation (fire and forget for immediate response)
+    NavigationHelper.goBack({
+      fallbackRoute,
+      replaceIfNoHistory
+    }).then(backResult => {
+      console.log('🧭 Hardware Back: NavigationHelper completed:', backResult);
+    }).catch(error => {
+      console.error('❌ Hardware Back: NavigationHelper error:', error);
+    });
+
+    // Always prevent default Android back behavior since we handle navigation
+    return true;
   }, [fallbackRoute, replaceIfNoHistory, customHandler]);
 
   useEffect(() => {
@@ -121,12 +120,16 @@ export const ScreenBackHandlers = {
     return useHardwareBackHandler({
       fallbackRoute,
       replaceIfNoHistory: true,
-      customHandler: async () => {
+      customHandler: () => {
         console.log('🏢 Admin Back: Handling admin screen back');
-        return await NavigationHelper.goBack({
+        
+        // Fire and forget - immediate response
+        NavigationHelper.goBack({
           fallbackRoute,
           replaceIfNoHistory: true
         });
+        
+        return true; // Prevent default behavior
       }
     });
   },
@@ -136,12 +139,15 @@ export const ScreenBackHandlers = {
     return useHardwareBackHandler({
       fallbackRoute: '/(drawer)/business',
       replaceIfNoHistory: true,
-      customHandler: async () => {
+      customHandler: () => {
         console.log('💼 Business Back: Handling business screen back');
-        return await NavigationHelper.goBack({
+        
+        NavigationHelper.goBack({
           fallbackRoute: '/(drawer)/business',
           replaceIfNoHistory: true
         });
+        
+        return true;
       }
     });
   },
@@ -151,12 +157,15 @@ export const ScreenBackHandlers = {
     return useHardwareBackHandler({
       fallbackRoute: '/(drawer)/',
       replaceIfNoHistory: true,
-      customHandler: async () => {
+      customHandler: () => {
         console.log('📦 Package Back: Handling package screen back');
-        return await NavigationHelper.goBack({
+        
+        NavigationHelper.goBack({
           fallbackRoute: '/(drawer)/',
           replaceIfNoHistory: true
         });
+        
+        return true;
       }
     });
   },
@@ -164,7 +173,7 @@ export const ScreenBackHandlers = {
   // Modal back handler (for modals that should close on back)
   useModalBackHandler: (onClose: () => void) => {
     return useHardwareBackHandler({
-      customHandler: async () => {
+      customHandler: () => {
         console.log('🗂️ Modal Back: Closing modal');
         onClose();
         return true; // Prevent default behavior
@@ -180,10 +189,12 @@ export const useConditionalBackHandler = (
   condition: boolean,
   options: HardwareBackOptions = {}
 ) => {
-  const baseHandler = useHardwareBackHandler({
+  const conditionalOptions = {
     ...options,
     customHandler: condition ? options.customHandler : undefined
-  });
+  };
+
+  const baseHandler = useHardwareBackHandler(conditionalOptions);
 
   useEffect(() => {
     if (condition) {
