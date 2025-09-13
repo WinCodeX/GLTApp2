@@ -1399,6 +1399,15 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
         type="destination"
       />
 
+
+      
+      {/* Enhanced Changelog Modal for APK Updates */}
+      <ChangelogModal
+        visible={showChangelogModal}
+        onClose={handleChangelogClose}
+      />
+
+
       {/* Enhanced Update Modal */}
       <UpdateModal
         visible={showUpdateModal}
