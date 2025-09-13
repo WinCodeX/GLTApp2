@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Fixed with proper navigation system integration
+// app/(drawer)/_layout.tsx - Fixed without automatic login redirects
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -88,15 +88,7 @@ export default function DrawerLayout() {
     try {
       console.log('DrawerLayout: Starting AccountManager-based authentication check...');
       
-      // Set a maximum initialization time to prevent infinite loading
-      const initTimeout = setTimeout(() => {
-        if (!initializationComplete) {
-          console.warn('Initialization timeout - proceeding with fallback');
-          setInitState('redirect');
-          setRedirectPath('/login');
-        }
-      }, 10000); // 10 second timeout
-
+      // FIXED: Removed timeout that could redirect to login
       try {
         await bootstrapApp();
       } catch (bootstrapError) {
@@ -127,7 +119,7 @@ export default function DrawerLayout() {
           setInitState('authenticated');
           setRedirectPath(null);
           
-          // FIXED: Track the home screen as the initial route in navigation system
+          // Track the home screen as the initial route in navigation system
           setTimeout(async () => {
             try {
               await NavigationHelper.trackRouteChange('/', {});
@@ -138,48 +130,40 @@ export default function DrawerLayout() {
           }, 1000);
         }
         
-        // Verify token in background without blocking UI
+        // Verify token in background without blocking UI or redirecting on failure
         verifyTokenInBackground(currentAccount.token, currentAccount.id);
       } else {
-        console.log('No current account found, redirecting to login');
-        setInitState('redirect');
-        setRedirectPath('/login');
+        console.log('No current account found - staying in authenticated state');
+        // FIXED: Don't redirect to login, just stay authenticated
+        setInitState('authenticated');
+        setRedirectPath(null);
       }
       
-      clearTimeout(initTimeout);
       initializationComplete = true;
       
     } catch (error) {
-      console.error('Critical initialization error:', error);
+      console.error('Initialization error (non-critical):', error);
       
-      // Fallback check
-      const hasAnyAccounts = accountManager.hasAccounts();
+      // FIXED: On error, just stay authenticated instead of redirecting
+      console.log('Error during init - staying authenticated');
+      setInitState('authenticated');
+      setRedirectPath(null);
       
-      if (hasAnyAccounts) {
-        console.log('Error during init but found accounts - staying authenticated');
-        setInitState('authenticated');
-        setRedirectPath(null);
-        
-        // Track home screen even in error case
-        setTimeout(async () => {
-          try {
-            await NavigationHelper.trackRouteChange('/', {});
-            console.log('✅ DrawerLayout: Home screen tracked in navigation system (error recovery)');
-          } catch (error) {
-            console.error('❌ DrawerLayout: Failed to track home screen in error recovery:', error);
-          }
-        }, 1000);
-      } else {
-        console.log('Error during init and no accounts - redirecting to login');
-        setInitState('redirect');
-        setRedirectPath('/login');
-      }
+      // Track home screen even in error case
+      setTimeout(async () => {
+        try {
+          await NavigationHelper.trackRouteChange('/', {});
+          console.log('✅ DrawerLayout: Home screen tracked in navigation system (error recovery)');
+        } catch (error) {
+          console.error('❌ DrawerLayout: Failed to track home screen in error recovery:', error);
+        }
+      }, 1000);
       
       initializationComplete = true;
     }
   }, [navigationInitialized]);
 
-  // Background token verification
+  // FIXED: Background token verification without redirects
   const verifyTokenInBackground = useCallback(async (token: string, userId: string) => {
     try {
       console.log('Background: Verifying token with server for user:', userId);
@@ -187,22 +171,11 @@ export default function DrawerLayout() {
       console.log('Background: Token verified successfully');
     } catch (verifyError) {
       console.warn('Background: Token verification failed (non-critical):', verifyError);
+      // FIXED: Don't redirect on token verification failure
+      // Just log the error and let the user continue using the app
       if (verifyError?.response?.status === 401 || verifyError?.response?.status === 422) {
-        console.log('Background: Token is invalid, removing account');
-        try {
-          const currentAccount = accountManager.getCurrentAccount();
-          if (currentAccount && currentAccount.id === userId) {
-            await accountManager.removeAccount(currentAccount.id);
-            
-            // Check if we still have accounts
-            if (!accountManager.hasAccounts()) {
-              setInitState('redirect');
-              setRedirectPath('/login');
-            }
-          }
-        } catch (removeError) {
-          console.error('Failed to remove invalid account:', removeError);
-        }
+        console.log('Background: Token appears invalid, but not forcing logout');
+        // Note: accountManager cleanup is handled by api.ts interceptor
       }
     }
   }, []);
@@ -214,39 +187,26 @@ export default function DrawerLayout() {
     }
   }, [navigationInitialized, initializeApp]);
 
-  // FIXED: Handle navigation when ready with proper route names
+  // FIXED: Handle navigation when ready - only for admin redirects
   useEffect(() => {
-    if (initState === 'redirect' && redirectPath) {
+    if (initState === 'redirect' && redirectPath && redirectPath === '/admin') {
       const performRedirect = async () => {
         try {
-          console.log(`🧭 DrawerLayout: Redirecting to ${redirectPath}`);
+          console.log(`🧭 DrawerLayout: Redirecting to admin ${redirectPath}`);
           
           // Small delay to ensure smooth transition
           await new Promise(resolve => setTimeout(resolve, 100));
           
-          // FIXED: Use correct route paths that match your file structure
-          if (redirectPath === '/login') {
-            // Navigate to login screen - adjust path to match your actual login route
-            router.replace('/login');
-          } else if (redirectPath === '/admin') {
-            // Navigate to admin screen - adjust path to match your actual admin route
-            router.replace('/admin');
-          } else {
-            // Fallback to provided path
-            router.replace(redirectPath);
-          }
+          router.replace('/admin');
           
           console.log(`✅ DrawerLayout: Successfully redirected to ${redirectPath}`);
         } catch (error) {
           console.error('❌ DrawerLayout: Navigation error:', error);
           
-          // Ultimate fallback - try to navigate to home
-          try {
-            console.log('🧭 DrawerLayout: Attempting fallback navigation to home');
-            router.replace('/');
-          } catch (fallbackError) {
-            console.error('❌ DrawerLayout: Fallback navigation also failed:', fallbackError);
-          }
+          // Fallback - just stay authenticated
+          console.log('🧭 DrawerLayout: Navigation failed, staying authenticated');
+          setInitState('authenticated');
+          setRedirectPath(null);
         }
       };
       
@@ -261,7 +221,7 @@ export default function DrawerLayout() {
       if (initState === 'loading') {
         console.log('Screen focused during loading state');
       } else if (initState === 'authenticated') {
-        // FIXED: Ensure home screen is always tracked when drawer layout gains focus
+        // Ensure home screen is always tracked when drawer layout gains focus
         setTimeout(async () => {
           try {
             const currentRoute = NavigationHelper.getCurrentRoute();
@@ -287,12 +247,12 @@ export default function DrawerLayout() {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Show loading screen during redirect
-  if (initState === 'redirect') {
+  // Show loading screen during admin redirect only
+  if (initState === 'redirect' && redirectPath === '/admin') {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Only render drawer when authenticated and navigation is ready
+  // Render drawer when authenticated and navigation is ready
   if (initState === 'authenticated') {
     return (
       <Drawer
