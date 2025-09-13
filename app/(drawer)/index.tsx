@@ -448,6 +448,8 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   
+const [showChangelogModal, setShowChangelogModal] = useState(false);
+
   // Update modal states
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateMetadata, setUpdateMetadata] = useState<UpdateMetadata | null>(null);
