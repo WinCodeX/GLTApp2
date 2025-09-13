@@ -1,4 +1,4 @@
-// lib/AccountManager.ts - Centralized account data management
+// lib/AccountManager.ts - Fixed Centralized account data management with robust persistence
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -20,16 +20,23 @@ export interface AccountGroup {
   version: number; // For data migration
 }
 
+// Storage keys
 const STORAGE_KEY = 'account_groups';
 const CURRENT_ACCOUNT_KEY = 'current_account_id';
+const BACKUP_KEY = 'account_groups_backup';
+
+// Storage schema version for migrations
+const CURRENT_VERSION = 2;
 
 export class AccountManager {
   private static instance: AccountManager;
   private accountGroup: AccountGroup = {
     accounts: [],
     currentAccountId: null,
-    version: 1
+    version: CURRENT_VERSION
   };
+  private initialized = false;
+  private persistenceTimeout: NodeJS.Timeout | null = null;
 
   private constructor() {}
 
@@ -40,67 +47,284 @@ export class AccountManager {
     return AccountManager.instance;
   }
 
-  // Initialize - load from storage
+  // FIXED: Robust initialization with data validation and recovery
   async initialize(): Promise<void> {
+    if (this.initialized) {
+      console.log('🔧 AccountManager: Already initialized');
+      return;
+    }
+
     try {
-      console.log('🔧 AccountManager: Initializing...');
+      console.log('🔧 AccountManager: Starting initialization...');
       
-      const storedData = await AsyncStorage.getItem(STORAGE_KEY);
-      const currentAccountId = await AsyncStorage.getItem(CURRENT_ACCOUNT_KEY);
+      // Try to load main data
+      const mainData = await this.loadStoredData(STORAGE_KEY);
+      const currentAccountId = await this.loadCurrentAccountId();
       
-      if (storedData) {
-        const parsed = JSON.parse(storedData);
+      if (mainData && this.validateAccountGroup(mainData)) {
+        // Successfully loaded valid data
         this.accountGroup = {
-          accounts: parsed.accounts || [],
-          currentAccountId: currentAccountId || parsed.currentAccountId || null,
-          version: parsed.version || 1
+          accounts: mainData.accounts,
+          currentAccountId: currentAccountId || mainData.currentAccountId || null,
+          version: mainData.version || CURRENT_VERSION
         };
         
-        console.log('✅ AccountManager: Loaded', {
+        console.log('✅ AccountManager: Loaded from main storage', {
           accounts: this.accountGroup.accounts.length,
           current: this.accountGroup.currentAccountId
         });
+      } else if (mainData && !this.validateAccountGroup(mainData)) {
+        // Data exists but is invalid - try backup
+        console.warn('⚠️ AccountManager: Main data invalid, trying backup...');
+        const backupData = await this.loadStoredData(BACKUP_KEY);
+        
+        if (backupData && this.validateAccountGroup(backupData)) {
+          this.accountGroup = {
+            accounts: backupData.accounts,
+            currentAccountId: currentAccountId || backupData.currentAccountId || null,
+            version: backupData.version || CURRENT_VERSION
+          };
+          
+          // Restore main storage from backup
+          await this.persist();
+          console.log('✅ AccountManager: Restored from backup');
+        } else {
+          // Both main and backup failed
+          console.error('❌ AccountManager: Both main and backup data invalid, starting fresh');
+          await this.resetToDefaults();
+        }
+      } else {
+        // No data found - fresh start
+        console.log('🔄 AccountManager: No stored data, starting fresh');
+        await this.resetToDefaults();
       }
+
+      // Perform data migration if needed
+      await this.migrateIfNeeded();
+      
+      // Sync with SecureStore if we have a current account
+      await this.syncWithSecureStore();
+      
+      this.initialized = true;
+      console.log('✅ AccountManager: Initialization complete');
+      
     } catch (error) {
-      console.error('❌ AccountManager: Failed to initialize:', error);
-      this.accountGroup = { accounts: [], currentAccountId: null, version: 1 };
+      console.error('❌ AccountManager: Critical initialization error:', error);
+      await this.resetToDefaults();
+      this.initialized = true;
     }
   }
 
-  // Save to storage with proper type handling
-  private async persist(): Promise<void> {
+  // FIXED: Robust data loading with proper type conversion
+  private async loadStoredData(key: string): Promise<AccountGroup | null> {
     try {
-      // Ensure all data is properly serialized as strings
-      const dataToStore = {
-        accounts: this.accountGroup.accounts.map(account => ({
-          ...account,
-          lastUsed: String(account.lastUsed),
-          createdAt: String(account.createdAt)
-        })),
-        currentAccountId: this.accountGroup.currentAccountId,
-        version: String(this.accountGroup.version)
+      const storedData = await AsyncStorage.getItem(key);
+      if (!storedData) return null;
+      
+      const parsed = JSON.parse(storedData);
+      
+      // Convert stored data back to proper types
+      const accountGroup: AccountGroup = {
+        accounts: (parsed.accounts || []).map((account: any) => ({
+          id: String(account.id || ''),
+          email: String(account.email || ''),
+          display_name: String(account.display_name || account.email || ''),
+          avatar_url: account.avatar_url || null,
+          token: String(account.token || ''),
+          role: (account.role === 'admin' ? 'admin' : 'client') as 'admin' | 'client',
+          userData: account.userData || {},
+          // FIXED: Convert string timestamps back to numbers
+          lastUsed: this.parseTimestamp(account.lastUsed),
+          createdAt: this.parseTimestamp(account.createdAt)
+        })).filter((account: AccountData) => 
+          // Filter out invalid accounts
+          account.id && account.email && account.token
+        ),
+        currentAccountId: parsed.currentAccountId || null,
+        version: parseInt(parsed.version) || 1
       };
-
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToStore));
       
-      if (this.accountGroup.currentAccountId) {
-        await AsyncStorage.setItem(CURRENT_ACCOUNT_KEY, String(this.accountGroup.currentAccountId));
-      }
-      
-      console.log('💾 AccountManager: Data persisted');
+      return accountGroup;
     } catch (error) {
-      console.error('❌ AccountManager: Failed to persist:', error);
-      throw error;
+      console.error(`❌ AccountManager: Failed to load from ${key}:`, error);
+      return null;
     }
   }
 
-  // Add new account
-  async addAccount(userData: any, token: string): Promise<void> {
+  // Helper to safely parse timestamps
+  private parseTimestamp(value: any): number {
+    if (typeof value === 'number') return value;
+    if (typeof value === 'string') {
+      const parsed = parseInt(value);
+      return isNaN(parsed) ? Date.now() : parsed;
+    }
+    return Date.now();
+  }
+
+  // Load current account ID separately for better reliability
+  private async loadCurrentAccountId(): Promise<string | null> {
     try {
-      console.log('➕ AccountManager: Adding account:', userData.email);
+      const stored = await AsyncStorage.getItem(CURRENT_ACCOUNT_KEY);
+      return stored ? String(stored) : null;
+    } catch (error) {
+      console.error('❌ AccountManager: Failed to load current account ID:', error);
+      return null;
+    }
+  }
+
+  // FIXED: Comprehensive data validation
+  private validateAccountGroup(data: any): boolean {
+    if (!data || typeof data !== 'object') {
+      console.warn('⚠️ AccountManager: Data is not an object');
+      return false;
+    }
+    
+    if (!Array.isArray(data.accounts)) {
+      console.warn('⚠️ AccountManager: Accounts is not an array');
+      return false;
+    }
+    
+    // Validate each account
+    for (const account of data.accounts) {
+      if (!this.validateAccount(account)) {
+        console.warn('⚠️ AccountManager: Invalid account found:', account?.email || 'unknown');
+        return false;
+      }
+    }
+    
+    console.log('✅ AccountManager: Data validation passed');
+    return true;
+  }
+
+  // Validate individual account
+  private validateAccount(account: any): boolean {
+    return !!(
+      account &&
+      account.id &&
+      account.email &&
+      account.token &&
+      account.display_name &&
+      (account.role === 'admin' || account.role === 'client') &&
+      account.lastUsed &&
+      account.createdAt
+    );
+  }
+
+  // Reset to default state
+  private async resetToDefaults(): Promise<void> {
+    this.accountGroup = {
+      accounts: [],
+      currentAccountId: null,
+      version: CURRENT_VERSION
+    };
+    await this.clearAllStorage();
+  }
+
+  // FIXED: Robust persistence with backup and error recovery
+  private async persist(): Promise<void> {
+    // Clear any existing timeout
+    if (this.persistenceTimeout) {
+      clearTimeout(this.persistenceTimeout);
+    }
+
+    // Debounce persistence calls
+    this.persistenceTimeout = setTimeout(async () => {
+      try {
+        console.log('💾 AccountManager: Starting persistence...');
+        
+        // Create backup of current data first
+        await this.createBackup();
+        
+        // Prepare data for storage with proper type conversion
+        const dataToStore = {
+          accounts: this.accountGroup.accounts.map(account => ({
+            id: String(account.id),
+            email: String(account.email),
+            display_name: String(account.display_name),
+            avatar_url: account.avatar_url,
+            token: String(account.token),
+            role: String(account.role),
+            userData: account.userData,
+            // Store as strings but ensure they're valid numbers first
+            lastUsed: String(account.lastUsed),
+            createdAt: String(account.createdAt)
+          })),
+          currentAccountId: this.accountGroup.currentAccountId ? String(this.accountGroup.currentAccountId) : null,
+          version: String(CURRENT_VERSION),
+          persistedAt: String(Date.now()) // Timestamp when data was saved
+        };
+
+        // Store main data
+        await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(dataToStore));
+        
+        // Store current account ID separately for quick access
+        if (this.accountGroup.currentAccountId) {
+          await AsyncStorage.setItem(CURRENT_ACCOUNT_KEY, String(this.accountGroup.currentAccountId));
+        } else {
+          await AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY);
+        }
+        
+        // Update SecureStore
+        await this.syncWithSecureStore();
+        
+        console.log('✅ AccountManager: Persistence successful', {
+          accounts: this.accountGroup.accounts.length,
+          currentId: this.accountGroup.currentAccountId
+        });
+        
+      } catch (error) {
+        console.error('❌ AccountManager: Persistence failed:', error);
+        
+        // Try to restore from backup if persistence fails
+        try {
+          await this.restoreFromBackup();
+          console.log('🔄 AccountManager: Restored from backup after persistence failure');
+        } catch (backupError) {
+          console.error('❌ AccountManager: Backup restoration also failed:', backupError);
+        }
+        
+        throw error;
+      }
+    }, 100); // Small delay to debounce rapid calls
+  }
+
+  // Create backup of current data
+  private async createBackup(): Promise<void> {
+    try {
+      const currentData = await AsyncStorage.getItem(STORAGE_KEY);
+      if (currentData) {
+        await AsyncStorage.setItem(BACKUP_KEY, currentData);
+      }
+    } catch (error) {
+      console.warn('⚠️ AccountManager: Failed to create backup:', error);
+    }
+  }
+
+  // Restore from backup
+  private async restoreFromBackup(): Promise<void> {
+    const backupData = await this.loadStoredData(BACKUP_KEY);
+    if (backupData && this.validateAccountGroup(backupData)) {
+      this.accountGroup = backupData;
+      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(backupData));
+    }
+  }
+
+  // FIXED: Enhanced account addition with better validation
+  async addAccount(userData: any, token: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      console.log('➕ AccountManager: Adding account:', userData?.email || 'unknown email');
+      
+      // Validate input data
+      if (!userData || !userData.id || !userData.email || !token) {
+        throw new Error('Invalid account data or token');
+      }
       
       // Check if account already exists
-      const existingIndex = this.accountGroup.accounts.findIndex(acc => acc.id === userData.id);
+      const existingIndex = this.accountGroup.accounts.findIndex(acc => acc.id === String(userData.id));
       
       const roles = userData.roles || [];
       const role = roles.includes('admin') ? 'admin' : 'client';
@@ -109,7 +333,7 @@ export class AccountManager {
         id: String(userData.id),
         email: String(userData.email),
         display_name: String(userData.display_name || userData.first_name || userData.email),
-        avatar_url: userData.avatar_url,
+        avatar_url: userData.avatar_url || null,
         token: String(token),
         role: role,
         userData: userData,
@@ -132,7 +356,6 @@ export class AccountManager {
 
       // Set as current account
       await this.setCurrentAccount(String(userData.id));
-      await this.persist();
       
     } catch (error) {
       console.error('❌ AccountManager: Failed to add account:', error);
@@ -140,44 +363,113 @@ export class AccountManager {
     }
   }
 
-  // Set current account
+  // FIXED: Enhanced current account setting with validation
   async setCurrentAccount(accountId: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
     const account = this.accountGroup.accounts.find(acc => acc.id === accountId);
     if (!account) {
-      throw new Error('Account not found');
+      throw new Error(`Account not found: ${accountId}`);
     }
 
     console.log('🔄 AccountManager: Setting current account:', account.email);
     
-    // Update last used timestamp
-    account.lastUsed = Date.now();
-    this.accountGroup.currentAccountId = accountId;
-    
-    // Update SecureStore with current account's auth data - ensure all values are strings
-    await SecureStore.setItemAsync('auth_token', String(account.token || ''));
-    await SecureStore.setItemAsync('user_id', String(account.id || ''));
-    await SecureStore.setItemAsync('user_role', String(account.role || ''));
-    
-    await this.persist();
-    console.log('✅ AccountManager: Current account set');
+    try {
+      // Update last used timestamp
+      account.lastUsed = Date.now();
+      this.accountGroup.currentAccountId = accountId;
+      
+      // Persist changes
+      await this.persist();
+      
+      console.log('✅ AccountManager: Current account set successfully');
+      
+    } catch (error) {
+      console.error('❌ AccountManager: Failed to set current account:', error);
+      throw error;
+    }
   }
 
-  // Get current account
+  // FIXED: Secure sync with SecureStore
+  private async syncWithSecureStore(): Promise<void> {
+    try {
+      const currentAccount = this.getCurrentAccount();
+      
+      if (currentAccount) {
+        // Set current account's auth data
+        await SecureStore.setItemAsync('auth_token', String(currentAccount.token));
+        await SecureStore.setItemAsync('user_id', String(currentAccount.id));
+        await SecureStore.setItemAsync('user_role', String(currentAccount.role));
+        console.log('🔐 AccountManager: SecureStore synced with current account');
+      } else {
+        // Clear SecureStore if no current account
+        await SecureStore.deleteItemAsync('auth_token').catch(() => {});
+        await SecureStore.deleteItemAsync('user_id').catch(() => {});
+        await SecureStore.deleteItemAsync('user_role').catch(() => {});
+        console.log('🧹 AccountManager: SecureStore cleared');
+      }
+    } catch (error) {
+      console.error('❌ AccountManager: SecureStore sync failed:', error);
+    }
+  }
+
+  // Data migration for version updates
+  private async migrateIfNeeded(): Promise<void> {
+    if (this.accountGroup.version < CURRENT_VERSION) {
+      console.log(`🔄 AccountManager: Migrating from v${this.accountGroup.version} to v${CURRENT_VERSION}`);
+      
+      // Add migration logic here as needed
+      if (this.accountGroup.version === 1) {
+        // Example migration: ensure all timestamps are numbers
+        this.accountGroup.accounts = this.accountGroup.accounts.map(account => ({
+          ...account,
+          lastUsed: this.parseTimestamp(account.lastUsed),
+          createdAt: this.parseTimestamp(account.createdAt)
+        }));
+      }
+      
+      this.accountGroup.version = CURRENT_VERSION;
+      await this.persist();
+      console.log('✅ AccountManager: Migration completed');
+    }
+  }
+
+  // Get current account with validation
   getCurrentAccount(): AccountData | null {
     if (!this.accountGroup.currentAccountId) return null;
     
-    return this.accountGroup.accounts.find(
+    const account = this.accountGroup.accounts.find(
       acc => acc.id === this.accountGroup.currentAccountId
-    ) || null;
+    );
+    
+    // Validate account before returning
+    if (account && this.validateAccount(account)) {
+      return account;
+    }
+    
+    // Current account is invalid, clear it
+    if (account) {
+      console.warn('⚠️ AccountManager: Current account is invalid, clearing');
+      this.accountGroup.currentAccountId = null;
+      this.persist().catch(() => {}); // Don't await to avoid blocking
+    }
+    
+    return null;
   }
 
   // Get all accounts
   getAllAccounts(): AccountData[] {
-    return [...this.accountGroup.accounts];
+    return this.accountGroup.accounts.filter(account => this.validateAccount(account));
   }
 
-  // Remove account
+  // FIXED: Enhanced account removal with cleanup
   async removeAccount(accountId: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
     console.log('🗑️ AccountManager: Removing account:', accountId);
     
     const accountIndex = this.accountGroup.accounts.findIndex(acc => acc.id === accountId);
@@ -199,6 +491,7 @@ export class AccountManager {
       } else {
         // No accounts left
         await this.clearAllAccounts();
+        return; // clearAllAccounts handles persistence
       }
     }
 
@@ -208,6 +501,10 @@ export class AccountManager {
 
   // Update account data (e.g., after API refresh)
   async updateAccount(accountId: string, userData: any): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
     const accountIndex = this.accountGroup.accounts.findIndex(acc => acc.id === accountId);
     if (accountIndex === -1) return;
 
@@ -221,34 +518,66 @@ export class AccountManager {
     console.log('✅ AccountManager: Account updated:', account.email);
   }
 
-  // Clear all accounts (logout)
+  // FIXED: Complete cleanup with error handling
   async clearAllAccounts(): Promise<void> {
     console.log('🧹 AccountManager: Clearing all accounts');
     
-    this.accountGroup = { accounts: [], currentAccountId: null, version: 1 };
+    this.accountGroup = { 
+      accounts: [], 
+      currentAccountId: null, 
+      version: CURRENT_VERSION 
+    };
     
-    // Clear SecureStore
-    await SecureStore.deleteItemAsync('auth_token').catch(() => {});
-    await SecureStore.deleteItemAsync('user_id').catch(() => {});
-    await SecureStore.deleteItemAsync('user_role').catch(() => {});
-    
-    // Clear AsyncStorage
-    await AsyncStorage.removeItem(STORAGE_KEY);
-    await AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY);
-    
+    await this.clearAllStorage();
     console.log('✅ AccountManager: All accounts cleared');
   }
 
-  // Get current account's auth token
+  // Clear all storage locations
+  private async clearAllStorage(): Promise<void> {
+    try {
+      // Clear SecureStore
+      await Promise.all([
+        SecureStore.deleteItemAsync('auth_token').catch(() => {}),
+        SecureStore.deleteItemAsync('user_id').catch(() => {}),
+        SecureStore.deleteItemAsync('user_role').catch(() => {})
+      ]);
+      
+      // Clear AsyncStorage
+      await Promise.all([
+        AsyncStorage.removeItem(STORAGE_KEY),
+        AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY),
+        AsyncStorage.removeItem(BACKUP_KEY)
+      ]);
+      
+    } catch (error) {
+      console.error('❌ AccountManager: Failed to clear storage:', error);
+    }
+  }
+
+  // FIXED: Robust token retrieval with validation
   getCurrentToken(): string | null {
     const current = this.getCurrentAccount();
-    return current?.token || null;
+    const token = current?.token;
+    
+    if (token && token.length > 0) {
+      return token;
+    }
+    
+    console.warn('⚠️ AccountManager: No valid token available');
+    return null;
   }
 
   // Get current account's user ID
   getCurrentUserId(): string | null {
     const current = this.getCurrentAccount();
-    return current?.id || null;
+    const userId = current?.id;
+    
+    if (userId && userId.length > 0) {
+      return userId;
+    }
+    
+    console.warn('⚠️ AccountManager: No valid user ID available');
+    return null;
   }
 
   // Get current account's role
@@ -271,6 +600,32 @@ export class AccountManager {
   // Check if account exists
   hasAccount(accountId: string): boolean {
     return this.accountGroup.accounts.some(acc => acc.id === accountId);
+  }
+
+  // FIXED: Debug method to check account manager state
+  getDebugInfo(): any {
+    return {
+      initialized: this.initialized,
+      accountCount: this.accountGroup.accounts.length,
+      currentAccountId: this.accountGroup.currentAccountId,
+      hasCurrentAccount: !!this.getCurrentAccount(),
+      currentToken: !!this.getCurrentToken(),
+      currentUserId: this.getCurrentUserId(),
+      currentRole: this.getCurrentRole(),
+      accounts: this.accountGroup.accounts.map(acc => ({
+        id: acc.id,
+        email: acc.email,
+        role: acc.role,
+        hasToken: !!acc.token,
+        lastUsed: new Date(acc.lastUsed).toISOString()
+      }))
+    };
+  }
+
+  // Force re-initialization (useful for debugging)
+  async forceReinitialize(): Promise<void> {
+    this.initialized = false;
+    await this.initialize();
   }
 }
 
