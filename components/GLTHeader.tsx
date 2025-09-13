@@ -236,7 +236,7 @@ export default function GLTHeader({
     setRecentNotifications(prev => [incomingNotification, ...prev.slice(0, 4)]);
     
     // Show notification banner
-    showNotificationBanner(incomingNotification);
+    displayNotificationBanner(incomingNotification);
     
     // Increment notification count
     setNotificationCount(prev => prev + 1);
@@ -266,7 +266,7 @@ export default function GLTHeader({
     }
   };
 
-  const showNotificationBanner = (notification: IncomingNotification) => {
+  const displayNotificationBanner = (notification: IncomingNotification) => {
     setCurrentNotification(notification);
     setShowNotificationBanner(true);
     
