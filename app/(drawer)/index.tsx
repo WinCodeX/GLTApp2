@@ -447,8 +447,7 @@ export default function HomeScreen() {
   const [selectedPackageSizeInfo, setSelectedPackageSizeInfo] = useState<PackageSizeInfo | null>(null);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
-  
-const [showChangelogModal, setShowChangelogModal] = useState(false);
+  const [showChangelogModal, setShowChangelogModal] = useState(false);
 
   // Update modal states
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -580,7 +579,7 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
 
-// Check if changelog should be shown
+      // Check if changelog should be shown
       await checkChangelogDisplay();
       
       // Check for APK updates on app start (delay to not block UI)
@@ -589,7 +588,6 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       console.error('App initialization error:', error);
     }
   };
-
 
   // Check if user has seen the current changelog version
   const checkChangelogDisplay = async () => {
@@ -605,8 +603,6 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       console.error('Error checking changelog status:', error);
     }
   };
-
-
 
   // Check for APK updates
   const checkForAPKUpdates = async () => {
@@ -651,20 +647,16 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
     }
   };
 
-
-
-  // Handle changelog modal close
+  // FIXED: Handle changelog modal close
   const handleChangelogClose = async () => {
-        try {
+    try {
       await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
       setShowChangelogModal(false);
-             } catch (error) {
+    } catch (error) {
       console.error('Error saving changelog status:', error);
       setShowChangelogModal(false);
-
-
-
-
+    }
+  };
 
   // Handle app going to background
   const handleAppGoingBackground = async () => {
@@ -1399,14 +1391,11 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
         type="destination"
       />
 
-
-      
       {/* Enhanced Changelog Modal for APK Updates */}
       <ChangelogModal
         visible={showChangelogModal}
         onClose={handleChangelogClose}
       />
-
 
       {/* Enhanced Update Modal */}
       <UpdateModal
