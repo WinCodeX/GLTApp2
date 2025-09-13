@@ -579,6 +579,9 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       // Initialize APK update service
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
+
+// Check if changelog should be shown
+      await checkChangelogDisplay();
       
       // Check for APK updates on app start (delay to not block UI)
       setTimeout(checkForAPKUpdates, 2000);
@@ -586,6 +589,24 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       console.error('App initialization error:', error);
     }
   };
+
+
+  // Check if user has seen the current changelog version
+  const checkChangelogDisplay = async () => {
+    try {
+      const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
+      
+      if (!hasSeenChangelog) {
+        setTimeout(() => {
+          setShowChangelogModal(true);
+        }, 1000);
+      }
+    } catch (error) {
+      console.error('Error checking changelog status:', error);
+    }
+  };
+
+
 
   // Check for APK updates
   const checkForAPKUpdates = async () => {
@@ -629,6 +650,21 @@ const [showChangelogModal, setShowChangelogModal] = useState(false);
       setTimeout(checkForAPKUpdates, 1000);
     }
   };
+
+
+
+  // Handle changelog modal close
+  const handleChangelogClose = async () => {
+        try {
+      await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
+      setShowChangelogModal(false);
+             } catch (error) {
+      console.error('Error saving changelog status:', error);
+      setShowChangelogModal(false);
+
+
+
+
 
   // Handle app going to background
   const handleAppGoingBackground = async () => {
