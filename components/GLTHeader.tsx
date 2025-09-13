@@ -1,13 +1,15 @@
-// components/GLTHeader.tsx - Fixed with proper error handling and fallbacks
+// components/GLTHeader.tsx - Fixed with expo-notifications integration
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as Notifications from 'expo-notifications';
+import Constants from 'expo-constants';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
 import { SafeLogo } from '../components/SafeLogo';
@@ -35,6 +37,14 @@ interface DownloadProgress {
   remainingTime: number;
   version?: string;
   status: 'checking' | 'downloading' | 'installing' | 'complete' | 'error';
+}
+
+interface IncomingNotification {
+  id: string;
+  title: string;
+  body: string;
+  data?: any;
+  timestamp: number;
 }
 
 // Enhanced Safe Avatar Component matching CustomDrawerContent
@@ -130,6 +140,9 @@ export default function GLTHeader({
     status: 'checking',
   });
   const [showInstallModal, setShowInstallModal] = useState(false);
+  const [recentNotifications, setRecentNotifications] = useState<IncomingNotification[]>([]);
+  const [showNotificationBanner, setShowNotificationBanner] = useState(false);
+  const [currentNotification, setCurrentNotification] = useState<IncomingNotification | null>(null);
   
   // Double tap detection for avatar cycling
   const lastTapRef = useRef<number>(0);
@@ -138,6 +151,186 @@ export default function GLTHeader({
   // Progress animation refs
   const progressBarAnim = useRef(new Animated.Value(0)).current;
   const progressBarHeight = useRef(new Animated.Value(0)).current;
+  
+  // Notification banner animation
+  const bannerAnimationValue = useRef(new Animated.Value(-100)).current;
+  const bannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Notification listeners refs
+  const notificationListener = useRef<Notifications.Subscription>();
+  const responseListener = useRef<Notifications.Subscription>();
+
+  // EXPO NOTIFICATIONS SETUP
+  useEffect(() => {
+    setupNotifications();
+    
+    return () => {
+      // Cleanup notification listeners
+      if (notificationListener.current) {
+        notificationListener.current.remove();
+      }
+      if (responseListener.current) {
+        responseListener.current.remove();
+      }
+      if (bannerTimeoutRef.current) {
+        clearTimeout(bannerTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const setupNotifications = async () => {
+    try {
+      console.log('🔔 Setting up expo-notifications in GLTHeader...');
+      
+      // Configure notification behavior
+      await Notifications.setNotificationHandler({
+        handleNotification: async (notification) => {
+          console.log('🔔 Notification received in header:', notification);
+          
+          // Always show notifications when app is in foreground
+          return {
+            shouldShowAlert: true,
+            shouldPlaySound: true,
+            shouldSetBadge: true,
+          };
+        },
+      });
+
+      // Request permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        console.warn('🔔 Notification permissions not granted');
+        return;
+      }
+
+      // Setup notification listeners
+      notificationListener.current = Notifications.addNotificationReceivedListener(handleNotificationReceived);
+      responseListener.current = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
+      
+      console.log('✅ Expo notifications setup complete');
+      
+    } catch (error) {
+      console.error('❌ Failed to setup notifications:', error);
+    }
+  };
+
+  const handleNotificationReceived = (notification: Notifications.Notification) => {
+    console.log('🔔 New notification received in header:', notification);
+    
+    const incomingNotification: IncomingNotification = {
+      id: notification.request.identifier,
+      title: notification.request.content.title || 'New Notification',
+      body: notification.request.content.body || '',
+      data: notification.request.content.data,
+      timestamp: Date.now(),
+    };
+    
+    // Add to recent notifications
+    setRecentNotifications(prev => [incomingNotification, ...prev.slice(0, 4)]);
+    
+    // Show notification banner
+    showNotificationBanner(incomingNotification);
+    
+    // Increment notification count
+    setNotificationCount(prev => prev + 1);
+    
+    // Store last notification for banner display
+    setCurrentNotification(incomingNotification);
+  };
+
+  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+    console.log('🔔 Notification response received:', response);
+    
+    const notificationData = response.notification.request.content.data;
+    
+    // Handle different notification types
+    if (notificationData?.type === 'package_update') {
+      // Navigate to package tracking
+      navigateToPackage(notificationData.package_id);
+    } else if (notificationData?.type === 'business_invite') {
+      // Navigate to business page
+      navigateToBusiness();
+    } else if (notificationData?.type === 'general') {
+      // Navigate to notifications page
+      handleNotifications();
+    } else {
+      // Default: navigate to notifications
+      handleNotifications();
+    }
+  };
+
+  const showNotificationBanner = (notification: IncomingNotification) => {
+    setCurrentNotification(notification);
+    setShowNotificationBanner(true);
+    
+    // Animate banner in
+    Animated.sequence([
+      Animated.timing(bannerAnimationValue, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(3000), // Show for 3 seconds
+      Animated.timing(bannerAnimationValue, {
+        toValue: -100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setShowNotificationBanner(false);
+      setCurrentNotification(null);
+    });
+  };
+
+  const dismissNotificationBanner = () => {
+    Animated.timing(bannerAnimationValue, {
+      toValue: -100,
+      duration: 200,
+      useNativeDriver: true,
+    }).start(() => {
+      setShowNotificationBanner(false);
+      setCurrentNotification(null);
+    });
+  };
+
+  const handleBannerPress = () => {
+    dismissNotificationBanner();
+    
+    if (currentNotification?.data?.type === 'package_update') {
+      navigateToPackage(currentNotification.data.package_id);
+    } else {
+      handleNotifications();
+    }
+  };
+
+  const navigateToPackage = async (packageId: string) => {
+    try {
+      await NavigationHelper.navigateTo('/(drawer)/track', {
+        params: { packageId },
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error('Navigation to package failed:', error);
+    }
+  };
+
+  const navigateToBusiness = async () => {
+    try {
+      await NavigationHelper.navigateTo('/(drawer)/business', {
+        params: {},
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error('Navigation to business failed:', error);
+    }
+  };
 
   useEffect(() => {
     // Monitor download progress
@@ -629,6 +822,50 @@ export default function GLTHeader({
         </View>
       </Animated.View>
 
+      {/* Notification Banner */}
+      {showNotificationBanner && currentNotification && (
+        <Animated.View
+          style={[
+            styles.notificationBanner,
+            {
+              transform: [{ translateY: bannerAnimationValue }],
+            },
+          ]}
+        >
+          <TouchableOpacity
+            style={styles.notificationBannerContent}
+            onPress={handleBannerPress}
+            activeOpacity={0.9}
+          >
+            <LinearGradient
+              colors={['#667eea', '#764ba2']}
+              style={styles.notificationBannerGradient}
+            >
+              <View style={styles.notificationBannerIcon}>
+                <Feather name="bell" size={16} color="white" />
+              </View>
+              
+              <View style={styles.notificationBannerText}>
+                <Text style={styles.notificationBannerTitle} numberOfLines={1}>
+                  {currentNotification.title}
+                </Text>
+                <Text style={styles.notificationBannerBody} numberOfLines={2}>
+                  {currentNotification.body}
+                </Text>
+              </View>
+              
+              <TouchableOpacity
+                onPress={dismissNotificationBanner}
+                style={styles.notificationBannerClose}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Feather name="x" size={16} color="rgba(255, 255, 255, 0.8)" />
+              </TouchableOpacity>
+            </LinearGradient>
+          </TouchableOpacity>
+        </Animated.View>
+      )}
+
       {/* Install Modal */}
       <Modal
         visible={showInstallModal}
@@ -790,6 +1027,57 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     borderRadius: 0,
+  },
+
+  // Notification Banner Styles
+  notificationBanner: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    zIndex: 1000,
+    paddingHorizontal: 16,
+    paddingTop: 50, // Account for status bar
+  },
+  notificationBannerContent: {
+    borderRadius: 12,
+    overflow: 'hidden',
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  notificationBannerGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    gap: 12,
+  },
+  notificationBannerIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  notificationBannerText: {
+    flex: 1,
+  },
+  notificationBannerTitle: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  notificationBannerBody: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  notificationBannerClose: {
+    padding: 4,
   },
 
   // Modal Styles
