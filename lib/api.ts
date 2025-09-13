@@ -1,7 +1,6 @@
-// lib/api.ts - Fixed to properly handle authentication errors without auto-logout
+// lib/api.ts - Fixed to properly handle authentication errors without auto-redirect
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
-import { router } from 'expo-router';
 import Toast from 'react-native-toast-message';
 import { accountManager } from './AccountManager';
 
@@ -169,7 +168,7 @@ const isFileUpload = (config: any): boolean => {
   return false;
 };
 
-// FIXED: Helper to determine if error is genuinely authentication-related
+// Helper to determine if error is genuinely authentication-related
 const isGenuineAuthError = (error: any): boolean => {
   const errorMessage = error.response?.data?.message || error.response?.data?.error || '';
   const errorCode = error.response?.data?.code || '';
@@ -197,7 +196,7 @@ const isGenuineAuthError = (error: any): boolean => {
   );
 };
 
-// FIXED: Helper to check if endpoint is authentication-related
+// Helper to check if endpoint is authentication-related
 const isAuthEndpoint = (url: string): boolean => {
   const authEndpoints = ['/login', '/signup', '/logout', '/auth/', '/sessions'];
   return authEndpoints.some(endpoint => url.includes(endpoint));
@@ -212,7 +211,7 @@ const api = axios.create({
   },
 });
 
-// FIXED: Request interceptor that properly handles file uploads
+// Request interceptor that properly handles file uploads
 api.interceptors.request.use(
   async (config) => {
     try {
@@ -227,7 +226,7 @@ api.interceptors.request.use(
         config.baseURL = resolvedBaseUrl;
       }
 
-      // CRITICAL FIX: Only set JSON headers for non-file uploads
+      // Only set JSON headers for non-file uploads
       const isUpload = isFileUpload(config);
       
       if (config.headers) {
@@ -279,7 +278,7 @@ api.interceptors.request.use(
   }
 );
 
-// FIXED: Response interceptor with intelligent authentication error handling
+// FIXED: Response interceptor without automatic login redirects
 api.interceptors.response.use(
   (response) => {
     const currentAccount = accountManager.getCurrentAccount();
@@ -317,7 +316,7 @@ api.interceptors.response.use(
       }
     }
 
-    // FIXED: Smart handling of 401/422 errors - Only logout for genuine auth failures
+    // FIXED: Handle authentication errors without automatic redirects
     if (status === 401 || status === 422) {
       const url = config?.url || '';
       const isAuthRequest = isAuthEndpoint(url);
@@ -331,29 +330,25 @@ api.interceptors.response.use(
         errorCode: error.response?.data?.code
       });
 
-      // Only trigger logout for genuine authentication errors
+      // Only clean up account for genuine authentication errors, but don't redirect
       if (isGenuineAuth && currentAccount) {
         console.log('🔐 Genuine authentication failure detected - cleaning up account');
         
         try {
           await accountManager.removeAccount(currentAccount.id);
           
-          // Show toast and redirect if no accounts remain
+          // Show toast but don't redirect automatically
           if (!accountManager.hasAccounts()) {
             Toast.show({ 
               type: 'error', 
               text1: 'Session expired',
-              text2: 'Please log in again'
+              text2: 'Account removed - please log in again'
             });
-            
-            setTimeout(() => {
-              router.replace('/login');
-            }, 2000);
           } else {
             Toast.show({ 
               type: 'warning', 
               text1: 'Account session expired',
-              text2: 'Switched to another account'
+              text2: 'Account removed - switched to another account'
             });
           }
         } catch (removeError) {
@@ -361,9 +356,9 @@ api.interceptors.response.use(
         }
       } else {
         // Handle non-authentication 401/422 errors gracefully
-        console.log('⚠️ Non-authentication 401/422 error - not triggering logout');
+        console.log('⚠️ Non-authentication 401/422 error - showing error message');
         
-        // Show specific error message without logging out
+        // Show specific error message without account cleanup
         const errorMessage = error.response?.data?.message || 'Request failed';
         Toast.show({
           type: 'error',
