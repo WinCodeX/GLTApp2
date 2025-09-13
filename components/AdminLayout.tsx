@@ -274,46 +274,29 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
-  // FIXED: Robust notification count fetching with multiple fallbacks
+  // FIXED: Fetch notification count from regular user notifications API
   const fetchNotificationCount = async () => {
     try {
-      console.log('🔔 Admin: Fetching notification count from admin API...');
+      console.log('🔔 Admin: Fetching notification count from user notifications API...');
       
-      // Try admin notifications stats endpoint first
-      try {
-        const response = await api.get('/api/v1/admin/notifications/stats', {
-          timeout: 8000
-        });
-        console.log('🔔 Admin: Stats response:', response.data);
-        
-        if (response.data && response.data.success) {
-          const count = response.data.data?.unread || 0;
-          setNotificationCount(count);
-          console.log('🔔 Admin: Notification count updated from stats:', count);
-          return;
-        }
-      } catch (statsError) {
-        console.log('🔔 Admin: Stats endpoint failed, trying fallback:', statsError.response?.status);
-      }
-      
-      // Fallback to regular notifications endpoint
+      // Method 1: Try the dedicated unread_count endpoint
       try {
         const response = await api.get('/api/v1/notifications/unread_count', {
           timeout: 8000
         });
-        console.log('🔔 Admin: Unread count response:', response.data);
+        console.log('🔔 Admin: Unread count endpoint response:', response.data);
         
         if (response.data && response.data.success) {
           const count = response.data.unread_count || response.data.count || 0;
           setNotificationCount(count);
-          console.log('🔔 Admin: Notification count updated from unread_count:', count);
+          console.log('🔔 Admin: Notification count updated from unread_count endpoint:', count);
           return;
         }
       } catch (unreadCountError) {
-        console.log('🔔 Admin: Unread count also failed:', unreadCountError.response?.status);
+        console.log('🔔 Admin: Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
       }
       
-      // Final fallback - basic notifications endpoint
+      // Method 2: Fallback to notifications index endpoint with minimal data
       try {
         const response = await api.get('/api/v1/notifications', {
           params: {
@@ -324,6 +307,8 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
           timeout: 8000
         });
         
+        console.log('🔔 Admin: Notifications index response:', response.data);
+        
         if (response.data && response.data.success) {
           const count = response.data.unread_count || response.data.pagination?.total_count || 0;
           setNotificationCount(count);
@@ -332,6 +317,26 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
         }
       } catch (indexError) {
         console.log('🔔 Admin: Index endpoint also failed:', indexError.response?.status);
+      }
+      
+      // Method 3: Final fallback - just get all notifications and count unread manually
+      try {
+        const response = await api.get('/api/v1/notifications', {
+          params: {
+            per_page: 50, // Get enough to count unread
+            page: 1
+          },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.success && response.data.data) {
+          const unreadCount = response.data.data.filter((notification: any) => !notification.read).length;
+          setNotificationCount(unreadCount);
+          console.log('🔔 Admin: Notification count updated from manual count:', unreadCount);
+          return;
+        }
+      } catch (manualCountError) {
+        console.log('🔔 Admin: Manual count also failed:', manualCountError.response?.status);
       }
       
       console.warn('🔔 Admin: All notification count methods failed, keeping previous count');
@@ -451,14 +456,14 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
   const handleNotifications = async (): void => {
     try {
       console.log('🔔 Admin: Navigating to admin notifications');
-      await NavigationHelper.navigateTo('/admin/NotificationsManagementScreen', {
+      await NavigationHelper.navigateTo('/admin/notifications', {
         params: {},
         trackInHistory: true
       });
     } catch (error) {
       console.error('🔔 Admin: Navigation to notifications failed:', error);
       // Fallback to router navigation
-      router.push('/admin/NotificationsManagementScreen');
+      router.push('/admin/notifications');
     }
   };
 
