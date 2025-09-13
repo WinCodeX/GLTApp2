@@ -1,21 +1,21 @@
-// app/admin/NotificationsManagementScreen.tsx - Admin Notifications Management
-import React, { useState, useEffect, useCallback } from 'react';
+// app/admin/NotificationsManagementScreen.tsx - Enhanced Admin Notifications Management
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Alert,
   TextInput,
   Modal,
   Dimensions,
   RefreshControl,
   ActivityIndicator,
   FlatList,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import api from '../../lib/api';
@@ -36,15 +36,20 @@ interface NotificationData {
   icon?: string;
   action_url?: string;
   status: string;
+  time_since_creation?: string;
+  formatted_created_at?: string;
+  expired?: boolean;
   user: {
     id: number;
     name: string;
     email?: string;
     phone?: string;
+    role?: string;
   };
   package?: {
     id: number;
     code: string;
+    state?: string;
   };
 }
 
@@ -75,6 +80,23 @@ interface CreateNotificationData {
   expires_at: string;
   action_url: string;
   icon: string;
+}
+
+interface UserSearchResult {
+  id: number;
+  name: string;
+  email?: string;
+  phone?: string;
+  packages?: { code: string; id: number }[];
+}
+
+interface ConfirmationModalData {
+  visible: boolean;
+  title: string;
+  message: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  type: 'delete' | 'broadcast' | 'general';
 }
 
 const NOTIFICATION_TYPES = [
@@ -132,6 +154,16 @@ export default function NotificationsManagementScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [showUserSearchModal, setShowUserSearchModal] = useState(false);
+  const [confirmationModal, setConfirmationModal] = useState<ConfirmationModalData>({
+    visible: false,
+    title: '',
+    message: '',
+    onConfirm: () => {},
+    onCancel: () => {},
+    type: 'general',
+  });
+
   const [createData, setCreateData] = useState<CreateNotificationData>({
     title: '',
     message: '',
@@ -143,11 +175,22 @@ export default function NotificationsManagementScreen() {
     icon: 'notifications',
   });
   const [creating, setCreating] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
+  
+  // User search states
+  const [userSearchQuery, setUserSearchQuery] = useState('');
+  const [userSearchResults, setUserSearchResults] = useState<UserSearchResult[]>([]);
+  const [userSearchLoading, setUserSearchLoading] = useState(false);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
   const [hasMore, setHasMore] = useState(true);
   const [totalCount, setTotalCount] = useState(0);
+
+  // Toast animation
+  const toastAnim = useRef(new Animated.Value(-100)).current;
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
   useEffect(() => {
     loadNotifications();
@@ -157,6 +200,43 @@ export default function NotificationsManagementScreen() {
   useEffect(() => {
     applyFilters();
   }, [notifications, filters]);
+
+  // Toast functionality
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    
+    Animated.sequence([
+      Animated.timing(toastAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(3000),
+      Animated.timing(toastAnim, {
+        toValue: -100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
+  };
+
+  // Confirmation modal helper
+  const showConfirmationModal = (
+    title: string,
+    message: string,
+    onConfirm: () => void,
+    type: 'delete' | 'broadcast' | 'general' = 'general'
+  ) => {
+    setConfirmationModal({
+      visible: true,
+      title,
+      message,
+      onConfirm,
+      onCancel: () => setConfirmationModal(prev => ({ ...prev, visible: false })),
+      type,
+    });
+  };
 
   const loadNotifications = async (page = 1, append = false) => {
     try {
@@ -191,7 +271,7 @@ export default function NotificationsManagementScreen() {
       }
     } catch (error) {
       console.error('❌ Failed to load notifications:', error);
-      Alert.alert('Error', 'Failed to load notifications');
+      showToast('Failed to load notifications', 'error');
     } finally {
       setLoading(false);
       setLoadingMore(false);
@@ -209,6 +289,46 @@ export default function NotificationsManagementScreen() {
       console.error('❌ Failed to load notification stats:', error);
     }
   };
+
+  // Enhanced user search functionality
+  const searchUsers = async (query: string) => {
+    if (!query.trim()) {
+      setUserSearchResults([]);
+      return;
+    }
+
+    try {
+      setUserSearchLoading(true);
+      
+      const response = await api.get('/api/v1/admin/users/search', {
+        params: {
+          query: query.trim(),
+          include_packages: true,
+        },
+        timeout: 10000,
+      });
+
+      if (response.data?.success) {
+        setUserSearchResults(response.data.data || []);
+      }
+    } catch (error) {
+      console.error('❌ Failed to search users:', error);
+      showToast('Failed to search users', 'error');
+    } finally {
+      setUserSearchLoading(false);
+    }
+  };
+
+  // Debounced user search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (showUserSearchModal && userSearchQuery) {
+        searchUsers(userSearchQuery);
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [userSearchQuery, showUserSearchModal]);
 
   const applyFilters = useCallback(() => {
     let filtered = [...notifications];
@@ -285,41 +405,39 @@ export default function NotificationsManagementScreen() {
       );
       
       loadStats(); // Refresh stats
+      showToast(`Notification marked as ${read ? 'read' : 'unread'}`, 'success');
     } catch (error) {
       console.error('❌ Failed to update notification:', error);
-      Alert.alert('Error', 'Failed to update notification');
+      showToast('Failed to update notification', 'error');
     }
   };
 
   const deleteNotification = async (notificationId: number) => {
-    Alert.alert(
+    const notification = notifications.find(n => n.id === notificationId);
+    
+    showConfirmationModal(
       'Delete Notification',
-      'Are you sure you want to delete this notification?',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            try {
-              await api.delete(`/api/v1/admin/notifications/${notificationId}`);
-              
-              // Remove from local state
-              setNotifications(prev => prev.filter(n => n.id !== notificationId));
-              loadStats(); // Refresh stats
-            } catch (error) {
-              console.error('❌ Failed to delete notification:', error);
-              Alert.alert('Error', 'Failed to delete notification');
-            }
-          }
+      `Are you sure you want to delete the notification "${notification?.title}"? This action cannot be undone.`,
+      async () => {
+        try {
+          await api.delete(`/api/v1/admin/notifications/${notificationId}`);
+          
+          // Remove from local state
+          setNotifications(prev => prev.filter(n => n.id !== notificationId));
+          loadStats(); // Refresh stats
+          showToast('Notification deleted successfully', 'success');
+        } catch (error) {
+          console.error('❌ Failed to delete notification:', error);
+          showToast('Failed to delete notification', 'error');
         }
-      ]
+      },
+      'delete'
     );
   };
 
   const handleCreateNotification = async () => {
     if (!createData.title || !createData.message) {
-      Alert.alert('Error', 'Title and message are required');
+      showToast('Title and message are required', 'error');
       return;
     }
 
@@ -336,7 +454,7 @@ export default function NotificationsManagementScreen() {
       const response = await api.post('/api/v1/admin/notifications', payload);
       
       if (response.data?.success) {
-        Alert.alert('Success', 'Notification created successfully');
+        showToast('Notification created successfully', 'success');
         setShowCreateModal(false);
         setCreateData({
           title: '',
@@ -353,10 +471,59 @@ export default function NotificationsManagementScreen() {
       }
     } catch (error) {
       console.error('❌ Failed to create notification:', error);
-      Alert.alert('Error', 'Failed to create notification');
+      showToast('Failed to create notification', 'error');
     } finally {
       setCreating(false);
     }
+  };
+
+  const handleBroadcastNotification = async () => {
+    if (!createData.title || !createData.message) {
+      showToast('Title and message are required', 'error');
+      return;
+    }
+
+    showConfirmationModal(
+      'Broadcast Notification',
+      `Send "${createData.title}" to all users? This will create notifications for every user in the system.`,
+      async () => {
+        try {
+          setBroadcasting(true);
+          
+          const payload = {
+            broadcast: {
+              ...createData,
+            }
+          };
+
+          const response = await api.post('/api/v1/admin/notifications/broadcast', payload);
+          
+          if (response.data?.success) {
+            const count = response.data.data?.notifications_created || 0;
+            showToast(`Broadcast sent to ${count} users`, 'success');
+            setShowCreateModal(false);
+            setCreateData({
+              title: '',
+              message: '',
+              notification_type: 'general',
+              priority: 0,
+              user_id: '',
+              expires_at: '',
+              action_url: '',
+              icon: 'notifications',
+            });
+            loadNotifications(1);
+            loadStats();
+          }
+        } catch (error) {
+          console.error('❌ Failed to broadcast notification:', error);
+          showToast('Failed to broadcast notification', 'error');
+        } finally {
+          setBroadcasting(false);
+        }
+      },
+      'broadcast'
+    );
   };
 
   const clearFilters = () => {
@@ -368,6 +535,13 @@ export default function NotificationsManagementScreen() {
       search: '',
     });
     setShowFiltersModal(false);
+  };
+
+  const selectUser = (user: UserSearchResult) => {
+    setCreateData(prev => ({ ...prev, user_id: user.id.toString() }));
+    setShowUserSearchModal(false);
+    setUserSearchQuery('');
+    setUserSearchResults([]);
   };
 
   const getPriorityColor = (priority: number) => {
@@ -395,33 +569,111 @@ export default function NotificationsManagementScreen() {
     }
   };
 
+  // Enhanced icon mapping like the regular notifications screen
+  const getNotificationIcon = (type: string, iconName?: string) => {
+    if (iconName && iconName !== 'notifications') {
+      return iconName;
+    }
+
+    switch (type) {
+      case 'package_created':
+      case 'package_rejected':
+      case 'package_expired':
+      case 'package_delivered':
+      case 'package_collected':
+        return 'package';
+      case 'package_submitted':
+        return 'send';
+      case 'payment_received':
+      case 'payment_reminder':
+        return 'credit-card';
+      case 'final_warning':
+      case 'resubmission_available':
+        return 'alert-triangle';
+      case 'general':
+        return 'bell';
+      default:
+        return 'notifications';
+    }
+  };
+
+  const getNotificationColor = (type: string, read: boolean) => {
+    if (read) return '#a78bfa';
+
+    switch (type) {
+      case 'package_delivered':
+      case 'package_collected':
+        return '#10b981';
+      case 'package_rejected':
+      case 'package_expired':
+        return '#ef4444';
+      case 'final_warning':
+      case 'resubmission_available':
+        return '#f59e0b';
+      case 'payment_received':
+      case 'payment_reminder':
+        return '#c084fc';
+      case 'general':
+        return '#8b5cf6';
+      default:
+        return '#8b5cf6';
+    }
+  };
+
   const formatDate = (dateString: string) => {
     const date = new Date(dateString);
     return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
   };
 
+  const formatTime = (timeString: string) => {
+    try {
+      const date = new Date(timeString);
+      const now = new Date();
+      const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+      if (diffInHours < 1) {
+        const diffInMinutes = Math.floor(diffInHours * 60);
+        return `${diffInMinutes}m ago`;
+      } else if (diffInHours < 24) {
+        return `${Math.floor(diffInHours)}h ago`;
+      } else {
+        const diffInDays = Math.floor(diffInHours / 24);
+        return `${diffInDays}d ago`;
+      }
+    } catch {
+      return timeString;
+    }
+  };
+
+  // Enhanced notification item with better details like the regular notifications screen
   const renderNotificationItem = ({ item }: { item: NotificationData }) => (
     <View style={styles.notificationCard}>
       <LinearGradient
         colors={item.read ? ['#2d1b4e', '#1a1b3d'] : ['#8b5cf6', '#c084fc']}
         style={styles.notificationGradient}
       >
-        {/* Header */}
+        {/* Enhanced header with better layout */}
         <View style={styles.notificationHeader}>
           <View style={styles.notificationHeaderLeft}>
-            <Ionicons 
-              name={item.icon as any || 'notifications'} 
-              size={20} 
-              color={item.read ? '#a78bfa' : 'white'} 
-            />
+            <View style={[
+              styles.iconBackground,
+              { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
+            ]}>
+              <Feather
+                name={getNotificationIcon(item.notification_type, item.icon) as any}
+                size={18}
+                color={getNotificationColor(item.notification_type, item.read)}
+              />
+            </View>
             <View style={styles.notificationHeaderText}>
               <Text style={[styles.notificationTitle, { color: item.read ? '#c4b5fd' : 'white' }]} numberOfLines={1}>
                 {item.title}
               </Text>
               <Text style={[styles.notificationMeta, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
-                {item.user?.name} • {formatDate(item.created_at)}
+                {item.user?.name} ({item.user?.email || item.user?.phone}) • {item.time_since_creation || formatTime(item.created_at)}
               </Text>
             </View>
+            {!item.read && <View style={styles.unreadIndicator} />}
           </View>
           
           <View style={styles.notificationActions}>
@@ -445,12 +697,27 @@ export default function NotificationsManagementScreen() {
           </View>
         </View>
 
-        {/* Message */}
-        <Text style={[styles.notificationMessage, { color: item.read ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>
+        {/* Enhanced message display */}
+        <Text style={[styles.notificationMessage, { color: item.read ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={3}>
           {item.message}
         </Text>
 
-        {/* Footer */}
+        {/* Package info if available */}
+        {item.package && (
+          <View style={styles.packageInfo}>
+            <Feather name="package" size={12} color={item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)'} />
+            <Text style={[styles.packageCode, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
+              #{item.package.code}
+            </Text>
+            {item.package.state && (
+              <View style={styles.packageStateBadge}>
+                <Text style={styles.packageStateText}>{item.package.state}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Enhanced footer with better badge layout */}
         <View style={styles.notificationFooter}>
           <View style={styles.notificationBadges}>
             <View style={[styles.badge, { backgroundColor: getPriorityColor(item.priority) }]}>
@@ -462,15 +729,19 @@ export default function NotificationsManagementScreen() {
             </View>
             
             <View style={[styles.badge, { backgroundColor: '#c084fc' }]}>
-              <Text style={styles.badgeText}>{item.notification_type}</Text>
+              <Text style={styles.badgeText}>{item.notification_type.replace('_', ' ')}</Text>
             </View>
+
+            {item.expired && (
+              <View style={[styles.badge, { backgroundColor: '#9ca3af' }]}>
+                <Text style={styles.badgeText}>Expired</Text>
+              </View>
+            )}
           </View>
           
-          {item.package && (
-            <Text style={[styles.packageCode, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
-              #{item.package.code}
-            </Text>
-          )}
+          <Text style={[styles.timestamp, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.6)' }]}>
+            {item.formatted_created_at || formatDate(item.created_at)}
+          </Text>
         </View>
       </LinearGradient>
     </View>
@@ -531,6 +802,80 @@ export default function NotificationsManagementScreen() {
     </View>
   );
 
+  // Enhanced user search modal
+  const renderUserSearchModal = () => (
+    <Modal visible={showUserSearchModal} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={styles.modalGradient}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Search Users</Text>
+              <TouchableOpacity onPress={() => {
+                setShowUserSearchModal(false);
+                setUserSearchQuery('');
+                setUserSearchResults([]);
+              }}>
+                <Ionicons name="close" size={24} color="#a78bfa" />
+              </TouchableOpacity>
+            </View>
+            
+            <View style={styles.userSearchContainer}>
+              <Ionicons name="search" size={20} color="#a78bfa" />
+              <TextInput
+                style={styles.userSearchInput}
+                placeholder="Search by name, email, phone, or package code..."
+                placeholderTextColor="#a78bfa"
+                value={userSearchQuery}
+                onChangeText={setUserSearchQuery}
+                autoFocus
+              />
+            </View>
+
+            {userSearchLoading && (
+              <View style={styles.searchLoading}>
+                <ActivityIndicator size="small" color="#8b5cf6" />
+                <Text style={styles.searchLoadingText}>Searching...</Text>
+              </View>
+            )}
+
+            <ScrollView style={styles.userSearchResults} showsVerticalScrollIndicator={false}>
+              {userSearchResults.map((user) => (
+                <TouchableOpacity
+                  key={user.id}
+                  style={styles.userResultItem}
+                  onPress={() => selectUser(user)}
+                >
+                  <View style={styles.userResultInfo}>
+                    <Text style={styles.userResultName}>{user.name}</Text>
+                    <Text style={styles.userResultDetails}>
+                      ID: {user.id} • {user.email || user.phone || 'No contact info'}
+                    </Text>
+                    {user.packages && user.packages.length > 0 && (
+                      <Text style={styles.userResultPackages}>
+                        Packages: {user.packages.map(p => p.code).join(', ')}
+                      </Text>
+                    )}
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color="#a78bfa" />
+                </TouchableOpacity>
+              ))}
+              
+              {userSearchQuery && !userSearchLoading && userSearchResults.length === 0 && (
+                <View style={styles.noResults}>
+                  <Text style={styles.noResultsText}>No users found</Text>
+                  <Text style={styles.noResultsSubtext}>
+                    Try searching by name, email, phone number, or package code
+                  </Text>
+                </View>
+              )}
+            </ScrollView>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Enhanced create modal with user search
   const renderCreateModal = () => (
     <Modal visible={showCreateModal} transparent animationType="fade">
       <View style={styles.modalOverlay}>
@@ -615,14 +960,24 @@ export default function NotificationsManagementScreen() {
               </View>
 
               <View style={styles.inputGroup}>
-                <Text style={styles.inputLabel}>User ID (optional)</Text>
-                <TextInput
-                  style={styles.textInput}
-                  placeholder="Enter user ID for specific user"
-                  placeholderTextColor="#a78bfa"
-                  value={createData.user_id}
-                  onChangeText={(text) => setCreateData(prev => ({ ...prev, user_id: text }))}
-                />
+                <Text style={styles.inputLabel}>Target User (optional)</Text>
+                <TouchableOpacity
+                  style={styles.userSearchButton}
+                  onPress={() => setShowUserSearchModal(true)}
+                >
+                  <Ionicons name="search" size={16} color="#8b5cf6" />
+                  <Text style={styles.userSearchButtonText}>
+                    {createData.user_id ? `User ID: ${createData.user_id}` : 'Search for specific user or leave empty for all users'}
+                  </Text>
+                </TouchableOpacity>
+                {createData.user_id && (
+                  <TouchableOpacity
+                    style={styles.clearUserButton}
+                    onPress={() => setCreateData(prev => ({ ...prev, user_id: '' }))}
+                  >
+                    <Text style={styles.clearUserButtonText}>Clear Selection</Text>
+                  </TouchableOpacity>
+                )}
               </View>
 
               <View style={styles.createActions}>
@@ -646,8 +1001,90 @@ export default function NotificationsManagementScreen() {
                     )}
                   </LinearGradient>
                 </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleBroadcastNotification}
+                  style={styles.broadcastButton}
+                  disabled={broadcasting}
+                >
+                  <LinearGradient colors={['#8b5cf6', '#c084fc']} style={styles.broadcastButtonGradient}>
+                    {broadcasting ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <>
+                        <Ionicons name="megaphone" size={14} color="white" />
+                        <Text style={styles.broadcastButtonText}>Broadcast to All</Text>
+                      </>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
               </View>
             </ScrollView>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  // Confirmation modal
+  const renderConfirmationModal = () => (
+    <Modal visible={confirmationModal.visible} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.confirmationModalContent}>
+          <LinearGradient 
+            colors={
+              confirmationModal.type === 'delete' ? ['#7f1d1d', '#991b1b'] :
+              confirmationModal.type === 'broadcast' ? ['#581c87', '#7c2d12'] :
+              ['#2d1b4e', '#1a1b3d']
+            } 
+            style={styles.confirmationModalGradient}
+          >
+            <View style={styles.confirmationHeader}>
+              <Ionicons
+                name={
+                  confirmationModal.type === 'delete' ? 'trash' :
+                  confirmationModal.type === 'broadcast' ? 'megaphone' :
+                  'help-circle'
+                }
+                size={24}
+                color="white"
+              />
+              <Text style={styles.confirmationTitle}>{confirmationModal.title}</Text>
+            </View>
+            
+            <Text style={styles.confirmationMessage}>
+              {confirmationModal.message}
+            </Text>
+            
+            <View style={styles.confirmationActions}>
+              <TouchableOpacity
+                onPress={confirmationModal.onCancel}
+                style={styles.confirmationCancelButton}
+              >
+                <Text style={styles.confirmationCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={() => {
+                  confirmationModal.onConfirm();
+                  setConfirmationModal(prev => ({ ...prev, visible: false }));
+                }}
+                style={[
+                  styles.confirmationConfirmButton,
+                  {
+                    backgroundColor: confirmationModal.type === 'delete' ? '#dc2626' :
+                                   confirmationModal.type === 'broadcast' ? '#8b5cf6' :
+                                   '#10b981'
+                  }
+                ]}
+              >
+                <Text style={styles.confirmationConfirmText}>
+                  {confirmationModal.type === 'delete' ? 'Delete' :
+                   confirmationModal.type === 'broadcast' ? 'Broadcast' :
+                   'Confirm'}
+                </Text>
+              </TouchableOpacity>
+            </View>
           </LinearGradient>
         </View>
       </View>
@@ -819,7 +1256,7 @@ export default function NotificationsManagementScreen() {
                 <Text style={styles.sectionTitle}>By Type</Text>
                 {Object.entries(stats.by_type || {}).map(([type, count]) => (
                   <View key={type} style={styles.statRow}>
-                    <Text style={styles.statRowLabel}>{type}</Text>
+                    <Text style={styles.statRowLabel}>{type.replace('_', ' ')}</Text>
                     <Text style={styles.statRowValue}>{count}</Text>
                   </View>
                 ))}
@@ -827,7 +1264,7 @@ export default function NotificationsManagementScreen() {
                 <Text style={styles.sectionTitle}>By Priority</Text>
                 {Object.entries(stats.by_priority || {}).map(([priority, count]) => (
                   <View key={priority} style={styles.statRow}>
-                    <Text style={styles.statRowLabel}>{getPriorityLabel(parseInt(priority))}</Text>
+                    <Text style={styles.statRowLabel}>{priority}</Text>
                     <Text style={styles.statRowValue}>{count}</Text>
                   </View>
                 ))}
@@ -837,6 +1274,26 @@ export default function NotificationsManagementScreen() {
         </View>
       </View>
     </Modal>
+  );
+
+  // Toast component
+  const renderToast = () => (
+    <Animated.View
+      style={[
+        styles.toast,
+        {
+          backgroundColor: toastType === 'success' ? '#10b981' : '#ef4444',
+          transform: [{ translateY: toastAnim }],
+        },
+      ]}
+    >
+      <Feather
+        name={toastType === 'success' ? 'check-circle' : 'x-circle'}
+        size={16}
+        color="white"
+      />
+      <Text style={styles.toastText}>{toastMessage}</Text>
+    </Animated.View>
   );
 
   if (loading && notifications.length === 0) {
@@ -893,9 +1350,13 @@ export default function NotificationsManagementScreen() {
         />
         
         {renderCreateModal()}
+        {renderUserSearchModal()}
         {renderFiltersModal()}
         {renderStatsModal()}
+        {renderConfirmationModal()}
       </LinearGradient>
+
+      {renderToast()}
     </View>
   );
 }
@@ -1007,26 +1468,44 @@ const styles = StyleSheet.create({
   },
   notificationHeader: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
     marginBottom: 8,
   },
   notificationHeaderLeft: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flex: 1,
+    position: 'relative',
+  },
+  iconBackground: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
   notificationHeaderText: {
-    marginLeft: 12,
     flex: 1,
   },
   notificationTitle: {
     fontSize: 16,
     fontWeight: '600',
+    marginBottom: 2,
   },
   notificationMeta: {
     fontSize: 12,
-    marginTop: 2,
+    lineHeight: 16,
+  },
+  unreadIndicator: {
+    position: 'absolute',
+    top: -2,
+    right: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#c084fc',
   },
   notificationActions: {
     flexDirection: 'row',
@@ -1040,6 +1519,28 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     marginBottom: 12,
   },
+  packageInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginBottom: 8,
+  },
+  packageCode: {
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  packageStateBadge: {
+    backgroundColor: 'rgba(192, 132, 252, 0.3)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  packageStateText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#c084fc',
+    textTransform: 'capitalize',
+  },
   notificationFooter: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1049,6 +1550,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 6,
     flex: 1,
+    flexWrap: 'wrap',
   },
   badge: {
     paddingHorizontal: 8,
@@ -1061,9 +1563,9 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'capitalize',
   },
-  packageCode: {
-    fontSize: 12,
-    fontWeight: '500',
+  timestamp: {
+    fontSize: 10,
+    marginLeft: 8,
   },
   loadingContainer: {
     flex: 1,
@@ -1210,13 +1712,115 @@ const styles = StyleSheet.create({
   priorityOptionTextSelected: {
     color: 'white',
   },
-  createActions: {
+  userSearchButton: {
     flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    gap: 8,
+  },
+  userSearchButtonText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    flex: 1,
+  },
+  clearUserButton: {
+    marginTop: 8,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderRadius: 6,
+    alignItems: 'center',
+  },
+  clearUserButtonText: {
+    color: '#ff6b6b',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  userSearchContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  userSearchInput: {
+    flex: 1,
+    color: '#e5e7eb',
+    fontSize: 16,
+    marginLeft: 12,
+  },
+  searchLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 16,
+  },
+  searchLoadingText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+  },
+  userSearchResults: {
+    maxHeight: height * 0.4,
+  },
+  userResultItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  userResultInfo: {
+    flex: 1,
+  },
+  userResultName: {
+    color: 'white',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  userResultDetails: {
+    color: '#c4b5fd',
+    fontSize: 12,
+    marginBottom: 2,
+  },
+  userResultPackages: {
+    color: '#a78bfa',
+    fontSize: 11,
+  },
+  noResults: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  noResultsText: {
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  noResultsSubtext: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  createActions: {
     gap: 12,
     marginTop: 20,
   },
   cancelButton: {
-    flex: 1,
     paddingVertical: 12,
     paddingHorizontal: 16,
     borderRadius: 8,
@@ -1230,7 +1834,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   createButton: {
-    flex: 1,
     borderRadius: 8,
     overflow: 'hidden',
   },
@@ -1240,6 +1843,79 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   createButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  broadcastButton: {
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  broadcastButtonGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 6,
+    justifyContent: 'center',
+  },
+  broadcastButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmationModalContent: {
+    width: width * 0.85,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  confirmationModalGradient: {
+    padding: 24,
+  },
+  confirmationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 16,
+    gap: 12,
+  },
+  confirmationTitle: {
+    color: 'white',
+    fontSize: 18,
+    fontWeight: 'bold',
+    flex: 1,
+  },
+  confirmationMessage: {
+    color: '#e5e7eb',
+    fontSize: 15,
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  confirmationActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  confirmationCancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+    alignItems: 'center',
+  },
+  confirmationCancelText: {
+    color: '#e5e7eb',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  confirmationConfirmButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  confirmationConfirmText: {
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
@@ -1361,10 +2037,35 @@ const styles = StyleSheet.create({
   statRowLabel: {
     color: '#e5e7eb',
     fontSize: 14,
+    textTransform: 'capitalize',
   },
   statRowValue: {
     color: 'white',
     fontSize: 14,
     fontWeight: '600',
+  },
+  toast: {
+    position: 'absolute',
+    top: 50,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    zIndex: 1000,
+  },
+  toastText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
   },
 });
