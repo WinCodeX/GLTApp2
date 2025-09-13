@@ -1,7 +1,8 @@
-// lib/helpers/hardwareBackHandler.ts - Hardware back button integration
+// lib/helpers/hardwareBackHandler.ts - Fixed TypeScript syntax errors
 import { useEffect, useRef, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { NavigationHelper } from './navigation';
+import React from 'react';
 
 interface HardwareBackOptions {
   fallbackRoute?: string;
@@ -92,19 +93,19 @@ export const HardwareBackProvider: React.FC<{
   options?: HardwareBackOptions;
 }> = ({ children, options = {} }) => {
   useHardwareBackHandler(options);
-  return <>{children}</>;
+  return React.createElement(React.Fragment, null, children);
 };
 
 /**
  * HOC to add hardware back handling to any component
  */
-export const withHardwareBackHandler = <P extends Record<string, any>>(
+export const withHardwareBackHandler = function<P extends Record<string, any>>(
   Component: React.ComponentType<P>,
   options: HardwareBackOptions = {}
-) => {
+): React.ComponentType<P> {
   const WrappedComponent = (props: P) => {
     useHardwareBackHandler(options);
-    return <Component {...props} />;
+    return React.createElement(Component, props);
   };
 
   WrappedComponent.displayName = `withHardwareBackHandler(${Component.displayName || Component.name})`;
