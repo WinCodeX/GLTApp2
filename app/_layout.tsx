@@ -1,4 +1,4 @@
-// app/_layout.tsx - Updated with hardware back button integration
+// app/_layout.tsx - Fixed with correct NavigationTracker import
 import React, { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -17,9 +17,10 @@ import NetworkBanner from '@/components/NetworkBanner';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import colors from '@/theme/colors';
 
-// Hardware back button and navigation tracking imports
+// Hardware back button and navigation tracking imports - FIXED IMPORTS
 import { HardwareBackProvider } from '@/lib/helpers/hardwareBackHandler';
-import { NavigationTracker, initializeNavigation } from '@/lib/helpers/navigation';
+import { NavigationTracker } from '@/lib/helpers/navigationTracker'; // Import from navigationTracker.ts, not navigation.ts
+import { initializeNavigation } from '@/lib/helpers/navigation'; // Import initializeNavigation from navigation.ts
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
