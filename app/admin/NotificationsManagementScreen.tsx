@@ -23,6 +23,7 @@ import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const { width, height } = Dimensions.get('window');
 
+// FIXED: Simplified interface matching the working notifications.tsx
 interface NotificationData {
   id: number;
   title: string;
@@ -39,8 +40,6 @@ interface NotificationData {
   time_since_creation?: string;
   formatted_created_at?: string;
   expired?: boolean;
-  is_broadcast?: boolean;
-  broadcast_count?: number;
   user?: {
     id: number;
     name: string;
@@ -52,6 +51,7 @@ interface NotificationData {
     id: number;
     code: string;
     state?: string;
+    state_display?: string;
   };
 }
 
@@ -61,7 +61,6 @@ interface NotificationStats {
   delivered: number;
   pending: number;
   expired: number;
-  broadcasts: number;
   by_type: Record<string, number>;
   by_priority: Record<string, number>;
 }
@@ -105,7 +104,6 @@ interface ConfirmationModalData {
 const NOTIFICATION_TYPES = [
   { value: '', label: 'All Types' },
   { value: 'general', label: 'General' },
-  { value: 'broadcast', label: 'Push Notification' },
   { value: 'package_rejected', label: 'Package Rejected' },
   { value: 'package_expired', label: 'Package Expired' },
   { value: 'payment_reminder', label: 'Payment Reminder' },
@@ -176,7 +174,7 @@ export default function NotificationsManagementScreen() {
     user_id: '',
     expires_at: '',
     action_url: '',
-    icon: 'notifications',
+    icon: 'bell',
   });
   const [creating, setCreating] = useState(false);
   const [broadcasting, setBroadcasting] = useState(false);
@@ -242,85 +240,73 @@ export default function NotificationsManagementScreen() {
     });
   };
 
-  // FIXED: Process notifications to group broadcasts and add proper error handling
+  // FIXED: Simplified data processing - no complex broadcast grouping
   const processNotifications = (rawNotifications: any[]): NotificationData[] => {
-    try {
-      const processed: NotificationData[] = [];
-      const broadcastGroups = new Map<string, any[]>();
-
-      rawNotifications.forEach(notification => {
-        try {
-          // Safe data extraction with fallbacks
-          const processedNotification: NotificationData = {
-            id: notification.id || 0,
-            title: notification.title || 'Unknown Title',
-            message: notification.message || 'No message',
-            notification_type: notification.notification_type || 'general',
-            priority: typeof notification.priority === 'number' ? notification.priority : 0,
-            read: Boolean(notification.read),
-            delivered: Boolean(notification.delivered),
-            created_at: notification.created_at || new Date().toISOString(),
-            expires_at: notification.expires_at,
-            icon: notification.icon || 'notifications',
-            action_url: notification.action_url,
-            status: notification.status || 'pending',
-            time_since_creation: notification.time_since_creation,
-            formatted_created_at: notification.formatted_created_at,
-            expired: Boolean(notification.expired),
-            user: notification.user ? {
-              id: notification.user.id || 0,
-              name: notification.user.name || 'Unknown User',
-              email: notification.user.email,
-              phone: notification.user.phone,
-              role: notification.user.role || 'user'
-            } : undefined,
-            package: notification.package ? {
-              id: notification.package.id || 0,
-              code: notification.package.code || 'Unknown',
-              state: notification.package.state
-            } : undefined
-          };
-
-          // Check if this appears to be a broadcast notification
-          // Broadcast notifications typically have the same title, message, and creation time
-          const broadcastKey = `${processedNotification.title}-${processedNotification.message}-${processedNotification.created_at.split('T')[0]}`;
-          
-          if (broadcastGroups.has(broadcastKey)) {
-            broadcastGroups.get(broadcastKey)!.push(processedNotification);
-          } else {
-            broadcastGroups.set(broadcastKey, [processedNotification]);
-          }
-        } catch (error) {
-          console.error('Error processing individual notification:', error);
-        }
-      });
-
-      // Process broadcast groups
-      broadcastGroups.forEach((group, key) => {
-        if (group.length > 5) { // If more than 5 identical notifications, treat as broadcast
-          const representative = group[0];
-          processed.push({
-            ...representative,
-            notification_type: 'broadcast',
-            is_broadcast: true,
-            broadcast_count: group.length,
-            user: {
-              id: 0,
-              name: 'Broadcast',
-              role: 'system'
-            }
-          });
-        } else {
-          // Add individual notifications
-          processed.push(...group);
-        }
-      });
-
-      return processed;
-    } catch (error) {
-      console.error('Error processing notifications:', error);
+    if (!Array.isArray(rawNotifications)) {
+      console.warn('processNotifications: Input is not an array:', rawNotifications);
       return [];
     }
+
+    return rawNotifications.map((notification, index) => {
+      try {
+        // Safe data extraction with proper fallbacks
+        return {
+          id: notification?.id || index,
+          title: notification?.title || 'Unknown Title',
+          message: notification?.message || 'No message',
+          notification_type: notification?.notification_type || 'general',
+          priority: typeof notification?.priority === 'number' ? notification.priority : 0,
+          read: Boolean(notification?.read),
+          delivered: Boolean(notification?.delivered),
+          created_at: notification?.created_at || new Date().toISOString(),
+          expires_at: notification?.expires_at || undefined,
+          icon: notification?.icon || 'bell',
+          action_url: notification?.action_url || undefined,
+          status: notification?.status || 'pending',
+          time_since_creation: notification?.time_since_creation || undefined,
+          formatted_created_at: notification?.formatted_created_at || undefined,
+          expired: Boolean(notification?.expired),
+          user: notification?.user ? {
+            id: notification.user.id || 0,
+            name: notification.user.name || 'Unknown User',
+            email: notification.user.email || undefined,
+            phone: notification.user.phone || undefined,
+            role: notification.user.role || 'user'
+          } : {
+            id: 0,
+            name: 'System',
+            role: 'system'
+          },
+          package: notification?.package ? {
+            id: notification.package.id || 0,
+            code: notification.package.code || 'Unknown',
+            state: notification.package.state || undefined,
+            state_display: notification.package.state_display || notification.package.state || undefined
+          } : undefined
+        };
+      } catch (error) {
+        console.error('Error processing notification:', error);
+        // Return a safe fallback notification
+        return {
+          id: index,
+          title: 'Error Loading Notification',
+          message: 'Unable to load notification details',
+          notification_type: 'general',
+          priority: 0,
+          read: false,
+          delivered: false,
+          created_at: new Date().toISOString(),
+          icon: 'alert-triangle',
+          status: 'error',
+          expired: false,
+          user: {
+            id: 0,
+            name: 'System',
+            role: 'system'
+          }
+        };
+      }
+    });
   };
 
   const loadNotifications = async (page = 1, append = false) => {
@@ -369,13 +355,7 @@ export default function NotificationsManagementScreen() {
     try {
       const response = await api.get('/api/v1/admin/notifications/stats');
       if (response.data?.success) {
-        const statsData = response.data.data;
-        // Add broadcast count to stats
-        const broadcastCount = notifications.filter(n => n.is_broadcast).length;
-        setStats({
-          ...statsData,
-          broadcasts: broadcastCount
-        });
+        setStats(response.data.data);
       }
     } catch (error) {
       console.error('❌ Failed to load notification stats:', error);
@@ -556,7 +536,7 @@ export default function NotificationsManagementScreen() {
           user_id: '',
           expires_at: '',
           action_url: '',
-          icon: 'notifications',
+          icon: 'bell',
         });
         loadNotifications(1);
         loadStats();
@@ -576,7 +556,7 @@ export default function NotificationsManagementScreen() {
     }
 
     showConfirmationModal(
-      'Broadcast Notification',
+      'Send Push Notification',
       `Send "${createData.title}" to all users? This will create notifications for every user in the system.`,
       async () => {
         try {
@@ -592,7 +572,7 @@ export default function NotificationsManagementScreen() {
           
           if (response.data?.success) {
             const count = response.data.data?.notifications_created || 0;
-            showToast(`Broadcast sent to ${count} users`, 'success');
+            showToast(`Push notification sent to ${count} users`, 'success');
             setShowCreateModal(false);
             setCreateData({
               title: '',
@@ -602,14 +582,14 @@ export default function NotificationsManagementScreen() {
               user_id: '',
               expires_at: '',
               action_url: '',
-              icon: 'notifications',
+              icon: 'bell',
             });
             loadNotifications(1);
             loadStats();
           }
         } catch (error) {
           console.error('❌ Failed to broadcast notification:', error);
-          showToast('Failed to broadcast notification', 'error');
+          showToast('Failed to send push notification', 'error');
         } finally {
           setBroadcasting(false);
         }
@@ -657,62 +637,44 @@ export default function NotificationsManagementScreen() {
       case 'sent': return '#10b981';
       case 'failed': return '#ff6b6b';
       case 'expired': return '#a78bfa';
+      case 'error': return '#ef4444';
       default: return '#8b5cf6';
     }
   };
 
-  // FIXED: Enhanced icon mapping with better error handling
-  const getNotificationIcon = (type: string, iconName?: string): string => {
-    try {
-      // Use provided icon if valid
-      if (iconName && iconName !== 'notifications' && isValidIcon(iconName)) {
-        return iconName;
-      }
-
-      // Map notification types to appropriate icons
-      switch (type) {
-        case 'broadcast':
-          return 'megaphone';
-        case 'package_created':
-        case 'package_rejected':
-        case 'package_expired':
-        case 'package_delivered':
-        case 'package_collected':
-          return 'package';
-        case 'package_submitted':
-          return 'send';
-        case 'payment_received':
-        case 'payment_reminder':
-          return 'credit-card';
-        case 'final_warning':
-        case 'resubmission_available':
-          return 'alert-triangle';
-        case 'general':
-          return 'bell';
-        default:
-          return 'bell';
-      }
-    } catch (error) {
-      console.error('Error getting notification icon:', error);
-      return 'bell';
+  // FIXED: Simplified icon mapping matching the working notifications.tsx
+  const getNotificationIcon = (type: string, iconName?: string) => {
+    // Use provided icon if valid, otherwise map by type
+    if (iconName && iconName !== 'notifications' && iconName !== 'bell') {
+      return iconName as keyof typeof Feather.glyphMap;
     }
-  };
 
-  // Helper function to validate icon names
-  const isValidIcon = (iconName: string): boolean => {
-    const validIcons = [
-      'bell', 'package', 'send', 'credit-card', 'alert-triangle', 'megaphone',
-      'mail', 'check', 'x', 'info', 'help-circle', 'star', 'heart',
-    ];
-    return validIcons.includes(iconName);
+    switch (type) {
+      case 'package_created':
+      case 'package_rejected':
+      case 'package_expired':
+      case 'package_delivered':
+      case 'package_collected':
+        return 'package';
+      case 'package_submitted':
+        return 'send';
+      case 'payment_received':
+      case 'payment_reminder':
+        return 'credit-card';
+      case 'final_warning':
+      case 'resubmission_available':
+        return 'alert-triangle';
+      case 'general':
+        return 'bell';
+      default:
+        return 'bell';
+    }
   };
 
   const getNotificationColor = (type: string, read: boolean) => {
     if (read) return '#a78bfa';
 
     switch (type) {
-      case 'broadcast':
-        return '#e11d48'; // Rose for broadcasts
       case 'package_delivered':
       case 'package_collected':
         return '#10b981';
@@ -732,7 +694,7 @@ export default function NotificationsManagementScreen() {
     }
   };
 
-  // FIXED: Safe date formatting with better error handling
+  // FIXED: Simplified date formatting matching the working notifications.tsx
   const formatDate = (dateString: string | undefined | null) => {
     if (!dateString) return 'Unknown date';
     
@@ -778,138 +740,107 @@ export default function NotificationsManagementScreen() {
     }
   };
 
-  // FIXED: Enhanced notification item with better error handling and broadcast display
-  const renderNotificationItem = ({ item }: { item: NotificationData }) => {
-    try {
-      return (
-        <View style={styles.notificationCard}>
-          <LinearGradient
-            colors={item.read ? ['#2d1b4e', '#1a1b3d'] : ['#8b5cf6', '#c084fc']}
-            style={styles.notificationGradient}
-          >
-            {/* Enhanced header with better layout */}
-            <View style={styles.notificationHeader}>
-              <View style={styles.notificationHeaderLeft}>
-                <View style={[
-                  styles.iconBackground,
-                  { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
-                ]}>
-                  <Feather
-                    name={getNotificationIcon(item.notification_type, item.icon) as any}
-                    size={18}
-                    color={getNotificationColor(item.notification_type, item.read)}
-                  />
-                </View>
-                <View style={styles.notificationHeaderText}>
-                  <Text style={[styles.notificationTitle, { color: item.read ? '#c4b5fd' : 'white' }]} numberOfLines={1}>
-                    {item.title}
-                  </Text>
-                  <Text style={[styles.notificationMeta, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
-                    {item.is_broadcast ? (
-                      `Broadcast to ${item.broadcast_count || 0} users • ${item.time_since_creation || formatTime(item.created_at)}`
-                    ) : (
-                      `${item.user?.name || 'Unknown User'} (${item.user?.email || item.user?.phone || 'No contact'}) • ${item.time_since_creation || formatTime(item.created_at)}`
-                    )}
-                  </Text>
-                </View>
-                {!item.read && <View style={styles.unreadIndicator} />}
-              </View>
-              
-              {!item.is_broadcast && (
-                <View style={styles.notificationActions}>
-                  <TouchableOpacity
-                    onPress={() => markAsRead(item.id, !item.read)}
-                    style={styles.actionButton}
-                  >
-                    <Ionicons 
-                      name={item.read ? 'mail-outline' : 'mail-open-outline'} 
-                      size={16} 
-                      color={item.read ? '#a78bfa' : 'white'} 
-                    />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    onPress={() => deleteNotification(item.id)}
-                    style={styles.actionButton}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
-                  </TouchableOpacity>
-                </View>
-              )}
+  // FIXED: Simplified notification rendering matching the working notifications.tsx
+  const renderNotificationItem = ({ item }: { item: NotificationData }) => (
+    <View style={styles.notificationCard}>
+      <LinearGradient
+        colors={item.read ? ['#2d1b4e', '#1a1b3d'] : ['#8b5cf6', '#c084fc']}
+        style={styles.notificationGradient}
+      >
+        {/* Header */}
+        <View style={styles.notificationHeader}>
+          <View style={styles.notificationHeaderLeft}>
+            <View style={[
+              styles.iconBackground,
+              { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
+            ]}>
+              <Feather
+                name={getNotificationIcon(item.notification_type, item.icon)}
+                size={18}
+                color={getNotificationColor(item.notification_type, item.read)}
+              />
             </View>
-
-            {/* Enhanced message display */}
-            <Text style={[styles.notificationMessage, { color: item.read ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={3}>
-              {item.message}
-            </Text>
-
-            {/* Package info if available and not broadcast */}
-            {item.package && !item.is_broadcast && (
-              <View style={styles.packageInfo}>
-                <Feather name="package" size={12} color={item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)'} />
-                <Text style={[styles.packageCode, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
-                  #{item.package.code}
-                </Text>
-                {item.package.state && (
-                  <View style={styles.packageStateBadge}>
-                    <Text style={styles.packageStateText}>{item.package.state}</Text>
-                  </View>
-                )}
-              </View>
-            )}
-
-            {/* Enhanced footer with better badge layout */}
-            <View style={styles.notificationFooter}>
-              <View style={styles.notificationBadges}>
-                <View style={[styles.badge, { backgroundColor: getPriorityColor(item.priority) }]}>
-                  <Text style={styles.badgeText}>{getPriorityLabel(item.priority)}</Text>
-                </View>
-                
-                <View style={[styles.badge, { backgroundColor: getStatusColor(item.status) }]}>
-                  <Text style={styles.badgeText}>{item.status}</Text>
-                </View>
-                
-                {item.is_broadcast ? (
-                  <View style={[styles.badge, { backgroundColor: '#e11d48' }]}>
-                    <Text style={styles.badgeText}>Push Notification</Text>
-                  </View>
-                ) : (
-                  <View style={[styles.badge, { backgroundColor: '#c084fc' }]}>
-                    <Text style={styles.badgeText}>{item.notification_type.replace('_', ' ')}</Text>
-                  </View>
-                )}
-
-                {item.expired && (
-                  <View style={[styles.badge, { backgroundColor: '#9ca3af' }]}>
-                    <Text style={styles.badgeText}>Expired</Text>
-                  </View>
-                )}
-              </View>
-              
-              <Text style={[styles.timestamp, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.6)' }]}>
-                {item.formatted_created_at || formatDate(item.created_at)}
+            <View style={styles.notificationHeaderText}>
+              <Text style={[styles.notificationTitle, { color: item.read ? '#c4b5fd' : 'white' }]} numberOfLines={1}>
+                {item.title}
+              </Text>
+              <Text style={[styles.notificationMeta, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
+                {item.user?.name || 'System'} ({item.user?.email || item.user?.phone || 'No contact'}) • {item.time_since_creation || formatTime(item.created_at)}
               </Text>
             </View>
-          </LinearGradient>
+            {!item.read && <View style={styles.unreadIndicator} />}
+          </View>
+          
+          <View style={styles.notificationActions}>
+            <TouchableOpacity
+              onPress={() => markAsRead(item.id, !item.read)}
+              style={styles.actionButton}
+            >
+              <Ionicons 
+                name={item.read ? 'mail-outline' : 'mail-open-outline'} 
+                size={16} 
+                color={item.read ? '#a78bfa' : 'white'} 
+              />
+            </TouchableOpacity>
+            
+            <TouchableOpacity
+              onPress={() => deleteNotification(item.id)}
+              style={styles.actionButton}
+            >
+              <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
+            </TouchableOpacity>
+          </View>
         </View>
-      );
-    } catch (error) {
-      console.error('Error rendering notification item:', error);
-      
-      // Return error notification card
-      return (
-        <View style={styles.notificationCard}>
-          <LinearGradient colors={['#7f1d1d', '#991b1b']} style={styles.notificationGradient}>
-            <View style={styles.errorContent}>
-              <Feather name="alert-triangle" size={20} color="#fca5a5" />
-              <Text style={styles.errorText}>Error loading notification</Text>
-              <Text style={styles.errorSubtext}>ID: {item.id}</Text>
+
+        {/* Message */}
+        <Text style={[styles.notificationMessage, { color: item.read ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={3}>
+          {item.message}
+        </Text>
+
+        {/* Package info if available */}
+        {item.package && (
+          <View style={styles.packageInfo}>
+            <Feather name="package" size={12} color={item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)'} />
+            <Text style={[styles.packageCode, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
+              #{item.package.code}
+            </Text>
+            {item.package.state && (
+              <View style={styles.packageStateBadge}>
+                <Text style={styles.packageStateText}>{item.package.state_display || item.package.state}</Text>
+              </View>
+            )}
+          </View>
+        )}
+
+        {/* Footer with badges */}
+        <View style={styles.notificationFooter}>
+          <View style={styles.notificationBadges}>
+            <View style={[styles.badge, { backgroundColor: getPriorityColor(item.priority) }]}>
+              <Text style={styles.badgeText}>{getPriorityLabel(item.priority)}</Text>
             </View>
-          </LinearGradient>
+            
+            <View style={[styles.badge, { backgroundColor: getStatusColor(item.status) }]}>
+              <Text style={styles.badgeText}>{item.status}</Text>
+            </View>
+            
+            <View style={[styles.badge, { backgroundColor: '#c084fc' }]}>
+              <Text style={styles.badgeText}>{item.notification_type.replace('_', ' ')}</Text>
+            </View>
+
+            {item.expired && (
+              <View style={[styles.badge, { backgroundColor: '#9ca3af' }]}>
+                <Text style={styles.badgeText}>Expired</Text>
+              </View>
+            )}
+          </View>
+          
+          <Text style={[styles.timestamp, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.6)' }]}>
+            {item.formatted_created_at || formatDate(item.created_at)}
+          </Text>
         </View>
-      );
-    }
-  };
+      </LinearGradient>
+    </View>
+  );
 
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
@@ -1080,7 +1011,7 @@ export default function NotificationsManagementScreen() {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Type</Text>
                 <View style={styles.pickerContainer}>
-                  {NOTIFICATION_TYPES.slice(1).filter(type => type.value !== 'broadcast').map((type) => (
+                  {NOTIFICATION_TYPES.slice(1).map((type) => (
                     <TouchableOpacity
                       key={type.value}
                       style={[
@@ -1412,17 +1343,15 @@ export default function NotificationsManagementScreen() {
                   </View>
                   
                   <View style={styles.statCard}>
-                    <Text style={styles.statNumber}>{stats.broadcasts}</Text>
-                    <Text style={styles.statLabel}>Push Sent</Text>
+                    <Text style={styles.statNumber}>{stats.pending}</Text>
+                    <Text style={styles.statLabel}>Pending</Text>
                   </View>
                 </View>
                 
                 <Text style={styles.sectionTitle}>By Type</Text>
                 {Object.entries(stats.by_type || {}).map(([type, count]) => (
                   <View key={type} style={styles.statRow}>
-                    <Text style={styles.statRowLabel}>
-                      {type === 'broadcast' ? 'Push Notification' : type.replace('_', ' ')}
-                    </Text>
+                    <Text style={styles.statRowLabel}>{type.replace('_', ' ')}</Text>
                     <Text style={styles.statRowValue}>{count}</Text>
                   </View>
                 ))}
@@ -1486,7 +1415,7 @@ export default function NotificationsManagementScreen() {
         <FlatList
           data={filteredNotifications}
           renderItem={renderNotificationItem}
-          keyExtractor={(item) => `notification-${item.id}-${item.is_broadcast ? 'broadcast' : 'single'}`}
+          keyExtractor={(item) => item.id.toString()}
           contentContainerStyle={[
             styles.listContent,
             filteredNotifications.length === 0 && styles.emptyListContent
@@ -1527,7 +1456,6 @@ export default function NotificationsManagementScreen() {
   );
 }
 
-// FIXED: Enhanced styles with error handling styles
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -1733,23 +1661,6 @@ const styles = StyleSheet.create({
   timestamp: {
     fontSize: 10,
     marginLeft: 8,
-  },
-  // FIXED: Error display styles
-  errorContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    padding: 8,
-  },
-  errorText: {
-    color: '#fca5a5',
-    fontSize: 14,
-    fontWeight: '500',
-    flex: 1,
-  },
-  errorSubtext: {
-    color: '#f87171',
-    fontSize: 12,
   },
   loadingContainer: {
     flex: 1,
