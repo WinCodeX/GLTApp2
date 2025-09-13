@@ -66,6 +66,17 @@ interface FilterOptions {
   search: string;
 }
 
+interface CreateNotificationData {
+  title: string;
+  message: string;
+  notification_type: string;
+  priority: number;
+  user_id: string;
+  expires_at: string;
+  action_url: string;
+  icon: string;
+}
+
 const NOTIFICATION_TYPES = [
   { value: '', label: 'All Types' },
   { value: 'general', label: 'General' },
@@ -121,6 +132,17 @@ export default function NotificationsManagementScreen() {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showFiltersModal, setShowFiltersModal] = useState(false);
   const [showStatsModal, setShowStatsModal] = useState(false);
+  const [createData, setCreateData] = useState<CreateNotificationData>({
+    title: '',
+    message: '',
+    notification_type: 'general',
+    priority: 0,
+    user_id: '',
+    expires_at: '',
+    action_url: '',
+    icon: 'notifications',
+  });
+  const [creating, setCreating] = useState(false);
   
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
@@ -295,11 +317,64 @@ export default function NotificationsManagementScreen() {
     );
   };
 
+  const handleCreateNotification = async () => {
+    if (!createData.title || !createData.message) {
+      Alert.alert('Error', 'Title and message are required');
+      return;
+    }
+
+    try {
+      setCreating(true);
+      
+      const payload = {
+        notification: {
+          ...createData,
+          user_id: createData.user_id || undefined,
+        }
+      };
+
+      const response = await api.post('/api/v1/admin/notifications', payload);
+      
+      if (response.data?.success) {
+        Alert.alert('Success', 'Notification created successfully');
+        setShowCreateModal(false);
+        setCreateData({
+          title: '',
+          message: '',
+          notification_type: 'general',
+          priority: 0,
+          user_id: '',
+          expires_at: '',
+          action_url: '',
+          icon: 'notifications',
+        });
+        loadNotifications(1);
+        loadStats();
+      }
+    } catch (error) {
+      console.error('❌ Failed to create notification:', error);
+      Alert.alert('Error', 'Failed to create notification');
+    } finally {
+      setCreating(false);
+    }
+  };
+
+  const clearFilters = () => {
+    setFilters({
+      type: '',
+      status: '',
+      priority: '',
+      read_status: '',
+      search: '',
+    });
+    setShowFiltersModal(false);
+  };
+
   const getPriorityColor = (priority: number) => {
     switch (priority) {
       case 2: return '#ff6b6b'; // Urgent - Red
       case 1: return '#ffa726'; // High - Orange  
-      default: return '#4caf50'; // Normal - Green
+      default: return '#10b981'; // Normal - Green
     }
   };
 
@@ -313,10 +388,10 @@ export default function NotificationsManagementScreen() {
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case 'sent': return '#4caf50';
+      case 'sent': return '#10b981';
       case 'failed': return '#ff6b6b';
-      case 'expired': return '#9e9e9e';
-      default: return '#2196f3';
+      case 'expired': return '#a78bfa';
+      default: return '#8b5cf6';
     }
   };
 
@@ -328,7 +403,7 @@ export default function NotificationsManagementScreen() {
   const renderNotificationItem = ({ item }: { item: NotificationData }) => (
     <View style={styles.notificationCard}>
       <LinearGradient
-        colors={item.read ? ['#2d3748', '#1a202c'] : ['#4c51bf', '#667eea']}
+        colors={item.read ? ['#2d1b4e', '#1a1b3d'] : ['#8b5cf6', '#c084fc']}
         style={styles.notificationGradient}
       >
         {/* Header */}
@@ -337,13 +412,13 @@ export default function NotificationsManagementScreen() {
             <Ionicons 
               name={item.icon as any || 'notifications'} 
               size={20} 
-              color={item.read ? '#a0aec0' : 'white'} 
+              color={item.read ? '#a78bfa' : 'white'} 
             />
             <View style={styles.notificationHeaderText}>
-              <Text style={[styles.notificationTitle, { color: item.read ? '#e2e8f0' : 'white' }]} numberOfLines={1}>
+              <Text style={[styles.notificationTitle, { color: item.read ? '#c4b5fd' : 'white' }]} numberOfLines={1}>
                 {item.title}
               </Text>
-              <Text style={[styles.notificationMeta, { color: item.read ? '#a0aec0' : 'rgba(255,255,255,0.8)' }]}>
+              <Text style={[styles.notificationMeta, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
                 {item.user?.name} • {formatDate(item.created_at)}
               </Text>
             </View>
@@ -357,7 +432,7 @@ export default function NotificationsManagementScreen() {
               <Ionicons 
                 name={item.read ? 'mail-outline' : 'mail-open-outline'} 
                 size={16} 
-                color={item.read ? '#a0aec0' : 'white'} 
+                color={item.read ? '#a78bfa' : 'white'} 
               />
             </TouchableOpacity>
             
@@ -371,7 +446,7 @@ export default function NotificationsManagementScreen() {
         </View>
 
         {/* Message */}
-        <Text style={[styles.notificationMessage, { color: item.read ? '#cbd5e0' : 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>
+        <Text style={[styles.notificationMessage, { color: item.read ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={2}>
           {item.message}
         </Text>
 
@@ -386,13 +461,13 @@ export default function NotificationsManagementScreen() {
               <Text style={styles.badgeText}>{item.status}</Text>
             </View>
             
-            <View style={[styles.badge, { backgroundColor: '#6c5ce7' }]}>
+            <View style={[styles.badge, { backgroundColor: '#c084fc' }]}>
               <Text style={styles.badgeText}>{item.notification_type}</Text>
             </View>
           </View>
           
           {item.package && (
-            <Text style={[styles.packageCode, { color: item.read ? '#a0aec0' : 'rgba(255,255,255,0.8)' }]}>
+            <Text style={[styles.packageCode, { color: item.read ? '#a78bfa' : 'rgba(255,255,255,0.8)' }]}>
               #{item.package.code}
             </Text>
           )}
@@ -403,7 +478,7 @@ export default function NotificationsManagementScreen() {
 
   const renderHeader = () => (
     <View style={[styles.header, { paddingTop: insets.top + 10 }]}>
-      <LinearGradient colors={['#667eea', '#764ba2']} style={styles.headerGradient}>
+      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.headerGradient}>
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <TouchableOpacity onPress={handleBack} style={styles.backButton}>
@@ -428,11 +503,11 @@ export default function NotificationsManagementScreen() {
   const renderControls = () => (
     <View style={styles.controls}>
       <View style={styles.searchContainer}>
-        <Ionicons name="search" size={20} color="#a0aec0" />
+        <Ionicons name="search" size={20} color="#a78bfa" />
         <TextInput
           style={styles.searchInput}
           placeholder="Search notifications..."
-          placeholderTextColor="#a0aec0"
+          placeholderTextColor="#a78bfa"
           value={filters.search}
           onChangeText={(text) => setFilters(prev => ({ ...prev, search: text }))}
         />
@@ -440,14 +515,14 @@ export default function NotificationsManagementScreen() {
       
       <View style={styles.controlButtons}>
         <TouchableOpacity onPress={() => setShowFiltersModal(true)} style={styles.controlButton}>
-          <LinearGradient colors={['#6c5ce7', '#a29bfe']} style={styles.controlButtonGradient}>
+          <LinearGradient colors={['#8b5cf6', '#c084fc']} style={styles.controlButtonGradient}>
             <Ionicons name="filter" size={16} color="white" />
             <Text style={styles.controlButtonText}>Filter</Text>
           </LinearGradient>
         </TouchableOpacity>
         
         <TouchableOpacity onPress={() => setShowCreateModal(true)} style={styles.controlButton}>
-          <LinearGradient colors={['#00b894', '#00a085']} style={styles.controlButtonGradient}>
+          <LinearGradient colors={['#10b981', '#34d399']} style={styles.controlButtonGradient}>
             <Ionicons name="add" size={16} color="white" />
             <Text style={styles.controlButtonText}>Create</Text>
           </LinearGradient>
@@ -456,20 +531,269 @@ export default function NotificationsManagementScreen() {
     </View>
   );
 
+  const renderCreateModal = () => (
+    <Modal visible={showCreateModal} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={styles.modalGradient}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Create Notification</Text>
+              <TouchableOpacity onPress={() => setShowCreateModal(false)}>
+                <Ionicons name="close" size={24} color="#a78bfa" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.createForm} showsVerticalScrollIndicator={false}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Title *</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Enter notification title"
+                  placeholderTextColor="#a78bfa"
+                  value={createData.title}
+                  onChangeText={(text) => setCreateData(prev => ({ ...prev, title: text }))}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Message *</Text>
+                <TextInput
+                  style={[styles.textInput, styles.textArea]}
+                  placeholder="Enter notification message"
+                  placeholderTextColor="#a78bfa"
+                  value={createData.message}
+                  onChangeText={(text) => setCreateData(prev => ({ ...prev, message: text }))}
+                  multiline
+                  numberOfLines={4}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Type</Text>
+                <View style={styles.pickerContainer}>
+                  {NOTIFICATION_TYPES.slice(1).map((type) => (
+                    <TouchableOpacity
+                      key={type.value}
+                      style={[
+                        styles.pickerOption,
+                        createData.notification_type === type.value && styles.pickerOptionSelected
+                      ]}
+                      onPress={() => setCreateData(prev => ({ ...prev, notification_type: type.value }))}
+                    >
+                      <Text style={[
+                        styles.pickerOptionText,
+                        createData.notification_type === type.value && styles.pickerOptionTextSelected
+                      ]}>
+                        {type.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Priority</Text>
+                <View style={styles.priorityContainer}>
+                  {PRIORITY_LEVELS.slice(1).map((priority) => (
+                    <TouchableOpacity
+                      key={priority.value}
+                      style={[
+                        styles.priorityOption,
+                        createData.priority.toString() === priority.value && styles.priorityOptionSelected
+                      ]}
+                      onPress={() => setCreateData(prev => ({ ...prev, priority: parseInt(priority.value) }))}
+                    >
+                      <Text style={[
+                        styles.priorityOptionText,
+                        createData.priority.toString() === priority.value && styles.priorityOptionTextSelected
+                      ]}>
+                        {priority.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>User ID (optional)</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Enter user ID for specific user"
+                  placeholderTextColor="#a78bfa"
+                  value={createData.user_id}
+                  onChangeText={(text) => setCreateData(prev => ({ ...prev, user_id: text }))}
+                />
+              </View>
+
+              <View style={styles.createActions}>
+                <TouchableOpacity
+                  onPress={() => setShowCreateModal(false)}
+                  style={styles.cancelButton}
+                >
+                  <Text style={styles.cancelButtonText}>Cancel</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={handleCreateNotification}
+                  style={styles.createButton}
+                  disabled={creating}
+                >
+                  <LinearGradient colors={['#10b981', '#34d399']} style={styles.createButtonGradient}>
+                    {creating ? (
+                      <ActivityIndicator size="small" color="white" />
+                    ) : (
+                      <Text style={styles.createButtonText}>Create</Text>
+                    )}
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
+  const renderFiltersModal = () => (
+    <Modal visible={showFiltersModal} transparent animationType="fade">
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalContent}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={styles.modalGradient}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Filter Notifications</Text>
+              <TouchableOpacity onPress={() => setShowFiltersModal(false)}>
+                <Ionicons name="close" size={24} color="#a78bfa" />
+              </TouchableOpacity>
+            </View>
+            
+            <ScrollView style={styles.filtersForm} showsVerticalScrollIndicator={false}>
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Type</Text>
+                <View style={styles.filterOptions}>
+                  {NOTIFICATION_TYPES.map((type) => (
+                    <TouchableOpacity
+                      key={type.value}
+                      style={[
+                        styles.filterOption,
+                        filters.type === type.value && styles.filterOptionSelected
+                      ]}
+                      onPress={() => setFilters(prev => ({ ...prev, type: type.value }))}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        filters.type === type.value && styles.filterOptionTextSelected
+                      ]}>
+                        {type.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Status</Text>
+                <View style={styles.filterOptions}>
+                  {STATUS_OPTIONS.map((status) => (
+                    <TouchableOpacity
+                      key={status.value}
+                      style={[
+                        styles.filterOption,
+                        filters.status === status.value && styles.filterOptionSelected
+                      ]}
+                      onPress={() => setFilters(prev => ({ ...prev, status: status.value }))}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        filters.status === status.value && styles.filterOptionTextSelected
+                      ]}>
+                        {status.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Priority</Text>
+                <View style={styles.filterOptions}>
+                  {PRIORITY_LEVELS.map((priority) => (
+                    <TouchableOpacity
+                      key={priority.value}
+                      style={[
+                        styles.filterOption,
+                        filters.priority === priority.value && styles.filterOptionSelected
+                      ]}
+                      onPress={() => setFilters(prev => ({ ...prev, priority: priority.value }))}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        filters.priority === priority.value && styles.filterOptionTextSelected
+                      ]}>
+                        {priority.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterGroup}>
+                <Text style={styles.filterLabel}>Read Status</Text>
+                <View style={styles.filterOptions}>
+                  {READ_STATUS_OPTIONS.map((readStatus) => (
+                    <TouchableOpacity
+                      key={readStatus.value}
+                      style={[
+                        styles.filterOption,
+                        filters.read_status === readStatus.value && styles.filterOptionSelected
+                      ]}
+                      onPress={() => setFilters(prev => ({ ...prev, read_status: readStatus.value }))}
+                    >
+                      <Text style={[
+                        styles.filterOptionText,
+                        filters.read_status === readStatus.value && styles.filterOptionTextSelected
+                      ]}>
+                        {readStatus.label}
+                      </Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </View>
+
+              <View style={styles.filterActions}>
+                <TouchableOpacity onPress={clearFilters} style={styles.clearButton}>
+                  <Text style={styles.clearButtonText}>Clear All</Text>
+                </TouchableOpacity>
+                
+                <TouchableOpacity
+                  onPress={() => setShowFiltersModal(false)}
+                  style={styles.applyButton}
+                >
+                  <LinearGradient colors={['#8b5cf6', '#c084fc']} style={styles.applyButtonGradient}>
+                    <Text style={styles.applyButtonText}>Apply</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </ScrollView>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+
   const renderStatsModal = () => (
     <Modal visible={showStatsModal} transparent animationType="fade">
       <View style={styles.modalOverlay}>
         <View style={styles.modalContent}>
-          <LinearGradient colors={['#2d3748', '#1a202c']} style={styles.modalGradient}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={styles.modalGradient}>
             <View style={styles.modalHeader}>
               <Text style={styles.modalTitle}>Notification Statistics</Text>
               <TouchableOpacity onPress={() => setShowStatsModal(false)}>
-                <Ionicons name="close" size={24} color="#a0aec0" />
+                <Ionicons name="close" size={24} color="#a78bfa" />
               </TouchableOpacity>
             </View>
             
             {stats && (
-              <ScrollView style={styles.statsContent}>
+              <ScrollView style={styles.statsContent} showsVerticalScrollIndicator={false}>
                 <View style={styles.statsGrid}>
                   <View style={styles.statCard}>
                     <Text style={styles.statNumber}>{stats.total}</Text>
@@ -519,10 +843,12 @@ export default function NotificationsManagementScreen() {
     return (
       <View style={styles.container}>
         {renderHeader()}
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#6c5ce7" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
-        </View>
+        <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#c084fc" />
+            <Text style={styles.loadingText}>Loading notifications...</Text>
+          </View>
+        </LinearGradient>
       </View>
     );
   }
@@ -530,35 +856,46 @@ export default function NotificationsManagementScreen() {
   return (
     <View style={styles.container}>
       {renderHeader()}
-      {renderControls()}
       
-      <FlatList
-        data={filteredNotifications}
-        renderItem={renderNotificationItem}
-        keyExtractor={(item) => item.id.toString()}
-        contentContainerStyle={styles.listContent}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#6c5ce7" />
-        }
-        onEndReached={handleLoadMore}
-        onEndReachedThreshold={0.1}
-        ListFooterComponent={
-          loadingMore ? (
-            <View style={styles.loadingMore}>
-              <ActivityIndicator size="small" color="#6c5ce7" />
+      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
+        {renderControls()}
+        
+        <FlatList
+          data={filteredNotifications}
+          renderItem={renderNotificationItem}
+          keyExtractor={(item) => item.id.toString()}
+          contentContainerStyle={[
+            styles.listContent,
+            filteredNotifications.length === 0 && styles.emptyListContent
+          ]}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={handleRefresh} tintColor="#8b5cf6" />
+          }
+          onEndReached={handleLoadMore}
+          onEndReachedThreshold={0.1}
+          ListFooterComponent={
+            loadingMore ? (
+              <View style={styles.loadingMore}>
+                <ActivityIndicator size="small" color="#8b5cf6" />
+              </View>
+            ) : null
+          }
+          ListEmptyComponent={
+            <View style={styles.emptyContainer}>
+              <View style={styles.emptyIconContainer}>
+                <Ionicons name="notifications-off" size={48} color="#a78bfa" />
+              </View>
+              <Text style={styles.emptyText}>No notifications found</Text>
+              <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
             </View>
-          ) : null
-        }
-        ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Ionicons name="notifications-off" size={64} color="#a0aec0" />
-            <Text style={styles.emptyText}>No notifications found</Text>
-            <Text style={styles.emptySubtext}>Try adjusting your filters</Text>
-          </View>
-        }
-      />
-      
-      {renderStatsModal()}
+          }
+          showsVerticalScrollIndicator={false}
+        />
+        
+        {renderCreateModal()}
+        {renderFiltersModal()}
+        {renderStatsModal()}
+      </LinearGradient>
     </View>
   );
 }
@@ -566,7 +903,10 @@ export default function NotificationsManagementScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#1a202c',
+    backgroundColor: '#1a1b3d',
+  },
+  gradient: {
+    flex: 1,
   },
   header: {
     backgroundColor: 'transparent',
@@ -607,20 +947,22 @@ const styles = StyleSheet.create({
   controls: {
     padding: 16,
     borderBottomWidth: 1,
-    borderBottomColor: '#2d3748',
+    borderBottomColor: 'rgba(168, 123, 250, 0.3)',
   },
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#2d3748',
-    borderRadius: 12,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderRadius: 25,
     paddingHorizontal: 16,
     paddingVertical: 12,
     marginBottom: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
   },
   searchInput: {
     flex: 1,
-    color: 'white',
+    color: '#e5e7eb',
     fontSize: 16,
     marginLeft: 12,
   },
@@ -629,7 +971,7 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   controlButton: {
-    borderRadius: 8,
+    borderRadius: 20,
     overflow: 'hidden',
   },
   controlButtonGradient: {
@@ -646,6 +988,9 @@ const styles = StyleSheet.create({
   },
   listContent: {
     padding: 16,
+  },
+  emptyListContent: {
+    flex: 1,
   },
   notificationCard: {
     marginBottom: 12,
@@ -724,10 +1069,10 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    gap: 12,
   },
   loadingText: {
-    color: '#a0aec0',
-    marginTop: 12,
+    color: '#c4b5fd',
     fontSize: 16,
   },
   loadingMore: {
@@ -738,18 +1083,29 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
   },
   emptyText: {
-    color: '#e2e8f0',
     fontSize: 18,
     fontWeight: '600',
-    marginTop: 16,
+    color: '#e5e7eb',
+    marginBottom: 8,
+    textAlign: 'center',
   },
   emptySubtext: {
-    color: '#a0aec0',
     fontSize: 14,
-    marginTop: 8,
+    color: '#c4b5fd',
+    textAlign: 'center',
+    lineHeight: 20,
   },
   modalOverlay: {
     flex: 1,
@@ -765,6 +1121,7 @@ const styles = StyleSheet.create({
   },
   modalGradient: {
     padding: 20,
+    maxHeight: height * 0.8,
   },
   modalHeader: {
     flexDirection: 'row',
@@ -777,6 +1134,187 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
+  createForm: {
+    maxHeight: height * 0.6,
+  },
+  inputGroup: {
+    marginBottom: 16,
+  },
+  inputLabel: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  textInput: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    color: '#e5e7eb',
+    fontSize: 16,
+  },
+  textArea: {
+    minHeight: 80,
+    textAlignVertical: 'top',
+  },
+  pickerContainer: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  pickerOption: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  pickerOptionSelected: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#8b5cf6',
+  },
+  pickerOptionText: {
+    color: '#c4b5fd',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  pickerOptionTextSelected: {
+    color: 'white',
+  },
+  priorityContainer: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  priorityOption: {
+    flex: 1,
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingVertical: 12,
+    borderRadius: 8,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  priorityOptionSelected: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#8b5cf6',
+  },
+  priorityOptionText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  priorityOptionTextSelected: {
+    color: 'white',
+  },
+  createActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  cancelButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+    alignItems: 'center',
+  },
+  cancelButtonText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  createButton: {
+    flex: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  createButtonGradient: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  createButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  filtersForm: {
+    maxHeight: height * 0.6,
+  },
+  filterGroup: {
+    marginBottom: 20,
+  },
+  filterLabel: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  filterOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  filterOption: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  filterOptionSelected: {
+    backgroundColor: '#8b5cf6',
+    borderColor: '#8b5cf6',
+  },
+  filterOptionText: {
+    color: '#c4b5fd',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  filterOptionTextSelected: {
+    color: 'white',
+  },
+  filterActions: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 20,
+  },
+  clearButton: {
+    flex: 1,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+    alignItems: 'center',
+  },
+  clearButtonText: {
+    color: '#c4b5fd',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  applyButton: {
+    flex: 1,
+    borderRadius: 8,
+    overflow: 'hidden',
+  },
+  applyButtonGradient: {
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    alignItems: 'center',
+  },
+  applyButtonText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   statsContent: {
     maxHeight: height * 0.6,
   },
@@ -787,11 +1325,13 @@ const styles = StyleSheet.create({
     marginBottom: 20,
   },
   statCard: {
-    backgroundColor: '#4a5568',
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
     borderRadius: 8,
     padding: 16,
     alignItems: 'center',
     width: (width * 0.9 - 80) / 2,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
   },
   statNumber: {
     color: 'white',
@@ -799,7 +1339,7 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   statLabel: {
-    color: '#a0aec0',
+    color: '#c4b5fd',
     fontSize: 12,
     marginTop: 4,
   },
@@ -816,10 +1356,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: '#4a5568',
+    borderBottomColor: 'rgba(168, 123, 250, 0.3)',
   },
   statRowLabel: {
-    color: '#cbd5e0',
+    color: '#e5e7eb',
     fontSize: 14,
   },
   statRowValue: {
