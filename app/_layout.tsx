@@ -1,4 +1,4 @@
-// app/_layout.tsx - Custom splash only, no Expo splash
+// app/_layout.tsx - Fixed without Expo splash screen
 import React, { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -8,7 +8,6 @@ import {
 } from '@react-navigation/native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import * as SplashScreen from 'expo-splash-screen';
 import Toast from 'react-native-toast-message';
 import { toastConfig } from '@/lib/toastConfig';
 
@@ -37,28 +36,33 @@ export default function Layout() {
   useEffect(() => {
     async function prepare() {
       try {
-        // Immediately hide the Expo splash screen to show only our custom one
-        await SplashScreen.hideAsync();
+        console.log('🚀 App Layout: Starting initialization...');
         
         // Minimum time to show our custom splash screen
         const minimumSplashTime = 1800; // 1.8 seconds to ensure it's visible
         const startTime = Date.now();
         
         // Perform any app-level initialization here if needed
-        // For now, just ensure minimum display time
+        // For now, just ensure minimum display time for smooth UX
+        console.log('⏳ App Layout: Showing splash screen for minimum time...');
+        
+        // Wait for minimum splash time
         await new Promise(resolve => setTimeout(resolve, minimumSplashTime));
         
         // Ensure minimum time has passed
         const elapsedTime = Date.now() - startTime;
         if (elapsedTime < minimumSplashTime) {
-          await new Promise(resolve => setTimeout(resolve, minimumSplashTime - elapsedTime));
+          const remainingTime = minimumSplashTime - elapsedTime;
+          console.log(`⏳ App Layout: Waiting additional ${remainingTime}ms for smooth transition...`);
+          await new Promise(resolve => setTimeout(resolve, remainingTime));
         }
         
         // Mark app as ready to proceed to drawer layout
+        console.log('✅ App Layout: Initialization complete, app ready');
         setAppIsReady(true);
         
       } catch (error) {
-        console.warn('App initialization error:', error);
+        console.warn('⚠️ App Layout: Initialization warning (non-critical):', error);
         // Even if there's an error, mark as ready to prevent infinite loading
         setAppIsReady(true);
       }
