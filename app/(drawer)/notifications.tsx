@@ -1,6 +1,6 @@
-// app/(drawer)/notifications.tsx - Purple-themed notifications screen
+// app/(drawer)/notifications.tsx - Enhanced Purple-themed notifications screen with Push Notifications
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -11,11 +11,13 @@ import {
   Alert,
   ActivityIndicator,
   Dimensions,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
+import * as Notifications from 'expo-notifications';
 import GLTHeader from '../../components/GLTHeader';
 import colors from '../../theme/colors';
 import api from '../../lib/api';
@@ -60,6 +62,15 @@ interface NotificationsResponse {
   unread_count: number;
 }
 
+// Enhanced Push Notifications Configuration
+Notifications.setNotificationHandler({
+  handleNotification: async () => ({
+    shouldShowAlert: true,
+    shouldPlaySound: true,
+    shouldSetBadge: true,
+  }),
+});
+
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -72,10 +83,122 @@ export default function NotificationsScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
+  const [pushToken, setPushToken] = useState<string | null>(null);
+
+  // Toast animation
+  const toastAnim = useRef(new Animated.Value(-100)).current;
+  const [toastMessage, setToastMessage] = useState('');
+  const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
   // Purple gradient colors
   const getGradientColors = () => {
     return ['#1a1b3d', '#2d1b4e', '#4c1d95'];
+  };
+
+  // Enhanced Push Notification Setup
+  useEffect(() => {
+    setupPushNotifications();
+    registerForPushNotificationsAsync();
+  }, []);
+
+  const setupPushNotifications = async () => {
+    try {
+      // Request permissions
+      const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      let finalStatus = existingStatus;
+      
+      if (existingStatus !== 'granted') {
+        const { status } = await Notifications.requestPermissionsAsync();
+        finalStatus = status;
+      }
+      
+      if (finalStatus !== 'granted') {
+        showToast('Push notification permissions denied', 'error');
+        return;
+      }
+
+      // Get push token
+      const token = (await Notifications.getExpoPushTokenAsync()).data;
+      setPushToken(token);
+      
+      // Send token to backend
+      await registerPushToken(token);
+
+      // Listen for notifications
+      const notificationListener = Notifications.addNotificationReceivedListener(handlePushNotification);
+      const responseListener = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
+
+      return () => {
+        notificationListener.remove();
+        responseListener.remove();
+      };
+    } catch (error) {
+      console.error('Push notification setup failed:', error);
+    }
+  };
+
+  const registerForPushNotificationsAsync = async () => {
+    try {
+      const { status } = await Notifications.requestPermissionsAsync();
+      if (status === 'granted') {
+        const token = (await Notifications.getExpoPushTokenAsync()).data;
+        await registerPushToken(token);
+      }
+    } catch (error) {
+      console.error('Failed to get push token:', error);
+    }
+  };
+
+  const registerPushToken = async (token: string) => {
+    try {
+      await api.post('/api/v1/push_tokens', {
+        push_token: token,
+        platform: 'expo'
+      });
+      console.log('Push token registered successfully');
+    } catch (error) {
+      console.error('Failed to register push token:', error);
+    }
+  };
+
+  const handlePushNotification = (notification: Notifications.Notification) => {
+    console.log('Push notification received:', notification);
+    // Refresh notifications list
+    fetchNotifications(1, true);
+    showToast('New notification received', 'success');
+  };
+
+  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
+    console.log('Notification response:', response);
+    const data = response.notification.request.content.data;
+    
+    // Handle notification tap
+    if (data?.package_code) {
+      NavigationHelper.navigateTo('/(drawer)/track', {
+        params: { code: data.package_code },
+        trackInHistory: true
+      });
+    }
+  };
+
+  // Toast functionality
+  const showToast = (message: string, type: 'success' | 'error' = 'success') => {
+    setToastMessage(message);
+    setToastType(type);
+    
+    Animated.sequence([
+      Animated.timing(toastAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(2000),
+      Animated.timing(toastAnim, {
+        toValue: -100,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start();
   };
 
   // Fetch notifications from API
@@ -153,9 +276,11 @@ export default function NotificationsScreen() {
               : notification
           );
         });
+        showToast('Notification marked as read', 'success');
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
+      showToast('Failed to mark as read', 'error');
     }
   };
 
@@ -173,11 +298,11 @@ export default function NotificationsScreen() {
           return prev.map(notification => ({ ...notification, read: true }));
         });
         
-        Alert.alert('Success', 'All notifications marked as read');
+        showToast('All notifications marked as read', 'success');
       }
     } catch (error) {
       console.error('🔔 Failed to mark all notifications as read:', error);
-      Alert.alert('Error', 'Failed to mark all notifications as read');
+      showToast('Failed to mark all as read', 'error');
     }
   };
 
@@ -214,29 +339,31 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Get notification icon based on type
+  // FIXED: Enhanced icon mapping with proper general notification support
   const getNotificationIcon = (type: string, iconName?: string) => {
-    if (iconName) {
+    if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
     }
 
     switch (type) {
       case 'package_created':
+      case 'package_rejected':
+      case 'package_expired':
+      case 'package_delivered':
+      case 'package_collected':
         return 'package';
       case 'package_submitted':
         return 'send';
-      case 'package_delivered':
-        return 'check-circle';
-      case 'package_rejected':
-        return 'x-circle';
       case 'payment_received':
+      case 'payment_reminder':
         return 'credit-card';
       case 'final_warning':
+      case 'resubmission_available':
         return 'alert-triangle';
       case 'general':
-        return 'info';
+        return 'bell'; // FIXED: Use bell icon for general notifications instead of ?
       default:
-        return 'bell';
+        return 'bell'; // Default to bell instead of showing ?
     }
   };
 
@@ -246,15 +373,21 @@ export default function NotificationsScreen() {
 
     switch (type) {
       case 'package_delivered':
+      case 'package_collected':
         return '#10b981'; // Green
       case 'package_rejected':
+      case 'package_expired':
         return '#ef4444'; // Red
       case 'final_warning':
+      case 'resubmission_available':
         return '#f59e0b'; // Amber
       case 'payment_received':
+      case 'payment_reminder':
         return '#c084fc'; // Purple
+      case 'general':
+        return '#8b5cf6'; // Purple for general notifications
       default:
-        return '#8b5cf6'; // Purple
+        return '#8b5cf6'; // Default purple
     }
   };
 
@@ -303,7 +436,7 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [fetchNotifications]);
 
-  // Render notification item
+  // Render notification item with enhanced details
   const renderNotificationItem = ({ item }: { item: NotificationData }) => (
     <TouchableOpacity
       style={[
@@ -355,11 +488,16 @@ export default function NotificationsScreen() {
           {/* Time and priority */}
           <View style={styles.metaContainer}>
             <Text style={styles.timeText}>
-              {formatTime(item.created_at)}
+              {item.time_since_creation || formatTime(item.created_at)}
             </Text>
             {item.priority === 'high' && (
               <View style={styles.priorityBadge}>
                 <Text style={styles.priorityText}>High</Text>
+              </View>
+            )}
+            {item.priority === 'urgent' && (
+              <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.3)' }]}>
+                <Text style={[styles.priorityText, { color: '#ef4444' }]}>Urgent</Text>
               </View>
             )}
             {item.expired && (
@@ -417,6 +555,26 @@ export default function NotificationsScreen() {
     );
   };
 
+  // Render toast
+  const renderToast = () => (
+    <Animated.View
+      style={[
+        styles.toast,
+        {
+          backgroundColor: toastType === 'success' ? '#10b981' : '#ef4444',
+          transform: [{ translateY: toastAnim }],
+        },
+      ]}
+    >
+      <Feather
+        name={toastType === 'success' ? 'check-circle' : 'x-circle'}
+        size={16}
+        color="white"
+      />
+      <Text style={styles.toastText}>{toastMessage}</Text>
+    </Animated.View>
+  );
+
   const unreadCount = Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0;
 
   return (
@@ -457,6 +615,14 @@ export default function NotificationsScreen() {
           )}
         </View>
 
+        {/* Push Token Status */}
+        {pushToken && (
+          <View style={styles.pushTokenStatus}>
+            <Feather name="bell" size={12} color="#10b981" />
+            <Text style={styles.pushTokenText}>Push notifications enabled</Text>
+          </View>
+        )}
+
         {/* Notifications List */}
         {loading && notifications.length === 0 ? (
           <View style={styles.loadingContainer}>
@@ -490,6 +656,9 @@ export default function NotificationsScreen() {
           />
         )}
       </LinearGradient>
+
+      {/* Toast */}
+      {renderToast()}
     </View>
   );
 }
@@ -549,6 +718,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '500',
     color: '#c084fc',
+  },
+  pushTokenStatus: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 20,
+    paddingVertical: 8,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+  },
+  pushTokenText: {
+    fontSize: 12,
+    color: '#10b981',
   },
   listContainer: {
     paddingHorizontal: 20,
@@ -668,7 +849,7 @@ const styles = StyleSheet.create({
     color: '#a78bfa',
   },
   priorityBadge: {
-    backgroundColor: 'rgba(239, 68, 68, 0.3)',
+    backgroundColor: 'rgba(251, 146, 60, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -676,7 +857,7 @@ const styles = StyleSheet.create({
   priorityText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#ef4444',
+    color: '#fb923c',
   },
   expiredBadge: {
     backgroundColor: 'rgba(156, 163, 175, 0.3)',
@@ -728,5 +909,28 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     color: 'white',
+  },
+  toast: {
+    position: 'absolute',
+    top: 0,
+    left: 16,
+    right: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderRadius: 8,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    zIndex: 1000,
+  },
+  toastText: {
+    color: 'white',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
