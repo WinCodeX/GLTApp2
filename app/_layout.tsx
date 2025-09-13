@@ -1,4 +1,4 @@
-// app/_layout.tsx - Fixed with correct NavigationTracker import
+// app/_layout.tsx - Fixed with single hardware back handler
 import React, { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -17,10 +17,10 @@ import NetworkBanner from '@/components/NetworkBanner';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import colors from '@/theme/colors';
 
-// Hardware back button and navigation tracking imports - FIXED IMPORTS
+// Hardware back button and navigation tracking imports
 import { HardwareBackProvider } from '@/lib/helpers/hardwareBackHandler';
-import { NavigationTracker } from '@/lib/helpers/navigationTracker'; // Import from navigationTracker.ts, not navigation.ts
-import { initializeNavigation } from '@/lib/helpers/navigation'; // Import initializeNavigation from navigation.ts
+import { NavigationTracker } from '@/lib/helpers/navigationTracker';
+import { initializeNavigation } from '@/lib/helpers/navigation';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -93,17 +93,13 @@ export default function Layout() {
           <ThemeProvider value={CustomDarkTheme}>
             <UserProvider>
               <BluetoothProvider>
-                {/* Hardware back button provider - handles phone's back button globally */}
+                {/* Hardware back button provider - ONLY hardware back handler */}
                 <HardwareBackProvider options={{
                   fallbackRoute: '/(drawer)/',
                   replaceIfNoHistory: true
                 }}>
-                  {/* Navigation tracker - tracks route changes and integrates with hardware back */}
-                  <NavigationTracker 
-                    enableHardwareBack={true}
-                    fallbackRoute="/(drawer)/"
-                    replaceIfNoHistory={true}
-                  >
+                  {/* Navigation tracker - ONLY tracks route changes */}
+                  <NavigationTracker fallbackRoute="/(drawer)/">
                     {/* Main app content - includes DrawerLayout and other routes */}
                     <Slot />
                     
