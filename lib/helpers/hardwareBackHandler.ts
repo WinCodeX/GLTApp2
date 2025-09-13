@@ -1,4 +1,4 @@
-// lib/helpers/hardwareBackHandler.ts - Fixed for single press response
+// lib/helpers/hardwareBackHandler.ts - Simplified for single press response
 import { useEffect, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { NavigationHelper } from './navigation';
@@ -7,7 +7,7 @@ import React from 'react';
 interface HardwareBackOptions {
   fallbackRoute?: string;
   replaceIfNoHistory?: boolean;
-  customHandler?: () => Promise<boolean> | boolean;
+  customHandler?: () => boolean;
   enableOnIOS?: boolean;
 }
 
@@ -25,56 +25,39 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
   const handleHardwareBack = useCallback((): boolean => {
     console.log('📱 Hardware Back: Button pressed');
 
-    // Use custom handler if provided (synchronous check first)
+    // Use custom handler if provided
     if (customHandler) {
       try {
-        const customResult = customHandler();
-        
-        // Handle both sync and async custom handlers
-        if (customResult instanceof Promise) {
-          customResult.then(result => {
-            console.log('🎯 Hardware Back: Async custom handler result:', result);
-          }).catch(error => {
-            console.error('❌ Hardware Back: Custom handler error:', error);
-          });
-        } else {
-          console.log('🎯 Hardware Back: Sync custom handler result:', customResult);
-          return customResult;
-        }
-        
-        // For async handlers, prevent default and let handler manage navigation
-        return true;
+        return customHandler();
       } catch (error) {
         console.error('❌ Hardware Back: Custom handler error:', error);
+        return false;
       }
     }
 
-    // Use NavigationHelper for back navigation (fire and forget for immediate response)
-    NavigationHelper.goBack({
-      fallbackRoute,
-      replaceIfNoHistory
-    }).then(backResult => {
-      console.log('🧭 Hardware Back: NavigationHelper completed:', backResult);
-    }).catch(error => {
-      console.error('❌ Hardware Back: NavigationHelper error:', error);
-    });
-
-    // Always prevent default Android back behavior since we handle navigation
-    return true;
+    // Execute navigation immediately without async complexity
+    try {
+      NavigationHelper.goBack({
+        fallbackRoute,
+        replaceIfNoHistory
+      });
+      return true; // Prevent default behavior
+    } catch (error) {
+      console.error('❌ Hardware Back: Navigation error:', error);
+      return false; // Allow default behavior on error
+    }
   }, [fallbackRoute, replaceIfNoHistory, customHandler]);
 
   useEffect(() => {
-    // Only handle on Android by default, unless enableOnIOS is true
     if (Platform.OS !== 'android' && !enableOnIOS) {
       return;
     }
 
-    console.log('📱 Hardware Back: Setting up hardware back handler');
-
+    console.log('📱 Hardware Back: Setting up handler');
     const backSubscription = BackHandler.addEventListener('hardwareBackPress', handleHardwareBack);
 
     return () => {
-      console.log('📱 Hardware Back: Removing hardware back handler');
+      console.log('📱 Hardware Back: Removing handler');
       backSubscription.remove();
     };
   }, [handleHardwareBack, enableOnIOS]);
@@ -112,25 +95,14 @@ export const withHardwareBackHandler = function<P extends Record<string, any>>(
 };
 
 /**
- * Screen-specific back handlers for different app sections
+ * Simplified screen-specific back handlers
  */
 export const ScreenBackHandlers = {
   // Admin screens back handler
   useAdminBackHandler: (fallbackRoute: string = '/admin') => {
     return useHardwareBackHandler({
       fallbackRoute,
-      replaceIfNoHistory: true,
-      customHandler: () => {
-        console.log('🏢 Admin Back: Handling admin screen back');
-        
-        // Fire and forget - immediate response
-        NavigationHelper.goBack({
-          fallbackRoute,
-          replaceIfNoHistory: true
-        });
-        
-        return true; // Prevent default behavior
-      }
+      replaceIfNoHistory: true
     });
   },
 
@@ -138,17 +110,7 @@ export const ScreenBackHandlers = {
   useBusinessBackHandler: () => {
     return useHardwareBackHandler({
       fallbackRoute: '/(drawer)/business',
-      replaceIfNoHistory: true,
-      customHandler: () => {
-        console.log('💼 Business Back: Handling business screen back');
-        
-        NavigationHelper.goBack({
-          fallbackRoute: '/(drawer)/business',
-          replaceIfNoHistory: true
-        });
-        
-        return true;
-      }
+      replaceIfNoHistory: true
     });
   },
 
@@ -156,17 +118,7 @@ export const ScreenBackHandlers = {
   usePackageBackHandler: () => {
     return useHardwareBackHandler({
       fallbackRoute: '/(drawer)/',
-      replaceIfNoHistory: true,
-      customHandler: () => {
-        console.log('📦 Package Back: Handling package screen back');
-        
-        NavigationHelper.goBack({
-          fallbackRoute: '/(drawer)/',
-          replaceIfNoHistory: true
-        });
-        
-        return true;
-      }
+      replaceIfNoHistory: true
     });
   },
 
@@ -176,7 +128,7 @@ export const ScreenBackHandlers = {
       customHandler: () => {
         console.log('🗂️ Modal Back: Closing modal');
         onClose();
-        return true; // Prevent default behavior
+        return true;
       }
     });
   }
@@ -189,20 +141,6 @@ export const useConditionalBackHandler = (
   condition: boolean,
   options: HardwareBackOptions = {}
 ) => {
-  const conditionalOptions = {
-    ...options,
-    customHandler: condition ? options.customHandler : undefined
-  };
-
-  const baseHandler = useHardwareBackHandler(conditionalOptions);
-
-  useEffect(() => {
-    if (condition) {
-      console.log('✅ Conditional Back: Handler activated');
-    } else {
-      console.log('⏸️ Conditional Back: Handler deactivated');
-    }
-  }, [condition]);
-
-  return baseHandler;
+  const conditionalOptions = condition ? options : {};
+  return useHardwareBackHandler(conditionalOptions);
 };
