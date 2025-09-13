@@ -57,6 +57,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
 }) => {
   const [sidebarVisible, setSidebarVisible] = useState(false);
   const [notificationCount, setNotificationCount] = useState(0);
+  const [cartCount, setCartCount] = useState(0);
   const [recentNotifications, setRecentNotifications] = useState<IncomingNotification[]>([]);
   const [showNotificationBanner, setShowNotificationBanner] = useState(false);
   const [currentNotification, setCurrentNotification] = useState<IncomingNotification | null>(null);
@@ -346,12 +347,65 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
     }
   };
 
+  // Fetch cart count (all pending_unpaid packages)
+  const fetchCartCount = async () => {
+    try {
+      console.log('🛒 Admin: Fetching ALL pending_unpaid packages for cart count...');
+      
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          state: 'pending_unpaid',
+          per_page: 1000,
+          page: 1
+        },
+        timeout: 15000
+      });
+      
+      if (response.data.success) {
+        let totalCount = response.data.data?.length || 0;
+        
+        const pagination = response.data.pagination;
+        if (pagination && pagination.total_pages > 1) {
+          console.log(`🛒 Admin: Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
+          
+          const additionalPages = [];
+          for (let page = 2; page <= pagination.total_pages; page++) {
+            additionalPages.push(
+              api.get('/api/v1/packages', {
+                params: {
+                  state: 'pending_unpaid',
+                  per_page: 1000,
+                  page: page
+                },
+                timeout: 15000
+              })
+            );
+          }
+
+          const additionalResponses = await Promise.all(additionalPages);
+          const additionalCount = additionalResponses.reduce((acc, res) => {
+            return acc + (res.data.success ? (res.data.data?.length || 0) : 0);
+          }, 0);
+
+          totalCount += additionalCount;
+          console.log(`🛒 Admin: Total cart count with all pages: ${totalCount}`);
+        }
+        
+        setCartCount(totalCount);
+      }
+    } catch (error) {
+      console.error('🛒 Admin: Failed to fetch cart count:', error);
+    }
+  };
+
   useEffect(() => {
     fetchNotificationCount();
+    fetchCartCount();
     
     // Refresh counts every 30 seconds
     const interval = setInterval(() => {
       fetchNotificationCount();
+      fetchCartCount();
     }, 30000);
 
     return () => clearInterval(interval);
@@ -464,6 +518,21 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
       console.error('🔔 Admin: Navigation to notifications failed:', error);
       // Fallback to router navigation
       router.push('/admin/notifications');
+    }
+  };
+
+  // Enhanced cart navigation with NavigationHelper
+  const handleCart = async (): void => {
+    try {
+      console.log('🛒 Admin: Navigating to admin cart');
+      await NavigationHelper.navigateTo('/admin/cart', {
+        params: {},
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error('🛒 Admin: Navigation to cart failed:', error);
+      // Fallback to router navigation
+      router.push('/admin/cart');
     }
   };
 
@@ -615,7 +684,7 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
             </View>
           )}
 
-          {/* Right - Notifications & Avatar */}
+          {/* Right - Notifications, Cart & Avatar */}
           <View style={styles.headerRight}>
             <TouchableOpacity 
               style={styles.headerAction}
@@ -628,6 +697,19 @@ const AdminLayout: React.FC<AdminLayoutProps> = ({
                 {renderBadge(notificationCount, '#8b5cf6')}
               </View>
             </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={styles.headerAction}
+              onPress={handleCart}
+              accessibilityLabel="Admin cart"
+              accessibilityRole="button"
+            >
+              <View style={styles.iconContainer}>
+                <Ionicons name="cart-outline" size={22} color="white" />
+                {renderBadge(cartCount, '#ef4444')}
+              </View>
+            </TouchableOpacity>
+            
             <TouchableOpacity 
               style={styles.headerAction}
               onPress={handleAvatarPress}
