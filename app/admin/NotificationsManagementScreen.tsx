@@ -858,27 +858,25 @@ export default function NotificationsManagementScreen() {
                 {!safeRead && <View style={styles.unreadIndicator} />}
               </View>
               
-              {!safeBroadcast && (
-                <View style={styles.notificationActions}>
-                  <TouchableOpacity
-                    onPress={() => markAsRead(item.id, !safeRead)}
-                    style={styles.actionButton}
-                  >
-                    <Ionicons 
-                      name={safeRead ? 'mail-outline' : 'mail-open-outline'} 
-                      size={16} 
-                      color={safeRead ? '#a78bfa' : 'white'} 
-                    />
-                  </TouchableOpacity>
-                  
-                  <TouchableOpacity
-                    onPress={() => deleteNotification(item.id)}
-                    style={styles.actionButton}
-                  >
-                    <Ionicons name="trash-outline" size={16} color="#ff6b6b" />
-                  </TouchableOpacity>
-                </View>
-              )}
+              <View style={styles.notificationActions}>
+              <TouchableOpacity
+                onPress={() => markAsRead(item.id, !safeRead)}
+                style={styles.actionButton}
+              >
+                <Ionicons 
+                  name={safeRead ? 'mail-outline' : 'mail-open-outline'} 
+                  size={18} 
+                  color={safeRead ? '#a78bfa' : 'white'} 
+                />
+              </TouchableOpacity>
+              
+              <TouchableOpacity
+                onPress={() => deleteNotification(item.id)}
+                style={[styles.actionButton, styles.deleteButton]}
+              >
+                <Ionicons name="trash-outline" size={18} color="#ff6b6b" />
+              </TouchableOpacity>
+            </View>
             </View>
 
             <Text style={[styles.notificationMessage, { color: safeRead ? '#e5e7eb' : 'rgba(255,255,255,0.9)' }]} numberOfLines={3}>
@@ -1717,7 +1715,11 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   actionButton: {
-    padding: 6,
+    padding: 8,
+    borderRadius: 6,
+  },
+  deleteButton: {
+    backgroundColor: 'rgba(255, 107, 107, 0.2)',
   },
   notificationMessage: {
     fontSize: 14,
