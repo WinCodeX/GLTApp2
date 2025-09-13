@@ -1,8 +1,9 @@
-// lib/api.ts - Fixed to properly handle authentication errors without auto-redirect
+// lib/api.ts - Fixed to redirect to login screen on session expiration
 import NetInfo from '@react-native-community/netinfo';
 import axios from 'axios';
 import Toast from 'react-native-toast-message';
 import { accountManager } from './AccountManager';
+import { NavigationContainerRef, CommonActions } from '@react-navigation/native';
 
 const LOCAL_BASE_1 = 'http://192.168.100.73:3000';
 const LOCAL_BASE_2 = 'http://10.29.205.106:3000';
@@ -11,6 +12,39 @@ const FALLBACK_BASE = PROD_BASE;
 
 let resolvedBaseUrl: string | null = null;
 let isResolvingBaseUrl = false;
+
+// Navigation reference for handling redirects
+let navigationRef: NavigationContainerRef<any> | null = null;
+
+// Function to set navigation reference
+export const setNavigationRef = (ref: NavigationContainerRef<any>) => {
+  navigationRef = ref;
+};
+
+// Function to navigate to login screen
+const navigateToLogin = () => {
+  if (navigationRef && navigationRef.isReady()) {
+    try {
+      navigationRef.dispatch(
+        CommonActions.reset({
+          index: 0,
+          routes: [{ name: 'Login' }],
+        })
+      );
+      console.log('🔄 Redirected to login screen due to session expiration');
+    } catch (error) {
+      console.error('❌ Navigation to login failed:', error);
+      // Fallback: try simple navigate
+      try {
+        navigationRef.navigate('Login' as never);
+      } catch (fallbackError) {
+        console.error('❌ Fallback navigation failed:', fallbackError);
+      }
+    }
+  } else {
+    console.warn('⚠️ Navigation ref not available for redirect');
+  }
+};
 
 // Export API_BASE_URL for compatibility
 export const API_BASE_URL = (() => {
@@ -184,7 +218,9 @@ const isGenuineAuthError = (error: any): boolean => {
     'invalid credentials',
     'session expired',
     'token invalid',
-    'jwt decode error'
+    'jwt decode error',
+    'signature has expired',
+    'jwt verification failed'
   ];
   
   const lowerMessage = errorMessage.toLowerCase();
@@ -278,7 +314,7 @@ api.interceptors.request.use(
   }
 );
 
-// FIXED: Response interceptor without automatic login redirects
+// Response interceptor with session expiration redirect
 api.interceptors.response.use(
   (response) => {
     const currentAccount = accountManager.getCurrentAccount();
@@ -316,7 +352,7 @@ api.interceptors.response.use(
       }
     }
 
-    // FIXED: Handle authentication errors without automatic redirects
+    // Handle authentication errors with redirect to login
     if (status === 401 || status === 422) {
       const url = config?.url || '';
       const isAuthRequest = isAuthEndpoint(url);
@@ -330,35 +366,60 @@ api.interceptors.response.use(
         errorCode: error.response?.data?.code
       });
 
-      // Only clean up account for genuine authentication errors, but don't redirect
+      // Handle genuine authentication errors with redirect
       if (isGenuineAuth && currentAccount) {
-        console.log('🔐 Genuine authentication failure detected - cleaning up account');
+        console.log('🔐 Session expired - redirecting to login');
         
         try {
+          // Remove the invalid account
           await accountManager.removeAccount(currentAccount.id);
           
-          // Show toast but don't redirect automatically
-          if (!accountManager.hasAccounts()) {
-            Toast.show({ 
-              type: 'error', 
-              text1: 'Session expired',
-              text2: 'Account removed - please log in again'
-            });
-          } else {
-            Toast.show({ 
-              type: 'warning', 
-              text1: 'Account session expired',
-              text2: 'Account removed - switched to another account'
-            });
-          }
+          // Show toast notification
+          Toast.show({ 
+            type: 'error', 
+            text1: 'Session Expired',
+            text2: 'Please log in again',
+            visibilityTime: 3000
+          });
+          
+          // Redirect to login screen
+          setTimeout(() => {
+            navigateToLogin();
+          }, 1000); // Small delay to ensure toast is visible
+          
         } catch (removeError) {
           console.error('❌ Failed to remove invalid account:', removeError);
+          
+          // Still redirect to login even if account removal fails
+          Toast.show({ 
+            type: 'error', 
+            text1: 'Session Expired',
+            text2: 'Please log in again',
+            visibilityTime: 3000
+          });
+          
+          setTimeout(() => {
+            navigateToLogin();
+          }, 1000);
         }
-      } else {
-        // Handle non-authentication 401/422 errors gracefully
-        console.log('⚠️ Non-authentication 401/422 error - showing error message');
+      } else if (isGenuineAuth && !currentAccount) {
+        // No current account but authentication error - redirect to login
+        console.log('🔐 Authentication required - redirecting to login');
         
-        // Show specific error message without account cleanup
+        Toast.show({ 
+          type: 'info', 
+          text1: 'Login Required',
+          text2: 'Please log in to continue',
+          visibilityTime: 3000
+        });
+        
+        setTimeout(() => {
+          navigateToLogin();
+        }, 1000);
+      } else if (!isAuthRequest) {
+        // Handle non-authentication 401/422 errors gracefully
+        console.log('⚠️ Non-authentication error - showing error message');
+        
         const errorMessage = error.response?.data?.message || 'Request failed';
         Toast.show({
           type: 'error',
