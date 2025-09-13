@@ -1,17 +1,35 @@
-// lib/helpers/navigationTracker.ts - Fixed navigation tracking with proper React imports
+// lib/helpers/navigationTracker.ts - Updated with hardware back integration
 import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'expo-router';
 import { NavigationHelper } from './navigation';
+import { useHardwareBackHandler } from './hardwareBackHandler';
 
 /**
- * Hook to automatically track route changes when navigation happens outside of NavigationHelper
- * This ensures the persistent navigation history is always up-to-date
+ * Enhanced hook that combines route tracking with hardware back handling
  */
-export const useNavigationTracker = () => {
+export const useNavigationTracker = (options: {
+  enableHardwareBack?: boolean;
+  fallbackRoute?: string;
+  replaceIfNoHistory?: boolean;
+} = {}) => {
+  const {
+    enableHardwareBack = true,
+    fallbackRoute = '/(drawer)/',
+    replaceIfNoHistory = true
+  } = options;
+
   const pathname = usePathname();
   const router = useRouter();
   const previousPathname = useRef<string | null>(null);
   const isInitialized = useRef(false);
+
+  // Set up hardware back handling if enabled
+  const { handleBackPress } = useHardwareBackHandler(
+    enableHardwareBack ? {
+      fallbackRoute,
+      replaceIfNoHistory
+    } : {}
+  );
 
   useEffect(() => {
     const initializeAndTrack = async () => {
@@ -49,17 +67,24 @@ export const useNavigationTracker = () => {
     canGoBack: NavigationHelper.canGoBack(),
     goBack: NavigationHelper.goBack,
     navigateTo: NavigationHelper.navigateTo,
+    handleHardwareBack: handleBackPress,
+    isHardwareBackEnabled: enableHardwareBack
   };
 };
 
 /**
- * HOC to wrap components with automatic navigation tracking
+ * HOC to wrap components with automatic navigation tracking and hardware back handling
  */
 export const withNavigationTracking = <P extends Record<string, any>>(
-  Component: React.ComponentType<P>
+  Component: React.ComponentType<P>,
+  options: {
+    enableHardwareBack?: boolean;
+    fallbackRoute?: string;
+    replaceIfNoHistory?: boolean;
+  } = {}
 ): React.ComponentType<P> => {
   const WrappedComponent = (props: P) => {
-    useNavigationTracker();
+    useNavigationTracker(options);
     return React.createElement(Component, props);
   };
 
@@ -68,9 +93,24 @@ export const withNavigationTracking = <P extends Record<string, any>>(
 };
 
 /**
- * Component to be placed at the root level to enable global navigation tracking
+ * Enhanced NavigationTracker component with hardware back support
  */
-export const NavigationTracker: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  useNavigationTracker();
+export const NavigationTracker: React.FC<{ 
+  children: React.ReactNode;
+  enableHardwareBack?: boolean;
+  fallbackRoute?: string;
+  replaceIfNoHistory?: boolean;
+}> = ({ 
+  children, 
+  enableHardwareBack = true,
+  fallbackRoute = '/(drawer)/',
+  replaceIfNoHistory = true
+}) => {
+  useNavigationTracker({
+    enableHardwareBack,
+    fallbackRoute,
+    replaceIfNoHistory
+  });
+  
   return React.createElement(React.Fragment, null, children);
 };
