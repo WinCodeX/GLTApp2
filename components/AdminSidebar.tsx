@@ -1,4 +1,4 @@
-// AdminSidebar.tsx - Updated with Terms Management integration
+// AdminSidebar.tsx - Updated with Notifications Management integration
 import React, { useState } from 'react';
 import {
   View,
@@ -66,6 +66,7 @@ const AdminSidebar: React.FC<AdminSidebarProps> = ({
     { icon: 'scan-outline', title: 'Scanning', id: 'scanning', route: '/admin/ScanningScreen' },
     { icon: 'person-outline', title: 'Account', id: 'account', route: '/admin/account' },
     { icon: 'document-text-outline', title: 'Terms Management', id: 'terms-management', route: '/admin/TermsManagementScreen' },
+    { icon: 'notifications-outline', title: 'Notifications Management', id: 'notifications-management', route: '/admin/NotificationsManagementScreen' },
     { icon: 'home-outline', title: 'Admin Home', id: 'admin-home', route: '/admin' },
     { icon: 'settings-outline', title: 'Admin Settings', id: 'admin-settings', route: '/admin/settings' },
   ];
