@@ -1,4 +1,4 @@
-// app/_layout.tsx - Fixed without Expo splash screen
+// app/_layout.tsx - Updated with hardware back button integration
 import React, { useEffect, useState } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
@@ -16,6 +16,10 @@ import { BluetoothProvider } from '@/contexts/BluetoothContext';
 import NetworkBanner from '@/components/NetworkBanner';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import colors from '@/theme/colors';
+
+// Hardware back button and navigation tracking imports
+import { HardwareBackProvider } from '@/lib/helpers/hardwareBackHandler';
+import { NavigationTracker, initializeNavigation } from '@/lib/helpers/navigation';
 
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
@@ -37,6 +41,11 @@ export default function Layout() {
     async function prepare() {
       try {
         console.log('🚀 App Layout: Starting initialization...');
+        
+        // Initialize navigation system early in app startup
+        console.log('🧭 App Layout: Initializing navigation system...');
+        await initializeNavigation();
+        console.log('✅ App Layout: Navigation system initialized');
         
         // Minimum time to show our custom splash screen
         const minimumSplashTime = 1800; // 1.8 seconds to ensure it's visible
@@ -83,11 +92,24 @@ export default function Layout() {
           <ThemeProvider value={CustomDarkTheme}>
             <UserProvider>
               <BluetoothProvider>
-                {/* Main app content - includes DrawerLayout and other routes */}
-                <Slot />
-                
-                {/* Network status banner - positioned below header */}
-                <NetworkBanner headerHeight={60} />
+                {/* Hardware back button provider - handles phone's back button globally */}
+                <HardwareBackProvider options={{
+                  fallbackRoute: '/(drawer)/',
+                  replaceIfNoHistory: true
+                }}>
+                  {/* Navigation tracker - tracks route changes and integrates with hardware back */}
+                  <NavigationTracker 
+                    enableHardwareBack={true}
+                    fallbackRoute="/(drawer)/"
+                    replaceIfNoHistory={true}
+                  >
+                    {/* Main app content - includes DrawerLayout and other routes */}
+                    <Slot />
+                    
+                    {/* Network status banner - positioned below header */}
+                    <NetworkBanner headerHeight={60} />
+                  </NavigationTracker>
+                </HardwareBackProvider>
               </BluetoothProvider>
             </UserProvider>
           </ThemeProvider>
