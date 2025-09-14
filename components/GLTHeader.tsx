@@ -1,7 +1,7 @@
-// components/GLTHeader.tsx - Enhanced with proper system notifications
+// components/GLTHeader.tsx - FIXED: System notifications now appear in phone's notification tray
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -148,7 +148,7 @@ export default function GLTHeader({
   const responseListener = useRef<Notifications.Subscription>();
 
   // ============================================
-  // ENHANCED SYSTEM NOTIFICATION SETUP
+  // FIXED: PROPER SYSTEM NOTIFICATION SETUP
   // ============================================
   useEffect(() => {
     setupSystemNotifications();
@@ -166,36 +166,117 @@ export default function GLTHeader({
 
   const setupSystemNotifications = async () => {
     try {
-      console.log('🔔 Setting up SYSTEM notifications...');
+      console.log('🔔 SETTING UP SYSTEM NOTIFICATIONS...');
       
-      // CRITICAL: Configure for SYSTEM notifications (not in-app)
+      // CRITICAL: Set up notification channels first (Android)
+      if (Platform.OS === 'android') {
+        await setupAndroidNotificationChannels();
+      }
+      
+      // FIXED: Configure notification handler for proper system notifications
       await Notifications.setNotificationHandler({
         handleNotification: async (notification) => {
-          console.log('🔔 System notification received:', notification);
+          console.log('🔔 NOTIFICATION RECEIVED:', {
+            title: notification.request.content.title,
+            body: notification.request.content.body,
+            data: notification.request.content.data
+          });
           
-          // Return false for in-app alerts so they show as system notifications
+          // CRITICAL: Return configuration that forces system notifications
           return {
-            shouldShowAlert: false,    // Don't show in-app
-            shouldPlaySound: true,     // Play system sound
-            shouldSetBadge: true,      // Update app badge
+            shouldShowAlert: false,      // NEVER show in-app alerts
+            shouldPlaySound: true,       // Play system sound
+            shouldSetBadge: true,        // Update app badge count
           };
         },
       });
 
-      // Configure notification categories for better UX
+      // Set up notification categories with actions
+      await setupNotificationCategories();
+
+      // Request permissions with detailed checking
+      const permissionGranted = await requestNotificationPermissions();
+      if (!permissionGranted) {
+        return;
+      }
+
+      // Get and register push token
+      await registerForPushNotifications();
+      
+      // Setup notification response listeners
+      setupNotificationListeners();
+      
+      console.log('✅ SYSTEM NOTIFICATIONS SETUP COMPLETE');
+      
+    } catch (error) {
+      console.error('❌ FAILED TO SETUP SYSTEM NOTIFICATIONS:', error);
+    }
+  };
+
+  const setupAndroidNotificationChannels = async () => {
+    try {
+      console.log('🔔 Setting up Android notification channels...');
+      
+      // Default channel
+      await Notifications.setNotificationChannelAsync('default', {
+        name: 'Default GLT Notifications',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#7c3aed',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+      });
+
+      // High priority channel for urgent notifications
+      await Notifications.setNotificationChannelAsync('urgent', {
+        name: 'Urgent GLT Notifications',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#ef4444',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+        bypassDnd: true,
+      });
+
+      // Package updates channel
+      await Notifications.setNotificationChannelAsync('packages', {
+        name: 'Package Updates',
+        importance: Notifications.AndroidImportance.HIGH,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#10b981',
+        sound: 'default',
+        enableVibrate: true,
+        enableLights: true,
+        showBadge: true,
+      });
+
+      console.log('✅ Android notification channels configured');
+    } catch (error) {
+      console.error('❌ Failed to setup Android channels:', error);
+    }
+  };
+
+  const setupNotificationCategories = async () => {
+    try {
+      // Package update category
       await Notifications.setNotificationCategoryAsync('package_update', [
         {
-          identifier: 'view',
+          identifier: 'view_package',
           buttonTitle: 'View Package',
           options: { opensAppToForeground: true }
         },
         {
-          identifier: 'dismiss',
-          buttonTitle: 'Dismiss',
-          options: { isDestructive: false }
+          identifier: 'track_package',
+          buttonTitle: 'Track',
+          options: { opensAppToForeground: true }
         }
       ]);
 
+      // General notification category
       await Notifications.setNotificationCategoryAsync('general', [
         {
           identifier: 'view',
@@ -204,71 +285,104 @@ export default function GLTHeader({
         }
       ]);
 
-      // Request permissions
+      console.log('✅ Notification categories configured');
+    } catch (error) {
+      console.error('❌ Failed to setup notification categories:', error);
+    }
+  };
+
+  const requestNotificationPermissions = async () => {
+    try {
+      console.log('🔔 CHECKING NOTIFICATION PERMISSIONS...');
+      
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
+      console.log('🔔 EXISTING PERMISSION STATUS:', existingStatus);
+      
       let finalStatus = existingStatus;
       
       if (existingStatus !== 'granted') {
-        console.log('🔔 Requesting notification permissions...');
-        const { status } = await Notifications.requestPermissionsAsync();
+        console.log('🔔 REQUESTING NOTIFICATION PERMISSIONS...');
+        const { status } = await Notifications.requestPermissionsAsync({
+          ios: {
+            allowAlert: true,
+            allowBadge: true,
+            allowSound: true,
+            allowDisplayInCarPlay: true,
+            allowCriticalAlerts: false,
+            provideAppNotificationSettings: true,
+            allowProvisional: false,
+            allowAnnouncements: false,
+          },
+          android: {},
+        });
         finalStatus = status;
+        console.log('🔔 NEW PERMISSION STATUS:', finalStatus);
       }
       
       if (finalStatus !== 'granted') {
-        console.warn('🔔 Notification permissions denied');
+        console.error('❌ NOTIFICATION PERMISSIONS DENIED');
         Alert.alert(
-          'Notifications Disabled',
-          'Enable notifications in settings to receive instant updates about your packages.',
+          'Notifications Required',
+          'GLT needs notification permissions to send you important updates about your packages. Please enable notifications in your device settings.',
           [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Settings', onPress: () => Linking.openSettings() }
+            { text: 'Maybe Later', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              style: 'default',
+              onPress: () => Linking.openSettings() 
+            }
           ]
         );
-        return;
+        return false;
       }
 
-      console.log('✅ Notification permissions granted');
-
-      // Get and register push token
-      await registerForPushNotifications();
-      
-      // Setup notification listeners
-      notificationListener.current = Notifications.addNotificationReceivedListener(handleSystemNotificationReceived);
-      responseListener.current = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
-      
-      console.log('✅ System notifications setup complete');
-      
+      console.log('✅ NOTIFICATION PERMISSIONS GRANTED');
+      return true;
     } catch (error) {
-      console.error('❌ Failed to setup system notifications:', error);
+      console.error('❌ ERROR REQUESTING PERMISSIONS:', error);
+      return false;
     }
   };
 
   const registerForPushNotifications = async () => {
     try {
       if (!Device.isDevice) {
-        console.warn('🔔 Push notifications only work on physical devices');
+        console.warn('🔔 SIMULATOR DETECTED - Push notifications only work on physical devices');
+        Alert.alert(
+          'Simulator Detected',
+          'Push notifications only work on physical devices. Please test on a real phone.',
+          [{ text: 'OK' }]
+        );
         return;
       }
 
-      console.log('🔔 Getting push token...');
+      console.log('🔔 GETTING EXPO PUSH TOKEN...');
+      console.log('🔔 PROJECT ID:', Constants.expoConfig?.extra?.eas?.projectId);
+      
       const token = (await Notifications.getExpoPushTokenAsync({
         projectId: Constants.expoConfig?.extra?.eas?.projectId,
       })).data;
       
-      console.log('🔔 Got push token:', token);
+      console.log('🔔 EXPO PUSH TOKEN RECEIVED:', token?.substring(0, 50) + '...');
       setExpoPushToken(token);
 
-      // Register with your backend
+      // Register with backend
       await registerPushTokenWithBackend(token);
       
     } catch (error) {
-      console.error('❌ Failed to get push token:', error);
+      console.error('❌ FAILED TO GET PUSH TOKEN:', error);
+      Alert.alert(
+        'Push Token Error',
+        'Failed to register for push notifications. Please try restarting the app.',
+        [{ text: 'OK' }]
+      );
     }
   };
 
   const registerPushTokenWithBackend = async (token: string) => {
     try {
-      console.log('🔔 Registering push token with backend...');
+      console.log('🔔 REGISTERING PUSH TOKEN WITH BACKEND...');
+      console.log('🔔 TOKEN:', token?.substring(0, 50) + '...');
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
@@ -278,73 +392,90 @@ export default function GLTHeader({
           modelName: Device.modelName,
           osName: Device.osName,
           osVersion: Device.osVersion,
+          isDevice: Device.isDevice,
+          deviceType: Device.deviceType,
         }
       });
       
+      console.log('🔔 BACKEND RESPONSE:', response.data);
+      
       if (response.data?.success) {
-        console.log('✅ Push token registered successfully');
-        
-        // Store token locally for debugging
+        console.log('✅ PUSH TOKEN REGISTERED SUCCESSFULLY');
         await AsyncStorage.setItem('expo_push_token', token);
+        await AsyncStorage.setItem('push_token_registered', 'true');
       } else {
-        console.error('❌ Backend rejected push token registration');
+        console.error('❌ BACKEND REJECTED PUSH TOKEN REGISTRATION:', response.data);
       }
       
     } catch (error) {
-      console.error('❌ Failed to register push token with backend:', error);
+      console.error('❌ PUSH TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
     }
   };
 
-  // Handle system notifications received while app is running
-  const handleSystemNotificationReceived = (notification: Notifications.Notification) => {
-    console.log('🔔 System notification received while app active:', notification);
+  const setupNotificationListeners = () => {
+    // Listen for notifications received while app is active
+    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
+      console.log('🔔 NOTIFICATION RECEIVED WHILE APP ACTIVE:', {
+        title: notification.request.content.title,
+        body: notification.request.content.body,
+        data: notification.request.content.data
+      });
+      
+      // Update badge count
+      setNotificationCount(prev => prev + 1);
+      
+      // The notification will automatically show in system tray due to our handler config
+    });
+
+    // Listen for notification responses (user taps notification)
+    responseListener.current = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
     
-    // Just update the badge count - system notification will show automatically
-    setNotificationCount(prev => prev + 1);
-    
-    // Optionally show minimal in-app feedback
-    // showBriefToast('New notification received');
+    console.log('✅ Notification listeners configured');
   };
 
   // Handle notification taps (when user taps system notification)
   const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
-    console.log('🔔 Notification tapped by user:', response);
+    console.log('🔔 NOTIFICATION TAPPED BY USER:', {
+      actionIdentifier: response.actionIdentifier,
+      data: response.notification.request.content.data
+    });
     
     const notificationData = response.notification.request.content.data;
     const actionIdentifier = response.actionIdentifier;
     
     try {
-      // Handle different action types
-      if (actionIdentifier === 'dismiss') {
-        console.log('🔔 User dismissed notification');
-        return;
-      }
-      
-      // Handle different notification types
-      if (notificationData?.type === 'package_update' && notificationData?.package_id) {
-        console.log('🔔 Navigating to package:', notificationData.package_id);
-        
-        await NavigationHelper.navigateTo('/(drawer)/track', {
-          params: { packageId: notificationData.package_id },
-          trackInHistory: true
-        });
-        
-      } else if (notificationData?.package_code) {
-        console.log('🔔 Navigating to package by code:', notificationData.package_code);
-        
-        await NavigationHelper.navigateTo('/(drawer)/track', {
-          params: { code: notificationData.package_code },
-          trackInHistory: true
-        });
-        
-      } else {
-        // Default: Navigate to notifications screen
-        console.log('🔔 Navigating to notifications screen');
-        
-        await NavigationHelper.navigateTo('/(drawer)/notifications', {
-          params: {},
-          trackInHistory: true
-        });
+      // Handle action-specific responses
+      if (actionIdentifier === 'view_package' || actionIdentifier === 'track_package') {
+        if (notificationData?.package_id) {
+          await NavigationHelper.navigateTo('/(drawer)/track', {
+            params: { packageId: notificationData.package_id },
+            trackInHistory: true
+          });
+        } else if (notificationData?.package_code) {
+          await NavigationHelper.navigateTo('/(drawer)/track', {
+            params: { code: notificationData.package_code },
+            trackInHistory: true
+          });
+        }
+      } else if (actionIdentifier === 'view' || !actionIdentifier) {
+        // Default action - navigate based on notification type
+        if (notificationData?.type === 'package_update' && notificationData?.package_id) {
+          await NavigationHelper.navigateTo('/(drawer)/track', {
+            params: { packageId: notificationData.package_id },
+            trackInHistory: true
+          });
+        } else if (notificationData?.package_code) {
+          await NavigationHelper.navigateTo('/(drawer)/track', {
+            params: { code: notificationData.package_code },
+            trackInHistory: true
+          });
+        } else {
+          // Navigate to notifications screen
+          await NavigationHelper.navigateTo('/(drawer)/notifications', {
+            params: {},
+            trackInHistory: true
+          });
+        }
       }
       
       // Mark notification as read if we have the ID
@@ -353,16 +484,16 @@ export default function GLTHeader({
       }
       
     } catch (error) {
-      console.error('🔔 Error handling notification response:', error);
+      console.error('🔔 ERROR HANDLING NOTIFICATION RESPONSE:', error);
       
-      // Fallback: Just go to notifications screen
+      // Fallback navigation
       try {
         await NavigationHelper.navigateTo('/(drawer)/notifications', {
           params: {},
           trackInHistory: true
         });
       } catch (fallbackError) {
-        console.error('🔔 Fallback navigation also failed:', fallbackError);
+        console.error('🔔 FALLBACK NAVIGATION FAILED:', fallbackError);
       }
     }
   };
