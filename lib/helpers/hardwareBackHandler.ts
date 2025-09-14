@@ -1,4 +1,4 @@
-// lib/helpers/hardwareBackHandler.ts - Simplified for single press response
+// lib/helpers/hardwareBackHandler.ts - Fixed for immediate single press response
 import { useEffect, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { NavigationHelper } from './navigation';
@@ -12,7 +12,7 @@ interface HardwareBackOptions {
 }
 
 /**
- * Hook to handle hardware back button with immediate single press response
+ * FIXED: Hook to handle hardware back button with immediate single press response
  */
 export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
   const {
@@ -23,25 +23,30 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
   } = options;
 
   const handleHardwareBack = useCallback((): boolean => {
-    console.log('📱 Hardware Back: Button pressed');
+    console.log('📱 Hardware Back: Button pressed - immediate response required');
 
-    // Use custom handler if provided
+    // FIXED: Use custom handler if provided - must be synchronous
     if (customHandler) {
       try {
-        return customHandler();
+        const result = customHandler();
+        console.log('📱 Hardware Back: Custom handler returned:', result);
+        return result;
       } catch (error) {
         console.error('❌ Hardware Back: Custom handler error:', error);
         return false;
       }
     }
 
-    // Execute navigation immediately without async complexity
+    // FIXED: Execute navigation immediately - NavigationHelper.goBack is now synchronous
     try {
-      NavigationHelper.goBack({
+      const success = NavigationHelper.goBack({
         fallbackRoute,
         replaceIfNoHistory
       });
-      return true; // Prevent default behavior
+      
+      console.log('📱 Hardware Back: Navigation completed, success:', success);
+      return true; // Always prevent default behavior - let our navigation handle it
+      
     } catch (error) {
       console.error('❌ Hardware Back: Navigation error:', error);
       return false; // Allow default behavior on error
@@ -49,11 +54,12 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
   }, [fallbackRoute, replaceIfNoHistory, customHandler]);
 
   useEffect(() => {
+    // FIXED: Only register on Android unless explicitly enabled for iOS
     if (Platform.OS !== 'android' && !enableOnIOS) {
       return;
     }
 
-    console.log('📱 Hardware Back: Setting up handler');
+    console.log('📱 Hardware Back: Setting up handler for', Platform.OS);
     const backSubscription = BackHandler.addEventListener('hardwareBackPress', handleHardwareBack);
 
     return () => {
