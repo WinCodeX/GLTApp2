@@ -164,7 +164,8 @@ class PersistentNavigationHistory {
     await this.saveState();
   }
 
-  static pop(): NavigationEntry | null {
+  // FIXED: Synchronous pop for immediate response
+  static popSync(): NavigationEntry | null {
     if (this.state.history.length > 0) {
       const popped = this.state.history.pop();
       console.log('📍 PersistentNavigation: Popped', popped?.route);
@@ -220,7 +221,7 @@ export class NavigationHelper {
     await PersistentNavigationHistory.initialize();
   }
 
-  // Fixed back navigation with immediate response
+  // FIXED: Completely synchronous back navigation for immediate hardware response
   static goBack(options: NavigationOptions = {}): boolean {
     const {
       fallbackRoute = '/(drawer)/',
@@ -229,58 +230,53 @@ export class NavigationHelper {
     } = options;
 
     try {
-      console.log('🧭 Navigation: Attempting to go back...');
+      console.log('🧭 Navigation: Hardware back pressed - immediate response');
       
-      // Check if we have history to go back to (synchronous check)
+      // FIXED: Check if we have history to go back to (synchronous check)
       if (PersistentNavigationHistory.canGoBackInHistory()) {
-        // Get previous route from our persistent history
-        const previousEntry = PersistentNavigationHistory.getPrevious();
+        console.log('🧭 Navigation: Found history, using router.back()');
         
-        if (previousEntry) {
-          console.log('🧭 Navigation: Going back to', previousEntry.route);
-          
-          // Execute navigation immediately
-          router.push({ 
-            pathname: previousEntry.route, 
-            params: { ...previousEntry.params, ...params }
-          });
-          
-          // Update history asynchronously (non-blocking)
-          const popped = PersistentNavigationHistory.pop();
-          if (popped) {
-            PersistentNavigationHistory.updateCurrentRoute(previousEntry.route);
-          }
-          
-          return true;
-        }
+        // FIXED: Use router.back() instead of router.push() - this is the correct way to go back
+        router.back();
+        
+        // FIXED: Update history synchronously, save asynchronously 
+        PersistentNavigationHistory.popSync();
+        
+        return true;
       }
       
-      // Try Expo Router's native back if no persistent history
+      // FIXED: Try Expo Router's native back if available
       if (router.canGoBack()) {
-        console.log('🧭 Navigation: Using Expo Router back');
+        console.log('🧭 Navigation: Using Expo Router native back');
         router.back();
         return true;
       }
       
-      // No history available - handle based on options
-      console.log(`🧭 Navigation: No history, using fallback: ${fallbackRoute}`);
+      // FIXED: No history available - immediate fallback
+      console.log(`🧭 Navigation: No back history, using fallback: ${fallbackRoute}`);
+      
       if (replaceIfNoHistory) {
         router.replace({ pathname: fallbackRoute, params });
       } else {
         router.push({ pathname: fallbackRoute, params });
       }
       
-      // Update state asynchronously
-      PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+      // FIXED: Update state asynchronously (non-blocking)
+      setTimeout(() => {
+        PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+      }, 0);
       
-      return false;
+      return false; // Indicate fallback was used
+      
     } catch (error) {
       console.error('🧭 Navigation: Error during back navigation:', error);
       
-      // Ultimate fallback - immediate execution
+      // FIXED: Ultimate fallback - immediate execution
       try {
         router.replace({ pathname: fallbackRoute, params });
-        PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+        setTimeout(() => {
+          PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+        }, 0);
       } catch (fallbackError) {
         console.error('🧭 Navigation: Fallback navigation also failed:', fallbackError);
       }
