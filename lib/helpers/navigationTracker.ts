@@ -1,10 +1,11 @@
 // lib/helpers/navigationTracker.ts - Fixed without duplicate hardware back handling
+
 import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'expo-router';
-import { NavigationHelper } from './navigation';
+// Removed NavigationHelper import to prevent circular dependency issues
 
 /**
- * Hook that only handles route tracking (hardware back handled by HardwareBackProvider)
+ * FIXED: Hook that ONLY handles route tracking (hardware back handled by HardwareBackProvider)
  */
 export const useNavigationTracker = (options: {
   fallbackRoute?: string;
@@ -18,6 +19,9 @@ export const useNavigationTracker = (options: {
   useEffect(() => {
     const initializeAndTrack = async () => {
       try {
+        // FIXED: Lazy load NavigationHelper to prevent circular imports
+        const { NavigationHelper } = await import('./navigation');
+        
         // Ensure NavigationHelper is initialized
         if (!isInitialized.current) {
           await NavigationHelper.initialize();
@@ -29,7 +33,7 @@ export const useNavigationTracker = (options: {
         if (previousPathname.current !== null && previousPathname.current !== pathname) {
           console.log(`📍 NavigationTracker: Route changed from ${previousPathname.current} to ${pathname}`);
           
-          // Only track if this isn't already tracked by NavigationHelper
+          // FIXED: Only track if this isn't already tracked by NavigationHelper
           const currentRoute = NavigationHelper.getCurrentRoute();
           if (currentRoute !== pathname) {
             await NavigationHelper.trackRouteChange(pathname);
@@ -46,11 +50,12 @@ export const useNavigationTracker = (options: {
     initializeAndTrack();
   }, [pathname]);
 
+  // FIXED: Return basic navigation functions without importing NavigationHelper directly
   return {
     currentRoute: pathname,
-    canGoBack: NavigationHelper.canGoBack(),
-    goBack: NavigationHelper.goBack,
-    navigateTo: NavigationHelper.navigateTo
+    canGoBack: () => router.canGoBack(),
+    goBack: () => router.back(),
+    navigateTo: (route: string, options?: any) => router.push({ pathname: route, params: options?.params })
   };
 };
 
