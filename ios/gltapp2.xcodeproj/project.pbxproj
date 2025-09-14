@@ -11,9 +11,9 @@
 		3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */; };
 		BB2F792D24A3F905000567C9 /* Expo.plist in Resources */ = {isa = PBXBuildFile; fileRef = BB2F792C24A3F905000567C9 /* Expo.plist */; };
 		F11748422D0307B40044C1D9 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = F11748412D0307B40044C1D9 /* AppDelegate.swift */; };
-		CCD15699540143B0AF037A69 /* notification_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = DB9826EB0EEB4E9E97F83895 /* notification_sound.wav */; };
-		74F2742C3E734C99A0266852 /* notification_urgent.wav in Resources */ = {isa = PBXBuildFile; fileRef = E65F70B84EFF4F6797D83B9D /* notification_urgent.wav */; };
-		C5477B9EEC9D4B86941A6480 /* notification_high.wav in Resources */ = {isa = PBXBuildFile; fileRef = A428E351D261498BA76AE1A8 /* notification_high.wav */; };
+		8778BDCD295747B392022DBF /* notification_sound.wav in Resources */ = {isa = PBXBuildFile; fileRef = 1EAB44AEA28A44D8B9B56A56 /* notification_sound.wav */; };
+		9E961A7DE94E42EFBC8F168C /* notification_urgent.wav in Resources */ = {isa = PBXBuildFile; fileRef = 564286F6917E403EBC922D4C /* notification_urgent.wav */; };
+		24C158713DD041B4829E5FEE /* notification_high.wav in Resources */ = {isa = PBXBuildFile; fileRef = 30FD3A18008A44B29BE1AE1B /* notification_high.wav */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -25,9 +25,9 @@
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F11748412D0307B40044C1D9 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = gltapp2/AppDelegate.swift; sourceTree = "<group>"; };
 		F11748442D0722820044C1D9 /* gltapp2-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; name = "gltapp2-Bridging-Header.h"; path = "gltapp2/gltapp2-Bridging-Header.h"; sourceTree = "<group>"; };
-		DB9826EB0EEB4E9E97F83895 /* notification_sound.wav */ = {isa = PBXFileReference; name = "notification_sound.wav"; path = "gltapp2/notification_sound.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		E65F70B84EFF4F6797D83B9D /* notification_urgent.wav */ = {isa = PBXFileReference; name = "notification_urgent.wav"; path = "gltapp2/notification_urgent.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
-		A428E351D261498BA76AE1A8 /* notification_high.wav */ = {isa = PBXFileReference; name = "notification_high.wav"; path = "gltapp2/notification_high.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		1EAB44AEA28A44D8B9B56A56 /* notification_sound.wav */ = {isa = PBXFileReference; name = "notification_sound.wav"; path = "gltapp2/notification_sound.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		564286F6917E403EBC922D4C /* notification_urgent.wav */ = {isa = PBXFileReference; name = "notification_urgent.wav"; path = "gltapp2/notification_urgent.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
+		30FD3A18008A44B29BE1AE1B /* notification_high.wav */ = {isa = PBXFileReference; name = "notification_high.wav"; path = "gltapp2/notification_high.wav"; sourceTree = "<group>"; fileEncoding = undefined; lastKnownFileType = unknown; explicitFileType = undefined; includeInIndex = 0; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -50,9 +50,9 @@
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				AA286B85B6C04FC6940260E9 /* SplashScreen.storyboard */,
-				DB9826EB0EEB4E9E97F83895 /* notification_sound.wav */,
-				E65F70B84EFF4F6797D83B9D /* notification_urgent.wav */,
-				A428E351D261498BA76AE1A8 /* notification_high.wav */,
+				1EAB44AEA28A44D8B9B56A56 /* notification_sound.wav */,
+				564286F6917E403EBC922D4C /* notification_urgent.wav */,
+				30FD3A18008A44B29BE1AE1B /* notification_high.wav */,
 			);
 			name = gltapp2;
 			sourceTree = "<group>";
@@ -164,9 +164,9 @@
 				BB2F792D24A3F905000567C9 /* Expo.plist in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				3E461D99554A48A4959DE609 /* SplashScreen.storyboard in Resources */,
-				CCD15699540143B0AF037A69 /* notification_sound.wav in Resources */,
-				74F2742C3E734C99A0266852 /* notification_urgent.wav in Resources */,
-				C5477B9EEC9D4B86941A6480 /* notification_high.wav in Resources */,
+				8778BDCD295747B392022DBF /* notification_sound.wav in Resources */,
+				9E961A7DE94E42EFBC8F168C /* notification_urgent.wav in Resources */,
+				24C158713DD041B4829E5FEE /* notification_high.wav in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -180,6 +180,8 @@
 			files = (
 			);
 			inputPaths = (
+				"$(SRCROOT)/.xcode.env",
+				"$(SRCROOT)/.xcode.env.local",
 			);
 			name = "Bundle React Native code and images";
 			outputPaths = (
