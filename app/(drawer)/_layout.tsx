@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Fixed without automatic login redirects
+// app/(drawer)/_layout.tsx - Session-first authentication with proper login redirects
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -18,8 +18,7 @@ import { bootstrapApp } from '@/lib/bootstrap';
 import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
-// IMPORTANT: Import the enhanced navigation system
-import { initializeNavigation, NavigationHelper } from '@/lib/helpers/navigation';
+import { NavigationHelper } from '@/lib/helpers/navigation';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -32,67 +31,39 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   settings: { name: 'settings-outline', lib: Ionicons },
   findus: { name: 'location-on', lib: MaterialIcons },
   contact: { name: 'user', lib: Feather },
+  cart: { name: 'shopping-cart', lib: Feather },
 };
 
-type InitializationState = 'loading' | 'authenticated' | 'redirect';
+type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_login';
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
-  const [initState, setInitState] = useState<InitializationState>('loading');
-  const [redirectPath, setRedirectPath] = useState<string | null>(null);
-  const [navigationInitialized, setNavigationInitialized] = useState(false);
+  const [authState, setAuthState] = useState<AuthState>('loading');
   const router = useRouter();
-
-  // Initialize navigation system first
-  useEffect(() => {
-    const initializeNavigationSystem = async () => {
-      try {
-        console.log('🚀 DrawerLayout: Initializing enhanced navigation system...');
-        await initializeNavigation();
-        setNavigationInitialized(true);
-        console.log('✅ DrawerLayout: Navigation system initialized successfully');
-      } catch (error) {
-        console.error('❌ DrawerLayout: Navigation system initialization failed:', error);
-        // Continue anyway - fallback to basic navigation
-        setNavigationInitialized(true);
-      }
-    };
-
-    initializeNavigationSystem();
-  }, []);
 
   // Handle app state changes
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
-      if (nextAppState === 'active' && initState === 'loading') {
-        // Re-run initialization if app becomes active while still loading
+      if (nextAppState === 'active' && authState === 'loading') {
         console.log('App became active during loading, re-initializing...');
-        initializeApp();
+        performSessionValidation();
       }
     };
 
     const subscription = AppState.addEventListener('change', handleAppStateChange);
     return () => subscription?.remove();
-  }, [initState]);
+  }, [authState]);
 
-  // Initialize the app - only after navigation system is ready
-  const initializeApp = useCallback(async () => {
-    // Wait for navigation system to be initialized first
-    if (!navigationInitialized) {
-      console.log('⏳ DrawerLayout: Waiting for navigation system to initialize...');
-      return;
-    }
-
-    let initializationComplete = false;
-    
+  // Session validation with proper error handling
+  const performSessionValidation = useCallback(async () => {
     try {
-      console.log('DrawerLayout: Starting AccountManager-based authentication check...');
+      console.log('🔐 DrawerLayout: Starting session validation...');
       
-      // FIXED: Removed timeout that could redirect to login
+      // Quick initial setup
       try {
         await bootstrapApp();
       } catch (bootstrapError) {
-        console.warn('Bootstrap warning (non-critical):', bootstrapError);
+        console.warn('Bootstrap warning (continuing):', bootstrapError);
       }
       
       // Initialize AccountManager
@@ -101,159 +72,164 @@ export default function DrawerLayout() {
       // Check for existing accounts
       const currentAccount = accountManager.getCurrentAccount();
       
-      console.log('AccountManager check:', { 
+      console.log('Session check:', { 
         hasCurrentAccount: !!currentAccount,
         totalAccounts: accountManager.getAllAccounts().length,
-        role: currentAccount?.role
+        role: currentAccount?.role,
+        userId: currentAccount?.id
       });
 
-      if (currentAccount) {
-        console.log('Found current account - checking role');
+      if (!currentAccount) {
+        console.log('🔐 No current account found - redirecting to login');
+        setAuthState('redirect_login');
+        return;
+      }
+
+      // CRITICAL: Verify token with server before proceeding
+      console.log('🔐 Verifying session token with server...');
+      
+      try {
+        const response = await api.get('/api/v1/me');
+        console.log('🔐 Session token verified successfully:', {
+          userId: response.data?.id,
+          role: response.data?.role
+        });
         
+        // Token is valid - check role routing
         if (currentAccount.role === 'admin') {
-          console.log('Admin role detected, redirecting to admin');
-          setInitState('redirect');
-          setRedirectPath('/admin');
+          console.log('🔐 Admin role detected - redirecting to admin panel');
+          setAuthState('redirect_admin');
         } else {
-          console.log('Client role, staying in drawer layout');
-          setInitState('authenticated');
-          setRedirectPath(null);
+          console.log('🔐 Client role - entering drawer layout');
+          setAuthState('authenticated');
           
-          // Track the home screen as the initial route in navigation system
+          // Track home screen in navigation system
           setTimeout(async () => {
             try {
               await NavigationHelper.trackRouteChange('/', {});
-              console.log('✅ DrawerLayout: Home screen tracked in navigation system');
+              console.log('✅ Home screen tracked in navigation system');
             } catch (error) {
-              console.error('❌ DrawerLayout: Failed to track home screen:', error);
+              console.error('❌ Failed to track home screen:', error);
             }
           }, 1000);
         }
         
-        // Verify token in background without blocking UI or redirecting on failure
-        verifyTokenInBackground(currentAccount.token, currentAccount.id);
-      } else {
-        console.log('No current account found - staying in authenticated state');
-        // FIXED: Don't redirect to login, just stay authenticated
-        setInitState('authenticated');
-        setRedirectPath(null);
+      } catch (tokenError) {
+        console.error('🔐 Session token verification failed:', tokenError);
+        
+        // Token is invalid/expired - clean up and redirect to login
+        if (tokenError?.response?.status === 401 || 
+            tokenError?.response?.status === 422 ||
+            tokenError?.response?.status === 403) {
+          
+          console.log('🔐 Token expired/invalid - cleaning up and redirecting to login');
+          
+          // Clean up invalid session
+          try {
+            await accountManager.removeAccount(currentAccount.id);
+            console.log('🔐 Invalid account removed from storage');
+          } catch (cleanupError) {
+            console.warn('Cleanup warning:', cleanupError);
+          }
+          
+          setAuthState('redirect_login');
+          
+        } else {
+          // Network or other error - allow temporary access but log issue
+          console.warn('🔐 Network error during token verification - allowing temporary access');
+          console.warn('Error details:', tokenError.message);
+          
+          if (currentAccount.role === 'admin') {
+            setAuthState('redirect_admin');
+          } else {
+            setAuthState('authenticated');
+          }
+        }
       }
-      
-      initializationComplete = true;
       
     } catch (error) {
-      console.error('Initialization error (non-critical):', error);
+      console.error('🔐 Critical session validation error:', error);
       
-      // FIXED: On error, just stay authenticated instead of redirecting
-      console.log('Error during init - staying authenticated');
-      setInitState('authenticated');
-      setRedirectPath(null);
-      
-      // Track home screen even in error case
-      setTimeout(async () => {
-        try {
-          await NavigationHelper.trackRouteChange('/', {});
-          console.log('✅ DrawerLayout: Home screen tracked in navigation system (error recovery)');
-        } catch (error) {
-          console.error('❌ DrawerLayout: Failed to track home screen in error recovery:', error);
-        }
-      }, 1000);
-      
-      initializationComplete = true;
-    }
-  }, [navigationInitialized]);
-
-  // FIXED: Background token verification without redirects
-  const verifyTokenInBackground = useCallback(async (token: string, userId: string) => {
-    try {
-      console.log('Background: Verifying token with server for user:', userId);
-      await api.get('/api/v1/me');
-      console.log('Background: Token verified successfully');
-    } catch (verifyError) {
-      console.warn('Background: Token verification failed (non-critical):', verifyError);
-      // FIXED: Don't redirect on token verification failure
-      // Just log the error and let the user continue using the app
-      if (verifyError?.response?.status === 401 || verifyError?.response?.status === 422) {
-        console.log('Background: Token appears invalid, but not forcing logout');
-        // Note: accountManager cleanup is handled by api.ts interceptor
-      }
+      // Critical error - redirect to login for safety
+      console.log('🔐 Critical error - redirecting to login for security');
+      setAuthState('redirect_login');
     }
   }, []);
 
-  // Initialize app only when navigation system is ready
+  // Start session validation immediately
   useEffect(() => {
-    if (navigationInitialized) {
-      initializeApp();
-    }
-  }, [navigationInitialized, initializeApp]);
+    // Small delay to ensure smooth initial render
+    const timer = setTimeout(() => {
+      performSessionValidation();
+    }, 100);
+    
+    return () => clearTimeout(timer);
+  }, [performSessionValidation]);
 
-  // FIXED: Handle navigation when ready - only for admin redirects
+  // Handle redirections when auth state changes
   useEffect(() => {
-    if (initState === 'redirect' && redirectPath && redirectPath === '/admin') {
-      const performRedirect = async () => {
+    const handleRedirection = async () => {
+      if (authState === 'redirect_admin') {
         try {
-          console.log(`🧭 DrawerLayout: Redirecting to admin ${redirectPath}`);
-          
-          // Small delay to ensure smooth transition
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
+          console.log('🧭 Redirecting to admin panel...');
+          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
           router.replace('/admin');
-          
-          console.log(`✅ DrawerLayout: Successfully redirected to ${redirectPath}`);
+          console.log('✅ Successfully redirected to admin panel');
         } catch (error) {
-          console.error('❌ DrawerLayout: Navigation error:', error);
-          
-          // Fallback - just stay authenticated
-          console.log('🧭 DrawerLayout: Navigation failed, staying authenticated');
-          setInitState('authenticated');
-          setRedirectPath(null);
+          console.error('❌ Admin redirect failed:', error);
+          // Fallback to login on navigation error
+          setAuthState('redirect_login');
         }
-      };
-      
-      performRedirect();
-    }
-  }, [initState, redirectPath, router]);
+      } else if (authState === 'redirect_login') {
+        try {
+          console.log('🧭 Redirecting to login...');
+          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
+          router.replace('/login');
+          console.log('✅ Successfully redirected to login');
+        } catch (error) {
+          console.error('❌ Login redirect failed:', error);
+          // Try alternative login routes
+          try {
+            router.replace('/auth/login');
+          } catch (altError) {
+            console.error('❌ Alternative login redirect also failed:', altError);
+          }
+        }
+      }
+    };
 
-  // Use focus effect to ensure proper state on screen focus
+    if (authState === 'redirect_admin' || authState === 'redirect_login') {
+      handleRedirection();
+    }
+  }, [authState, router]);
+
+  // Ensure proper state on screen focus
   useFocusEffect(
     useCallback(() => {
-      // If we're still loading and screen gains focus, ensure we have proper state
-      if (initState === 'loading') {
-        console.log('Screen focused during loading state');
-      } else if (initState === 'authenticated') {
-        // Ensure home screen is always tracked when drawer layout gains focus
+      if (authState === 'authenticated') {
+        // Ensure home screen tracking when drawer gains focus
         setTimeout(async () => {
           try {
             const currentRoute = NavigationHelper.getCurrentRoute();
             if (!currentRoute || currentRoute === null) {
               await NavigationHelper.trackRouteChange('/', {});
-              console.log('✅ DrawerLayout: Home screen re-tracked on focus');
+              console.log('✅ Home screen re-tracked on focus');
             }
           } catch (error) {
-            console.error('❌ DrawerLayout: Failed to re-track home screen on focus:', error);
+            console.error('❌ Failed to re-track home screen on focus:', error);
           }
         }, 500);
       }
-    }, [initState])
+    }, [authState])
   );
 
-  // Show loading while navigation system initializes
-  if (!navigationInitialized) {
+  // Show loading screen during initial validation or redirects
+  if (authState === 'loading' || authState === 'redirect_admin' || authState === 'redirect_login') {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Always show loading screen during initialization
-  if (initState === 'loading') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
-  }
-
-  // Show loading screen during admin redirect only
-  if (initState === 'redirect' && redirectPath === '/admin') {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
-  }
-
-  // Render drawer when authenticated and navigation is ready
-  if (initState === 'authenticated') {
+  // Render drawer only when properly authenticated
+  if (authState === 'authenticated') {
     return (
       <Drawer
         drawerContent={(props) => 
@@ -284,6 +260,6 @@ export default function DrawerLayout() {
     );
   }
 
-  // Fallback loading screen
+  // Fallback loading screen (should never reach here)
   return <LoadingSplashScreen backgroundColor={colors.background} />;
 }
