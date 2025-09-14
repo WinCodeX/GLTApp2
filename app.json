@@ -92,11 +92,13 @@
         {
           "iosPermissionsArray": [
             "NSBluetoothAlwaysUsageDescription",
-            "NSBluetoothPeripheralUsageDescription", 
+            "NSBluetoothPeripheralUsageDescription",
             "NSLocationWhenInUseUsageDescription"
           ]
         }
-      ]
+      ],
+      "expo-build-properties",
+      "expo-font"
     ],
     "experiments": {
       "typedRoutes": true
