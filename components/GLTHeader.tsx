@@ -1,7 +1,7 @@
-// components/GLTHeader.tsx - Fixed with expo-notifications integration
+// components/GLTHeader.tsx - Enhanced with proper system notifications
 
 import React, { useState, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -9,6 +9,7 @@ import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Notifications from 'expo-notifications';
+import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
@@ -30,7 +31,7 @@ interface GLTHeaderProps {
 
 interface DownloadProgress {
   isDownloading: boolean;
-  progress: number; // 0-100
+  progress: number;
   downloadedBytes: number;
   totalBytes: number;
   speed: number;
@@ -39,15 +40,7 @@ interface DownloadProgress {
   status: 'checking' | 'downloading' | 'installing' | 'complete' | 'error';
 }
 
-interface IncomingNotification {
-  id: string;
-  title: string;
-  body: string;
-  data?: any;
-  timestamp: number;
-}
-
-// Enhanced Safe Avatar Component matching CustomDrawerContent
+// Enhanced Safe Avatar Component
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
@@ -140,9 +133,7 @@ export default function GLTHeader({
     status: 'checking',
   });
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [recentNotifications, setRecentNotifications] = useState<IncomingNotification[]>([]);
-  const [showNotificationBanner, setShowNotificationBanner] = useState(false);
-  const [currentNotification, setCurrentNotification] = useState<IncomingNotification | null>(null);
+  const [expoPushToken, setExpoPushToken] = useState<string>('');
   
   // Double tap detection for avatar cycling
   const lastTapRef = useRef<number>(0);
@@ -152,17 +143,15 @@ export default function GLTHeader({
   const progressBarAnim = useRef(new Animated.Value(0)).current;
   const progressBarHeight = useRef(new Animated.Value(0)).current;
   
-  // Notification banner animation
-  const bannerAnimationValue = useRef(new Animated.Value(-100)).current;
-  const bannerTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  
   // Notification listeners refs
   const notificationListener = useRef<Notifications.Subscription>();
   const responseListener = useRef<Notifications.Subscription>();
 
-  // EXPO NOTIFICATIONS SETUP
+  // ============================================
+  // ENHANCED SYSTEM NOTIFICATION SETUP
+  // ============================================
   useEffect(() => {
-    setupNotifications();
+    setupSystemNotifications();
     
     return () => {
       // Cleanup notification listeners
@@ -172,165 +161,247 @@ export default function GLTHeader({
       if (responseListener.current) {
         responseListener.current.remove();
       }
-      if (bannerTimeoutRef.current) {
-        clearTimeout(bannerTimeoutRef.current);
-      }
     };
   }, []);
 
-  const setupNotifications = async () => {
+  const setupSystemNotifications = async () => {
     try {
-      console.log('🔔 Setting up expo-notifications in GLTHeader...');
+      console.log('🔔 Setting up SYSTEM notifications...');
       
-      // Configure notification behavior
+      // CRITICAL: Configure for SYSTEM notifications (not in-app)
       await Notifications.setNotificationHandler({
         handleNotification: async (notification) => {
-          console.log('🔔 Notification received in header:', notification);
+          console.log('🔔 System notification received:', notification);
           
-          // Always show notifications when app is in foreground
+          // Return false for in-app alerts so they show as system notifications
           return {
-            shouldShowAlert: true,
-            shouldPlaySound: true,
-            shouldSetBadge: true,
+            shouldShowAlert: false,    // Don't show in-app
+            shouldPlaySound: true,     // Play system sound
+            shouldSetBadge: true,      // Update app badge
           };
         },
       });
+
+      // Configure notification categories for better UX
+      await Notifications.setNotificationCategoryAsync('package_update', [
+        {
+          identifier: 'view',
+          buttonTitle: 'View Package',
+          options: { opensAppToForeground: true }
+        },
+        {
+          identifier: 'dismiss',
+          buttonTitle: 'Dismiss',
+          options: { isDestructive: false }
+        }
+      ]);
+
+      await Notifications.setNotificationCategoryAsync('general', [
+        {
+          identifier: 'view',
+          buttonTitle: 'View',
+          options: { opensAppToForeground: true }
+        }
+      ]);
 
       // Request permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
       
       if (existingStatus !== 'granted') {
+        console.log('🔔 Requesting notification permissions...');
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
       
       if (finalStatus !== 'granted') {
-        console.warn('🔔 Notification permissions not granted');
+        console.warn('🔔 Notification permissions denied');
+        Alert.alert(
+          'Notifications Disabled',
+          'Enable notifications in settings to receive instant updates about your packages.',
+          [
+            { text: 'Later', style: 'cancel' },
+            { text: 'Settings', onPress: () => Linking.openSettings() }
+          ]
+        );
         return;
       }
 
+      console.log('✅ Notification permissions granted');
+
+      // Get and register push token
+      await registerForPushNotifications();
+      
       // Setup notification listeners
-      notificationListener.current = Notifications.addNotificationReceivedListener(handleNotificationReceived);
+      notificationListener.current = Notifications.addNotificationReceivedListener(handleSystemNotificationReceived);
       responseListener.current = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
       
-      console.log('✅ Expo notifications setup complete');
+      console.log('✅ System notifications setup complete');
       
     } catch (error) {
-      console.error('❌ Failed to setup notifications:', error);
+      console.error('❌ Failed to setup system notifications:', error);
     }
   };
 
-  const handleNotificationReceived = (notification: Notifications.Notification) => {
-    console.log('🔔 New notification received in header:', notification);
+  const registerForPushNotifications = async () => {
+    try {
+      if (!Device.isDevice) {
+        console.warn('🔔 Push notifications only work on physical devices');
+        return;
+      }
+
+      console.log('🔔 Getting push token...');
+      const token = (await Notifications.getExpoPushTokenAsync({
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+      })).data;
+      
+      console.log('🔔 Got push token:', token);
+      setExpoPushToken(token);
+
+      // Register with your backend
+      await registerPushTokenWithBackend(token);
+      
+    } catch (error) {
+      console.error('❌ Failed to get push token:', error);
+    }
+  };
+
+  const registerPushTokenWithBackend = async (token: string) => {
+    try {
+      console.log('🔔 Registering push token with backend...');
+      
+      const response = await api.post('/api/v1/push_tokens', {
+        push_token: token,
+        platform: 'expo',
+        device_info: {
+          brand: Device.brand,
+          modelName: Device.modelName,
+          osName: Device.osName,
+          osVersion: Device.osVersion,
+        }
+      });
+      
+      if (response.data?.success) {
+        console.log('✅ Push token registered successfully');
+        
+        // Store token locally for debugging
+        await AsyncStorage.setItem('expo_push_token', token);
+      } else {
+        console.error('❌ Backend rejected push token registration');
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to register push token with backend:', error);
+    }
+  };
+
+  // Handle system notifications received while app is running
+  const handleSystemNotificationReceived = (notification: Notifications.Notification) => {
+    console.log('🔔 System notification received while app active:', notification);
     
-    const incomingNotification: IncomingNotification = {
-      id: notification.request.identifier,
-      title: notification.request.content.title || 'New Notification',
-      body: notification.request.content.body || '',
-      data: notification.request.content.data,
-      timestamp: Date.now(),
-    };
-    
-    // Add to recent notifications
-    setRecentNotifications(prev => [incomingNotification, ...prev.slice(0, 4)]);
-    
-    // Show notification banner
-    displayNotificationBanner(incomingNotification);
-    
-    // Increment notification count
+    // Just update the badge count - system notification will show automatically
     setNotificationCount(prev => prev + 1);
     
-    // Store last notification for banner display
-    setCurrentNotification(incomingNotification);
+    // Optionally show minimal in-app feedback
+    // showBriefToast('New notification received');
   };
 
-  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
-    console.log('🔔 Notification response received:', response);
+  // Handle notification taps (when user taps system notification)
+  const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
+    console.log('🔔 Notification tapped by user:', response);
     
     const notificationData = response.notification.request.content.data;
+    const actionIdentifier = response.actionIdentifier;
     
-    // Handle different notification types
-    if (notificationData?.type === 'package_update') {
-      // Navigate to package tracking
-      navigateToPackage(notificationData.package_id);
-    } else if (notificationData?.type === 'business_invite') {
-      // Navigate to business page
-      navigateToBusiness();
-    } else if (notificationData?.type === 'general') {
-      // Navigate to notifications page
-      handleNotifications();
-    } else {
-      // Default: navigate to notifications
-      handleNotifications();
-    }
-  };
-
-  const displayNotificationBanner = (notification: IncomingNotification) => {
-    setCurrentNotification(notification);
-    setShowNotificationBanner(true);
-    
-    // Animate banner in
-    Animated.sequence([
-      Animated.timing(bannerAnimationValue, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-      Animated.delay(3000), // Show for 3 seconds
-      Animated.timing(bannerAnimationValue, {
-        toValue: -100,
-        duration: 300,
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setShowNotificationBanner(false);
-      setCurrentNotification(null);
-    });
-  };
-
-  const dismissNotificationBanner = () => {
-    Animated.timing(bannerAnimationValue, {
-      toValue: -100,
-      duration: 200,
-      useNativeDriver: true,
-    }).start(() => {
-      setShowNotificationBanner(false);
-      setCurrentNotification(null);
-    });
-  };
-
-  const handleBannerPress = () => {
-    dismissNotificationBanner();
-    
-    if (currentNotification?.data?.type === 'package_update') {
-      navigateToPackage(currentNotification.data.package_id);
-    } else {
-      handleNotifications();
-    }
-  };
-
-  const navigateToPackage = async (packageId: string) => {
     try {
-      await NavigationHelper.navigateTo('/(drawer)/track', {
-        params: { packageId },
-        trackInHistory: true
-      });
+      // Handle different action types
+      if (actionIdentifier === 'dismiss') {
+        console.log('🔔 User dismissed notification');
+        return;
+      }
+      
+      // Handle different notification types
+      if (notificationData?.type === 'package_update' && notificationData?.package_id) {
+        console.log('🔔 Navigating to package:', notificationData.package_id);
+        
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { packageId: notificationData.package_id },
+          trackInHistory: true
+        });
+        
+      } else if (notificationData?.package_code) {
+        console.log('🔔 Navigating to package by code:', notificationData.package_code);
+        
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { code: notificationData.package_code },
+          trackInHistory: true
+        });
+        
+      } else {
+        // Default: Navigate to notifications screen
+        console.log('🔔 Navigating to notifications screen');
+        
+        await NavigationHelper.navigateTo('/(drawer)/notifications', {
+          params: {},
+          trackInHistory: true
+        });
+      }
+      
+      // Mark notification as read if we have the ID
+      if (notificationData?.notification_id) {
+        markNotificationAsRead(notificationData.notification_id);
+      }
+      
     } catch (error) {
-      console.error('Navigation to package failed:', error);
+      console.error('🔔 Error handling notification response:', error);
+      
+      // Fallback: Just go to notifications screen
+      try {
+        await NavigationHelper.navigateTo('/(drawer)/notifications', {
+          params: {},
+          trackInHistory: true
+        });
+      } catch (fallbackError) {
+        console.error('🔔 Fallback navigation also failed:', fallbackError);
+      }
     }
   };
 
-  const navigateToBusiness = async () => {
+  const markNotificationAsRead = async (notificationId: string) => {
     try {
-      await NavigationHelper.navigateTo('/(drawer)/business', {
-        params: {},
-        trackInHistory: true
-      });
+      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
+      console.log('✅ Notification marked as read');
+      
+      // Refresh notification count
+      fetchNotificationCount();
+      
     } catch (error) {
-      console.error('Navigation to business failed:', error);
+      console.error('❌ Failed to mark notification as read:', error);
     }
   };
+
+  // ============================================
+  // REAL-TIME NOTIFICATION POLLING
+  // ============================================
+  useEffect(() => {
+    // Start aggressive polling for real-time feel
+    const startNotificationPolling = () => {
+      fetchNotificationCount();
+      fetchCartCount();
+      
+      // Poll every 10 seconds for immediate updates
+      const interval = setInterval(() => {
+        fetchNotificationCount();
+        fetchCartCount();
+      }, 10000);
+      
+      return interval;
+    };
+    
+    const interval = startNotificationPolling();
+    
+    return () => clearInterval(interval);
+  }, []);
 
   useEffect(() => {
     // Monitor download progress
@@ -347,7 +418,6 @@ export default function GLTHeader({
           }));
         }
         
-        // Check for completed downloads
         const updateService = UpdateService.getInstance();
         const { hasDownload, version } = await updateService.hasCompletedDownload();
         
@@ -367,8 +437,6 @@ export default function GLTHeader({
     };
     
     checkDownloadProgress();
-    
-    // Check progress every 2 seconds when downloading
     const interval = setInterval(checkDownloadProgress, 2000);
     
     return () => clearInterval(interval);
@@ -377,21 +445,18 @@ export default function GLTHeader({
   // Animate progress bar
   useEffect(() => {
     if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
-      // Show progress bar
       Animated.timing(progressBarHeight, {
         toValue: 3,
         duration: 300,
         useNativeDriver: false,
       }).start();
       
-      // Update progress
       Animated.timing(progressBarAnim, {
         toValue: downloadProgress.progress / 100,
         duration: 300,
         useNativeDriver: false,
       }).start();
     } else {
-      // Hide progress bar
       Animated.timing(progressBarHeight, {
         toValue: 0,
         duration: 300,
@@ -404,7 +469,6 @@ export default function GLTHeader({
     navigation.dispatch(DrawerActions.openDrawer());
   };
 
-  // FIXED: Enhanced back navigation with NavigationHelper
   const handleBackPress = async () => {
     if (onBackPress) {
       onBackPress();
@@ -424,7 +488,6 @@ export default function GLTHeader({
     }
   };
 
-  // FIXED: Enhanced notifications navigation with NavigationHelper
   const handleNotifications = async () => {
     try {
       await NavigationHelper.navigateTo('/(drawer)/notifications', {
@@ -433,12 +496,10 @@ export default function GLTHeader({
       });
     } catch (error) {
       console.error('Navigation to notifications failed:', error);
-      // Fallback to router navigation
       router.push('/(drawer)/notifications');
     }
   };
 
-  // FIXED: Enhanced cart navigation with NavigationHelper
   const handleCart = async () => {
     try {
       await NavigationHelper.navigateTo('/(drawer)/cart', {
@@ -466,29 +527,24 @@ export default function GLTHeader({
     setShowInstallModal(false);
   };
 
-  // FIXED: Enhanced avatar press navigation with NavigationHelper
   const handleAvatarPress = () => {
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
     
-    // Clear any existing timeout
     if (tapTimeoutRef.current) {
       clearTimeout(tapTimeoutRef.current);
       tapTimeoutRef.current = null;
     }
     
-    // Check for double tap (within 300ms)
     if (timeSinceLastTap < 300) {
       console.log('🎭 Header: Double tap detected, cycling business selection');
       handleAvatarDoubleTap();
-      lastTapRef.current = 0; // Reset to prevent triple tap
+      lastTapRef.current = 0;
     } else {
-      // Single tap - set timeout to navigate to business page
       lastTapRef.current = now;
       tapTimeoutRef.current = setTimeout(async () => {
         console.log('🎭 Header: Single tap, navigating to business page');
         
-        // FIXED: Use NavigationHelper instead of direct navigation
         try {
           await NavigationHelper.navigateTo('/(drawer)/business', {
             params: {},
@@ -511,7 +567,6 @@ export default function GLTHeader({
     }
   };
 
-  // Cycle through business selection on double tap
   const handleAvatarDoubleTap = () => {
     const allBusinessOptions = [
       null, // "You" mode
@@ -524,7 +579,6 @@ export default function GLTHeader({
       return;
     }
     
-    // Find current index
     let currentIndex = 0;
     if (selectedBusiness) {
       const businessIndex = allBusinessOptions.findIndex(
@@ -533,7 +587,6 @@ export default function GLTHeader({
       currentIndex = businessIndex !== -1 ? businessIndex : 0;
     }
     
-    // Get next index (cycle back to 0 if at end)
     const nextIndex = (currentIndex + 1) % allBusinessOptions.length;
     const nextSelection = allBusinessOptions[nextIndex];
     
@@ -547,7 +600,6 @@ export default function GLTHeader({
     setSelectedBusiness(nextSelection);
   };
 
-  // Cleanup timeout on unmount
   useEffect(() => {
     return () => {
       if (tapTimeoutRef.current) {
@@ -556,7 +608,7 @@ export default function GLTHeader({
     };
   }, []);
 
-  // FIXED: Robust notification count fetching with multiple fallbacks
+  // Enhanced notification count fetching with multiple fallbacks
   const fetchNotificationCount = async () => {
     try {
       console.log('🔔 Fetching notification count from API...');
@@ -578,7 +630,7 @@ export default function GLTHeader({
         console.log('🔔 Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
       }
       
-      // Method 2: Fallback to notifications index endpoint with minimal data
+      // Method 2: Fallback to notifications index endpoint
       try {
         const response = await api.get('/api/v1/notifications', {
           params: {
@@ -601,11 +653,11 @@ export default function GLTHeader({
         console.log('🔔 Index endpoint also failed:', indexError.response?.status);
       }
       
-      // Method 3: Final fallback - just get all notifications and count unread manually
+      // Method 3: Manual count fallback
       try {
         const response = await api.get('/api/v1/notifications', {
           params: {
-            per_page: 50, // Get enough to count unread
+            per_page: 50,
             page: 1
           },
           timeout: 10000
@@ -628,7 +680,7 @@ export default function GLTHeader({
     }
   };
 
-  // Fetch cart count (all pending_unpaid packages)
+  // Fetch cart count
   const fetchCartCount = async () => {
     try {
       console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
@@ -679,19 +731,6 @@ export default function GLTHeader({
     }
   };
 
-  useEffect(() => {
-    fetchNotificationCount();
-    fetchCartCount();
-    
-    // Refresh counts every 30 seconds
-    const interval = setInterval(() => {
-      fetchNotificationCount();
-      fetchCartCount();
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, []);
-
   const renderBadge = (count: number, color: string) => {
     if (count === 0) return null;
     
@@ -704,26 +743,14 @@ export default function GLTHeader({
     );
   };
 
-  const formatFileSize = (bytes: number): string => {
-    if (bytes === 0) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
-  const formatSpeed = (bytesPerSecond: number): string => {
-    return formatFileSize(bytesPerSecond) + '/s';
+  const getProgressBarColor = () => {
+    if (downloadProgress.status === 'complete') return '#10b981';
+    if (downloadProgress.status === 'error') return '#ef4444';
+    return '#ff6b35';
   };
 
   // Determine if we're in business mode and get appropriate image
   const isBusinessMode = !!selectedBusiness;
-
-  const getProgressBarColor = () => {
-    if (downloadProgress.status === 'complete') return '#10b981';
-    if (downloadProgress.status === 'error') return '#ef4444';
-    return '#ff6b35'; // Orange color like in the image
-  };
 
   return (
     <>
@@ -763,7 +790,6 @@ export default function GLTHeader({
           {/* Avatar Preview with Business Cycling */}
           <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarButton}>
             <View style={styles.avatarContainer}>
-              {/* Context-aware image display: Business logo when business selected, avatar when in "You" mode */}
               {isBusinessMode ? (
                 <SafeLogo
                   size={28}
@@ -781,7 +807,6 @@ export default function GLTHeader({
                 />
               )}
               
-              {/* Selection indicator */}
               <View style={[
                 styles.selectionIndicator,
                 { backgroundColor: isBusinessMode ? '#7c3aed' : '#10b981' }
@@ -821,50 +846,6 @@ export default function GLTHeader({
           />
         </View>
       </Animated.View>
-
-      {/* Notification Banner */}
-      {showNotificationBanner && currentNotification && (
-        <Animated.View
-          style={[
-            styles.notificationBanner,
-            {
-              transform: [{ translateY: bannerAnimationValue }],
-            },
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.notificationBannerContent}
-            onPress={handleBannerPress}
-            activeOpacity={0.9}
-          >
-            <LinearGradient
-              colors={['#667eea', '#764ba2']}
-              style={styles.notificationBannerGradient}
-            >
-              <View style={styles.notificationBannerIcon}>
-                <Feather name="bell" size={16} color="white" />
-              </View>
-              
-              <View style={styles.notificationBannerText}>
-                <Text style={styles.notificationBannerTitle} numberOfLines={1}>
-                  {currentNotification.title}
-                </Text>
-                <Text style={styles.notificationBannerBody} numberOfLines={2}>
-                  {currentNotification.body}
-                </Text>
-              </View>
-              
-              <TouchableOpacity
-                onPress={dismissNotificationBanner}
-                style={styles.notificationBannerClose}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Feather name="x" size={16} color="rgba(255, 255, 255, 0.8)" />
-              </TouchableOpacity>
-            </LinearGradient>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
 
       {/* Install Modal */}
       <Modal
@@ -1027,57 +1008,6 @@ const styles = StyleSheet.create({
   progressBarFill: {
     height: '100%',
     borderRadius: 0,
-  },
-
-  // Notification Banner Styles
-  notificationBanner: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 1000,
-    paddingHorizontal: 16,
-    paddingTop: 50, // Account for status bar
-  },
-  notificationBannerContent: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  notificationBannerGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    gap: 12,
-  },
-  notificationBannerIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notificationBannerText: {
-    flex: 1,
-  },
-  notificationBannerTitle: {
-    color: 'white',
-    fontSize: 14,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  notificationBannerBody: {
-    color: 'rgba(255, 255, 255, 0.9)',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  notificationBannerClose: {
-    padding: 4,
   },
 
   // Modal Styles
