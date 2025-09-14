@@ -37,9 +37,9 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
       }
     }
 
-    // FIXED: Execute navigation immediately - NavigationHelper.goBack is now synchronous
+    // FIXED: Execute navigation immediately - use synchronous version for hardware back
     try {
-      const success = NavigationHelper.goBack({
+      const success = NavigationHelper.goBackSync({
         fallbackRoute,
         replaceIfNoHistory
       });
