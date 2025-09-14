@@ -1,4 +1,4 @@
-// lib/helpers/navigation.ts - Fixed for immediate single-press response
+// lib/helpers/navigation.ts - Fixed with working navigation tracker
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { router } from 'expo-router';
 
@@ -128,11 +128,7 @@ class PersistentNavigationHistory {
     }
   }
 
-  static async push(route: string, params?: Record<string, any>): Promise<void> {
-    if (!this.initialized) {
-      await this.initialize();
-    }
-
+  static push(route: string, params?: Record<string, any>): void {
     const entry: NavigationEntry = {
       route,
       params,
@@ -161,11 +157,13 @@ class PersistentNavigationHistory {
       historyLength: this.state.history.length
     });
 
-    await this.saveState();
+    // Save asynchronously
+    this.saveState().catch(error => {
+      console.error('❌ PersistentNavigation: Failed to save after push:', error);
+    });
   }
 
-  // FIXED: Synchronous pop for immediate response
-  static popSync(): NavigationEntry | null {
+  static pop(): NavigationEntry | null {
     if (this.state.history.length > 0) {
       const popped = this.state.history.pop();
       console.log('📍 PersistentNavigation: Popped', popped?.route);
@@ -221,94 +219,8 @@ export class NavigationHelper {
     await PersistentNavigationHistory.initialize();
   }
 
-  /*
-   * DUAL-MODE NAVIGATION EXPLANATION:
-   * 
-   * We provide two back navigation methods to handle different use cases:
-   * 
-   * 1. goBack() - Returns Promise<boolean>
-   *    - For UI back arrow buttons (TouchableOpacity onPress handlers)
-   *    - Allows UI components to await the result and handle success/failure
-   *    - Example: const success = await NavigationHelper.goBack({...})
-   * 
-   * 2. goBackSync() - Returns boolean immediately
-   *    - For hardware back button handlers (BackHandler.addEventListener)
-   *    - Must return synchronously to prevent/allow default behavior
-   *    - Example: return NavigationHelper.goBackSync({...})
-   * 
-   * Both methods execute the same navigation logic but handle timing differently.
-   */
-
-  // FIXED: Dual-mode back navigation - works for both hardware back and UI back arrows
-  static goBack(options: NavigationOptions = {}): Promise<boolean> {
-    const {
-      fallbackRoute = '/(drawer)/',
-      replaceIfNoHistory = true,
-      params = {}
-    } = options;
-
-    return new Promise((resolve) => {
-      try {
-        console.log('🧭 Navigation: Back navigation requested');
-        
-        // FIXED: Check if we have history to go back to (synchronous check)
-        if (PersistentNavigationHistory.canGoBackInHistory()) {
-          console.log('🧭 Navigation: Found history, using router.back()');
-          
-          // FIXED: Use router.back() instead of router.push() - this is the correct way to go back
-          router.back();
-          
-          // FIXED: Update history synchronously, save asynchronously 
-          PersistentNavigationHistory.popSync();
-          
-          resolve(true);
-          return;
-        }
-        
-        // FIXED: Try Expo Router's native back if available
-        if (router.canGoBack()) {
-          console.log('🧭 Navigation: Using Expo Router native back');
-          router.back();
-          resolve(true);
-          return;
-        }
-        
-        // FIXED: No history available - immediate fallback
-        console.log(`🧭 Navigation: No back history, using fallback: ${fallbackRoute}`);
-        
-        if (replaceIfNoHistory) {
-          router.replace({ pathname: fallbackRoute, params });
-        } else {
-          router.push({ pathname: fallbackRoute, params });
-        }
-        
-        // FIXED: Update state asynchronously (non-blocking)
-        setTimeout(() => {
-          PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
-        }, 0);
-        
-        resolve(false); // Indicate fallback was used
-        
-      } catch (error) {
-        console.error('🧭 Navigation: Error during back navigation:', error);
-        
-        // FIXED: Ultimate fallback - immediate execution
-        try {
-          router.replace({ pathname: fallbackRoute, params });
-          setTimeout(() => {
-            PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
-          }, 0);
-        } catch (fallbackError) {
-          console.error('🧭 Navigation: Fallback navigation also failed:', fallbackError);
-        }
-        
-        resolve(false);
-      }
-    });
-  }
-
-  // FIXED: Synchronous version specifically for hardware back handler
-  static goBackSync(options: NavigationOptions = {}): boolean {
+  // Fixed back navigation with immediate response and proper tracking
+  static goBack(options: NavigationOptions = {}): boolean {
     const {
       fallbackRoute = '/(drawer)/',
       replaceIfNoHistory = true,
@@ -316,53 +228,60 @@ export class NavigationHelper {
     } = options;
 
     try {
-      console.log('🧭 Navigation: Hardware back pressed - immediate response');
+      console.log('🧭 Navigation: Attempting to go back...');
       
       // Check if we have history to go back to (synchronous check)
       if (PersistentNavigationHistory.canGoBackInHistory()) {
-        console.log('🧭 Navigation: Found history, using router.back()');
+        // Get previous route from our persistent history
+        const previousEntry = PersistentNavigationHistory.getPrevious();
         
-        // Use router.back() - this is the correct way to go back
-        router.back();
-        
-        // Update history synchronously
-        PersistentNavigationHistory.popSync();
-        
-        return true;
+        if (previousEntry) {
+          console.log('🧭 Navigation: Going back to', previousEntry.route);
+          
+          // Update history immediately (synchronous)
+          const popped = PersistentNavigationHistory.pop();
+          if (popped) {
+            PersistentNavigationHistory.updateCurrentRoute(previousEntry.route);
+          }
+          
+          // Execute navigation immediately
+          router.push({ 
+            pathname: previousEntry.route, 
+            params: { ...previousEntry.params, ...params }
+          });
+          
+          return true;
+        }
       }
       
-      // Try Expo Router's native back if available
+      // Try Expo Router's native back if no persistent history
       if (router.canGoBack()) {
-        console.log('🧭 Navigation: Using Expo Router native back');
+        console.log('🧭 Navigation: Using Expo Router back');
         router.back();
         return true;
       }
       
-      // No history available - immediate fallback
-      console.log(`🧭 Navigation: No back history, using fallback: ${fallbackRoute}`);
+      // No history available - handle based on options
+      console.log(`🧭 Navigation: No history, using fallback: ${fallbackRoute}`);
+      
+      // Update state immediately (synchronous)
+      PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
       
       if (replaceIfNoHistory) {
         router.replace({ pathname: fallbackRoute, params });
       } else {
         router.push({ pathname: fallbackRoute, params });
+        PersistentNavigationHistory.push(fallbackRoute, params);
       }
       
-      // Update state asynchronously (non-blocking)
-      setTimeout(() => {
-        PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
-      }, 0);
-      
-      return false; // Indicate fallback was used
-      
+      return false;
     } catch (error) {
       console.error('🧭 Navigation: Error during back navigation:', error);
       
       // Ultimate fallback - immediate execution
       try {
         router.replace({ pathname: fallbackRoute, params });
-        setTimeout(() => {
-          PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
-        }, 0);
+        PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
       } catch (fallbackError) {
         console.error('🧭 Navigation: Fallback navigation also failed:', fallbackError);
       }
@@ -371,22 +290,20 @@ export class NavigationHelper {
     }
   }
 
-  // Enhanced navigation with persistent tracking
-  static async navigateTo(route: string, options: NavigationOptions = {}): Promise<void> {
+  // Enhanced navigation with immediate tracking
+  static navigateTo(route: string, options: NavigationOptions = {}): void {
     const { params = {}, trackInHistory = true } = options;
     
     try {
       console.log(`🧭 Navigation: Navigating to ${route}`);
       
+      // Track in history immediately (synchronous)
+      if (trackInHistory) {
+        PersistentNavigationHistory.push(route, params);
+      }
+      
       // Execute navigation immediately
       router.push({ pathname: route, params });
-      
-      // Track in history asynchronously (non-blocking)
-      if (trackInHistory) {
-        PersistentNavigationHistory.push(route, params).catch(error => {
-          console.error('❌ Navigation: Failed to track navigation:', error);
-        });
-      }
     } catch (error) {
       console.error(`🧭 Navigation: Failed to navigate to ${route}:`, error);
       
@@ -394,9 +311,7 @@ export class NavigationHelper {
       try {
         router.replace({ pathname: route, params });
         if (trackInHistory) {
-          PersistentNavigationHistory.push(route, params).catch(error => {
-            console.error('❌ Navigation: Failed to track fallback navigation:', error);
-          });
+          PersistentNavigationHistory.push(route, params);
         }
       } catch (replaceError) {
         console.error('🧭 Navigation: Replace fallback also failed:', replaceError);
@@ -416,7 +331,7 @@ export class NavigationHelper {
   }
 
   // Navigate with reset (clear history)
-  static async navigateWithReset(route: string, params: Record<string, any> = {}): Promise<void> {
+  static navigateWithReset(route: string, params: Record<string, any> = {}): void {
     try {
       console.log(`🧭 Navigation: Resetting navigation to ${route}`);
       
@@ -424,9 +339,12 @@ export class NavigationHelper {
       router.dismissAll(); // Dismiss any modals
       router.replace({ pathname: route, params });
       
-      // Clear history and track asynchronously
+      // Update tracking immediately
+      PersistentNavigationHistory.updateCurrentRoute(route);
+      
+      // Clear history asynchronously
       PersistentNavigationHistory.clearHistory().then(() => {
-        return PersistentNavigationHistory.push(route, params);
+        PersistentNavigationHistory.push(route, params);
       }).catch(error => {
         console.error('❌ Navigation: Failed to reset history:', error);
       });
@@ -466,17 +384,16 @@ export class NavigationHelper {
     return JSON.stringify(state, null, 2);
   }
 
-  // Track route change when navigating outside of NavigationHelper
-  static async trackRouteChange(route: string, params?: Record<string, any>): Promise<void> {
-    await PersistentNavigationHistory.push(route, params);
+  // Synchronous track route change for immediate tracking
+  static trackRouteChange(route: string, params?: Record<string, any>): void {
+    PersistentNavigationHistory.push(route, params);
   }
 }
 
 // Hook for navigation in components
 export const useNavigation = () => {
   return {
-    goBack: NavigationHelper.goBack, // Returns Promise<boolean> for UI components
-    goBackSync: NavigationHelper.goBackSync, // Returns boolean for hardware back
+    goBack: NavigationHelper.goBack,
     navigateTo: NavigationHelper.navigateTo,
     replaceTo: NavigationHelper.replaceTo,
     navigateWithReset: NavigationHelper.navigateWithReset,
@@ -493,20 +410,20 @@ export const useNavigation = () => {
 // Enhanced Business-specific navigation patterns with persistent tracking
 export class BusinessNavigation {
   // Navigate to business details with persistent tracking
-  static async goToBusinessDetails(businessId?: number): Promise<void> {
+  static goToBusinessDetails(businessId?: number): void {
     const route = '/(drawer)/BusinessDetails';
     const params = businessId ? { businessId } : {};
     
-    await NavigationHelper.navigateTo(route, { params });
+    NavigationHelper.navigateTo(route, { params });
   }
 
   // Navigate to business list with persistent tracking
-  static async goToBusinessList(): Promise<void> {
-    await NavigationHelper.navigateTo('/(drawer)/business');
+  static goToBusinessList(): void {
+    NavigationHelper.navigateTo('/(drawer)/business');
   }
 
   // Go back from business details with smart fallback
-  static async backFromBusinessDetails(): Promise<boolean> {
+  static backFromBusinessDetails(): boolean {
     return NavigationHelper.goBack({
       fallbackRoute: '/(drawer)/business',
       replaceIfNoHistory: true
@@ -514,7 +431,7 @@ export class BusinessNavigation {
   }
 
   // Go back from business list with smart fallback  
-  static async backFromBusinessList(): Promise<boolean> {
+  static backFromBusinessList(): boolean {
     return NavigationHelper.goBack({
       fallbackRoute: '/(drawer)/',
       replaceIfNoHistory: true
@@ -525,9 +442,9 @@ export class BusinessNavigation {
 // Utility functions for navigation tracking (static methods moved here)
 export const NavigationUtils = {
   // Track navigation with persistent storage
-  trackNavigation: async (route: string): Promise<void> => {
+  trackNavigation: (route: string): void => {
     console.log(`📊 Navigation Tracker: ${route}`);
-    // Navigation is automatically tracked by PersistentNavigationHistory
+    NavigationHelper.trackRouteChange(route);
   },
 
   // Get navigation history from persistent storage
