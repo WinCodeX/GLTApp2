@@ -5,18 +5,17 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.7.4';
+export const CHANGELOG_VERSION = '1.7.5';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-  'Better error handling and user feedback',
-'Added notifications',
 'Fixed going back in screens',
 'Terms and conditions update',
 'Auto reject feature added',
 'Polished UI in contact screen',
-'Bug fixes',
+'Push notifications and sounds added',
+'Other Bug fixes',
 ];
 
 type Props = {
