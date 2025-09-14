@@ -1,10 +1,10 @@
-// lib/helpers/navigationTracker.ts - Fixed without duplicate hardware back handling
+// lib/helpers/navigationTracker.ts - Fixed to work with synchronous navigation
 import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'expo-router';
-// Removed NavigationHelper import to prevent circular dependency issues
+import { NavigationHelper } from './navigation';
 
 /**
- * FIXED: Hook that ONLY handles route tracking (hardware back handled by HardwareBackProvider)
+ * Hook that handles route tracking with synchronous navigation methods
  */
 export const useNavigationTracker = (options: {
   fallbackRoute?: string;
@@ -18,24 +18,22 @@ export const useNavigationTracker = (options: {
   useEffect(() => {
     const initializeAndTrack = async () => {
       try {
-        // FIXED: Lazy load NavigationHelper to prevent circular imports
-        const { NavigationHelper } = await import('./navigation');
-        
-        // Ensure NavigationHelper is initialized
+        // Ensure NavigationHelper is initialized (still async)
         if (!isInitialized.current) {
           await NavigationHelper.initialize();
           isInitialized.current = true;
           console.log('📍 NavigationTracker: NavigationHelper initialized');
         }
 
-        // Track route changes
+        // Track route changes (now synchronous)
         if (previousPathname.current !== null && previousPathname.current !== pathname) {
           console.log(`📍 NavigationTracker: Route changed from ${previousPathname.current} to ${pathname}`);
           
-          // FIXED: Only track if this isn't already tracked by NavigationHelper
+          // Only track if this isn't already tracked by NavigationHelper
           const currentRoute = NavigationHelper.getCurrentRoute();
           if (currentRoute !== pathname) {
-            await NavigationHelper.trackRouteChange(pathname);
+            // trackRouteChange is now synchronous - no await needed
+            NavigationHelper.trackRouteChange(pathname);
             console.log(`📍 NavigationTracker: Auto-tracked route change to ${pathname}`);
           }
         }
@@ -49,18 +47,16 @@ export const useNavigationTracker = (options: {
     initializeAndTrack();
   }, [pathname]);
 
-  // FIXED: Return basic navigation functions without importing NavigationHelper directly
-  // Note: For full NavigationHelper functionality, import it directly in your components
   return {
     currentRoute: pathname,
-    canGoBack: () => router.canGoBack(),
-    goBack: () => router.back(), // Simple router back - for advanced navigation use NavigationHelper.goBack()
-    navigateTo: (route: string, options?: any) => router.push({ pathname: route, params: options?.params })
+    canGoBack: NavigationHelper.canGoBack(),
+    goBack: NavigationHelper.goBack,
+    navigateTo: NavigationHelper.navigateTo
   };
 };
 
 /**
- * HOC to wrap components with automatic navigation tracking (no hardware back)
+ * HOC to wrap components with automatic navigation tracking
  */
 export const withNavigationTracking = <P extends Record<string, any>>(
   Component: React.ComponentType<P>,
@@ -79,7 +75,7 @@ export const withNavigationTracking = <P extends Record<string, any>>(
 };
 
 /**
- * NavigationTracker component for route tracking only (hardware back handled elsewhere)
+ * NavigationTracker component for route tracking
  */
 export const NavigationTracker: React.FC<{ 
   children: React.ReactNode;
