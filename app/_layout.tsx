@@ -1,5 +1,5 @@
-// app/_layout.tsx - Fixed with single hardware back handler
-import React, { useEffect, useState } from 'react';
+// app/_layout.tsx - Minimal root layout without loading animations
+import React, { useEffect } from 'react';
 import { Slot } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
 import {
@@ -14,7 +14,6 @@ import { toastConfig } from '@/lib/toastConfig';
 import { UserProvider } from '@/context/UserContext';
 import { BluetoothProvider } from '@/contexts/BluetoothContext';
 import NetworkBanner from '@/components/NetworkBanner';
-import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import colors from '@/theme/colors';
 
 // Hardware back button and navigation tracking imports
@@ -36,56 +35,23 @@ const CustomDarkTheme = {
 };
 
 export default function Layout() {
-  const [appIsReady, setAppIsReady] = useState(false);
-
+  
+  // Initialize navigation system immediately (non-blocking)
   useEffect(() => {
-    async function prepare() {
+    const initNavigation = async () => {
       try {
-        console.log('🚀 App Layout: Starting initialization...');
-        
-        // Initialize navigation system early in app startup
-        console.log('🧭 App Layout: Initializing navigation system...');
+        console.log('🧭 Root Layout: Initializing navigation system...');
         await initializeNavigation();
-        console.log('✅ App Layout: Navigation system initialized');
-        
-        // Minimum time to show our custom splash screen
-        const minimumSplashTime = 1800; // 1.8 seconds to ensure it's visible
-        const startTime = Date.now();
-        
-        // Perform any app-level initialization here if needed
-        // For now, just ensure minimum display time for smooth UX
-        console.log('⏳ App Layout: Showing splash screen for minimum time...');
-        
-        // Wait for minimum splash time
-        await new Promise(resolve => setTimeout(resolve, minimumSplashTime));
-        
-        // Ensure minimum time has passed
-        const elapsedTime = Date.now() - startTime;
-        if (elapsedTime < minimumSplashTime) {
-          const remainingTime = minimumSplashTime - elapsedTime;
-          console.log(`⏳ App Layout: Waiting additional ${remainingTime}ms for smooth transition...`);
-          await new Promise(resolve => setTimeout(resolve, remainingTime));
-        }
-        
-        // Mark app as ready to proceed to drawer layout
-        console.log('✅ App Layout: Initialization complete, app ready');
-        setAppIsReady(true);
-        
+        console.log('✅ Root Layout: Navigation system ready');
       } catch (error) {
-        console.warn('⚠️ App Layout: Initialization warning (non-critical):', error);
-        // Even if there's an error, mark as ready to prevent infinite loading
-        setAppIsReady(true);
+        console.warn('⚠️ Root Layout: Navigation init warning (non-critical):', error);
       }
-    }
-
-    prepare();
+    };
+    
+    initNavigation();
   }, []);
 
-  // Show our custom loading screen until app is ready
-  if (!appIsReady) {
-    return <LoadingSplashScreen backgroundColor={colors.background} />;
-  }
-
+  // No loading screen - let child layouts handle their own loading states
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -100,7 +66,7 @@ export default function Layout() {
                 }}>
                   {/* Navigation tracker - ONLY tracks route changes */}
                   <NavigationTracker fallbackRoute="/(drawer)/">
-                    {/* Main app content - includes DrawerLayout and other routes */}
+                    {/* Main app content - child layouts handle their own loading */}
                     <Slot />
                     
                     {/* Network status banner - positioned below header */}
