@@ -1,5 +1,4 @@
 // lib/helpers/navigationTracker.ts - Fixed without duplicate hardware back handling
-
 import React, { useEffect, useRef } from 'react';
 import { useRouter, usePathname } from 'expo-router';
 // Removed NavigationHelper import to prevent circular dependency issues
@@ -51,10 +50,11 @@ export const useNavigationTracker = (options: {
   }, [pathname]);
 
   // FIXED: Return basic navigation functions without importing NavigationHelper directly
+  // Note: For full NavigationHelper functionality, import it directly in your components
   return {
     currentRoute: pathname,
     canGoBack: () => router.canGoBack(),
-    goBack: () => router.back(),
+    goBack: () => router.back(), // Simple router back - for advanced navigation use NavigationHelper.goBack()
     navigateTo: (route: string, options?: any) => router.push({ pathname: route, params: options?.params })
   };
 };
