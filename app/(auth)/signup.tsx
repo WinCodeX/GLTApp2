@@ -13,13 +13,14 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Button, TextInput, Checkbox } from 'react-native-paper';    
 import { AntDesign } from '@expo/vector-icons';    
 import Toast from 'react-native-toast-message';    
-import * as SecureStore from 'expo-secure-store';    
 import api from '../../lib/api';    
 import { useGoogleAuth } from '../../lib/useGoogleAuth';    
+import { useUser } from '../../context/UserContext';  // Add this import
 import TermsModal from '../../components/TermsModal';    
     
 export default function SignupScreen() {    
-  const router = useRouter();    
+  const router = useRouter();
+  const { addAccount } = useUser(); // Add this hook
     
   const [email, setEmail] = useState('');    
   const [phone, setPhone] = useState('');    
@@ -31,7 +32,7 @@ export default function SignupScreen() {
   const [showConfirm, setShowConfirm] = useState(false);    
   const [acceptedTerms, setAcceptedTerms] = useState(false);    
   const [showTermsModal, setShowTermsModal] = useState(false);
-const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service');    
+  const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'privacy_policy'>('terms_of_service');    
   const [isLoading, setIsLoading] = useState(false);    
     
   // Error states    
@@ -45,45 +46,29 @@ const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'priva
     terms: false,    
   });    
     
-  const { promptAsync, request } = useGoogleAuth(async (googleUser) => {    
+  // Google Auth handler - updated to use addAccount
+  const { promptAsync, request } = useGoogleAuth(async (googleUser, isNewUser) => {    
     try {    
-      setIsLoading(true);    
-      const response = await api.post('/api/v1/google_login', {    
-        user: {    
-          email: googleUser.email,    
-          first_name: googleUser.given_name,    
-          last_name: googleUser.family_name,    
-          avatar_url: googleUser.picture,    
-          provider: 'google',    
-          uid: googleUser.id,    
-        },    
+      setIsLoading(true);
+      
+      // Add account through UserContext (which uses AccountManager)
+      await addAccount(googleUser, googleUser.token || 'temp_token');
+      
+      Toast.show({    
+        type: 'success',    
+        text1: isNewUser ? 'Account Created!' : 'Welcome back!',    
+        text2: isNewUser ? 'Signed up with Google successfully' : 'Signed in with Google'
       });    
     
-      const token = response?.data?.token;    
-      const userId = response?.data?.user?.id;    
-      const roles = response?.data?.user?.roles || [];    
-      const role = roles.includes('admin') ? 'admin' : 'client';    
-    
-      if (token && userId) {    
-        await SecureStore.setItemAsync('auth_token', token);    
-        await SecureStore.setItemAsync('user_id', String(userId));    
-        await SecureStore.setItemAsync('user_role', role);    
-    
-        Toast.show({    
-          type: 'success',    
-          text1: 'Signed up with Google!',    
-        });    
-    
-        router.replace(role === 'admin' ? '/admin' : '/');    
-      } else {    
-        Toast.show({    
-          type: 'error',    
-          text1: 'Signup failed',    
-          text2: 'Missing token or user ID',    
-        });    
-      }    
+      const role = googleUser.roles?.includes('admin') ? 'admin' : 'client';
+      
+      setTimeout(() => {
+        router.replace(role === 'admin' ? '/admin' : '/');
+      }, 1500);
+      
     } catch (err: any) {    
-      const msg = err?.response?.data?.error || err?.message || 'Google signup failed';    
+      console.error('Google signup error:', err);
+      const msg = err?.message || 'Google signup failed';    
       Toast.show({ type: 'error', text1: 'Google Signup Error', text2: msg });    
     } finally {    
       setIsLoading(false);    
@@ -141,6 +126,8 @@ const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'priva
     
     try {    
       setIsLoading(true);    
+      console.log('Attempting signup for:', email);
+      
       const response = await api.post('/api/v1/signup', {    
         user: {    
           email: email.trim(),    
@@ -152,53 +139,83 @@ const [termsModalType, setTermsModalType] = useState<'terms_of_service' | 'priva
         },    
       });    
     
-      const token = response?.data?.token;    
-      const userId = response?.data?.user?.id;    
-      const roles = response?.data?.user?.roles || [];    
-      const role = roles.includes('admin') ? 'admin' : 'client';    
+      const token = response?.data?.token || response.headers?.authorization?.split(' ')[1];
+      const user = response?.data?.user;    
     
-      const tokenFromHeader = response.headers?.authorization?.split(' ')[1];    
-      const finalToken = token || tokenFromHeader;    
-    
-      if (finalToken && userId) {    
-        await SecureStore.setItemAsync('auth_token', finalToken);    
-        await SecureStore.setItemAsync('user_id', String(userId));    
-        await SecureStore.setItemAsync('user_role', role);    
-    
+      if (token && user) {    
+        console.log('Signup successful, adding account...');
+        
+        // Add account through UserContext (which uses AccountManager)
+        await addAccount(user, token);
+        
         Toast.show({    
           type: 'success',    
-          text1: 'Account Created',    
-          text2: 'Welcome aboard!',    
+          text1: 'Account Created!',    
+          text2: 'Welcome to the platform!',    
         });    
     
-        router.replace(role === 'admin' ? '/admin' : '/');    
+        const role = user.roles?.includes('admin') ? 'admin' : 'client';
+        
+        console.log('Signup successful, redirecting to:', role === 'admin' ? '/admin' : '/');
+        
+        setTimeout(() => {
+          router.replace(role === 'admin' ? '/admin' : '/');
+        }, 1500);
       } else {    
+        console.error('Signup failed: Missing token or user data', { hasToken: !!token, hasUser: !!user });
         Toast.show({    
           type: 'error',    
           text1: 'Signup failed',    
-          text2: 'Missing authentication data',    
+          text2: 'Server response incomplete',    
         });    
       }    
     } catch (err: any) {    
-      const msg = err?.response?.data?.error || err?.message || 'Signup failed';    
-      Toast.show({ type: 'error', text1: 'Signup error', text2: msg });    
-      console.error('Signup error:', msg);    
+      console.error('Signup error:', err?.response?.data || err?.message);
+      
+      let errorMessage = 'Please try again';
+      let toastMessage = 'Unexpected error';
+
+      if (err?.response?.status === 422) {
+        const errors = err.response.data?.errors || [];
+        if (errors.length > 0) {
+          errorMessage = errors[0];
+          toastMessage = 'Validation error';
+        } else {
+          errorMessage = 'Please check your information';
+          toastMessage = 'Invalid input';
+        }
+      } else if (err?.response?.status === 409) {
+        errorMessage = err.response.data?.message || 'Email already exists';
+        toastMessage = 'Account exists';
+      } else if (err?.code === 'NETWORK_ERROR' || err?.message === 'Network Error') {
+        errorMessage = 'Network error - check your connection';
+        toastMessage = 'Connection failed';
+      } else if (err?.response?.data?.message) {
+        errorMessage = err.response.data.message;
+        toastMessage = 'Server error';
+      }
+
+      Toast.show({ 
+        type: 'error', 
+        text1: 'Signup failed', 
+        text2: toastMessage 
+      });
     } finally {    
       setIsLoading(false);    
     }    
   };    
     
   const showTerms = (type: 'terms_of_service' | 'privacy_policy') => {
-  setTermsModalType(type);
-  setShowTermsModal(true);
-};
+    setTermsModalType(type);
+    setShowTermsModal(true);
+  };
 
-const handleFieldChange = (field: keyof typeof errors, value: string) => {
-  // Clear error when user starts typing
-  if (errors[field] && value.trim()) {
-    setErrors(prev => ({ ...prev, [field]: false }));
-  }
-};    
+  const handleFieldChange = (field: keyof typeof errors, value: string) => {
+    // Clear error when user starts typing
+    if (errors[field] && value.trim()) {
+      setErrors(prev => ({ ...prev, [field]: false }));
+    }
+  };    
     
   const handleTermsChange = () => {    
     const newValue = !acceptedTerms;    
@@ -238,7 +255,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.email ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.email ? "#f87171" : "#bd93f9"}    
-              error={errors.email}    
+              error={errors.email}
+              disabled={isLoading}
             />    
     
             <TextInput    
@@ -255,7 +273,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.phone ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.phone ? "#f87171" : "#bd93f9"}    
-              error={errors.phone}    
+              error={errors.phone}
+              disabled={isLoading}
             />    
     
             <TextInput    
@@ -271,7 +290,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.firstName ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.firstName ? "#f87171" : "#bd93f9"}    
-              error={errors.firstName}    
+              error={errors.firstName}
+              disabled={isLoading}
             />    
     
             <TextInput    
@@ -287,7 +307,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.lastName ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.lastName ? "#f87171" : "#bd93f9"}    
-              error={errors.lastName}    
+              error={errors.lastName}
+              disabled={isLoading}
             />    
     
             <TextInput    
@@ -304,7 +325,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.password ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.password ? "#f87171" : "#bd93f9"}    
-              error={errors.password}    
+              error={errors.password}
+              disabled={isLoading}
               right={    
                 <TextInput.Icon    
                   icon={showPassword ? 'eye-off' : 'eye'}    
@@ -329,7 +351,8 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
               placeholderTextColor="#ccc"    
               outlineColor={errors.confirmPassword ? "#f87171" : "#44475a"}    
               activeOutlineColor={errors.confirmPassword ? "#f87171" : "#bd93f9"}    
-              error={errors.confirmPassword}    
+              error={errors.confirmPassword}
+              disabled={isLoading}
               right={    
                 <TextInput.Icon    
                   icon={showConfirm ? 'eye-off' : 'eye'}    
@@ -341,40 +364,41 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
             />    
     
             {/* Terms and Conditions Checkbox */}    
-<View style={[    
-  styles.termsContainer,     
-  errors.terms && styles.termsContainerError    
-]}>    
-  <Checkbox    
-    status={acceptedTerms ? 'checked' : 'unchecked'}    
-    onPress={handleTermsChange}    
-    color="#bd93f9"    
-    uncheckedColor={errors.terms ? "#f87171" : "#666"}    
-  />    
-  <View style={styles.termsTextContainer}>    
-    <View style={styles.termsTextRow}>    
-      <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>    
-        I agree to GLT&apos;s{' '}    
-      </Text>    
-        <TouchableOpacity onPress={() => showTerms('terms_of_service')}>    
-        <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>    
-          Terms of Service    
-        </Text>    
-      </TouchableOpacity>    
-      <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>    
-        {' '}and{' '}    
-      </Text>    
-      <TouchableOpacity onPress={() => showTerms('privacy_policy')}>    
-        <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>    
-          Privacy Policy    
-        </Text>    
-      </TouchableOpacity>    
-    </View>    
-  </View>    
-</View>    
+            <View style={[    
+              styles.termsContainer,     
+              errors.terms && styles.termsContainerError    
+            ]}>    
+              <Checkbox    
+                status={acceptedTerms ? 'checked' : 'unchecked'}    
+                onPress={handleTermsChange}    
+                color="#bd93f9"    
+                uncheckedColor={errors.terms ? "#f87171" : "#666"}
+                disabled={isLoading}
+              />    
+              <View style={styles.termsTextContainer}>    
+                <View style={styles.termsTextRow}>    
+                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>    
+                    I agree to GLT&apos;s{' '}    
+                  </Text>    
+                  <TouchableOpacity onPress={() => showTerms('terms_of_service')} disabled={isLoading}>    
+                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>    
+                      Terms of Service    
+                    </Text>    
+                  </TouchableOpacity>    
+                  <Text style={[styles.termsText, errors.terms && styles.termsTextError]}>    
+                    {' '}and{' '}    
+                  </Text>    
+                  <TouchableOpacity onPress={() => showTerms('privacy_policy')} disabled={isLoading}>    
+                    <Text style={[styles.linkText, errors.terms && styles.linkTextError]}>    
+                      Privacy Policy    
+                    </Text>    
+                  </TouchableOpacity>    
+                </View>    
+              </View>    
+            </View>    
     
             <TouchableOpacity    
-              style={[styles.googleBtn, isLoading && styles.disabledBtn]}    
+              style={[styles.googleBtn, (isLoading || !request) && styles.disabledBtn]}    
               onPress={() => promptAsync()}    
               disabled={!request || isLoading}    
             >    
@@ -412,11 +436,11 @@ const handleFieldChange = (field: keyof typeof errors, value: string) => {
     
       {/* Terms Modal */}    
       <TermsModal
-  key={termsModalType}   // 🔑 force remount when type changes
-  visible={showTermsModal}
-  onClose={() => setShowTermsModal(false)}
-  termType={termsModalType}
-/>    
+        key={termsModalType}   
+        visible={showTermsModal}
+        onClose={() => setShowTermsModal(false)}
+        termType={termsModalType}
+      />    
     </LinearGradient>    
   );    
 }    
@@ -527,7 +551,4 @@ const styles = StyleSheet.create({
   linkTextError: {    
     color: '#f87171',    
   },    
-});    
-    
-    
- 
+});
