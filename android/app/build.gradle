@@ -102,7 +102,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         
         // ✅ FIXED: Use defined variables instead of hardcoded values
-        versionCode appVersionCode
+        versionCode 1
         versionName appVersionName    // Now uses variable
         
         // App display name and metadata
