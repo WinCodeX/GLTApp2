@@ -689,21 +689,48 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
         ...(businessData.phone_number && { 
           phone_number: formatPhoneNumber(businessData.phone_number.trim()) 
         }),
-        ...(businessData.category_ids && businessData.category_ids.length > 0 && {
+        // Always include category_ids if provided (even if empty array)
+        ...(businessData.category_ids !== undefined && {
           category_ids: businessData.category_ids
         })
       }
     };
 
     console.log('🏢 Updating business with data:', requestData);
+    console.log('🏢 Using endpoint:', `/api/v1/businesses/${businessId}`);
 
-    const response = await api.put(`/api/v1/businesses/${businessId}`, requestData, {
-      headers: {
-        Authorization: `Bearer ${token}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 15000, // 15 second timeout
-    });
+    // Try the update endpoint - some APIs might use different patterns
+    let response;
+    try {
+      response = await api.patch(`/api/v1/businesses/${businessId}`, requestData, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        timeout: 15000, // 15 second timeout
+      });
+    } catch (firstError: any) {
+      console.log('🏢 First endpoint failed, trying alternative:', firstError?.response?.status);
+      
+      // If 404 or HTML response, try alternative endpoint pattern
+      if (firstError?.response?.status === 404 || 
+          firstError?.response?.headers?.['content-type']?.includes('text/html')) {
+        
+        console.log('🏢 Trying alternative endpoint: /api/v1/businesses/update');
+        response = await api.post(`/api/v1/businesses/update`, {
+          ...requestData,
+          business_id: businessId
+        }, {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          timeout: 15000,
+        });
+      } else {
+        throw firstError;
+      }
+    }
     
     console.log('🏢 Business update response:', response.data);
     
@@ -716,7 +743,27 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
     }
     
   } catch (error: any) {
-    console.error('🏢 Update Business Error:', error?.response?.data || error?.message);
+    console.error('🏢 Update Business Error:', {
+      status: error?.response?.status,
+      statusText: error?.response?.statusText,
+      url: error?.config?.url,
+      method: error?.config?.method,
+      data: error?.response?.data,
+      message: error?.message
+    });
+    
+    // Check if server returned HTML instead of JSON
+    if (error?.response?.headers?.['content-type']?.includes('text/html')) {
+      console.error('🚨 Server returned HTML instead of JSON! Check API endpoint:', error?.config?.url);
+      Toast.show({
+        type: 'error',
+        text1: 'Server Error',
+        text2: 'API endpoint not found. Please check server configuration.',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('API endpoint not found. Server returned HTML instead of JSON.');
+    }
     
     // Handle authentication errors specifically
     if (isAuthenticationError(error)) {
@@ -737,6 +784,18 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       const errorDetails = error.response?.data?.errors?.join(', ') || '';
       
       console.log('🏢 Validation error during business update:', errorMessage, errorDetails);
+      
+      // Check for specific category error
+      if (errorMessage.toLowerCase().includes('category') || errorMessage.toLowerCase().includes('categories')) {
+        Toast.show({
+          type: 'error',
+          text1: 'Categories Required',
+          text2: 'Please select at least one category for your business',
+          position: 'bottom',
+          visibilityTime: 4000,
+        });
+        throw new Error('Please select at least one category for your business');
+      }
       
       Toast.show({
         type: 'error',

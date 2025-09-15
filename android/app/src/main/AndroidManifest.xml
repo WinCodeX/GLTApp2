@@ -59,11 +59,6 @@
     android:dataExtractionRules="@xml/secure_store_data_extraction_rules"
     android:enableOnBackInvokedCallback="false">
     
-    <!-- Firebase notification configuration -->
-    <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default"/>
-    <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
-    <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
-    
     <!-- Expo notification configuration -->
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="expo.modules.notifications.default_notification_icon" android:resource="@drawable/notification_icon"/>

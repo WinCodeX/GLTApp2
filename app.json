@@ -39,8 +39,7 @@
         "android.permission.WAKE_LOCK",
         "android.permission.REQUEST_INSTALL_PACKAGES",
         "android.permission.INSTALL_PACKAGES"
-      ],
-      "usesCleartextTraffic": false
+      ]
     },
     "web": {
       "bundler": "metro",
@@ -52,12 +51,7 @@
       "color": "#7c3aed",
       "iosDisplayInForeground": false,
       "androidMode": "default",
-      "androidCollapsedTitle": "GLT Logistics Update",
-      "sounds": [
-        "./assets/sounds/notification_sound.wav",
-        "./assets/sounds/notification_urgent.wav",
-        "./assets/sounds/notification_high.wav"
-      ]
+      "androidCollapsedTitle": "GLT Logistics Update"
     },
     "plugins": [
       "expo-router",
@@ -79,12 +73,7 @@
         {
           "icon": "./assets/images/notification-icon.png",
           "color": "#7c3aed",
-          "defaultChannel": "default",
-          "sounds": [
-            "./assets/sounds/notification_sound.wav",
-            "./assets/sounds/notification_urgent.wav",
-            "./assets/sounds/notification_high.wav"
-          ]
+          "defaultChannel": "default"
         }
       ],
       [

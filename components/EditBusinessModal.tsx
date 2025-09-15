@@ -89,8 +89,18 @@ export default function EditBusinessModal({
   const [businessName, setBusinessName] = useState(business.name);
   const [phoneNumber, setPhoneNumber] = useState(business.phone_number || '');
   const [selectedCategories, setSelectedCategories] = useState<number[]>(
-    business.categories.map(cat => cat.id)
+    business.categories?.map(cat => cat.id) || []
   );
+  
+  // Track if business originally had categories (to determine validation rules)
+  const originallyHadCategories = business.categories && business.categories.length > 0;
+  
+  console.log('🏷️ EditBusinessModal: Business category info:', {
+    businessName: business.name,
+    originalCategories: business.categories,
+    originallyHadCategories,
+    selectedCategories
+  });
   
   // Categories data
   const [categories, setCategories] = useState<Category[]>([]);
@@ -116,7 +126,7 @@ export default function EditBusinessModal({
   useEffect(() => {
     setBusinessName(business.name);
     setPhoneNumber(business.phone_number || '');
-    setSelectedCategories(business.categories.map(cat => cat.id));
+    setSelectedCategories(business.categories?.map(cat => cat.id) || []);
     setPreviewUri(null);
     setLocalLogoUrl(null);
   }, [business]);
@@ -152,15 +162,29 @@ export default function EditBusinessModal({
   };
 
   const toggleCategory = useCallback((categoryId: number) => {
+    console.log('🏷️ EditBusinessModal: Toggling category:', categoryId);
     setSelectedCategories(prev => {
+      let newSelection;
       if (prev.includes(categoryId)) {
-        return prev.filter(id => id !== categoryId);
+        // Check if this would leave no categories selected
+        // Only prevent removal if business originally had categories
+        if (prev.length === 1 && originallyHadCategories) {
+          showToast.warning('Category Required', 'At least one category must be selected');
+          console.log('🏷️ EditBusinessModal: Cannot remove last category');
+          return prev;
+        }
+        newSelection = prev.filter(id => id !== categoryId);
+        console.log('🏷️ EditBusinessModal: Removed category:', categoryId);
       } else if (prev.length < 5) {
-        return [...prev, categoryId];
+        newSelection = [...prev, categoryId];
+        console.log('🏷️ EditBusinessModal: Added category:', categoryId);
       } else {
         showToast.warning('Maximum Categories', 'You can select up to 5 categories only');
+        console.log('🏷️ EditBusinessModal: Maximum categories reached');
         return prev;
       }
+      console.log('🏷️ EditBusinessModal: New category selection:', newSelection);
+      return newSelection;
     });
   }, []);
 
@@ -263,8 +287,14 @@ export default function EditBusinessModal({
       return false;
     }
 
-    if (selectedCategories.length === 0) {
-      showToast.error('Validation Error', 'Please select at least one category');
+    // Only require categories if this business originally had categories OR if they're adding categories
+    if (selectedCategories.length === 0 && originallyHadCategories) {
+      showToast.error('Categories Required', 'Please select at least one category for your business');
+      return false;
+    }
+
+    if (selectedCategories.length > 5) {
+      showToast.error('Too Many Categories', 'You can select a maximum of 5 categories');
       return false;
     }
 
@@ -278,12 +308,16 @@ export default function EditBusinessModal({
       setLoading(true);
       
       console.log('🏢 EditBusinessModal: Starting business update...');
+      console.log('🏷️ EditBusinessModal: Selected categories:', {
+        selectedCategories,
+        selectedCategoryNames: categories.filter(cat => selectedCategories.includes(cat.id)).map(cat => cat.name)
+      });
       
       // Prepare update data
       const updateData = {
         name: businessName.trim(),
         phone_number: phoneNumber.trim() || undefined,
-        category_ids: selectedCategories.length > 0 ? selectedCategories : undefined
+        category_ids: selectedCategories // Always send category_ids array (even if empty)
       };
       
       console.log('🏢 EditBusinessModal: Update data:', updateData);
@@ -441,10 +475,13 @@ export default function EditBusinessModal({
             {/* Categories */}
             <View style={styles.section}>
               <Text style={styles.label}>
-                Categories * ({selectedCategories.length}/5)
+                Categories {originallyHadCategories ? '*' : ''} ({selectedCategories.length}/5)
               </Text>
               <Text style={styles.helpText}>
-                Select up to 5 categories that best describe your business
+                {originallyHadCategories 
+                  ? 'Select 1-5 categories that best describe your business (at least one required)'
+                  : 'Select up to 5 categories that best describe your business (optional)'
+                }
               </Text>
               
               {loadingCategories ? (

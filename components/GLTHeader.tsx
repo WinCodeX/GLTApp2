@@ -358,6 +358,12 @@ export default function GLTHeader({
 
       console.log('🔔 GETTING EXPO PUSH TOKEN...');
       console.log('🔔 PROJECT ID:', Constants.expoConfig?.extra?.eas?.projectId);
+      console.log('🔔 Build Info:', {
+        isExpoGo: Constants.appOwnership === 'expo',
+        executionEnvironment: Constants.executionEnvironment,
+        platform: Platform.OS,
+        buildType: __DEV__ ? 'development' : 'production'
+      });
       
       const token = (await Notifications.getExpoPushTokenAsync({
         projectId: Constants.expoConfig?.extra?.eas?.projectId,
@@ -370,10 +376,21 @@ export default function GLTHeader({
       await registerPushTokenWithBackend(token);
       
     } catch (error) {
-      console.error('❌ FAILED TO GET PUSH TOKEN:', error);
+      console.error('❌ DETAILED PUSH TOKEN ERROR:', {
+        message: error.message,
+        code: error.code,
+        stack: error.stack,
+        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+        buildInfo: {
+          isExpoGo: Constants.appOwnership === 'expo',
+          executionEnvironment: Constants.executionEnvironment,
+          platform: Platform.OS
+        }
+      });
+      
       Alert.alert(
         'Push Token Error',
-        'Failed to register for push notifications. Please try restarting the app.',
+        `Failed to register for push notifications: ${error.message}\n\nPlease try restarting the app.`,
         [{ text: 'OK' }]
       );
     }
