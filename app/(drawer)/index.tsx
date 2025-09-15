@@ -17,10 +17,9 @@ import {
   FlatList,
   ActivityIndicator,
   AppState,
-  KeyboardAvoidingView,
   Keyboard,
-  PanGestureHandler,
-  State,
+  KeyboardAvoidingView,
+  PanResponder,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -192,7 +191,7 @@ const PACKAGE_SIZE_INFO: Record<string, PackageSizeInfo> = {
   }
 };
 
-// FIXED: Enhanced Area Selection Modal Component with proper keyboard handling
+// FIXED: Area Selection Modal Component with Keyboard Handling
 const AreaSelectionModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -217,15 +216,13 @@ const AreaSelectionModal: React.FC<{
         useNativeDriver: true,
       }).start();
 
-      // FIXED: Keyboard listeners for proper positioning
-      const keyboardWillShowListener = Keyboard.addListener(
-        Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
-        (e) => setKeyboardHeight(e.endCoordinates.height)
-      );
-      const keyboardWillHideListener = Keyboard.addListener(
-        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
-        () => setKeyboardHeight(0)
-      );
+      // FIXED: Add keyboard listeners
+      const keyboardWillShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+      });
+      const keyboardWillHideListener = Keyboard.addListener('keyboardDidHide', () => {
+        setKeyboardHeight(0);
+      });
 
       return () => {
         keyboardWillShowListener?.remove();
@@ -351,7 +348,7 @@ const AreaSelectionModal: React.FC<{
   return (
     <Modal visible={visible} transparent animationType="none">
       <View style={styles.modalOverlay}>
-        <KeyboardAvoidingView
+        <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardAvoidingView}
         >
@@ -360,8 +357,8 @@ const AreaSelectionModal: React.FC<{
               styles.areaModalContainer,
               { 
                 transform: [{ translateY: slideAnim }],
-                height: screenHeight * 0.85 - (keyboardHeight * 0.3), // FIXED: Adjust height for keyboard
-                marginBottom: keyboardHeight * 0.7, // FIXED: Push content up when keyboard is visible
+                marginBottom: keyboardHeight > 0 ? keyboardHeight - 50 : 0,
+                height: keyboardHeight > 0 ? screenHeight * 0.6 : screenHeight * 0.85,
               }
             ]}
           >
@@ -384,8 +381,9 @@ const AreaSelectionModal: React.FC<{
                   placeholderTextColor="#888"
                   value={searchQuery}
                   onChangeText={setSearchQuery}
-                  returnKeyType="done"
-                  onSubmitEditing={() => Keyboard.dismiss()}
+                  autoCorrect={false}
+                  returnKeyType="search"
+                  blurOnSubmit={false}
                 />
               </View>
 
@@ -409,11 +407,7 @@ const AreaSelectionModal: React.FC<{
                 ))}
               </View>
 
-              <ScrollView 
-                style={styles.resultsContainer} 
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled" // FIXED: Handle taps when keyboard is visible
-              >
+              <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
                 {isLoading ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#8B5CF6" />
@@ -463,158 +457,6 @@ const AreaSelectionModal: React.FC<{
   );
 };
 
-// FIXED: Interactive Location Carousel Component
-const InteractiveLocationCarousel: React.FC<{ locations: Location[] }> = ({ locations }) => {
-  const scrollViewRef = useRef<ScrollView>(null);
-  const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const [isAnimating, setIsAnimating] = useState(true);
-  const [isUserInteracting, setIsUserInteracting] = useState(false);
-  const [currentScrollX, setCurrentScrollX] = useState(0);
-  
-  const locationTagWidth = 120;
-  const totalLocations = locations.length;
-  const singleSetWidth = totalLocations * locationTagWidth;
-  
-  // Create triple set for infinite scroll
-  const tripleLocations = [...locations, ...locations, ...locations];
-
-  useEffect(() => {
-    if (isAnimating && !isUserInteracting) {
-      startAnimation();
-    } else {
-      stopAnimation();
-    }
-
-    return () => {
-      stopAnimation();
-      clearInactivityTimer();
-    };
-  }, [isAnimating, isUserInteracting]);
-
-  const startAnimation = () => {
-    stopAnimation();
-    
-    animationTimerRef.current = setInterval(() => {
-      if (!isUserInteracting && scrollViewRef.current) {
-        const newPosition = (currentScrollX + 1) % singleSetWidth;
-        scrollViewRef.current.scrollTo({ 
-          x: singleSetWidth + newPosition, 
-          animated: false 
-        });
-        setCurrentScrollX(newPosition);
-      }
-    }, 50); // Smooth 50ms intervals
-  };
-
-  const stopAnimation = () => {
-    if (animationTimerRef.current) {
-      clearInterval(animationTimerRef.current);
-      animationTimerRef.current = null;
-    }
-  };
-
-  const clearInactivityTimer = () => {
-    if (inactivityTimerRef.current) {
-      clearTimeout(inactivityTimerRef.current);
-      inactivityTimerRef.current = null;
-    }
-  };
-
-  const startInactivityTimer = () => {
-    clearInactivityTimer();
-    inactivityTimerRef.current = setTimeout(() => {
-      setIsUserInteracting(false);
-      setIsAnimating(true);
-    }, 3000); // Resume animation after 3 seconds of inactivity
-  };
-
-  const handleScrollBeginDrag = () => {
-    setIsUserInteracting(true);
-    setIsAnimating(false);
-    clearInactivityTimer();
-  };
-
-  const handleScrollEndDrag = () => {
-    startInactivityTimer();
-  };
-
-  const handleTouchStart = () => {
-    setIsUserInteracting(true);
-    setIsAnimating(false);
-    clearInactivityTimer();
-  };
-
-  const handleTouchEnd = () => {
-    startInactivityTimer();
-  };
-
-  const handleScroll = (event: any) => {
-    const { contentOffset } = event.nativeEvent;
-    let scrollX = contentOffset.x;
-    
-    // Handle infinite scroll wrapping
-    if (scrollX <= 0) {
-      scrollViewRef.current?.scrollTo({ x: singleSetWidth, animated: false });
-      scrollX = singleSetWidth;
-    } else if (scrollX >= singleSetWidth * 2) {
-      scrollViewRef.current?.scrollTo({ x: singleSetWidth, animated: false });
-      scrollX = singleSetWidth;
-    }
-    
-    setCurrentScrollX(scrollX - singleSetWidth);
-  };
-
-  const LocationTag = ({ location, index }: { location: Location; index: number }) => (
-    <TouchableOpacity
-      key={`${location.name}-${index}`}
-      onPressIn={handleTouchStart}
-      onPressOut={handleTouchEnd}
-      activeOpacity={0.8}
-      style={styles.locationTagContainer}
-    >
-      <LinearGradient
-        colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.locationTagGradient}
-      >
-        <View style={styles.locationTag}>
-          <Text style={styles.locationText}>{location.name}</Text>
-        </View>
-      </LinearGradient>
-    </TouchableOpacity>
-  );
-
-  return (
-    <View style={styles.interactiveCarouselContainer}>
-      <ScrollView
-        ref={scrollViewRef}
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        scrollEventThrottle={16}
-        onScroll={handleScroll}
-        onScrollBeginDrag={handleScrollBeginDrag}
-        onScrollEndDrag={handleScrollEndDrag}
-        onMomentumScrollEnd={handleScrollEndDrag}
-        contentContainerStyle={styles.carouselContent}
-        style={styles.carouselScrollView}
-      >
-        {tripleLocations.map((location, index) => (
-          <LocationTag key={`${location.id}-${index}`} location={location} index={index} />
-        ))}
-      </ScrollView>
-      
-      {/* Interaction hint */}
-      {isAnimating && (
-        <View style={styles.interactionHint}>
-          <Text style={styles.interactionHintText}>Tap to explore</Text>
-        </View>
-      )}
-    </View>
-  );
-};
-
 export default function HomeScreen() {
   const [selectedOriginLocation, setSelectedOriginLocation] = useState<SelectedLocation | null>(null);
   const [selectedDestinationLocation, setSelectedDestinationLocation] = useState<SelectedLocation | null>(null);
@@ -649,6 +491,11 @@ export default function HomeScreen() {
   // FIXED: Add navigation tracking state
   const [navigationRegistered, setNavigationRegistered] = useState(false);
   
+  // FIXED: Animation interaction states
+  const [isAnimationPaused, setIsAnimationPaused] = useState(false);
+  const [manualScrollPosition, setManualScrollPosition] = useState(0);
+  const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
+  
   const { 
     user, 
     currentAccount,
@@ -662,6 +509,8 @@ export default function HomeScreen() {
   
   // FIXED: Use navigation hook for better integration
   const navigation = useNavigation();
+  
+  const scrollX = useRef(new Animated.Value(0)).current;
   
   // FAB Menu Animations
   const fabRotation = useRef(new Animated.Value(0)).current;
@@ -729,6 +578,96 @@ export default function HomeScreen() {
   useEffect(() => {
     loadFormDataInBackground();
   }, []);
+
+  // FIXED: Enhanced location scrolling animation with interaction
+  useEffect(() => {
+    if (locations.length === 0) return;
+    
+    const locationTagWidth = 120;
+    const singleSetWidth = locations.length * locationTagWidth;
+
+    const startContinuousLoop = () => {
+      if (isAnimationPaused) return;
+      
+      scrollX.setValue(manualScrollPosition);
+      
+      Animated.timing(scrollX, {
+        toValue: manualScrollPosition - singleSetWidth,
+        duration: 12000 * (1 - (manualScrollPosition / singleSetWidth)),
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished && !isAnimationPaused) {
+          setManualScrollPosition(0);
+          startContinuousLoop();
+        }
+      });
+    };
+
+    if (!isAnimationPaused) {
+      startContinuousLoop();
+    }
+
+    return () => {
+      scrollX.stopAnimation();
+    };
+  }, [scrollX, locations, isAnimationPaused, manualScrollPosition]);
+
+  // FIXED: Pan responder for location animation interaction
+  const locationPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        // Stop animation when user touches
+        setIsAnimationPaused(true);
+        scrollX.stopAnimation((value) => {
+          setManualScrollPosition(value);
+        });
+        
+        // Clear existing timer
+        if (inactivityTimer.current) {
+          clearTimeout(inactivityTimer.current);
+        }
+      },
+      onPanResponderMove: (_, gestureState) => {
+        // Handle manual scrolling
+        const locationTagWidth = 120;
+        const singleSetWidth = locations.length * locationTagWidth;
+        const newPosition = manualScrollPosition + gestureState.dx;
+        
+        // Keep within bounds for infinite loop
+        let constrainedPosition = newPosition;
+        if (newPosition > 0) {
+          constrainedPosition = newPosition - singleSetWidth;
+        } else if (newPosition < -singleSetWidth) {
+          constrainedPosition = newPosition + singleSetWidth;
+        }
+        
+        scrollX.setValue(constrainedPosition);
+      },
+      onPanResponderRelease: (_, gestureState) => {
+        // Update manual position
+        const locationTagWidth = 120;
+        const singleSetWidth = locations.length * locationTagWidth;
+        let newPosition = manualScrollPosition + gestureState.dx;
+        
+        // Normalize position for infinite loop
+        if (newPosition > 0) {
+          newPosition = newPosition - singleSetWidth;
+        } else if (newPosition < -singleSetWidth) {
+          newPosition = newPosition + singleSetWidth;
+        }
+        
+        setManualScrollPosition(newPosition);
+        
+        // Start inactivity timer to resume animation
+        inactivityTimer.current = setTimeout(() => {
+          setIsAnimationPaused(false);
+        }, 3000); // Resume after 3 seconds of inactivity
+      },
+    })
+  ).current;
 
   // Initialize app with APK update system
   const initializeApp = async () => {
@@ -1208,6 +1147,22 @@ export default function HomeScreen() {
     }
   };
 
+  const LocationTag = ({ location }) => (
+    <LinearGradient
+      colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
+      start={{ x: 0, y: 0 }}
+      end={{ x: 1, y: 1 }}
+      style={styles.locationTagGradient}
+    >
+      <TouchableOpacity
+        style={styles.locationTag}
+        activeOpacity={0.8}
+      >
+        <Text style={styles.locationText}>{location.name}</Text>
+      </TouchableOpacity>
+    </LinearGradient>
+  );
+
   const renderPackageSizes = () => (
     <View style={styles.packageSizeContainer}>
       <Text style={styles.sectionLabel}>What are you sending?</Text>
@@ -1356,10 +1311,22 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* FIXED: Currently Reaching Section with interactive carousel */}
+      {/* FIXED: Interactive Currently Reaching Section with seamless endless scrolling */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
-        <InteractiveLocationCarousel locations={locations} />
+        <View style={styles.animatedContainer}>
+          <Animated.View
+            style={[
+              styles.animatedContent,
+              { transform: [{ translateX: scrollX }] },
+            ]}
+            {...locationPanResponder.panHandlers}
+          >
+            {Array(10).fill(locations).flat().map((location, index) => (
+              <LocationTag key={`${location.name}-${index}`} location={location} />
+            ))}
+          </Animated.View>
+        </View>
       </View>
 
       {/* Enhanced Cost Calculator with proper bottom padding */}
@@ -1714,18 +1681,11 @@ export default function HomeScreen() {
   );
 }
 
-// FIXED: Enhanced styles with keyboard handling and interactive carousel support
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#0a0a0f' 
   },
-  
-  // FIXED: Enhanced keyboard handling styles
-  keyboardAvoidingView: {
-    flex: 1,
-  },
-  
   locationsContainer: { 
     paddingTop: 20, 
     paddingBottom: 20,
@@ -1741,32 +1701,26 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  
-  // FIXED: Interactive carousel styles
-  interactiveCarouselContainer: {
-    height: 80,
-    position: 'relative',
+  animatedContainer: { 
+    height: 60, 
+    overflow: 'hidden' 
   },
-  carouselScrollView: {
-    height: 60,
-  },
-  carouselContent: {
-    alignItems: 'center',
-    paddingHorizontal: 16,
-  },
-  locationTagContainer: {
-    marginHorizontal: 8,
+  animatedContent: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    paddingHorizontal: 16 
   },
   locationTagGradient: { 
     borderRadius: 25, 
     padding: 2, 
+    marginHorizontal: 8 
   },
   locationTag: {
     backgroundColor: '#1a1a2e',
     paddingVertical: 12, 
     paddingHorizontal: 20,
     borderRadius: 23, 
-    minWidth: 100, 
+    minWidth: 80, 
     alignItems: 'center',
   },
   locationText: { 
@@ -1774,21 +1728,6 @@ const styles = StyleSheet.create({
     fontSize: 14, 
     fontWeight: '500' 
   },
-  interactionHint: {
-    position: 'absolute',
-    bottom: 0,
-    right: 20,
-    backgroundColor: 'rgba(139, 92, 246, 0.8)',
-    paddingHorizontal: 12,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  interactionHintText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  
   scrollContainer: { 
     flex: 1 
   },
@@ -2051,10 +1990,14 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // FIXED: Enhanced Area Selection Modal Styles with keyboard handling
+  // FIXED: Enhanced Modal Styles with Keyboard Handling
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
+    justifyContent: 'flex-end',
+  },
+  keyboardAvoidingView: {
+    flex: 1,
     justifyContent: 'flex-end',
   },
   areaModalContainer: {
@@ -2235,7 +2178,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Modal Styles
+  // Info Modal Styles
   infoModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
