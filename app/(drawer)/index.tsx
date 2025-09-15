@@ -17,6 +17,10 @@ import {
   FlatList,
   ActivityIndicator,
   AppState,
+  KeyboardAvoidingView,
+  Keyboard,
+  PanGestureHandler,
+  State,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -188,7 +192,7 @@ const PACKAGE_SIZE_INFO: Record<string, PackageSizeInfo> = {
   }
 };
 
-// Area Selection Modal Component
+// FIXED: Enhanced Area Selection Modal Component with proper keyboard handling
 const AreaSelectionModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -201,6 +205,7 @@ const AreaSelectionModal: React.FC<{
   const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'areas' | 'offices'>('all');
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
 
   useEffect(() => {
@@ -211,6 +216,21 @@ const AreaSelectionModal: React.FC<{
         duration: 300,
         useNativeDriver: true,
       }).start();
+
+      // FIXED: Keyboard listeners for proper positioning
+      const keyboardWillShowListener = Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow',
+        (e) => setKeyboardHeight(e.endCoordinates.height)
+      );
+      const keyboardWillHideListener = Keyboard.addListener(
+        Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide',
+        () => setKeyboardHeight(0)
+      );
+
+      return () => {
+        keyboardWillShowListener?.remove();
+        keyboardWillHideListener?.remove();
+      };
     }
   }, [visible]);
 
@@ -232,6 +252,7 @@ const AreaSelectionModal: React.FC<{
   };
 
   const closeModal = () => {
+    Keyboard.dismiss();
     Animated.timing(slideAnim, {
       toValue: screenHeight,
       duration: 250,
@@ -240,6 +261,7 @@ const AreaSelectionModal: React.FC<{
       onClose();
       setSearchQuery('');
       setSelectedFilter('all');
+      setKeyboardHeight(0);
     });
   };
 
@@ -329,100 +351,267 @@ const AreaSelectionModal: React.FC<{
   return (
     <Modal visible={visible} transparent animationType="none">
       <View style={styles.modalOverlay}>
-        <Animated.View
-          style={[
-            styles.areaModalContainer,
-            { transform: [{ translateY: slideAnim }] }
-          ]}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.keyboardAvoidingView}
         >
-          <LinearGradient
-            colors={['#1a1a2e', '#2d3748', '#4a5568']}
-            style={styles.areaModalContent}
+          <Animated.View
+            style={[
+              styles.areaModalContainer,
+              { 
+                transform: [{ translateY: slideAnim }],
+                height: screenHeight * 0.85 - (keyboardHeight * 0.3), // FIXED: Adjust height for keyboard
+                marginBottom: keyboardHeight * 0.7, // FIXED: Push content up when keyboard is visible
+              }
+            ]}
           >
-            <View style={styles.areaModalHeader}>
-              <TouchableOpacity onPress={closeModal} style={styles.modalCloseButton}>
-                <Feather name="x" size={24} color="#fff" />
-              </TouchableOpacity>
-              <Text style={styles.areaModalTitle}>{title}</Text>
-              <View style={styles.placeholder} />
-            </View>
-            
-            <View style={styles.searchContainer}>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="Search areas or offices..."
-                placeholderTextColor="#888"
-                value={searchQuery}
-                onChangeText={setSearchQuery}
-              />
-            </View>
-
-            <View style={styles.filterContainer}>
-              {['all', 'areas', 'offices'].map((filter) => (
-                <TouchableOpacity
-                  key={filter}
-                  style={[
-                    styles.filterButton,
-                    selectedFilter === filter && styles.filterButtonActive
-                  ]}
-                  onPress={() => setSelectedFilter(filter as any)}
-                >
-                  <Text style={[
-                    styles.filterText,
-                    selectedFilter === filter && styles.filterTextActive
-                  ]}>
-                    {filter.charAt(0).toUpperCase() + filter.slice(1)}
-                  </Text>
+            <LinearGradient
+              colors={['#1a1a2e', '#2d3748', '#4a5568']}
+              style={styles.areaModalContent}
+            >
+              <View style={styles.areaModalHeader}>
+                <TouchableOpacity onPress={closeModal} style={styles.modalCloseButton}>
+                  <Feather name="x" size={24} color="#fff" />
                 </TouchableOpacity>
-              ))}
-            </View>
+                <Text style={styles.areaModalTitle}>{title}</Text>
+                <View style={styles.placeholder} />
+              </View>
+              
+              <View style={styles.searchContainer}>
+                <TextInput
+                  style={styles.searchInput}
+                  placeholder="Search areas or offices..."
+                  placeholderTextColor="#888"
+                  value={searchQuery}
+                  onChangeText={setSearchQuery}
+                  returnKeyType="done"
+                  onSubmitEditing={() => Keyboard.dismiss()}
+                />
+              </View>
 
-            <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
-              {isLoading ? (
-                <View style={styles.loadingContainer}>
-                  <ActivityIndicator size="large" color="#8B5CF6" />
-                  <Text style={styles.loadingText}>Loading locations...</Text>
-                </View>
-              ) : (
-                <View>
-                  {(selectedFilter === 'all' || selectedFilter === 'areas') && filteredAreas.length > 0 && (
-                    <View>
-                      <Text style={styles.modalSectionTitle}>Areas ({filteredAreas.length})</Text>
-                      <FlatList
-                        data={filteredAreas}
-                        keyExtractor={(item) => `area-${item.id}`}
-                        renderItem={renderAreaItem}
-                        scrollEnabled={false}
-                      />
-                    </View>
-                  )}
-                  
-                  {(selectedFilter === 'all' || selectedFilter === 'offices') && filteredAgents.length > 0 && (
-                    <View style={{ marginTop: selectedFilter === 'all' && filteredAreas.length > 0 ? 16 : 0 }}>
-                      <Text style={styles.modalSectionTitle}>Offices ({filteredAgents.length})</Text>
-                      <FlatList
-                        data={filteredAgents}
-                        keyExtractor={(item) => `agent-${item.id}`}
-                        renderItem={renderAgentItem}
-                        scrollEnabled={false}
-                      />
-                    </View>
-                  )}
-                  
-                  {filteredAreas.length === 0 && filteredAgents.length === 0 && !isLoading && (
-                    <View style={styles.noResults}>
-                      <Feather name="search" size={48} color="#666" />
-                      <Text style={styles.noResultsText}>No locations found</Text>
-                      <Text style={styles.noResultsSubtext}>Try a different search term or filter</Text>
-                    </View>
-                  )}
-                </View>
-              )}
-            </ScrollView>
-          </LinearGradient>
-        </Animated.View>
+              <View style={styles.filterContainer}>
+                {['all', 'areas', 'offices'].map((filter) => (
+                  <TouchableOpacity
+                    key={filter}
+                    style={[
+                      styles.filterButton,
+                      selectedFilter === filter && styles.filterButtonActive
+                    ]}
+                    onPress={() => setSelectedFilter(filter as any)}
+                  >
+                    <Text style={[
+                      styles.filterText,
+                      selectedFilter === filter && styles.filterTextActive
+                    ]}>
+                      {filter.charAt(0).toUpperCase() + filter.slice(1)}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <ScrollView 
+                style={styles.resultsContainer} 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled" // FIXED: Handle taps when keyboard is visible
+              >
+                {isLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#8B5CF6" />
+                    <Text style={styles.loadingText}>Loading locations...</Text>
+                  </View>
+                ) : (
+                  <View>
+                    {(selectedFilter === 'all' || selectedFilter === 'areas') && filteredAreas.length > 0 && (
+                      <View>
+                        <Text style={styles.modalSectionTitle}>Areas ({filteredAreas.length})</Text>
+                        <FlatList
+                          data={filteredAreas}
+                          keyExtractor={(item) => `area-${item.id}`}
+                          renderItem={renderAreaItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {(selectedFilter === 'all' || selectedFilter === 'offices') && filteredAgents.length > 0 && (
+                      <View style={{ marginTop: selectedFilter === 'all' && filteredAreas.length > 0 ? 16 : 0 }}>
+                        <Text style={styles.modalSectionTitle}>Offices ({filteredAgents.length})</Text>
+                        <FlatList
+                          data={filteredAgents}
+                          keyExtractor={(item) => `agent-${item.id}`}
+                          renderItem={renderAgentItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {filteredAreas.length === 0 && filteredAgents.length === 0 && !isLoading && (
+                      <View style={styles.noResults}>
+                        <Feather name="search" size={48} color="#666" />
+                        <Text style={styles.noResultsText}>No locations found</Text>
+                        <Text style={styles.noResultsSubtext}>Try a different search term or filter</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
+              </ScrollView>
+            </LinearGradient>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </View>
     </Modal>
+  );
+};
+
+// FIXED: Interactive Location Carousel Component
+const InteractiveLocationCarousel: React.FC<{ locations: Location[] }> = ({ locations }) => {
+  const scrollViewRef = useRef<ScrollView>(null);
+  const animationTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const inactivityTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [isAnimating, setIsAnimating] = useState(true);
+  const [isUserInteracting, setIsUserInteracting] = useState(false);
+  const [currentScrollX, setCurrentScrollX] = useState(0);
+  
+  const locationTagWidth = 120;
+  const totalLocations = locations.length;
+  const singleSetWidth = totalLocations * locationTagWidth;
+  
+  // Create triple set for infinite scroll
+  const tripleLocations = [...locations, ...locations, ...locations];
+
+  useEffect(() => {
+    if (isAnimating && !isUserInteracting) {
+      startAnimation();
+    } else {
+      stopAnimation();
+    }
+
+    return () => {
+      stopAnimation();
+      clearInactivityTimer();
+    };
+  }, [isAnimating, isUserInteracting]);
+
+  const startAnimation = () => {
+    stopAnimation();
+    
+    animationTimerRef.current = setInterval(() => {
+      if (!isUserInteracting && scrollViewRef.current) {
+        const newPosition = (currentScrollX + 1) % singleSetWidth;
+        scrollViewRef.current.scrollTo({ 
+          x: singleSetWidth + newPosition, 
+          animated: false 
+        });
+        setCurrentScrollX(newPosition);
+      }
+    }, 50); // Smooth 50ms intervals
+  };
+
+  const stopAnimation = () => {
+    if (animationTimerRef.current) {
+      clearInterval(animationTimerRef.current);
+      animationTimerRef.current = null;
+    }
+  };
+
+  const clearInactivityTimer = () => {
+    if (inactivityTimerRef.current) {
+      clearTimeout(inactivityTimerRef.current);
+      inactivityTimerRef.current = null;
+    }
+  };
+
+  const startInactivityTimer = () => {
+    clearInactivityTimer();
+    inactivityTimerRef.current = setTimeout(() => {
+      setIsUserInteracting(false);
+      setIsAnimating(true);
+    }, 3000); // Resume animation after 3 seconds of inactivity
+  };
+
+  const handleScrollBeginDrag = () => {
+    setIsUserInteracting(true);
+    setIsAnimating(false);
+    clearInactivityTimer();
+  };
+
+  const handleScrollEndDrag = () => {
+    startInactivityTimer();
+  };
+
+  const handleTouchStart = () => {
+    setIsUserInteracting(true);
+    setIsAnimating(false);
+    clearInactivityTimer();
+  };
+
+  const handleTouchEnd = () => {
+    startInactivityTimer();
+  };
+
+  const handleScroll = (event: any) => {
+    const { contentOffset } = event.nativeEvent;
+    let scrollX = contentOffset.x;
+    
+    // Handle infinite scroll wrapping
+    if (scrollX <= 0) {
+      scrollViewRef.current?.scrollTo({ x: singleSetWidth, animated: false });
+      scrollX = singleSetWidth;
+    } else if (scrollX >= singleSetWidth * 2) {
+      scrollViewRef.current?.scrollTo({ x: singleSetWidth, animated: false });
+      scrollX = singleSetWidth;
+    }
+    
+    setCurrentScrollX(scrollX - singleSetWidth);
+  };
+
+  const LocationTag = ({ location, index }: { location: Location; index: number }) => (
+    <TouchableOpacity
+      key={`${location.name}-${index}`}
+      onPressIn={handleTouchStart}
+      onPressOut={handleTouchEnd}
+      activeOpacity={0.8}
+      style={styles.locationTagContainer}
+    >
+      <LinearGradient
+        colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.locationTagGradient}
+      >
+        <View style={styles.locationTag}>
+          <Text style={styles.locationText}>{location.name}</Text>
+        </View>
+      </LinearGradient>
+    </TouchableOpacity>
+  );
+
+  return (
+    <View style={styles.interactiveCarouselContainer}>
+      <ScrollView
+        ref={scrollViewRef}
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        scrollEventThrottle={16}
+        onScroll={handleScroll}
+        onScrollBeginDrag={handleScrollBeginDrag}
+        onScrollEndDrag={handleScrollEndDrag}
+        onMomentumScrollEnd={handleScrollEndDrag}
+        contentContainerStyle={styles.carouselContent}
+        style={styles.carouselScrollView}
+      >
+        {tripleLocations.map((location, index) => (
+          <LocationTag key={`${location.id}-${index}`} location={location} index={index} />
+        ))}
+      </ScrollView>
+      
+      {/* Interaction hint */}
+      {isAnimating && (
+        <View style={styles.interactionHint}>
+          <Text style={styles.interactionHintText}>Tap to explore</Text>
+        </View>
+      )}
+    </View>
   );
 };
 
@@ -473,8 +662,6 @@ export default function HomeScreen() {
   
   // FIXED: Use navigation hook for better integration
   const navigation = useNavigation();
-  
-  const scrollX = useRef(new Animated.Value(0)).current;
   
   // FAB Menu Animations
   const fabRotation = useRef(new Animated.Value(0)).current;
@@ -542,35 +729,6 @@ export default function HomeScreen() {
   useEffect(() => {
     loadFormDataInBackground();
   }, []);
-
-  // Location scrolling animation
-  useEffect(() => {
-    if (locations.length === 0) return;
-    
-    const locationTagWidth = 120;
-    const singleSetWidth = locations.length * locationTagWidth;
-
-    const startContinuousLoop = () => {
-      scrollX.setValue(0);
-      
-      Animated.timing(scrollX, {
-        toValue: -singleSetWidth,
-        duration: 12000,
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished) {
-          startContinuousLoop();
-        }
-      });
-    };
-
-    startContinuousLoop();
-
-    return () => {
-      scrollX.stopAnimation();
-    };
-  }, [scrollX, locations]);
 
   // Initialize app with APK update system
   const initializeApp = async () => {
@@ -1050,22 +1208,6 @@ export default function HomeScreen() {
     }
   };
 
-  const LocationTag = ({ location }) => (
-    <LinearGradient
-      colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
-      start={{ x: 0, y: 0 }}
-      end={{ x: 1, y: 1 }}
-      style={styles.locationTagGradient}
-    >
-      <TouchableOpacity
-        style={styles.locationTag}
-        activeOpacity={0.8}
-      >
-        <Text style={styles.locationText}>{location.name}</Text>
-      </TouchableOpacity>
-    </LinearGradient>
-  );
-
   const renderPackageSizes = () => (
     <View style={styles.packageSizeContainer}>
       <Text style={styles.sectionLabel}>What are you sending?</Text>
@@ -1214,21 +1356,10 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* Currently Reaching Section with seamless endless scrolling */}
+      {/* FIXED: Currently Reaching Section with interactive carousel */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
-        <View style={styles.animatedContainer}>
-          <Animated.View
-            style={[
-              styles.animatedContent,
-              { transform: [{ translateX: scrollX }] },
-            ]}
-          >
-            {Array(10).fill(locations).flat().map((location, index) => (
-              <LocationTag key={`${location.name}-${index}`} location={location} />
-            ))}
-          </Animated.View>
-        </View>
+        <InteractiveLocationCarousel locations={locations} />
       </View>
 
       {/* Enhanced Cost Calculator with proper bottom padding */}
@@ -1583,12 +1714,18 @@ export default function HomeScreen() {
   );
 }
 
-// Styles remain the same as before
+// FIXED: Enhanced styles with keyboard handling and interactive carousel support
 const styles = StyleSheet.create({
   container: { 
     flex: 1, 
     backgroundColor: '#0a0a0f' 
   },
+  
+  // FIXED: Enhanced keyboard handling styles
+  keyboardAvoidingView: {
+    flex: 1,
+  },
+  
   locationsContainer: { 
     paddingTop: 20, 
     paddingBottom: 20,
@@ -1604,26 +1741,32 @@ const styles = StyleSheet.create({
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 4,
   },
-  animatedContainer: { 
-    height: 60, 
-    overflow: 'hidden' 
+  
+  // FIXED: Interactive carousel styles
+  interactiveCarouselContainer: {
+    height: 80,
+    position: 'relative',
   },
-  animatedContent: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    paddingHorizontal: 16 
+  carouselScrollView: {
+    height: 60,
+  },
+  carouselContent: {
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  locationTagContainer: {
+    marginHorizontal: 8,
   },
   locationTagGradient: { 
     borderRadius: 25, 
     padding: 2, 
-    marginHorizontal: 8 
   },
   locationTag: {
     backgroundColor: '#1a1a2e',
     paddingVertical: 12, 
     paddingHorizontal: 20,
     borderRadius: 23, 
-    minWidth: 80, 
+    minWidth: 100, 
     alignItems: 'center',
   },
   locationText: { 
@@ -1631,6 +1774,21 @@ const styles = StyleSheet.create({
     fontSize: 14, 
     fontWeight: '500' 
   },
+  interactionHint: {
+    position: 'absolute',
+    bottom: 0,
+    right: 20,
+    backgroundColor: 'rgba(139, 92, 246, 0.8)',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  interactionHintText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '500',
+  },
+  
   scrollContainer: { 
     flex: 1 
   },
@@ -1893,14 +2051,13 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // Area Selection Modal Styles
+  // FIXED: Enhanced Area Selection Modal Styles with keyboard handling
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
     justifyContent: 'flex-end',
   },
   areaModalContainer: {
-    height: screenHeight * 0.85,
     backgroundColor: '#1a1a2e',
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
