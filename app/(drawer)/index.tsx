@@ -1,5 +1,5 @@
 // app/(drawer)/index.tsx - Fixed HomeScreen with proper navigation system integration
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   SafeAreaView,
   StyleSheet,
@@ -205,7 +205,17 @@ const AreaSelectionModal: React.FC<{
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'areas' | 'offices'>('all');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
+
+  // FIXED: Calculate modal height based on keyboard state
+  const modalHeight = useMemo(() => {
+    if (isKeyboardVisible) {
+      const maxHeightWithKeyboard = screenHeight - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
+      return Math.min(maxHeightWithKeyboard, screenHeight * 0.75);
+    }
+    return screenHeight * 0.85;
+  }, [isKeyboardVisible, keyboardHeight]);
 
   useEffect(() => {
     if (visible) {
@@ -215,21 +225,31 @@ const AreaSelectionModal: React.FC<{
         duration: 300,
         useNativeDriver: true,
       }).start();
-
-      // FIXED: Add keyboard listeners
-      const keyboardWillShowListener = Keyboard.addListener('keyboardDidShow', (e) => {
-        setKeyboardHeight(e.endCoordinates.height);
-      });
-      const keyboardWillHideListener = Keyboard.addListener('keyboardDidHide', () => {
-        setKeyboardHeight(0);
-      });
-
-      return () => {
-        keyboardWillShowListener?.remove();
-        keyboardWillHideListener?.remove();
-      };
     }
   }, [visible]);
+
+  // FIXED: Separate keyboard effect with proper listeners
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => {
+        setKeyboardHeight(e.endCoordinates.height);
+        setIsKeyboardVisible(true);
+      }
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => {
+        setKeyboardHeight(0);
+        setIsKeyboardVisible(false);
+      }
+    );
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
 
   const loadLocationData = async () => {
     try {
@@ -259,6 +279,7 @@ const AreaSelectionModal: React.FC<{
       setSearchQuery('');
       setSelectedFilter('all');
       setKeyboardHeight(0);
+      setIsKeyboardVisible(false);
     });
   };
 
@@ -351,14 +372,14 @@ const AreaSelectionModal: React.FC<{
         <KeyboardAvoidingView 
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardAvoidingView}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <Animated.View
             style={[
               styles.areaModalContainer,
               { 
                 transform: [{ translateY: slideAnim }],
-                marginBottom: keyboardHeight > 0 ? keyboardHeight - 50 : 0,
-                height: keyboardHeight > 0 ? screenHeight * 0.6 : screenHeight * 0.85,
+                height: modalHeight,
               }
             ]}
           >
@@ -366,7 +387,7 @@ const AreaSelectionModal: React.FC<{
               colors={['#1a1a2e', '#2d3748', '#4a5568']}
               style={styles.areaModalContent}
             >
-              <View style={styles.areaModalHeader}>
+              <View style={[styles.areaModalHeader, { paddingTop: isKeyboardVisible ? 15 : 20 }]}>
                 <TouchableOpacity onPress={closeModal} style={styles.modalCloseButton}>
                   <Feather name="x" size={24} color="#fff" />
                 </TouchableOpacity>
@@ -384,6 +405,8 @@ const AreaSelectionModal: React.FC<{
                   autoCorrect={false}
                   returnKeyType="search"
                   blurOnSubmit={false}
+                  keyboardShouldPersistTaps="handled"
+                  autoCapitalize="none"
                 />
               </View>
 
@@ -407,7 +430,11 @@ const AreaSelectionModal: React.FC<{
                 ))}
               </View>
 
-              <ScrollView style={styles.resultsContainer} showsVerticalScrollIndicator={false}>
+              <ScrollView 
+                style={styles.resultsContainer} 
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
                 {isLoading ? (
                   <View style={styles.loadingContainer}>
                     <ActivityIndicator size="large" color="#8B5CF6" />
@@ -579,29 +606,33 @@ export default function HomeScreen() {
     loadFormDataInBackground();
   }, []);
 
-  // FIXED: Enhanced location scrolling animation with interaction
+  // Fixed: Enhanced location scrolling animation with consistent speed and smooth interaction
   useEffect(() => {
     if (locations.length === 0) return;
     
-    const locationTagWidth = 120;
+    const locationTagWidth = 120; // Updated to match new pill width
     const singleSetWidth = locations.length * locationTagWidth;
+    const ANIMATION_DURATION = 10000; // Consistent 10 seconds for full cycle
 
     const startContinuousLoop = () => {
       if (isAnimationPaused) return;
       
-      scrollX.setValue(manualScrollPosition);
+      // Improved position normalization to prevent glitches
+      const normalizedPosition = ((manualScrollPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+      const startPosition = -normalizedPosition;
       
-      Animated.timing(scrollX, {
-        toValue: manualScrollPosition - singleSetWidth,
-        duration: 12000 * (1 - (manualScrollPosition / singleSetWidth)),
-        easing: Easing.linear,
-        useNativeDriver: true,
-      }).start(({ finished }) => {
-        if (finished && !isAnimationPaused) {
-          setManualScrollPosition(0);
-          startContinuousLoop();
-        }
-      });
+      scrollX.setValue(startPosition);
+      
+      // Always animate for consistent duration regardless of starting position
+      Animated.loop(
+        Animated.timing(scrollX, {
+          toValue: startPosition - singleSetWidth,
+          duration: ANIMATION_DURATION,
+          easing: Easing.linear,
+          useNativeDriver: true,
+        }),
+        { iterations: -1 }
+      ).start();
     };
 
     if (!isAnimationPaused) {
@@ -613,16 +644,23 @@ export default function HomeScreen() {
     };
   }, [scrollX, locations, isAnimationPaused, manualScrollPosition]);
 
-  // FIXED: Pan responder for location animation interaction
+  // Fixed: Enhanced pan responder with smooth glitch-free scrolling
   const locationPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, gestureState) => {
+        // Only respond to horizontal movement to avoid conflicts
+        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 5;
+      },
       onPanResponderGrant: () => {
         // Stop animation when user touches
         setIsAnimationPaused(true);
         scrollX.stopAnimation((value) => {
-          setManualScrollPosition(value);
+          // Improved normalization to prevent glitches
+          const locationTagWidth = 120; // Updated to match new pill size
+          const singleSetWidth = locations.length * locationTagWidth;
+          const normalizedValue = ((value % singleSetWidth) + singleSetWidth) % singleSetWidth;
+          setManualScrollPosition(-normalizedValue);
         });
         
         // Clear existing timer
@@ -631,40 +669,35 @@ export default function HomeScreen() {
         }
       },
       onPanResponderMove: (_, gestureState) => {
-        // Handle manual scrolling
-        const locationTagWidth = 120;
+        // Handle smooth manual scrolling with proper bounds
+        const locationTagWidth = 120; // Updated to match new pill size
         const singleSetWidth = locations.length * locationTagWidth;
-        const newPosition = manualScrollPosition + gestureState.dx;
+        const sensitivity = 0.8; // Reduced sensitivity for smoother, less wobbly scrolling
+        const newPosition = manualScrollPosition + (gestureState.dx * sensitivity);
         
-        // Keep within bounds for infinite loop
-        let constrainedPosition = newPosition;
-        if (newPosition > 0) {
-          constrainedPosition = newPosition - singleSetWidth;
-        } else if (newPosition < -singleSetWidth) {
-          constrainedPosition = newPosition + singleSetWidth;
-        }
-        
-        scrollX.setValue(constrainedPosition);
+        // Smooth infinite loop constraint with better modulo handling
+        const constrainedPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+        scrollX.setValue(-constrainedPosition);
       },
       onPanResponderRelease: (_, gestureState) => {
-        // Update manual position
-        const locationTagWidth = 120;
+        // Calculate final position with controlled momentum
+        const locationTagWidth = 100; // Updated to match new pill size
         const singleSetWidth = locations.length * locationTagWidth;
-        let newPosition = manualScrollPosition + gestureState.dx;
+        const momentum = Math.min(Math.max(gestureState.vx * 0.2, -200), 200); // Clamped momentum
+        const finalDx = gestureState.dx + momentum;
+        let newPosition = manualScrollPosition + (finalDx * 0.8);
         
-        // Normalize position for infinite loop
-        if (newPosition > 0) {
-          newPosition = newPosition - singleSetWidth;
-        } else if (newPosition < -singleSetWidth) {
-          newPosition = newPosition + singleSetWidth;
-        }
-        
-        setManualScrollPosition(newPosition);
+        // Normalize position for seamless infinite loop
+        newPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+        setManualScrollPosition(-newPosition);
         
         // Start inactivity timer to resume animation
+        if (inactivityTimer.current) {
+          clearTimeout(inactivityTimer.current);
+        }
         inactivityTimer.current = setTimeout(() => {
           setIsAnimationPaused(false);
-        }, 3000); // Resume after 3 seconds of inactivity
+        }, 1500); // Reduced for quicker resumption
       },
     })
   ).current;
@@ -1147,7 +1180,7 @@ export default function HomeScreen() {
     }
   };
 
-  const LocationTag = ({ location }) => (
+  const LocationTag = React.memo(({ location }) => (
     <LinearGradient
       colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
       start={{ x: 0, y: 0 }}
@@ -1157,11 +1190,12 @@ export default function HomeScreen() {
       <TouchableOpacity
         style={styles.locationTag}
         activeOpacity={0.8}
+        pointerEvents="none" // Disable touch to prevent conflicts during scrolling
       >
         <Text style={styles.locationText}>{location.name}</Text>
       </TouchableOpacity>
     </LinearGradient>
-  );
+  ));
 
   const renderPackageSizes = () => (
     <View style={styles.packageSizeContainer}>
@@ -1311,19 +1345,25 @@ export default function HomeScreen() {
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* FIXED: Interactive Currently Reaching Section with seamless endless scrolling */}
+      {/* Enhanced Interactive Currently Reaching Section with smooth animations */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
           <Animated.View
             style={[
               styles.animatedContent,
-              { transform: [{ translateX: scrollX }] },
+              { 
+                transform: [{ translateX: scrollX }],
+                // Add hardware acceleration hints for smoother performance
+                opacity: 1,
+                elevation: 0,
+              },
             ]}
             {...locationPanResponder.panHandlers}
           >
-            {Array(10).fill(locations).flat().map((location, index) => (
-              <LocationTag key={`${location.name}-${index}`} location={location} />
+            {/* Render multiple copies for seamless infinite scroll */}
+            {Array(8).fill(locations).flat().map((location, index) => (
+              <LocationTag key={`${location.id || location.name}-${index}`} location={location} />
             ))}
           </Animated.View>
         </View>
@@ -1703,25 +1743,34 @@ const styles = StyleSheet.create({
   },
   animatedContainer: { 
     height: 60, 
-    overflow: 'hidden' 
+    overflow: 'hidden',
+    backgroundColor: 'transparent', // Ensure no background flickering
   },
   animatedContent: { 
     flexDirection: 'row', 
     alignItems: 'center', 
-    paddingHorizontal: 16 
+    paddingHorizontal: 16,
+    // Performance optimizations for smooth scrolling
+    shouldRasterizeIOS: true,
+    renderToHardwareTextureAndroid: true,
   },
   locationTagGradient: { 
     borderRadius: 25, 
     padding: 2, 
-    marginHorizontal: 8 
+    marginHorizontal: 8,
+    // Add performance hints
+    shouldRasterizeIOS: true,
+    renderToHardwareTextureAndroid: true,
   },
   locationTag: {
     backgroundColor: '#1a1a2e',
-    paddingVertical: 12, 
+    paddingVertical: 14, 
     paddingHorizontal: 20,
-    borderRadius: 23, 
-    minWidth: 80, 
+    borderRadius: 25, 
+    minWidth: 100, 
     alignItems: 'center',
+    // Prevent layout shifts during animation
+    width: 120, // Increased width to handle longer text
   },
   locationText: { 
     color: '#fff', 

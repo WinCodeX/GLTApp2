@@ -1,4 +1,4 @@
-// lib/helpers/hardwareBackHandler.ts - Fixed for immediate single press response
+// lib/helpers/hardwareBackHandler.ts - Fixed for immediate single press response with debouncing
 import { useEffect, useCallback } from 'react';
 import { BackHandler, Platform } from 'react-native';
 import { NavigationHelper } from './navigation';
@@ -37,14 +37,14 @@ export const useHardwareBackHandler = (options: HardwareBackOptions = {}) => {
       }
     }
 
-    // FIXED: Execute navigation immediately - use synchronous version for hardware back
+    // FIXED: Execute navigation immediately - use immediate version for hardware back
     try {
-      const success = NavigationHelper.goBackSync({
+      const success = NavigationHelper.goBackImmediate({
         fallbackRoute,
         replaceIfNoHistory
       });
       
-      console.log('📱 Hardware Back: Navigation completed, success:', success);
+      console.log('📱 Hardware Back: Navigation completed immediately, success:', success);
       return true; // Always prevent default behavior - let our navigation handle it
       
     } catch (error) {

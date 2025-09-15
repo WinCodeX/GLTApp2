@@ -38,6 +38,9 @@ class PersistentNavigationHistory {
     lastUpdated: Date.now()
   };
   private static initialized = false;
+  private static navigationInProgress = false;
+  private static lastNavigationTime = 0;
+  private static readonly DEBOUNCE_TIME = 150; // Reduced to 150ms for better responsiveness
 
   static async initialize(): Promise<void> {
     if (this.initialized) return;
@@ -211,6 +214,22 @@ class PersistentNavigationHistory {
       console.error('❌ PersistentNavigation: Failed to save state after route update:', error);
     });
   }
+
+  static resetNavigationLock(): void {
+    this.navigationInProgress = false;
+    this.lastNavigationTime = 0; // Also reset the time to allow immediate navigation
+    console.log('🔓 PersistentNavigation: Navigation lock and timer reset');
+  }
+
+  // Automatic failsafe reset after longer period
+  private static scheduleFailsafeReset(): void {
+    setTimeout(() => {
+      if (this.navigationInProgress) {
+        console.warn('⚠️ PersistentNavigation: Failsafe reset triggered - navigation was stuck');
+        this.resetNavigationLock();
+      }
+    }, 2000); // Reset after 2 seconds if still locked
+  }
 }
 
 export class NavigationHelper {
@@ -221,6 +240,31 @@ export class NavigationHelper {
 
   // Fixed back navigation with immediate response and proper tracking
   static goBack(options: NavigationOptions = {}): boolean {
+    return this.goBackSync(options);
+  }
+
+  // Synchronous back navigation - with aggressive debouncing (used by regular goBack calls)
+  static goBackSync(options: NavigationOptions = {}): boolean {
+    const now = Date.now();
+    
+    // AGGRESSIVE: Debounce rapid successive calls
+    if (PersistentNavigationHistory.navigationInProgress) {
+      console.log('🧭 Navigation: BLOCKED - Navigation already in progress (sync)');
+      return true; // Block and return true to indicate handled
+    }
+    
+    if ((now - PersistentNavigationHistory.lastNavigationTime) < PersistentNavigationHistory.DEBOUNCE_TIME) {
+      console.log('🧭 Navigation: DEBOUNCED - Too soon since last navigation (sync)');
+      return true; // Block and return true to indicate handled
+    }
+    
+    // Set navigation in progress IMMEDIATELY
+    PersistentNavigationHistory.navigationInProgress = true;
+    PersistentNavigationHistory.lastNavigationTime = now;
+    PersistentNavigationHistory.scheduleFailsafeReset();
+    
+    console.log('🧭 Navigation: EXECUTING synchronous back navigation...');
+    
     const {
       fallbackRoute = '/(drawer)/',
       replaceIfNoHistory = true,
@@ -250,6 +294,11 @@ export class NavigationHelper {
             params: { ...previousEntry.params, ...params }
           });
           
+          // Clear navigation in progress after a short delay
+          setTimeout(() => {
+            PersistentNavigationHistory.navigationInProgress = false;
+          }, 50);
+          
           return true;
         }
       }
@@ -258,6 +307,12 @@ export class NavigationHelper {
       if (router.canGoBack()) {
         console.log('🧭 Navigation: Using Expo Router back');
         router.back();
+        
+        // Clear navigation in progress after a short delay
+        setTimeout(() => {
+          PersistentNavigationHistory.navigationInProgress = false;
+        }, 100);
+        
         return true;
       }
       
@@ -274,6 +329,11 @@ export class NavigationHelper {
         PersistentNavigationHistory.push(fallbackRoute, params);
       }
       
+      // Clear navigation in progress after a short delay
+      setTimeout(() => {
+        PersistentNavigationHistory.navigationInProgress = false;
+      }, 100);
+      
       return false;
     } catch (error) {
       console.error('🧭 Navigation: Error during back navigation:', error);
@@ -286,6 +346,112 @@ export class NavigationHelper {
         console.error('🧭 Navigation: Fallback navigation also failed:', fallbackError);
       }
       
+      // Clear navigation in progress
+      PersistentNavigationHistory.navigationInProgress = false;
+      return false;
+    }
+  }
+
+  // Immediate back navigation without async operations - with aggressive debouncing
+  static goBackImmediate(options: NavigationOptions = {}): boolean {
+    const now = Date.now();
+    
+    // AGGRESSIVE: Debounce rapid successive calls with shorter window
+    if (PersistentNavigationHistory.navigationInProgress) {
+      console.log('🧭 Navigation: BLOCKED - Navigation already in progress');
+      return true; // Block and return true to prevent default back behavior
+    }
+    
+    if ((now - PersistentNavigationHistory.lastNavigationTime) < PersistentNavigationHistory.DEBOUNCE_TIME) {
+      console.log('🧭 Navigation: DEBOUNCED - Too soon since last navigation');
+      return true; // Block and return true to prevent default back behavior  
+    }
+    
+    // Set navigation in progress IMMEDIATELY
+    PersistentNavigationHistory.navigationInProgress = true;
+    PersistentNavigationHistory.lastNavigationTime = now;
+    PersistentNavigationHistory.scheduleFailsafeReset();
+    
+    console.log('🧭 Navigation: EXECUTING immediate back navigation...');
+    
+    const {
+      fallbackRoute = '/(drawer)/',
+      replaceIfNoHistory = true,
+      params = {}
+    } = options;
+
+    try {
+      
+      // Check if we have history to go back to (synchronous check)
+      if (PersistentNavigationHistory.canGoBackInHistory()) {
+        // Get previous route from our persistent history
+        const previousEntry = PersistentNavigationHistory.getPrevious();
+        
+        if (previousEntry) {
+          console.log('🧭 Navigation: Immediate back to', previousEntry.route);
+          
+          // Update history immediately (synchronous)
+          PersistentNavigationHistory.pop();
+          PersistentNavigationHistory.updateCurrentRoute(previousEntry.route);
+          
+          // Execute navigation immediately
+          router.push({ 
+            pathname: previousEntry.route, 
+            params: { ...previousEntry.params, ...params }
+          });
+          
+          // Clear navigation in progress after a short delay
+          setTimeout(() => {
+            PersistentNavigationHistory.navigationInProgress = false;
+          }, 50);
+          
+          return true;
+        }
+      }
+      
+      // Try Expo Router's native back if no persistent history
+      if (router.canGoBack()) {
+        console.log('🧭 Navigation: Using Expo Router back immediately');
+        router.back();
+        
+        // Clear navigation in progress after a short delay
+        setTimeout(() => {
+          PersistentNavigationHistory.navigationInProgress = false;
+        }, 100);
+        
+        return true;
+      }
+      
+      // No history available - immediate fallback
+      console.log(`🧭 Navigation: Immediate fallback to: ${fallbackRoute}`);
+      PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+      
+      if (replaceIfNoHistory) {
+        router.replace({ pathname: fallbackRoute, params });
+      } else {
+        router.push({ pathname: fallbackRoute, params });
+        PersistentNavigationHistory.push(fallbackRoute, params);
+      }
+      
+      // Clear navigation in progress after a short delay
+      setTimeout(() => {
+        PersistentNavigationHistory.navigationInProgress = false;
+      }, 100);
+      
+      return true;
+    } catch (error) {
+      console.error('🧭 Navigation: Error in immediate back:', error);
+      
+      // Ultimate fallback
+      try {
+        router.replace({ pathname: fallbackRoute, params });
+        PersistentNavigationHistory.updateCurrentRoute(fallbackRoute);
+      } catch (fallbackError) {
+        console.error('🧭 Navigation: Immediate fallback failed:', fallbackError);
+      }
+      
+      // Clear navigation in progress
+      PersistentNavigationHistory.navigationInProgress = false;
       return false;
     }
   }
@@ -388,6 +554,11 @@ export class NavigationHelper {
   static trackRouteChange(route: string, params?: Record<string, any>): void {
     PersistentNavigationHistory.push(route, params);
   }
+
+  // Reset navigation lock in case of issues
+  static resetNavigationLock(): void {
+    PersistentNavigationHistory.resetNavigationLock();
+  }
 }
 
 // Hook for navigation in components
@@ -404,6 +575,7 @@ export const useNavigation = () => {
     clearNavigationHistory: NavigationHelper.clearNavigationHistory,
     exportNavigationState: NavigationHelper.exportNavigationState,
     trackRouteChange: NavigationHelper.trackRouteChange,
+    resetNavigationLock: NavigationHelper.resetNavigationLock,
   };
 };
 

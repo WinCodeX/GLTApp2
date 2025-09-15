@@ -16,7 +16,7 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeLogo } from './SafeLogo';
-import { fetchCategories, validatePhoneNumber, formatPhoneNumber } from '../lib/helpers/business';
+import { fetchCategories, validatePhoneNumber, formatPhoneNumber, updateBusiness } from '../lib/helpers/business';
 import { uploadBusinessLogo } from '../lib/helpers/uploadBusinessLogo';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
@@ -277,8 +277,23 @@ export default function EditBusinessModal({
     try {
       setLoading(true);
       
-      // Here you would typically call an API to update the business
-      // For now, we'll simulate success
+      console.log('🏢 EditBusinessModal: Starting business update...');
+      
+      // Prepare update data
+      const updateData = {
+        name: businessName.trim(),
+        phone_number: phoneNumber.trim() || undefined,
+        category_ids: selectedCategories.length > 0 ? selectedCategories : undefined
+      };
+      
+      console.log('🏢 EditBusinessModal: Update data:', updateData);
+      
+      // Make API call to update business
+      const response = await updateBusiness(business.id, updateData);
+      
+      console.log('🏢 EditBusinessModal: Business update response:', response);
+      
+      // Prepare updated business object for UI
       const updatedBusiness = {
         ...business,
         name: businessName.trim(),
@@ -290,10 +305,22 @@ export default function EditBusinessModal({
 
       showToast.success('Business updated!', 'Changes have been saved successfully');
 
+      // Update parent component with new business data
       onUpdate(updatedBusiness);
       onClose();
+      
+      // Trigger background refresh to ensure data consistency
+      setTimeout(async () => {
+        try {
+          await clearUserCache();
+          await refreshBusinesses(true);
+        } catch (bgError) {
+          console.error('Background refresh after business update error:', bgError);
+        }
+      }, 1000);
+      
     } catch (error: any) {
-      console.error('Update business error:', error);
+      console.error('🏢 EditBusinessModal: Update business error:', error);
       showToast.error('Update failed', error.message || 'Please try again');
     } finally {
       setLoading(false);

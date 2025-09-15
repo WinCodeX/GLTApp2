@@ -18,6 +18,12 @@ interface BusinessData {
   categories?: string[]; // Legacy support
 }
 
+interface UpdateBusinessData {
+  name: string;
+  phone_number?: string;
+  category_ids?: number[];
+}
+
 const CATEGORIES_CACHE_KEY = '@business_categories';
 const CATEGORIES_CACHE_EXPIRY = '@categories_cache_expiry';
 const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
@@ -661,4 +667,138 @@ export const formatPhoneNumber = (phoneNumber: string): string => {
   }
   
   return phoneNumber;
+};
+
+// Update business with proper error handling
+export const updateBusiness = async (businessId: number, businessData: UpdateBusinessData) => {
+  try {
+    console.log('🏢 Starting business update process...', { businessId, businessData });
+    
+    if (!businessId || isNaN(businessId)) {
+      throw new Error('Invalid business ID');
+    }
+    
+    // Get auth token with verification
+    const token = await getAuthToken();
+    console.log('🏢 Found auth token for business update');
+
+    // Prepare request data
+    const requestData = {
+      business: {
+        name: businessData.name.trim(),
+        ...(businessData.phone_number && { 
+          phone_number: formatPhoneNumber(businessData.phone_number.trim()) 
+        }),
+        ...(businessData.category_ids && businessData.category_ids.length > 0 && {
+          category_ids: businessData.category_ids
+        })
+      }
+    };
+
+    console.log('🏢 Updating business with data:', requestData);
+
+    const response = await api.put(`/api/v1/businesses/${businessId}`, requestData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000, // 15 second timeout
+    });
+    
+    console.log('🏢 Business update response:', response.data);
+    
+    // Check if the response indicates success
+    if (response.data.success) {
+      return response.data;
+    } else {
+      // Server returned success=false
+      throw new Error(response.data.message || 'Business update failed');
+    }
+    
+  } catch (error: any) {
+    console.error('🏢 Update Business Error:', error?.response?.data || error?.message);
+    
+    // Handle authentication errors specifically
+    if (isAuthenticationError(error)) {
+      console.log('🏢 Authentication failed during business update');
+      Toast.show({
+        type: 'error',
+        text1: 'Session expired',
+        text2: 'Please log in again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Session expired. Please log in again.');
+    }
+    
+    // Handle validation errors (422) - DON'T redirect to login
+    if (isValidationError(error)) {
+      const errorMessage = error.response?.data?.message || 'Validation failed';
+      const errorDetails = error.response?.data?.errors?.join(', ') || '';
+      
+      console.log('🏢 Validation error during business update:', errorMessage, errorDetails);
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Validation Error',
+        text2: errorDetails || errorMessage,
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error(errorDetails || errorMessage);
+    }
+    
+    // Handle network/connection errors
+    if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Network Error',
+        text2: 'Please check your connection and try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Network error. Please check your connection and try again.');
+    }
+    
+    // Handle timeout errors
+    if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
+      Toast.show({
+        type: 'error',
+        text1: 'Request Timeout',
+        text2: 'Please try again',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Request timeout. Please try again.');
+    }
+    
+    // Handle server errors (500)
+    if (error.response?.status >= 500) {
+      Toast.show({
+        type: 'error',
+        text1: 'Server Error',
+        text2: 'Please try again later',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Server error. Please try again later.');
+    }
+    
+    // Enhanced error handling for other cases
+    const errorMessage = error?.response?.data?.message || 
+                        error?.response?.data?.errors?.join(', ') ||
+                        error?.response?.data?.error || 
+                        error?.message || 
+                        'Failed to update business';
+    
+    Toast.show({
+      type: 'error',
+      text1: 'Failed to update business',
+      text2: errorMessage,
+      position: 'bottom',
+      visibilityTime: 4000,
+    });
+    
+    throw new Error(errorMessage);
+  }
 };

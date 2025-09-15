@@ -600,21 +600,27 @@ export default function GLTHeader({
     navigation.dispatch(DrawerActions.openDrawer());
   };
 
-  const handleBackPress = async () => {
+  const handleBackPress = () => {
     if (onBackPress) {
       onBackPress();
     } else {
       try {
-        const success = await NavigationHelper.goBack({
+        console.log('🔙 Header: UI back button pressed - using immediate navigation');
+        const success = NavigationHelper.goBackImmediate({
           fallbackRoute: '/(drawer)/',
           replaceIfNoHistory: true
         });
         
-        if (!success) {
-          console.log('🔙 Header: Back navigation used fallback');
-        }
+        console.log('🔙 Header: UI back navigation completed immediately:', success);
       } catch (error) {
-        console.error('🔙 Header: Back navigation failed:', error);
+        console.error('🔙 Header: UI back navigation failed:', error);
+        
+        // Fallback to router back
+        try {
+          router.back();
+        } catch (fallbackError) {
+          console.error('🔙 Header: Router back fallback also failed:', fallbackError);
+        }
       }
     }
   };
