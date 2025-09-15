@@ -1,6 +1,8 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+// ✅ Add Firebase Google Services plugin
+apply plugin: 'com.google.gms.google-services'
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -235,6 +237,15 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // ✅ Firebase Dependencies
+    implementation platform('com.google.firebase:firebase-bom:33.1.2')
+    implementation 'com.google.firebase:firebase-messaging'
+    implementation 'com.google.firebase:firebase-analytics'
+    implementation 'com.google.firebase:firebase-inappmessaging-display'
+    
+    // ✅ Google Play Services (required for FCM)
+    implementation 'com.google.android.gms:play-services-base:18.2.0'
+
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
     def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
@@ -263,14 +274,14 @@ dependencies {
 }
 
 /*
- * ✅ APK UPDATE CONFIGURATION SUMMARY:
- * - Version management unified: appVersionName = "1.7.5", appVersionCode = 1
- * - APK naming includes version for update tracking
- * - Removed Expo Updates references (now using custom APK updates)
- * - Version accessible via BuildConfig.VERSION_NAME at runtime
+ * ✅ FIREBASE FCM CONFIGURATION SUMMARY:
+ * - Added Firebase BOM and messaging dependencies
+ * - Google Services plugin applied for google-services.json processing
+ * - Maintains existing APK update system with version tracking
+ * - All Firebase notifications will use existing notification-icon.png
  * 
- * 🎯 FOR NEXT APK RELEASE:
- * 1. Increment appVersionName to "1.8.0"
- * 2. Increment appVersionCode to 2
- * 3. Create matching database entry: AppUpdate.create!(version: "1.8.0", apk_url: "...")
+ * 🎯 NEXT STEPS:
+ * 1. Add google-services.json to android/app/
+ * 2. Update project-level build.gradle with Google Services classpath
+ * 3. Configure FCM in React Native code
  */
