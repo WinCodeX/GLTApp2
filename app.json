@@ -11,6 +11,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lvl0-x.gltapp2",
+      "googleServicesFile": "./GoogleService-Info.plist",
       "infoPlist": {
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
@@ -24,6 +25,7 @@
       },
       "edgeToEdgeEnabled": true,
       "package": "com.lvl0_x.gltapp2",
+      "googleServicesFile": "./android/app/google-services.json",
       "permissions": [
         "android.permission.BLUETOOTH",
         "android.permission.BLUETOOTH_ADMIN",
@@ -38,7 +40,9 @@
         "android.permission.VIBRATE",
         "android.permission.WAKE_LOCK",
         "android.permission.REQUEST_INSTALL_PACKAGES",
-        "android.permission.INSTALL_PACKAGES"
+        "android.permission.INSTALL_PACKAGES",
+        "android.permission.RECEIVE_BOOT_COMPLETED",
+        "com.google.android.c2dm.permission.RECEIVE"
       ]
     },
     "web": {
@@ -51,7 +55,12 @@
       "color": "#7c3aed",
       "iosDisplayInForeground": false,
       "androidMode": "default",
-      "androidCollapsedTitle": "GLT Logistics Update"
+      "androidCollapsedTitle": "GLT Logistics Update",
+      "sounds": {
+        "default": "./assets/sounds/notification_sound.wav",
+        "high": "./assets/sounds/notification_high.wav",
+        "urgent": "./assets/sounds/notification_urgent.wav"
+      }
     },
     "plugins": [
       "expo-router",
@@ -73,7 +82,23 @@
         {
           "icon": "./assets/images/notification-icon.png",
           "color": "#7c3aed",
-          "defaultChannel": "default"
+          "defaultChannel": "default",
+          "enableBackgroundRemoteNotifications": true
+        }
+      ],
+      [
+        "@react-native-firebase/app",
+        {
+          "android_package_name": "com.lvl0_x.gltapp2",
+          "ios_bundle_id": "com.lvl0-x.gltapp2"
+        }
+      ],
+      [
+        "@react-native-firebase/messaging",
+        {
+          "android_default_channel_id": "default",
+          "android_default_notification_color": "#7c3aed",
+          "android_default_notification_icon": "@drawable/notification_icon"
         }
       ],
       [
@@ -101,6 +126,14 @@
       "router": {},
       "eas": {
         "projectId": "cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+      },
+      "firebaseConfig": {
+        "apiKey": "YOUR_API_KEY",
+        "authDomain": "YOUR_PROJECT.firebaseapp.com",
+        "projectId": "YOUR_PROJECT_ID",
+        "storageBucket": "YOUR_PROJECT.appspot.com",
+        "messagingSenderId": "YOUR_SENDER_ID",
+        "appId": "YOUR_APP_ID"
       }
     },
     "owner": "lvl0_x"
