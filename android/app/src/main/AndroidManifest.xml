@@ -1,29 +1,38 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
-  <!-- Existing permissions -->
+  <!-- Location permissions -->
   <uses-permission-sdk-23 android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission-sdk-23 android:name="android.permission.ACCESS_FINE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+  
+  <!-- Network permissions -->
   <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+  <uses-permission android:name="android.permission.INTERNET"/>
+  
+  <!-- Bluetooth permissions -->
   <uses-permission android:name="android.permission.BLUETOOTH"/>
   <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
   <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
   <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
   <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation"/>
+  
+  <!-- Device permissions -->
   <uses-permission android:name="android.permission.CAMERA"/>
-  <uses-permission android:name="android.permission.INTERNET"/>
-  <uses-permission android:name="android.permission.READ_CONTACTS"/>
-  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
-  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
-  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
   <uses-permission android:name="android.permission.WAKE_LOCK"/>
-  <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
-  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW"/>
+  <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+  <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
   
-  <!-- ✅ NEW: APK installation permissions for updates -->
-  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
-  <uses-permission android:name="android.permission.INSTALL_PACKAGES" />
+  <!-- Storage permissions -->
+  <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"/>
+  <uses-permission android:name="android.permission.READ_CONTACTS"/>
+  <uses-permission android:name="android.permission.WRITE_CONTACTS"/>
+  
+  <!-- APK installation permissions -->
+  <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+  <uses-permission android:name="android.permission.INSTALL_PACKAGES"/>
   
   <!-- Hardware features -->
   <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
@@ -47,16 +56,22 @@
     android:theme="@style/AppTheme" 
     android:supportsRtl="true" 
     android:fullBackupContent="@xml/secure_store_backup_rules" 
-    android:dataExtractionRules="@xml/secure_store_data_extraction_rules">
+    android:dataExtractionRules="@xml/secure_store_data_extraction_rules"
+    android:enableOnBackInvokedCallback="false">
     
-    <!-- ✅ REMOVED: All Expo Updates configuration -->
-    <!-- These lines were removed for APK-based updates:
-    <meta-data android:name="expo.modules.updates.ENABLED" android:value="true"/>
+    <!-- Firebase notification configuration -->
+    <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default"/>
+    <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
+    <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
+    
+    <!-- Expo notification configuration -->
+    <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
+    <meta-data android:name="expo.modules.notifications.default_notification_icon" android:resource="@drawable/notification_icon"/>
+    
+    <!-- Expo updates configuration -->
+    <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-    <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://glt-53x8.onrender.com/api/v1/updates/manifest"/>
-    <meta-data android:name="expo.modules.updates.EXPO_RUNTIME_VERSION" android:value="1.0.0"/>
-    -->
     
     <activity 
       android:name=".MainActivity" 
