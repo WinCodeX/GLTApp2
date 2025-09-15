@@ -36,15 +36,7 @@
   
   <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true" android:enableOnBackInvokedCallback="false" android:fullBackupContent="@xml/secure_store_backup_rules" android:dataExtractionRules="@xml/secure_store_data_extraction_rules">
     
-    <!-- ✅ Firebase Cloud Messaging Configuration with Custom Sounds -->
-    <meta-data android:name="com.google.firebase.messaging.default_notification_channel_id" android:value="default"/>
-    <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
-    <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
-    
-    <!-- ✅ Custom Sound Configuration -->
-    <meta-data android:name="com.google.firebase.messaging.default_notification_sound" android:resource="@raw/notification_sound"/>
-    
-    <!-- ✅ Enhanced Expo Notifications Configuration (Hybrid Mode) -->
+    <!-- ✅ Keep Expo Notifications Configuration Only -->
     <meta-data android:name="expo.modules.notifications.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="expo.modules.notifications.default_notification_icon" android:resource="@drawable/notification_icon"/>
     <meta-data android:name="expo.modules.notifications.default_notification_sound" android:resource="@raw/notification_sound"/>
@@ -53,15 +45,6 @@
     <meta-data android:name="expo.modules.updates.ENABLED" android:value="false"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
-
-    <!-- ✅ Firebase Messaging Service -->
-    <service
-        android:name="com.google.firebase.messaging.FirebaseMessagingService"
-        android:exported="false">
-        <intent-filter>
-            <action android:name="com.google.firebase.MESSAGING_EVENT" />
-        </intent-filter>
-    </service>
     
     <!-- ✅ Main Activity -->
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true" android:screenOrientation="portrait">
