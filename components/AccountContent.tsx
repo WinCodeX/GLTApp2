@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Updated to use changelog version from ChangelogModal with Enhanced NavigationHelper
+// components/AccountContent.tsx - Updated to use Stack Navigation
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -39,8 +39,8 @@ import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 // Import changelog version from ChangelogModal instead of defining locally
 import { CHANGELOG_VERSION } from './ChangelogModal';
 
-// Import Enhanced NavigationHelper
-import { NavigationHelper } from '../lib/helpers/navigation';
+// Import Stack Navigation instead of NavigationHelper
+import { useStackNavigation, useAppNavigation } from '../lib/hooks/useStackNavigation';
 
 // Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
@@ -130,7 +130,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
 };
 
 interface AccountContentProps {
-  source: 'admin' | 'drawer';
+  source: 'admin' | 'drawer' | 'stack';
   onBack: () => void;
   title?: string;
 }
@@ -179,6 +179,10 @@ const showToast = {
 };
 
 export default function AccountContent({ source, onBack, title = 'Account' }: AccountContentProps) {
+  // Stack Navigation hooks
+  const { replace, push } = useStackNavigation();
+  const navigation = useAppNavigation();
+
   // Initialize component state
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
@@ -258,24 +262,24 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // Enhanced navigation handlers using NavigationHelper
+  // Updated navigation handlers using Stack Navigation
   const navigateToLogin = useCallback(async () => {
     try {
-      console.log('🧭 AccountContent: Navigating to login...');
-      await NavigationHelper.replaceTo('/login');
+      console.log('📱 AccountContent: Navigating to login...');
+      replace('/login');
     } catch (error) {
-      console.error('🧭 AccountContent: Failed to navigate to login:', error);
+      console.error('📱 AccountContent: Failed to navigate to login:', error);
     }
-  }, []);
+  }, [replace]);
 
   const navigateToEditPage = useCallback(async (page: string) => {
     try {
-      console.log(`🧭 AccountContent: Navigating to ${page}...`);
-      await NavigationHelper.navigateTo(page);
+      console.log(`📱 AccountContent: Navigating to ${page}...`);
+      push(page);
     } catch (error) {
-      console.error(`🧭 AccountContent: Failed to navigate to ${page}:`, error);
+      console.error(`📱 AccountContent: Failed to navigate to ${page}:`, error);
     }
-  }, []);
+  }, [push]);
 
   // Check for user data and redirect if missing
   useEffect(() => {
@@ -294,7 +298,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           console.log('🎭 AccountContent: No user data in context, redirecting to login');
           setIsRedirecting(true);
           showToast.error('User session invalid', 'Please log in again');
-          await navigateToLogin();
+          navigateToLogin();
           return;
         }
 
@@ -314,7 +318,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         if (isMounted && !user) {
           setIsRedirecting(true);
           showToast.error('Authentication error', 'Please log in again');
-          await navigateToLogin();
+          navigateToLogin();
         }
       }
     }
@@ -440,7 +444,7 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
-  // Use AccountManager-backed logout from UserContext with NavigationHelper
+  // Use AccountManager-backed logout from UserContext with Stack Navigation
   const confirmLogout = useCallback(async () => {
     try {
       console.log('🎭 AccountContent: Logging out through UserContext...');
@@ -451,8 +455,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       showToast.info('Logged out successfully');
       setShowLogoutConfirm(false);
       
-      // Navigate to login using NavigationHelper
-      await navigateToLogin();
+      // Navigate to login using Stack Navigation
+      navigateToLogin();
       
     } catch (error) {
       console.error('🎭 AccountContent: Logout error:', error);
