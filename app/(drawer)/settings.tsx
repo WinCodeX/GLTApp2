@@ -1,12 +1,11 @@
 // app/settings.tsx - Updated for Stack Navigation (moved from app/(drawer)/)
-import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
-import { MaterialIcons, Feather } from '@expo/vector-icons';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import colors from '../theme/colors';
+import React, { useCallback, useState } from 'react';
+import { SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 // Import Stack Navigation hooks instead of NavigationHelper
-import { useStackNavigation, useHardwareBackButton, useAppNavigation } from '../../lib/hooks/useStackNavigation';
+import { useAppNavigation, useHardwareBackButton, useStackNavigation } from '../../lib/hooks/useStackNavigation';
 
 const SETTINGS_SECTIONS = [
   {
