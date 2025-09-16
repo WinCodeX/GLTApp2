@@ -6,7 +6,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import colors from '../theme/colors';
 
 // Import Stack Navigation hooks instead of NavigationHelper
-import { useStackNavigation, useHardwareBackButton, useAppNavigation } from '../lib/hooks/useStackNavigation';
+import { useStackNavigation, useHardwareBackButton, useAppNavigation } from '../../lib/hooks/useStackNavigation';
 
 const SETTINGS_SECTIONS = [
   {
