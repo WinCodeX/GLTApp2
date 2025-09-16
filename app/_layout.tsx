@@ -1,6 +1,6 @@
-// app/_layout.tsx - Minimal root layout without loading animations
-import React, { useEffect } from 'react';
-import { Slot } from 'expo-router';
+// app/_layout.tsx - Complete Stack Navigation System
+import React from 'react';
+import { Stack } from 'expo-router';
 import { Provider as PaperProvider } from 'react-native-paper';
 import {
   ThemeProvider,
@@ -16,11 +16,6 @@ import { BluetoothProvider } from '@/contexts/BluetoothContext';
 import NetworkBanner from '@/components/NetworkBanner';
 import colors from '@/theme/colors';
 
-// Hardware back button and navigation tracking imports
-import { HardwareBackProvider } from '@/lib/helpers/hardwareBackHandler';
-import { NavigationTracker } from '@/lib/helpers/navigationTracker';
-import { initializeNavigation } from '@/lib/helpers/navigation';
-
 const CustomDarkTheme = {
   ...NavigationDarkTheme,
   colors: {
@@ -35,23 +30,6 @@ const CustomDarkTheme = {
 };
 
 export default function Layout() {
-  
-  // Initialize navigation system immediately (non-blocking)
-  useEffect(() => {
-    const initNavigation = async () => {
-      try {
-        console.log('🧭 Root Layout: Initializing navigation system...');
-        await initializeNavigation();
-        console.log('✅ Root Layout: Navigation system ready');
-      } catch (error) {
-        console.warn('⚠️ Root Layout: Navigation init warning (non-critical):', error);
-      }
-    };
-    
-    initNavigation();
-  }, []);
-
-  // No loading screen - let child layouts handle their own loading states
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
@@ -59,26 +37,227 @@ export default function Layout() {
           <ThemeProvider value={CustomDarkTheme}>
             <UserProvider>
               <BluetoothProvider>
-                {/* Hardware back button provider - ONLY hardware back handler */}
-                <HardwareBackProvider options={{
-                  fallbackRoute: '/(drawer)/',
-                  replaceIfNoHistory: true
-                }}>
-                  {/* Navigation tracker - ONLY tracks route changes */}
-                  <NavigationTracker fallbackRoute="/(drawer)/">
-                    {/* Main app content - child layouts handle their own loading */}
-                    <Slot />
-                    
-                    {/* Network status banner - positioned below header */}
-                    <NetworkBanner headerHeight={60} />
-                  </NavigationTracker>
-                </HardwareBackProvider>
+                <Stack
+                  screenOptions={{
+                    headerShown: false,
+                    animation: 'slide_from_right',
+                    gestureEnabled: true,
+                    gestureDirection: 'horizontal',
+                  }}
+                >
+                  {/* MAIN DRAWER - Entry point */}
+                  <Stack.Screen 
+                    name="(drawer)" 
+                    options={{ 
+                      title: 'Home',
+                      gestureEnabled: false,
+                    }} 
+                  />
+                  
+                  {/* MAIN APP SCREENS - All moved to root level */}
+                  <Stack.Screen 
+                    name="account" 
+                    options={{ 
+                      title: 'Account',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="business" 
+                    options={{ 
+                      title: 'Business',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="BusinessDetails" 
+                    options={{ 
+                      title: 'Business Details',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="settings" 
+                    options={{ 
+                      title: 'Settings',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="support" 
+                    options={{ 
+                      title: 'Support',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="track" 
+                    options={{ 
+                      title: 'Track Package',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="tracking" 
+                    options={{ 
+                      title: 'Package Tracking',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="faqs" 
+                    options={{ 
+                      title: 'FAQs',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="findus" 
+                    options={{ 
+                      title: 'Find Us',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="contact" 
+                    options={{ 
+                      title: 'Contact',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="history" 
+                    options={{ 
+                      title: 'History',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="cart" 
+                    options={{ 
+                      title: 'Cart',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="home" 
+                    options={{ 
+                      title: 'Home',
+                      presentation: 'card'
+                    }} 
+                  />
+                  
+                  {/* MODAL SCREENS */}
+                  <Stack.Screen 
+                    name="notifications" 
+                    options={{ 
+                      title: 'Notifications',
+                      presentation: 'modal',
+                      animation: 'slide_from_bottom'
+                    }} 
+                  />
+                  
+                  {/* ADMIN SCREENS */}
+                  <Stack.Screen 
+                    name="admin" 
+                    options={{ 
+                      title: 'Admin Panel',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="AdminAppManager" 
+                    options={{ 
+                      title: 'App Manager',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="AdminNotifications" 
+                    options={{ 
+                      title: 'Notifications Management',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="AdminPackageSearch" 
+                    options={{ 
+                      title: 'Package Search',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="AdminScanning" 
+                    options={{ 
+                      title: 'Scanning',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="AdminTermsManagement" 
+                    options={{ 
+                      title: 'Terms Management',
+                      presentation: 'card'
+                    }} 
+                  />
+                  
+                  {/* SETTINGS SUB-SCREENS */}
+                  <Stack.Screen 
+                    name="SettingsAppearance" 
+                    options={{ 
+                      title: 'Appearance',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsAccessibility" 
+                    options={{ 
+                      title: 'Accessibility',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsNotifications" 
+                    options={{ 
+                      title: 'Notification Settings',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsAdvanced" 
+                    options={{ 
+                      title: 'Advanced Settings',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsContentSocial" 
+                    options={{ 
+                      title: 'Content & Social',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsBugReport" 
+                    options={{ 
+                      title: 'Bug Report',
+                      presentation: 'card'
+                    }} 
+                  />
+                  <Stack.Screen 
+                    name="SettingsAcknowledgements" 
+                    options={{ 
+                      title: 'Acknowledgements',
+                      presentation: 'card'
+                    }} 
+                  />
+                </Stack>
+                
+                <NetworkBanner headerHeight={60} />
               </BluetoothProvider>
             </UserProvider>
           </ThemeProvider>
         </PaperProvider>
-        
-        {/* Toast component at the very end */}
         <Toast config={toastConfig} />
       </SafeAreaProvider>
     </GestureHandlerRootView>
