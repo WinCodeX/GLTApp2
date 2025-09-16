@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - FIXED: Proper Expo + Firebase integration
+// components/GLTHeader.tsx - FIXED: Firebase FCM notifications integration
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking, Platform } from 'react-native';
@@ -8,8 +8,6 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import * as Notifications from 'expo-notifications';
-import * as Device from 'expo-device';
 import Constants from 'expo-constants';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
@@ -17,6 +15,10 @@ import { SafeLogo } from '../components/SafeLogo';
 import UpdateService from '../lib/services/updateService';
 import colors from '../theme/colors';
 import api from '../lib/api';
+
+// CRITICAL: Import Firebase messaging instead of Expo notifications
+import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import { firebase } from '@react-native-firebase/app';
 
 // CRITICAL: Import NavigationHelper for proper navigation tracking
 import { NavigationHelper } from '../lib/helpers/navigation';
@@ -133,7 +135,7 @@ export default function GLTHeader({
     status: 'checking',
   });
   const [showInstallModal, setShowInstallModal] = useState(false);
-  const [expoPushToken, setExpoPushToken] = useState<string>('');
+  const [fcmToken, setFcmToken] = useState<string>('');
   
   // Double tap detection for avatar cycling
   const lastTapRef = useRef<number>(0);
@@ -143,189 +145,67 @@ export default function GLTHeader({
   const progressBarAnim = useRef(new Animated.Value(0)).current;
   const progressBarHeight = useRef(new Animated.Value(0)).current;
   
-  // Notification listeners refs
-  const notificationListener = useRef<Notifications.Subscription>();
-  const responseListener = useRef<Notifications.Subscription>();
+  // Firebase messaging listeners refs
+  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
+  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
 
   // ============================================
-  // FIXED: PROPER EXPO + FIREBASE INTEGRATION
+  // FIXED: PROPER FIREBASE FCM SETUP
   // ============================================
   useEffect(() => {
-    setupNotifications();
+    setupFirebaseNotifications();
     
     return () => {
-      // Cleanup notification listeners
-      if (notificationListener.current) {
-        notificationListener.current.remove();
+      // Cleanup Firebase listeners
+      if (unsubscribeOnMessage.current) {
+        unsubscribeOnMessage.current();
       }
-      if (responseListener.current) {
-        responseListener.current.remove();
+      if (unsubscribeOnNotificationOpenedApp.current) {
+        unsubscribeOnNotificationOpenedApp.current();
       }
     };
   }, []);
 
-  const setupNotifications = async () => {
+  const setupFirebaseNotifications = async () => {
     try {
-      console.log('🔔 SETTING UP EXPO NOTIFICATIONS WITH FIREBASE INTEGRATION...');
+      console.log('🔥 SETTING UP FIREBASE NOTIFICATIONS...');
       
-      // CRITICAL: Configure notification handler for proper system notifications
-      await configureNotificationHandler();
-      
-      // Set up notification channels (Android)
-      if (Platform.OS === 'android') {
-        await setupAndroidNotificationChannels();
-      }
-
-      // Set up notification categories
-      await setupNotificationCategories();
-
-      // Request permissions
-      const permissionGranted = await requestNotificationPermissions();
+      // Request permission first
+      const permissionGranted = await requestFirebasePermissions();
       if (!permissionGranted) {
         return;
       }
 
-      // Get and register push token
-      await registerForPushNotifications();
+      // Get FCM token
+      await getFirebaseToken();
       
-      // Setup notification response listeners
-      setupNotificationListeners();
+      // Set up Firebase notification handlers
+      setupFirebaseListeners();
       
-      console.log('✅ EXPO NOTIFICATIONS SETUP COMPLETE');
+      // Handle notification that opened app from killed state
+      handleInitialNotification();
+      
+      console.log('✅ FIREBASE NOTIFICATIONS SETUP COMPLETE');
       
     } catch (error) {
-      console.error('❌ FAILED TO SETUP NOTIFICATIONS:', error);
+      console.error('❌ FAILED TO SETUP FIREBASE NOTIFICATIONS:', error);
     }
   };
 
-  const configureNotificationHandler = async () => {
-    // CRITICAL: This configuration ensures notifications appear in system tray
-    await Notifications.setNotificationHandler({
-      handleNotification: async (notification) => {
-        console.log('🔔 NOTIFICATION RECEIVED:', {
-          title: notification.request.content.title,
-          body: notification.request.content.body,
-          data: notification.request.content.data
-        });
-        
-        // CRITICAL: Return configuration that forces system notifications
-        return {
-          shouldShowAlert: true,        // Show alert when app is active
-          shouldPlaySound: true,        // Play system sound
-          shouldSetBadge: true,         // Update app badge count
-        };
-      },
-    });
-  };
-
-  const setupAndroidNotificationChannels = async () => {
+  const requestFirebasePermissions = async (): Promise<boolean> => {
     try {
-      console.log('🔔 Setting up Android notification channels...');
+      console.log('🔥 REQUESTING FIREBASE PERMISSIONS...');
       
-      // Default channel - matches your AndroidManifest.xml
-      await Notifications.setNotificationChannelAsync('default', {
-        name: 'Default GLT Notifications',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#7c3aed',
-        sound: 'default',
-        enableVibrate: true,
-        enableLights: true,
-        showBadge: true,
-      });
+      const authStatus = await messaging().requestPermission();
+      const enabled =
+        authStatus === messaging.AuthorizationStatus.AUTHORIZED ||
+        authStatus === messaging.AuthorizationStatus.PROVISIONAL;
 
-      // High priority channel for urgent notifications
-      await Notifications.setNotificationChannelAsync('urgent', {
-        name: 'Urgent GLT Notifications',
-        importance: Notifications.AndroidImportance.MAX,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#ef4444',
-        sound: 'default',
-        enableVibrate: true,
-        enableLights: true,
-        showBadge: true,
-        bypassDnd: true,
-      });
-
-      // Package updates channel
-      await Notifications.setNotificationChannelAsync('packages', {
-        name: 'Package Updates',
-        importance: Notifications.AndroidImportance.HIGH,
-        vibrationPattern: [0, 250, 250, 250],
-        lightColor: '#10b981',
-        sound: 'default',
-        enableVibrate: true,
-        enableLights: true,
-        showBadge: true,
-      });
-
-      console.log('✅ Android notification channels configured');
-    } catch (error) {
-      console.error('❌ Failed to setup Android channels:', error);
-    }
-  };
-
-  const setupNotificationCategories = async () => {
-    try {
-      // Package update category
-      await Notifications.setNotificationCategoryAsync('package_update', [
-        {
-          identifier: 'view_package',
-          buttonTitle: 'View Package',
-          options: { opensAppToForeground: true }
-        },
-        {
-          identifier: 'track_package',
-          buttonTitle: 'Track',
-          options: { opensAppToForeground: true }
-        }
-      ]);
-
-      // General notification category
-      await Notifications.setNotificationCategoryAsync('general', [
-        {
-          identifier: 'view',
-          buttonTitle: 'View',
-          options: { opensAppToForeground: true }
-        }
-      ]);
-
-      console.log('✅ Notification categories configured');
-    } catch (error) {
-      console.error('❌ Failed to setup notification categories:', error);
-    }
-  };
-
-  const requestNotificationPermissions = async (): Promise<boolean> => {
-    try {
-      console.log('🔔 CHECKING NOTIFICATION PERMISSIONS...');
-      
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      console.log('🔔 EXISTING PERMISSION STATUS:', existingStatus);
-      
-      let finalStatus = existingStatus;
-      
-      if (existingStatus !== 'granted') {
-        console.log('🔔 REQUESTING NOTIFICATION PERMISSIONS...');
-        const { status } = await Notifications.requestPermissionsAsync({
-          ios: {
-            allowAlert: true,
-            allowBadge: true,
-            allowSound: true,
-            allowDisplayInCarPlay: true,
-            allowCriticalAlerts: false,
-            provideAppNotificationSettings: true,
-            allowProvisional: false,
-            allowAnnouncements: false,
-          },
-          android: {},
-        });
-        finalStatus = status;
-        console.log('🔔 NEW PERMISSION STATUS:', finalStatus);
-      }
-      
-      if (finalStatus !== 'granted') {
-        console.error('❌ NOTIFICATION PERMISSIONS DENIED');
+      if (enabled) {
+        console.log('✅ FIREBASE AUTHORIZATION STATUS:', authStatus);
+        return true;
+      } else {
+        console.log('❌ FIREBASE PERMISSIONS DENIED');
         Alert.alert(
           'Notifications Required',
           'GLT needs notification permissions to send you important updates about your packages. Please enable notifications in your device settings.',
@@ -340,178 +220,166 @@ export default function GLTHeader({
         );
         return false;
       }
-
-      console.log('✅ NOTIFICATION PERMISSIONS GRANTED');
-      return true;
     } catch (error) {
-      console.error('❌ ERROR REQUESTING PERMISSIONS:', error);
+      console.error('❌ ERROR REQUESTING FIREBASE PERMISSIONS:', error);
       return false;
     }
   };
 
-  const registerForPushNotifications = async () => {
+  const getFirebaseToken = async () => {
     try {
-      if (!Device.isDevice) {
-        console.warn('🔔 SIMULATOR DETECTED - Push notifications only work on physical devices');
-        Alert.alert(
-          'Simulator Detected',
-          'Push notifications only work on physical devices. Please test on a real phone.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
+      console.log('🔥 GETTING FIREBASE FCM TOKEN...');
+      
+      // Get FCM token
+      const token = await messaging().getToken();
+      
+      console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
+      setFcmToken(token);
 
-      console.log('🔔 GETTING EXPO PUSH TOKEN...');
+      // Register with backend
+      await registerFCMTokenWithBackend(token);
       
-      // CRITICAL: Get project ID from your EAS configuration
-      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
-      console.log('🔔 PROJECT ID:', projectId);
+      // Listen for token refresh
+      const unsubscribe = messaging().onTokenRefresh(async (newToken) => {
+        console.log('🔥 FCM TOKEN REFRESHED:', newToken?.substring(0, 50) + '...');
+        setFcmToken(newToken);
+        await registerFCMTokenWithBackend(newToken);
+      });
       
-      if (!projectId) {
-        console.error('❌ PROJECT ID NOT FOUND - Check your app.config.js');
-        Alert.alert(
-          'Configuration Error',
-          'Project ID not found. Please check your app.config.js file.',
-          [{ text: 'OK' }]
-        );
-        return;
-      }
-      
-      const token = (await Notifications.getExpoPushTokenAsync({
-        projectId: projectId,
-      })).data;
-      
-      console.log('🔔 EXPO PUSH TOKEN RECEIVED:', token?.substring(0, 50) + '...');
-      setExpoPushToken(token);
-
-      // Register with backend (keeping your existing 'expo' platform)
-      await registerPushTokenWithBackend(token);
+      // Store unsubscribe function for cleanup
+      return unsubscribe;
       
     } catch (error) {
-      console.error('❌ DETAILED PUSH TOKEN ERROR:', {
+      console.error('❌ DETAILED FCM TOKEN ERROR:', {
         message: error.message,
         code: error.code,
-        stack: error.stack,
-        projectId: Constants.expoConfig?.extra?.eas?.projectId,
-        buildInfo: {
-          isExpoGo: Constants.appOwnership === 'expo',
-          executionEnvironment: Constants.executionEnvironment,
-          platform: Platform.OS
-        }
+        stack: error.stack
       });
       
       Alert.alert(
-        'Push Token Error',
-        `Failed to register for push notifications: ${error.message}\n\nPlease try restarting the app.`,
+        'FCM Token Error',
+        `Failed to get Firebase token: ${error.message}\n\nPlease try restarting the app.`,
         [{ text: 'OK' }]
       );
     }
   };
 
-  const registerPushTokenWithBackend = async (token: string) => {
+  const registerFCMTokenWithBackend = async (token: string) => {
     try {
-      console.log('🔔 REGISTERING PUSH TOKEN WITH BACKEND...');
-      console.log('🔔 TOKEN:', token?.substring(0, 50) + '...');
+      console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
+      console.log('🔥 TOKEN:', token?.substring(0, 50) + '...');
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
-        platform: 'expo', // Keep as 'expo' to match your backend
+        platform: 'fcm', // Changed from 'expo' to 'fcm'
         device_info: {
-          brand: Device.brand,
-          modelName: Device.modelName,
-          osName: Device.osName,
-          osVersion: Device.osVersion,
-          isDevice: Device.isDevice,
-          deviceType: Device.deviceType,
+          platform: Platform.OS,
+          version: Platform.Version,
+          isDevice: true,
+          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
         }
       });
       
-      console.log('🔔 BACKEND RESPONSE:', response.data);
+      console.log('🔥 BACKEND RESPONSE:', response.data);
       
       if (response.data?.success) {
-        console.log('✅ PUSH TOKEN REGISTERED SUCCESSFULLY');
-        await AsyncStorage.setItem('expo_push_token', token);
-        await AsyncStorage.setItem('push_token_registered', 'true');
+        console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
+        await AsyncStorage.setItem('fcm_token', token);
+        await AsyncStorage.setItem('fcm_token_registered', 'true');
       } else {
-        console.error('❌ BACKEND REJECTED PUSH TOKEN REGISTRATION:', response.data);
+        console.error('❌ BACKEND REJECTED FCM TOKEN REGISTRATION:', response.data);
       }
       
     } catch (error) {
-      console.error('❌ PUSH TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
+      console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
     }
   };
 
-  const setupNotificationListeners = () => {
-    // Listen for notifications received while app is active
-    notificationListener.current = Notifications.addNotificationReceivedListener((notification) => {
-      console.log('🔔 NOTIFICATION RECEIVED WHILE APP ACTIVE:', {
-        title: notification.request.content.title,
-        body: notification.request.content.body,
-        data: notification.request.content.data
-      });
+  const setupFirebaseListeners = () => {
+    // Listen for foreground messages
+    unsubscribeOnMessage.current = messaging().onMessage(async (remoteMessage) => {
+      console.log('🔥 FOREGROUND MESSAGE RECEIVED:', remoteMessage);
       
-      // Update badge count
+      // Update notification count
       setNotificationCount(prev => prev + 1);
+      
+      // Show local notification for foreground messages
+      if (Platform.OS === 'android') {
+        // For Android, we can show a local notification
+        // The notification will be handled by Firebase automatically
+        console.log('🔥 Android foreground message handled by Firebase');
+      } else {
+        // For iOS, we might want to show an alert
+        if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
+          Alert.alert(
+            remoteMessage.notification.title,
+            remoteMessage.notification.body,
+            [
+              {
+                text: 'View',
+                onPress: () => handleNotificationData(remoteMessage.data)
+              },
+              { text: 'Dismiss', style: 'cancel' }
+            ]
+          );
+        }
+      }
     });
 
-    // Listen for notification responses (user taps notification)
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
-    
-    console.log('✅ Notification listeners configured');
+    // Listen for notification opened app (from background)
+    unsubscribeOnNotificationOpenedApp.current = messaging().onNotificationOpenedApp((remoteMessage) => {
+      console.log('🔥 NOTIFICATION OPENED APP FROM BACKGROUND:', remoteMessage);
+      handleNotificationData(remoteMessage.data);
+    });
   };
 
-  // Handle notification taps (when user taps system notification)
-  const handleNotificationResponse = async (response: Notifications.NotificationResponse) => {
-    console.log('🔔 NOTIFICATION TAPPED BY USER:', {
-      actionIdentifier: response.actionIdentifier,
-      data: response.notification.request.content.data
-    });
-    
-    const notificationData = response.notification.request.content.data;
-    const actionIdentifier = response.actionIdentifier;
+  const handleInitialNotification = async () => {
+    try {
+      // Check if app was opened by a notification (from killed state)
+      const initialNotification = await messaging().getInitialNotification();
+      
+      if (initialNotification) {
+        console.log('🔥 APP OPENED BY NOTIFICATION (FROM KILLED STATE):', initialNotification);
+        // Give some time for app to fully load before handling
+        setTimeout(() => {
+          handleNotificationData(initialNotification.data);
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('🔥 ERROR HANDLING INITIAL NOTIFICATION:', error);
+    }
+  };
+
+  const handleNotificationData = async (data: any) => {
+    console.log('🔥 HANDLING NOTIFICATION DATA:', data);
     
     try {
-      // Handle action-specific responses
-      if (actionIdentifier === 'view_package' || actionIdentifier === 'track_package') {
-        if (notificationData?.package_id) {
-          await NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { packageId: notificationData.package_id },
-            trackInHistory: true
-          });
-        } else if (notificationData?.package_code) {
-          await NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { code: notificationData.package_code },
-            trackInHistory: true
-          });
-        }
-      } else if (actionIdentifier === 'view' || !actionIdentifier) {
-        // Default action - navigate based on notification type
-        if (notificationData?.type === 'package_update' && notificationData?.package_id) {
-          await NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { packageId: notificationData.package_id },
-            trackInHistory: true
-          });
-        } else if (notificationData?.package_code) {
-          await NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { code: notificationData.package_code },
-            trackInHistory: true
-          });
-        } else {
-          // Navigate to notifications screen
-          await NavigationHelper.navigateTo('/(drawer)/notifications', {
-            params: {},
-            trackInHistory: true
-          });
-        }
+      // Handle different notification types
+      if (data?.type === 'package_update' && data?.package_id) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { packageId: data.package_id },
+          trackInHistory: true
+        });
+      } else if (data?.package_code) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { code: data.package_code },
+          trackInHistory: true
+        });
+      } else {
+        // Navigate to notifications screen
+        await NavigationHelper.navigateTo('/(drawer)/notifications', {
+          params: {},
+          trackInHistory: true
+        });
       }
       
       // Mark notification as read if we have the ID
-      if (notificationData?.notification_id) {
-        markNotificationAsRead(notificationData.notification_id);
+      if (data?.notification_id) {
+        markNotificationAsRead(data.notification_id);
       }
       
     } catch (error) {
-      console.error('🔔 ERROR HANDLING NOTIFICATION RESPONSE:', error);
+      console.error('🔥 ERROR HANDLING NOTIFICATION DATA:', error);
       
       // Fallback navigation
       try {
@@ -520,7 +388,7 @@ export default function GLTHeader({
           trackInHistory: true
         });
       } catch (fallbackError) {
-        console.error('🔔 FALLBACK NAVIGATION FAILED:', fallbackError);
+        console.error('🔥 FALLBACK NAVIGATION FAILED:', fallbackError);
       }
     }
   };
