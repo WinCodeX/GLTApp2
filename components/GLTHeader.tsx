@@ -363,9 +363,19 @@ export default function GLTHeader({
 
       console.log('🔔 GETTING EXPO PUSH TOKEN...');
       
-      // CRITICAL: Use your specific EAS project ID
-      const projectId = 'cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7';
+      // CRITICAL: Get project ID from your EAS configuration
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
       console.log('🔔 PROJECT ID:', projectId);
+      
+      if (!projectId) {
+        console.error('❌ PROJECT ID NOT FOUND - Check your app.config.js');
+        Alert.alert(
+          'Configuration Error',
+          'Project ID not found. Please check your app.config.js file.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
       
       const token = (await Notifications.getExpoPushTokenAsync({
         projectId: projectId,
