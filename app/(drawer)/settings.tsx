@@ -1,75 +1,68 @@
-// app/(drawer)/settings.tsx - Settings Screen with Enhanced NavigationHelper integration
+// app/settings.tsx - Updated for Stack Navigation (moved from app/(drawer)/)
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, SectionList, TextInput } from 'react-native';
 import { MaterialIcons, Feather } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import colors from '../../theme/colors';
+import colors from '../theme/colors';
 
-// Import Enhanced NavigationHelper
-import { NavigationHelper } from '../../lib/helpers/navigation';
+// Import Stack Navigation hooks instead of NavigationHelper
+import { useStackNavigation, useHardwareBackButton, useAppNavigation } from '../lib/hooks/useStackNavigation';
 
 const SETTINGS_SECTIONS = [
   {
     title: 'Account Settings',
     data: [
-      { id: '1', label: 'Account', icon: 'account-circle', route: '/(drawer)/account' },
-      { id: '2', label: 'Content & Social', icon: 'group', route: '/settings/content_social' },
+      { id: '1', label: 'Account', icon: 'account-circle', route: '/account' },
+      { id: '2', label: 'Content & Social', icon: 'group', route: '/SettingsContentSocial' },
     ],
   },
   {
     title: 'App Settings',
     data: [
-      { id: '3', label: 'Appearance', icon: 'color-lens', route: '/settings/appearance' },
-      { id: '4', label: 'Accessibility', icon: 'accessibility', route: '/settings/accessibility' },
-      { id: '5', label: 'Notifications', icon: 'notifications', route: '/settings/notifications' },
-      { id: '6', label: 'Advanced', icon: 'settings', route: '/settings/advanced' },
+      { id: '3', label: 'Appearance', icon: 'color-lens', route: '/SettingsAppearance' },
+      { id: '4', label: 'Accessibility', icon: 'accessibility', route: '/SettingsAccessibility' },
+      { id: '5', label: 'Notifications', icon: 'notifications', route: '/SettingsNotifications' },
+      { id: '6', label: 'Advanced', icon: 'settings', route: '/SettingsAdvanced' },
     ],
   },
   {
     title: 'Support',
     data: [
-      { id: '9', label: 'Support', icon: 'help-circle', route: '/(drawer)/support' },
-      { id: '10', label: 'Upload any Bugs you find to GLT Support', icon: 'file-upload', route: '/settings/bug_report' },
-      { id: '11', label: 'Acknowledgements', icon: 'info', route: '/settings/acknowledgements' },
+      { id: '9', label: 'Support', icon: 'help-circle', route: '/support' },
+      { id: '10', label: 'Upload any Bugs you find to GLT Support', icon: 'file-upload', route: '/SettingsBugReport' },
+      { id: '11', label: 'Acknowledgements', icon: 'info', route: '/SettingsAcknowledgements' },
     ],
   },
 ];
 
 export default function SettingsScreen() {
   const [search, setSearch] = useState('');
+  
+  // Stack Navigation hooks
+  const { goBack, push } = useStackNavigation();
+  const navigation = useAppNavigation();
+  
+  // Handle hardware back button automatically
+  useHardwareBackButton('/(drawer)/');
 
-  // Enhanced back navigation using NavigationHelper
-  const handleGoBack = useCallback(async () => {
+  // Simple back navigation using Stack Navigation
+  const handleGoBack = useCallback(() => {
     console.log('🔙 Settings: Going back...');
-    
-    try {
-      const success = await NavigationHelper.goBack({
-        fallbackRoute: '/(drawer)/',
-        replaceIfNoHistory: true
-      });
-      
-      if (!success) {
-        console.log('🔙 Settings: Back navigation used fallback');
-      }
-    } catch (error) {
-      console.error('🔙 Settings: Back navigation failed:', error);
-    }
-  }, []);
+    goBack('/(drawer)/');
+  }, [goBack]);
 
-  // Enhanced navigation handler using NavigationHelper
-  const handleSettingNavigation = useCallback(async (item: any) => {
+  // Updated navigation handler using Stack Navigation
+  const handleSettingNavigation = useCallback((item: any) => {
     console.log('🔧 Settings: Navigating to:', item.label);
     
     try {
-      // Use predefined route if available, otherwise generate one
-      const route = item.route || `/settings/${item.label.toLowerCase().replace(/ /g, '_').replace(/&/g, 'and')}`;
-      
-      await NavigationHelper.navigateTo(route);
-      console.log('✅ Settings: Successfully navigated to:', route);
+      // Use Stack Navigation push method
+      push(item.route);
+      console.log('✅ Settings: Successfully navigated to:', item.route);
     } catch (error) {
       console.error('❌ Settings: Navigation failed for:', item.label, error);
     }
-  }, []);
+  }, [push]);
 
   // Function to filter the settings data
   const filterSettings = (sections: any) => {
@@ -110,7 +103,7 @@ export default function SettingsScreen() {
 
   return (
     <View style={styles.container}>
-      {/* Header with gradient background and Enhanced NavigationHelper back */}
+      {/* Header with gradient background and Stack Navigation back */}
       <LinearGradient
         colors={['#4c1d95', '#7c3aed', '#3730a3']}
         start={{ x: 0, y: 0 }}
