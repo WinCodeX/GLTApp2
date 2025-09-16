@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - FIXED: System notifications now appear in phone's notification tray
+// components/GLTHeader.tsx - FIXED: Proper Expo + Firebase integration
 
 import React, { useState, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking, Platform } from 'react-native';
@@ -148,10 +148,10 @@ export default function GLTHeader({
   const responseListener = useRef<Notifications.Subscription>();
 
   // ============================================
-  // FIXED: PROPER SYSTEM NOTIFICATION SETUP
+  // FIXED: PROPER EXPO + FIREBASE INTEGRATION
   // ============================================
   useEffect(() => {
-    setupSystemNotifications();
+    setupNotifications();
     
     return () => {
       // Cleanup notification listeners
@@ -164,37 +164,22 @@ export default function GLTHeader({
     };
   }, []);
 
-  const setupSystemNotifications = async () => {
+  const setupNotifications = async () => {
     try {
-      console.log('🔔 SETTING UP SYSTEM NOTIFICATIONS...');
+      console.log('🔔 SETTING UP EXPO NOTIFICATIONS WITH FIREBASE INTEGRATION...');
       
-      // CRITICAL: Set up notification channels first (Android)
+      // CRITICAL: Configure notification handler for proper system notifications
+      await configureNotificationHandler();
+      
+      // Set up notification channels (Android)
       if (Platform.OS === 'android') {
         await setupAndroidNotificationChannels();
       }
-      
-      // FIXED: Configure notification handler for proper system notifications
-      await Notifications.setNotificationHandler({
-        handleNotification: async (notification) => {
-          console.log('🔔 NOTIFICATION RECEIVED:', {
-            title: notification.request.content.title,
-            body: notification.request.content.body,
-            data: notification.request.content.data
-          });
-          
-          // CRITICAL: Return configuration that forces system notifications
-          return {
-            shouldShowAlert: false,      // NEVER show in-app alerts
-            shouldPlaySound: true,       // Play system sound
-            shouldSetBadge: true,        // Update app badge count
-          };
-        },
-      });
 
-      // Set up notification categories with actions
+      // Set up notification categories
       await setupNotificationCategories();
 
-      // Request permissions with detailed checking
+      // Request permissions
       const permissionGranted = await requestNotificationPermissions();
       if (!permissionGranted) {
         return;
@@ -206,18 +191,38 @@ export default function GLTHeader({
       // Setup notification response listeners
       setupNotificationListeners();
       
-      console.log('✅ SYSTEM NOTIFICATIONS SETUP COMPLETE');
+      console.log('✅ EXPO NOTIFICATIONS SETUP COMPLETE');
       
     } catch (error) {
-      console.error('❌ FAILED TO SETUP SYSTEM NOTIFICATIONS:', error);
+      console.error('❌ FAILED TO SETUP NOTIFICATIONS:', error);
     }
+  };
+
+  const configureNotificationHandler = async () => {
+    // CRITICAL: This configuration ensures notifications appear in system tray
+    await Notifications.setNotificationHandler({
+      handleNotification: async (notification) => {
+        console.log('🔔 NOTIFICATION RECEIVED:', {
+          title: notification.request.content.title,
+          body: notification.request.content.body,
+          data: notification.request.content.data
+        });
+        
+        // CRITICAL: Return configuration that forces system notifications
+        return {
+          shouldShowAlert: true,        // Show alert when app is active
+          shouldPlaySound: true,        // Play system sound
+          shouldSetBadge: true,         // Update app badge count
+        };
+      },
+    });
   };
 
   const setupAndroidNotificationChannels = async () => {
     try {
       console.log('🔔 Setting up Android notification channels...');
       
-      // Default channel
+      // Default channel - matches your AndroidManifest.xml
       await Notifications.setNotificationChannelAsync('default', {
         name: 'Default GLT Notifications',
         importance: Notifications.AndroidImportance.HIGH,
@@ -291,7 +296,7 @@ export default function GLTHeader({
     }
   };
 
-  const requestNotificationPermissions = async () => {
+  const requestNotificationPermissions = async (): Promise<boolean> => {
     try {
       console.log('🔔 CHECKING NOTIFICATION PERMISSIONS...');
       
@@ -357,22 +362,19 @@ export default function GLTHeader({
       }
 
       console.log('🔔 GETTING EXPO PUSH TOKEN...');
-      console.log('🔔 PROJECT ID:', Constants.expoConfig?.extra?.eas?.projectId);
-      console.log('🔔 Build Info:', {
-        isExpoGo: Constants.appOwnership === 'expo',
-        executionEnvironment: Constants.executionEnvironment,
-        platform: Platform.OS,
-        buildType: __DEV__ ? 'development' : 'production'
-      });
+      
+      // CRITICAL: Use your specific EAS project ID
+      const projectId = 'cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7';
+      console.log('🔔 PROJECT ID:', projectId);
       
       const token = (await Notifications.getExpoPushTokenAsync({
-        projectId: Constants.expoConfig?.extra?.eas?.projectId,
+        projectId: projectId,
       })).data;
       
       console.log('🔔 EXPO PUSH TOKEN RECEIVED:', token?.substring(0, 50) + '...');
       setExpoPushToken(token);
 
-      // Register with backend
+      // Register with backend (keeping your existing 'expo' platform)
       await registerPushTokenWithBackend(token);
       
     } catch (error) {
@@ -403,7 +405,7 @@ export default function GLTHeader({
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
-        platform: 'expo',
+        platform: 'expo', // Keep as 'expo' to match your backend
         device_info: {
           brand: Device.brand,
           modelName: Device.modelName,
@@ -440,8 +442,6 @@ export default function GLTHeader({
       
       // Update badge count
       setNotificationCount(prev => prev + 1);
-      
-      // The notification will automatically show in system tray due to our handler config
     });
 
     // Listen for notification responses (user taps notification)
