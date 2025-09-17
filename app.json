@@ -50,18 +50,6 @@
       "output": "server",
       "favicon": "./assets/images/favicon.png"
     },
-    "notification": {
-      "icon": "./assets/images/notification-icon.png",
-      "color": "#7c3aed",
-      "iosDisplayInForeground": false,
-      "androidMode": "default",
-      "androidCollapsedTitle": "GLT Logistics Update",
-      "sounds": {
-        "default": "./assets/sounds/notification_sound.wav",
-        "high": "./assets/sounds/notification_high.wav",
-        "urgent": "./assets/sounds/notification_urgent.wav"
-      }
-    },
     "plugins": [
       "expo-router",
       [
@@ -77,15 +65,6 @@
       "expo-web-browser",
       "expo-dev-client",
       "react-native-ble-plx",
-      [
-        "expo-notifications",
-        {
-          "icon": "./assets/images/notification-icon.png",
-          "color": "#7c3aed",
-          "defaultChannel": "default",
-          "enableBackgroundRemoteNotifications": true
-        }
-      ],
       [
         "@react-native-firebase/app",
         {
@@ -125,7 +104,7 @@
       "iosClientId": "$IOS_CLIENT_ID",
       "router": {},
       "eas": {
-        "projectId": "$EAS_PROJECT_ID"
+        "projectId": "cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
       }
     },
     "owner": "lvl0_x"
