@@ -920,7 +920,7 @@ export default function GLTHeader({
                 </TouchableOpacity>
               </View>
               
-              <Text style={styles.modalText">
+              <Text style={styles.modalText}>
                 GLT version {downloadProgress.version} is ready to install.
               </Text>
               
