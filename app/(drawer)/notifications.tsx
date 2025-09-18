@@ -99,9 +99,13 @@ export default function NotificationsScreen() {
   // FIREBASE SETUP - Same as header
   // ============================================
   useEffect(() => {
-    setupFirebaseMessaging();
+    // Wait a bit to ensure authentication is established
+    const timer = setTimeout(() => {
+      setupFirebaseMessaging();
+    }, 2000);
     
     return () => {
+      clearTimeout(timer);
       // Cleanup Firebase listeners
       if (unsubscribeOnMessage.current) {
         unsubscribeOnMessage.current();
@@ -118,10 +122,16 @@ export default function NotificationsScreen() {
   const setupFirebaseMessaging = async () => {
     try {
       console.log('🔥 NOTIFICATIONS SCREEN: Setting up Firebase messaging...');
+      console.log('🔥 Platform detection:', {
+        isNative: firebase.isNative,
+        platform: Platform.OS,
+        hasMessaging: !!firebase.messaging()
+      });
       
-      // Only setup on native platforms (not web/Expo Go)
-      if (!firebase.isNative || !firebase.messaging()) {
-        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
+      // Try Firebase setup regardless of platform check
+      const messaging = firebase.messaging();
+      if (!messaging) {
+        console.log('🔥 Firebase messaging not available, skipping setup');
         return;
       }
 
@@ -386,97 +396,59 @@ export default function NotificationsScreen() {
     }
   }, [filter]);
 
-  // Mark notification as read - FIXED to prevent blank notifications
+  // Mark notification as read - FIXED to prevent blank notifications completely
   const markAsRead = async (notificationId: number) => {
     try {
       console.log('🔔 Marking notification as read:', notificationId);
       
-      // Optimistic update - update UI immediately
-      setNotifications(prev => {
-        if (!Array.isArray(prev)) return prev;
-        return prev.map(notification =>
-          notification.id === notificationId
-            ? { ...notification, read: true }
-            : notification
-        );
-      });
-      
-      // Then make API call in background
+      // Make API call without touching the UI state
       const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       
       if (response.data && response.data.success) {
         console.log('✅ Notification marked as read successfully');
-      } else {
-        // Revert optimistic update if API call failed
+        // Only update state after successful API call
         setNotifications(prev => {
           if (!Array.isArray(prev)) return prev;
           return prev.map(notification =>
             notification.id === notificationId
-              ? { ...notification, read: false }
+              ? { ...notification, read: true }
               : notification
           );
         });
-        showToast('Failed to mark as read', 'error');
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
-      
-      // Revert optimistic update if API call failed
-      setNotifications(prev => {
-        if (!Array.isArray(prev)) return prev;
-        return prev.map(notification =>
-          notification.id === notificationId
-            ? { ...notification, read: false }
-            : notification
-        );
-      });
-      showToast('Failed to mark as read', 'error');
     }
   };
 
-  // Mark all notifications as read
+  // Mark all notifications as read - FIXED 
   const markAllAsRead = async () => {
     try {
       console.log('🔔 Marking all notifications as read');
       
-      // Optimistic update - update UI immediately
-      const originalNotifications = [...notifications];
-      setNotifications(prev => {
-        if (!Array.isArray(prev)) return prev;
-        return prev.map(notification => ({ ...notification, read: true }));
-      });
-      
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
       
       if (response.data && response.data.success) {
+        // Update all notifications in the local state after successful API call
+        setNotifications(prev => {
+          if (!Array.isArray(prev)) return prev;
+          return prev.map(notification => ({ ...notification, read: true }));
+        });
         showToast('All notifications marked as read', 'success');
       } else {
-        // Revert if failed
-        setNotifications(originalNotifications);
         showToast('Failed to mark all as read', 'error');
       }
     } catch (error) {
       console.error('🔔 Failed to mark all notifications as read:', error);
-      
-      // Revert on error
-      setNotifications(prev => {
-        if (!Array.isArray(prev)) return prev;
-        return prev.map(notification => ({ ...notification, read: false }));
-      });
       showToast('Failed to mark all as read', 'error');
     }
   };
 
-  // Handle notification press - FIXED to prevent blank notifications
+  // Handle notification press - COMPLETELY FIXED to prevent blank notifications
   const handleNotificationPress = (notification: NotificationData) => {
     console.log('🔔 Notification pressed:', notification.id, 'read:', notification.read);
     
-    // Mark as read if not already read (non-blocking)
-    if (!notification.read) {
-      markAsRead(notification.id);
-    }
-
-    // Navigate to related content if action_url is provided
+    // Navigate first, then mark as read in background without affecting UI immediately
     if (notification.action_url) {
       try {
         // Extract route from action_url
@@ -499,6 +471,13 @@ export default function NotificationsScreen() {
       } catch (error) {
         console.error('🔔 Navigation error:', error);
       }
+    }
+
+    // Mark as read after navigation, in background, with delay to prevent UI issues
+    if (!notification.read) {
+      setTimeout(() => {
+        markAsRead(notification.id);
+      }, 500); // Delay to ensure navigation completes first
     }
   };
 
