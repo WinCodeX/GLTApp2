@@ -153,7 +153,7 @@ export default function NotificationsScreen() {
     try {
       await api.post('/api/v1/push_tokens', {
         push_token: token,
-        platform: 'expo'
+        platform: 'fcm' // Changed from 'expo' to match backend expectations
       });
       console.log('Push token registered successfully');
     } catch (error) {
@@ -264,22 +264,43 @@ export default function NotificationsScreen() {
     try {
       console.log('🔔 Marking notification as read:', notificationId);
       
+      // Update state immediately for better UX
+      setNotifications(prev => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map(notification =>
+          notification.id === notificationId
+            ? { ...notification, read: true }
+            : notification
+        );
+      });
+      
       const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       
       if (response.data && response.data.success) {
-        // Update the notification in the local state
+        showToast('Notification marked as read', 'success');
+      } else {
+        // Revert state if API call failed
         setNotifications(prev => {
           if (!Array.isArray(prev)) return prev;
           return prev.map(notification =>
             notification.id === notificationId
-              ? { ...notification, read: true }
+              ? { ...notification, read: false }
               : notification
           );
         });
-        showToast('Notification marked as read', 'success');
+        showToast('Failed to mark as read', 'error');
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
+      // Revert state if API call failed
+      setNotifications(prev => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map(notification =>
+          notification.id === notificationId
+            ? { ...notification, read: false }
+            : notification
+        );
+      });
       showToast('Failed to mark as read', 'error');
     }
   };
@@ -306,11 +327,11 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Handle notification press
+  // Handle notification press - FIXED
   const handleNotificationPress = async (notification: NotificationData) => {
-    // Mark as read if not already read
+    // Mark as read if not already read (optimistic update)
     if (!notification.read) {
-      await markAsRead(notification.id);
+      markAsRead(notification.id);
     }
 
     // Navigate to related content if action_url is provided
@@ -339,7 +360,7 @@ export default function NotificationsScreen() {
     }
   };
 
-  // FIXED: Enhanced icon mapping with proper general notification support
+  // Enhanced icon mapping with proper general notification support
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -361,9 +382,9 @@ export default function NotificationsScreen() {
       case 'resubmission_available':
         return 'alert-triangle';
       case 'general':
-        return 'bell'; // FIXED: Use bell icon for general notifications instead of ?
+        return 'bell';
       default:
-        return 'bell'; // Default to bell instead of showing ?
+        return 'bell';
     }
   };
 
