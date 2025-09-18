@@ -1,4 +1,4 @@
-// lib/helpers/business.ts - Fixed invite generation and error handling
+// lib/helpers/business.ts - Fixed business update logic
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -669,7 +669,7 @@ export const formatPhoneNumber = (phoneNumber: string): string => {
   return phoneNumber;
 };
 
-// Update business with proper error handling
+// FIXED: Simplified updateBusiness function without complex fallback logic
 export const updateBusiness = async (businessId: number, businessData: UpdateBusinessData) => {
   try {
     console.log('🏢 Starting business update process...', { businessId, businessData });
@@ -682,14 +682,13 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
     const token = await getAuthToken();
     console.log('🏢 Found auth token for business update');
 
-    // Prepare request data
+    // Prepare request data - match backend expectations exactly
     const requestData = {
       business: {
         name: businessData.name.trim(),
         ...(businessData.phone_number && { 
           phone_number: formatPhoneNumber(businessData.phone_number.trim()) 
         }),
-        // Always include category_ids if provided (even if empty array)
         ...(businessData.category_ids !== undefined && {
           category_ids: businessData.category_ids
         })
@@ -699,38 +698,14 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
     console.log('🏢 Updating business with data:', requestData);
     console.log('🏢 Using endpoint:', `/api/v1/businesses/${businessId}`);
 
-    // Try the update endpoint - some APIs might use different patterns
-    let response;
-    try {
-      response = await api.patch(`/api/v1/businesses/${businessId}`, requestData, {
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        timeout: 15000, // 15 second timeout
-      });
-    } catch (firstError: any) {
-      console.log('🏢 First endpoint failed, trying alternative:', firstError?.response?.status);
-      
-      // If 404 or HTML response, try alternative endpoint pattern
-      if (firstError?.response?.status === 404 || 
-          firstError?.response?.headers?.['content-type']?.includes('text/html')) {
-        
-        console.log('🏢 Trying alternative endpoint: /api/v1/businesses/update');
-        response = await api.post(`/api/v1/businesses/update`, {
-          ...requestData,
-          business_id: businessId
-        }, {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          timeout: 15000,
-        });
-      } else {
-        throw firstError;
-      }
-    }
+    // Make the API request - NO FALLBACK LOGIC, clean and simple
+    const response = await api.patch(`/api/v1/businesses/${businessId}`, requestData, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      timeout: 15000,
+    });
     
     console.log('🏢 Business update response:', response.data);
     
@@ -752,22 +727,9 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       message: error?.message
     });
     
-    // Check if server returned HTML instead of JSON
-    if (error?.response?.headers?.['content-type']?.includes('text/html')) {
-      console.error('🚨 Server returned HTML instead of JSON! Check API endpoint:', error?.config?.url);
-      Toast.show({
-        type: 'error',
-        text1: 'Server Error',
-        text2: 'API endpoint not found. Please check server configuration.',
-        position: 'bottom',
-        visibilityTime: 4000,
-      });
-      throw new Error('API endpoint not found. Server returned HTML instead of JSON.');
-    }
-    
-    // Handle authentication errors specifically
-    if (isAuthenticationError(error)) {
-      console.log('🏢 Authentication failed during business update');
+    // Detailed error handling for debugging
+    if (error?.response?.status === 401) {
+      console.error('🚨 Authentication failed - token might be invalid');
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -778,36 +740,59 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Session expired. Please log in again.');
     }
     
-    // Handle validation errors (422) - DON'T redirect to login
-    if (isValidationError(error)) {
-      const errorMessage = error.response?.data?.message || 'Validation failed';
-      const errorDetails = error.response?.data?.errors?.join(', ') || '';
-      
-      console.log('🏢 Validation error during business update:', errorMessage, errorDetails);
-      
-      // Check for specific category error
-      if (errorMessage.toLowerCase().includes('category') || errorMessage.toLowerCase().includes('categories')) {
-        Toast.show({
-          type: 'error',
-          text1: 'Categories Required',
-          text2: 'Please select at least one category for your business',
-          position: 'bottom',
-          visibilityTime: 4000,
-        });
-        throw new Error('Please select at least one category for your business');
-      }
+    if (error?.response?.status === 403) {
+      console.error('🚨 Authorization failed - user might not own this business');
+      Toast.show({
+        type: 'error',
+        text1: 'Access denied',
+        text2: 'You are not authorized to edit this business',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('You are not authorized to edit this business.');
+    }
+    
+    if (error?.response?.status === 404) {
+      console.error('🚨 Business not found or endpoint missing');
+      Toast.show({
+        type: 'error',
+        text1: 'Business not found',
+        text2: 'Business may have been deleted or endpoint unavailable',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('Business not found or API endpoint unavailable.');
+    }
+    
+    if (error?.response?.status === 422) {
+      const validationErrors = error.response?.data?.errors || [];
+      const errorMessage = validationErrors.join(', ') || error.response?.data?.message || 'Validation failed';
+      console.error('🚨 Validation failed:', errorMessage);
       
       Toast.show({
         type: 'error',
         text1: 'Validation Error',
-        text2: errorDetails || errorMessage,
+        text2: errorMessage,
         position: 'bottom',
         visibilityTime: 4000,
       });
-      throw new Error(errorDetails || errorMessage);
+      throw new Error(errorMessage);
     }
     
-    // Handle network/connection errors
+    // Check if server returned HTML instead of JSON (routing issue)
+    if (error?.response?.headers?.['content-type']?.includes('text/html')) {
+      console.error('🚨 Server returned HTML instead of JSON! Route configuration issue.');
+      Toast.show({
+        type: 'error',
+        text1: 'Server Configuration Error',
+        text2: 'API endpoint not properly configured',
+        position: 'bottom',
+        visibilityTime: 4000,
+      });
+      throw new Error('API endpoint configuration error. Please contact support.');
+    }
+    
+    // Network/timeout errors
     if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
       Toast.show({
         type: 'error',
@@ -819,7 +804,6 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Network error. Please check your connection and try again.');
     }
     
-    // Handle timeout errors
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
       Toast.show({
         type: 'error',
@@ -831,7 +815,7 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Request timeout. Please try again.');
     }
     
-    // Handle server errors (500)
+    // Server errors
     if (error.response?.status >= 500) {
       Toast.show({
         type: 'error',
@@ -843,9 +827,8 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Server error. Please try again later.');
     }
     
-    // Enhanced error handling for other cases
+    // Generic error handling
     const errorMessage = error?.response?.data?.message || 
-                        error?.response?.data?.errors?.join(', ') ||
                         error?.response?.data?.error || 
                         error?.message || 
                         'Failed to update business';
