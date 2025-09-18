@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Enhanced Purple-themed notifications screen with Push Notifications
+// app/(drawer)/notifications.tsx - Enhanced Purple-themed notifications screen with Firebase Push Notifications
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -12,16 +12,20 @@ import {
   ActivityIndicator,
   Dimensions,
   Animated,
+  Platform,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import * as Notifications from 'expo-notifications';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import GLTHeader from '../../components/GLTHeader';
 import colors from '../../theme/colors';
 import api from '../../lib/api';
 import { NavigationHelper } from '../../lib/helpers/navigation';
+
+// Import Firebase using the same pattern as header
+import firebase from '../../config/firebase';
 
 const { width: screenWidth } = Dimensions.get('window');
 
@@ -62,15 +66,6 @@ interface NotificationsResponse {
   unread_count: number;
 }
 
-// Enhanced Push Notifications Configuration
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-  }),
-});
-
 export default function NotificationsScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
@@ -83,101 +78,233 @@ export default function NotificationsScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
-  const [pushToken, setPushToken] = useState<string | null>(null);
+  const [fcmToken, setFcmToken] = useState<string | null>(null);
 
   // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
+  // Firebase messaging listeners refs
+  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
+  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
+  const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
+
   // Purple gradient colors
   const getGradientColors = () => {
     return ['#1a1b3d', '#2d1b4e', '#4c1d95'];
   };
 
-  // Enhanced Push Notification Setup
+  // ============================================
+  // FIREBASE SETUP - Same as header
+  // ============================================
   useEffect(() => {
-    setupPushNotifications();
-    registerForPushNotificationsAsync();
+    setupFirebaseMessaging();
+    
+    return () => {
+      // Cleanup Firebase listeners
+      if (unsubscribeOnMessage.current) {
+        unsubscribeOnMessage.current();
+      }
+      if (unsubscribeOnNotificationOpenedApp.current) {
+        unsubscribeOnNotificationOpenedApp.current();
+      }
+      if (unsubscribeTokenRefresh.current) {
+        unsubscribeTokenRefresh.current();
+      }
+    };
   }, []);
 
-  const setupPushNotifications = async () => {
+  const setupFirebaseMessaging = async () => {
     try {
-      // Request permissions
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
+      console.log('🔥 NOTIFICATIONS SCREEN: Setting up Firebase messaging...');
       
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
-      }
-      
-      if (finalStatus !== 'granted') {
-        showToast('Push notification permissions denied', 'error');
+      // Only setup on native platforms (not web/Expo Go)
+      if (!firebase.isNative || !firebase.messaging()) {
+        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
         return;
       }
 
-      // Get push token
-      const token = (await Notifications.getExpoPushTokenAsync()).data;
-      setPushToken(token);
+      // Request permission first
+      const permissionGranted = await requestFirebasePermissions();
+      if (!permissionGranted) {
+        return;
+      }
+
+      // Get FCM token
+      await getFirebaseToken();
       
-      // Send token to backend
-      await registerPushToken(token);
-
-      // Listen for notifications
-      const notificationListener = Notifications.addNotificationReceivedListener(handlePushNotification);
-      const responseListener = Notifications.addNotificationResponseReceivedListener(handleNotificationResponse);
-
-      return () => {
-        notificationListener.remove();
-        responseListener.remove();
-      };
+      // Set up Firebase notification handlers
+      setupFirebaseListeners();
+      
+      console.log('✅ NOTIFICATIONS SCREEN: Firebase messaging setup complete');
+      
     } catch (error) {
-      console.error('Push notification setup failed:', error);
+      console.error('❌ NOTIFICATIONS SCREEN: Failed to setup Firebase messaging:', error);
     }
   };
 
-  const registerForPushNotificationsAsync = async () => {
+  const requestFirebasePermissions = async (): Promise<boolean> => {
     try {
-      const { status } = await Notifications.requestPermissionsAsync();
-      if (status === 'granted') {
-        const token = (await Notifications.getExpoPushTokenAsync()).data;
-        await registerPushToken(token);
+      console.log('🔥 NOTIFICATIONS SCREEN: Requesting Firebase permissions...');
+      
+      const messaging = firebase.messaging();
+      if (!messaging) {
+        console.log('🔥 Firebase messaging not available');
+        return false;
+      }
+      
+      const authStatus = await messaging.requestPermission();
+      const enabled = authStatus === 1 || authStatus === 2; // AUTHORIZED or PROVISIONAL
+
+      if (enabled) {
+        console.log('✅ NOTIFICATIONS SCREEN: Firebase authorization granted:', authStatus);
+        return true;
+      } else {
+        console.log('❌ NOTIFICATIONS SCREEN: Firebase permissions denied');
+        showToast('Push notification permissions denied', 'error');
+        return false;
       }
     } catch (error) {
-      console.error('Failed to get push token:', error);
+      console.error('❌ NOTIFICATIONS SCREEN: Error requesting Firebase permissions:', error);
+      return false;
     }
   };
 
-  const registerPushToken = async (token: string) => {
+  const getFirebaseToken = async () => {
     try {
-      await api.post('/api/v1/push_tokens', {
-        push_token: token,
-        platform: 'fcm' // Changed from 'expo' to match backend expectations
+      console.log('🔥 NOTIFICATIONS SCREEN: Getting Firebase FCM token...');
+      
+      const messaging = firebase.messaging();
+      if (!messaging) {
+        console.log('🔥 Firebase messaging not available for token generation');
+        return;
+      }
+      
+      // Get FCM token
+      const token = await messaging.getToken();
+      
+      console.log('🔥 NOTIFICATIONS SCREEN: FCM token received:', token?.substring(0, 50) + '...');
+      setFcmToken(token);
+
+      // Register with backend using same method as header
+      await registerFCMTokenWithBackend(token);
+      
+      // Listen for token refresh
+      unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
+        console.log('🔥 NOTIFICATIONS SCREEN: FCM token refreshed:', newToken?.substring(0, 50) + '...');
+        setFcmToken(newToken);
+        await registerFCMTokenWithBackend(newToken);
       });
-      console.log('Push token registered successfully');
+      
     } catch (error) {
-      console.error('Failed to register push token:', error);
+      console.error('❌ NOTIFICATIONS SCREEN: FCM token error:', error);
     }
   };
 
-  const handlePushNotification = (notification: Notifications.Notification) => {
-    console.log('Push notification received:', notification);
-    // Refresh notifications list
-    fetchNotifications(1, true);
-    showToast('New notification received', 'success');
+  const registerFCMTokenWithBackend = async (token: string) => {
+    try {
+      console.log('🔥 NOTIFICATIONS SCREEN: Registering FCM token with backend...');
+      
+      // Check if user is authenticated first
+      const authToken = await AsyncStorage.getItem('authToken');
+      if (!authToken) {
+        console.log('No auth token available, skipping push token registration');
+        return;
+      }
+      
+      const response = await api.post('/api/v1/push_tokens', {
+        push_token: token,
+        platform: 'fcm', // Same as header
+        device_info: {
+          platform: Platform.OS,
+          version: Platform.Version,
+          isDevice: true,
+          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
+        }
+      });
+      
+      console.log('🔥 NOTIFICATIONS SCREEN: Backend response:', response.data);
+      
+      if (response.data?.success) {
+        console.log('✅ NOTIFICATIONS SCREEN: FCM token registered successfully');
+        await AsyncStorage.setItem('fcm_token', token);
+        await AsyncStorage.setItem('fcm_token_registered', 'true');
+        showToast('Push notifications enabled', 'success');
+      } else {
+        console.error('❌ NOTIFICATIONS SCREEN: Backend rejected FCM token registration:', response.data);
+      }
+      
+    } catch (error) {
+      console.error('❌ NOTIFICATIONS SCREEN: FCM token backend registration failed:', error);
+      
+      // If authentication error, don't show error toast to user
+      if (error.response?.status === 401) {
+        console.log('Authentication required for push token registration');
+        return;
+      }
+      
+      showToast('Failed to register for push notifications', 'error');
+    }
   };
 
-  const handleNotificationResponse = (response: Notifications.NotificationResponse) => {
-    console.log('Notification response:', response);
-    const data = response.notification.request.content.data;
+  const setupFirebaseListeners = () => {
+    const messaging = firebase.messaging();
+    if (!messaging) return;
+
+    // Listen for foreground messages
+    unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
+      console.log('🔥 NOTIFICATIONS SCREEN: Foreground message received:', remoteMessage);
+      
+      // Refresh notifications list
+      fetchNotifications(1, true);
+      showToast('New notification received', 'success');
+    });
+
+    // Listen for notification opened app (from background)
+    unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
+      console.log('🔥 NOTIFICATIONS SCREEN: Notification opened app from background:', remoteMessage);
+      handleNotificationData(remoteMessage.data);
+    });
+  };
+
+  const handleNotificationData = async (data: any) => {
+    console.log('🔥 NOTIFICATIONS SCREEN: Handling notification data:', data);
     
-    // Handle notification tap
-    if (data?.package_code) {
-      NavigationHelper.navigateTo('/(drawer)/track', {
-        params: { code: data.package_code },
-        trackInHistory: true
-      });
+    try {
+      // Handle different notification types
+      if (data?.type === 'package_update' && data?.package_id) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { packageId: data.package_id },
+          trackInHistory: true
+        });
+      } else if (data?.package_code) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { code: data.package_code },
+          trackInHistory: true
+        });
+      }
+      
+      // Mark notification as read if we have the ID
+      if (data?.notification_id) {
+        markNotificationAsRead(data.notification_id);
+      }
+      
+    } catch (error) {
+      console.error('🔥 NOTIFICATIONS SCREEN: Error handling notification data:', error);
+    }
+  };
+
+  const markNotificationAsRead = async (notificationId: string) => {
+    try {
+      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
+      console.log('✅ NOTIFICATIONS SCREEN: Notification marked as read');
+      
+      // Refresh notification list
+      fetchNotifications(1, true);
+      
+    } catch (error) {
+      console.error('❌ NOTIFICATIONS SCREEN: Failed to mark notification as read:', error);
     }
   };
 
@@ -259,12 +386,12 @@ export default function NotificationsScreen() {
     }
   }, [filter]);
 
-  // Mark notification as read
+  // Mark notification as read - FIXED to prevent blank notifications
   const markAsRead = async (notificationId: number) => {
     try {
       console.log('🔔 Marking notification as read:', notificationId);
       
-      // Update state immediately for better UX
+      // Optimistic update - update UI immediately
       setNotifications(prev => {
         if (!Array.isArray(prev)) return prev;
         return prev.map(notification =>
@@ -274,12 +401,13 @@ export default function NotificationsScreen() {
         );
       });
       
+      // Then make API call in background
       const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       
       if (response.data && response.data.success) {
-        showToast('Notification marked as read', 'success');
+        console.log('✅ Notification marked as read successfully');
       } else {
-        // Revert state if API call failed
+        // Revert optimistic update if API call failed
         setNotifications(prev => {
           if (!Array.isArray(prev)) return prev;
           return prev.map(notification =>
@@ -292,7 +420,8 @@ export default function NotificationsScreen() {
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
-      // Revert state if API call failed
+      
+      // Revert optimistic update if API call failed
       setNotifications(prev => {
         if (!Array.isArray(prev)) return prev;
         return prev.map(notification =>
@@ -310,26 +439,39 @@ export default function NotificationsScreen() {
     try {
       console.log('🔔 Marking all notifications as read');
       
+      // Optimistic update - update UI immediately
+      const originalNotifications = [...notifications];
+      setNotifications(prev => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map(notification => ({ ...notification, read: true }));
+      });
+      
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
       
       if (response.data && response.data.success) {
-        // Update all notifications in the local state
-        setNotifications(prev => {
-          if (!Array.isArray(prev)) return prev;
-          return prev.map(notification => ({ ...notification, read: true }));
-        });
-        
         showToast('All notifications marked as read', 'success');
+      } else {
+        // Revert if failed
+        setNotifications(originalNotifications);
+        showToast('Failed to mark all as read', 'error');
       }
     } catch (error) {
       console.error('🔔 Failed to mark all notifications as read:', error);
+      
+      // Revert on error
+      setNotifications(prev => {
+        if (!Array.isArray(prev)) return prev;
+        return prev.map(notification => ({ ...notification, read: false }));
+      });
       showToast('Failed to mark all as read', 'error');
     }
   };
 
-  // Handle notification press - FIXED
-  const handleNotificationPress = async (notification: NotificationData) => {
-    // Mark as read if not already read (optimistic update)
+  // Handle notification press - FIXED to prevent blank notifications
+  const handleNotificationPress = (notification: NotificationData) => {
+    console.log('🔔 Notification pressed:', notification.id, 'read:', notification.read);
+    
+    // Mark as read if not already read (non-blocking)
     if (!notification.read) {
       markAsRead(notification.id);
     }
@@ -343,13 +485,13 @@ export default function NotificationsScreen() {
         if (url.includes('/track/')) {
           // Package tracking URL
           const packageCode = url.split('/track/')[1];
-          await NavigationHelper.navigateTo('/(drawer)/track', {
+          NavigationHelper.navigateTo('/(drawer)/track', {
             params: { code: packageCode },
             trackInHistory: true
           });
         } else if (notification.package?.code) {
           // Navigate to package details
-          await NavigationHelper.navigateTo('/(drawer)/track', {
+          NavigationHelper.navigateTo('/(drawer)/track', {
             params: { code: notification.package.code },
             trackInHistory: true
           });
@@ -457,80 +599,88 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [fetchNotifications]);
 
-  // Render notification item with enhanced details
-  const renderNotificationItem = ({ item }: { item: NotificationData }) => (
-    <TouchableOpacity
-      style={[
-        styles.notificationCard,
-        !item.read && styles.unreadCard,
-        item.expired && styles.expiredCard,
-      ]}
-      onPress={() => handleNotificationPress(item)}
-      activeOpacity={0.7}
-    >
-      <View style={styles.notificationContent}>
-        {/* Icon and status indicator */}
-        <View style={styles.iconContainer}>
-          <View
-            style={[
-              styles.iconBackground,
-              { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
-            ]}
-          >
-            <Feather
-              name={getNotificationIcon(item.notification_type, item.icon)}
-              size={20}
-              color={getNotificationColor(item.notification_type, item.read)}
-            />
-          </View>
-          {!item.read && <View style={styles.unreadIndicator} />}
-        </View>
+  // Render notification item with enhanced details - FIXED to prevent blank notifications
+  const renderNotificationItem = ({ item }: { item: NotificationData }) => {
+    // Ensure we have valid data before rendering
+    if (!item || !item.title || !item.message) {
+      console.warn('🔔 Invalid notification item:', item);
+      return null;
+    }
 
-        {/* Content */}
-        <View style={styles.contentContainer}>
-          <Text style={[styles.title, !item.read && styles.unreadTitle]}>
-            {item.title}
-          </Text>
-          <Text style={[styles.message, !item.read && styles.unreadMessage]}>
-            {item.message}
-          </Text>
-          
-          {/* Package info if available */}
-          {item.package && (
-            <View style={styles.packageInfo}>
-              <Feather name="package" size={12} color="#c4b5fd" />
-              <Text style={styles.packageCode}>{item.package.code}</Text>
-              <View style={styles.packageStateBadge}>
-                <Text style={styles.packageStateText}>{item.package.state_display}</Text>
-              </View>
+    return (
+      <TouchableOpacity
+        style={[
+          styles.notificationCard,
+          !item.read && styles.unreadCard,
+          item.expired && styles.expiredCard,
+        ]}
+        onPress={() => handleNotificationPress(item)}
+        activeOpacity={0.7}
+      >
+        <View style={styles.notificationContent}>
+          {/* Icon and status indicator */}
+          <View style={styles.iconContainer}>
+            <View
+              style={[
+                styles.iconBackground,
+                { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
+              ]}
+            >
+              <Feather
+                name={getNotificationIcon(item.notification_type, item.icon)}
+                size={20}
+                color={getNotificationColor(item.notification_type, item.read)}
+              />
             </View>
-          )}
+            {!item.read && <View style={styles.unreadIndicator} />}
+          </View>
 
-          {/* Time and priority */}
-          <View style={styles.metaContainer}>
-            <Text style={styles.timeText}>
-              {item.time_since_creation || formatTime(item.created_at)}
+          {/* Content */}
+          <View style={styles.contentContainer}>
+            <Text style={[styles.title, !item.read && styles.unreadTitle]}>
+              {item.title}
             </Text>
-            {item.priority === 'high' && (
-              <View style={styles.priorityBadge}>
-                <Text style={styles.priorityText}>High</Text>
+            <Text style={[styles.message, !item.read && styles.unreadMessage]}>
+              {item.message}
+            </Text>
+            
+            {/* Package info if available */}
+            {item.package && (
+              <View style={styles.packageInfo}>
+                <Feather name="package" size={12} color="#c4b5fd" />
+                <Text style={styles.packageCode}>{item.package.code}</Text>
+                <View style={styles.packageStateBadge}>
+                  <Text style={styles.packageStateText}>{item.package.state_display}</Text>
+                </View>
               </View>
             )}
-            {item.priority === 'urgent' && (
-              <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.3)' }]}>
-                <Text style={[styles.priorityText, { color: '#ef4444' }]}>Urgent</Text>
-              </View>
-            )}
-            {item.expired && (
-              <View style={styles.expiredBadge}>
-                <Text style={styles.expiredText}>Expired</Text>
-              </View>
-            )}
+
+            {/* Time and priority */}
+            <View style={styles.metaContainer}>
+              <Text style={styles.timeText}>
+                {item.time_since_creation || formatTime(item.created_at)}
+              </Text>
+              {item.priority === 'high' && (
+                <View style={styles.priorityBadge}>
+                  <Text style={styles.priorityText}>High</Text>
+                </View>
+              )}
+              {item.priority === 'urgent' && (
+                <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.3)' }]}>
+                  <Text style={[styles.priorityText, { color: '#ef4444' }]}>Urgent</Text>
+                </View>
+              )}
+              {item.expired && (
+                <View style={styles.expiredBadge}>
+                  <Text style={styles.expiredText}>Expired</Text>
+                </View>
+              )}
+            </View>
           </View>
         </View>
-      </View>
-    </TouchableOpacity>
-  );
+      </TouchableOpacity>
+    );
+  };
 
   // Render empty state
   const renderEmptyState = () => (
@@ -636,8 +786,8 @@ export default function NotificationsScreen() {
           )}
         </View>
 
-        {/* Push Token Status */}
-        {pushToken && (
+        {/* Firebase Token Status */}
+        {fcmToken && (
           <View style={styles.pushTokenStatus}>
             <Feather name="bell" size={12} color="#10b981" />
             <Text style={styles.pushTokenText}>Push notifications enabled</Text>
@@ -656,7 +806,7 @@ export default function NotificationsScreen() {
           <FlatList
             data={notifications}
             renderItem={renderNotificationItem}
-            keyExtractor={(item) => item.id.toString()}
+            keyExtractor={(item) => `notification-${item.id}`}
             contentContainerStyle={[
               styles.listContainer,
               notifications.length === 0 && styles.emptyListContainer
@@ -674,6 +824,10 @@ export default function NotificationsScreen() {
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
             showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            initialNumToRender={10}
+            maxToRenderPerBatch={10}
+            windowSize={10}
           />
         )}
       </LinearGradient>
