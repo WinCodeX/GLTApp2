@@ -1,4 +1,4 @@
-// components/EditBusinessModal.tsx - Fixed with ImagePreviewModal opening properly
+// components/EditBusinessModal.tsx - FIXED VERSION
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
@@ -35,6 +35,12 @@ interface Business {
   phone_number?: string;
   logo_url?: string;
   categories: Category[];
+  owner_id?: number;
+  owner?: {
+    id: number;
+    name: string;
+    email: string;
+  };
 }
 
 interface EditBusinessModalProps {
@@ -85,19 +91,32 @@ export default function EditBusinessModal({
 }: EditBusinessModalProps) {
   const { user, triggerAvatarRefresh, clearUserCache, refreshBusinesses } = useUser();
   
+  // CRITICAL: Check if user can edit this business
+  const canEditBusiness = user && business && (
+    user.id === business.owner_id || 
+    user.id === business.owner?.id
+  );
+
+  console.log('🏢 EditBusinessModal: Permission check:', {
+    userId: user?.id,
+    businessOwnerId: business?.owner_id,
+    businessOwner: business?.owner?.id,
+    canEdit: canEditBusiness
+  });
+  
   // Form states
-  const [businessName, setBusinessName] = useState(business.name);
-  const [phoneNumber, setPhoneNumber] = useState(business.phone_number || '');
+  const [businessName, setBusinessName] = useState(business?.name || '');
+  const [phoneNumber, setPhoneNumber] = useState(business?.phone_number || '');
   const [selectedCategories, setSelectedCategories] = useState<number[]>(
-    business.categories?.map(cat => cat.id) || []
+    business?.categories?.map(cat => cat.id) || []
   );
   
   // Track if business originally had categories (to determine validation rules)
-  const originallyHadCategories = business.categories && business.categories.length > 0;
+  const originallyHadCategories = business?.categories && business.categories.length > 0;
   
   console.log('🏷️ EditBusinessModal: Business category info:', {
-    businessName: business.name,
-    originalCategories: business.categories,
+    businessName: business?.name,
+    originalCategories: business?.categories,
     originallyHadCategories,
     selectedCategories
   });
@@ -115,21 +134,28 @@ export default function EditBusinessModal({
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
   const [localLogoUrl, setLocalLogoUrl] = useState<string | null>(null);
 
-  // Load categories on mount
+  // FIXED: Load categories on mount and reset form properly
   useEffect(() => {
-    if (visible) {
+    if (visible && canEditBusiness) {
       loadCategories();
     }
-  }, [visible]);
+  }, [visible, canEditBusiness]);
 
-  // Reset form when business changes
+  // FIXED: Reset form when business changes with proper null checks
   useEffect(() => {
-    setBusinessName(business.name);
-    setPhoneNumber(business.phone_number || '');
-    setSelectedCategories(business.categories?.map(cat => cat.id) || []);
-    setPreviewUri(null);
-    setLocalLogoUrl(null);
+    if (business) {
+      setBusinessName(business.name || '');
+      setPhoneNumber(business.phone_number || '');
+      setSelectedCategories(business.categories?.map(cat => cat.id) || []);
+      setPreviewUri(null);
+      setLocalLogoUrl(null);
+    }
   }, [business]);
+
+  // FIXED: Don't show modal if user can't edit
+  if (!canEditBusiness) {
+    return null;
+  }
 
   const loadCategories = async () => {
     setLoadingCategories(true);
@@ -186,7 +212,7 @@ export default function EditBusinessModal({
       console.log('🏷️ EditBusinessModal: New category selection:', newSelection);
       return newSelection;
     });
-  }, []);
+  }, [originallyHadCategories]);
 
   const handlePhoneNumberChange = (text: string) => {
     // Allow only digits, spaces, hyphens, parentheses, and plus sign
@@ -304,38 +330,52 @@ export default function EditBusinessModal({
   const handleSave = async () => {
     if (!validateForm()) return;
 
+    // CRITICAL: Double-check permissions before attempting update
+    if (!canEditBusiness) {
+      showToast.error('Access Denied', 'You are not authorized to edit this business');
+      return;
+    }
+
     try {
       setLoading(true);
       
       console.log('🏢 EditBusinessModal: Starting business update...');
+      console.log('🏢 EditBusinessModal: Business ID:', business.id);
+      console.log('🏢 EditBusinessModal: User ID:', user?.id);
+      console.log('🏢 EditBusinessModal: Business Owner ID:', business?.owner_id || business?.owner?.id);
       console.log('🏷️ EditBusinessModal: Selected categories:', {
         selectedCategories,
         selectedCategoryNames: categories.filter(cat => selectedCategories.includes(cat.id)).map(cat => cat.name)
       });
       
-      // Prepare update data
+      // Prepare update data - ensure we're sending the right format
       const updateData = {
         name: businessName.trim(),
         phone_number: phoneNumber.trim() || undefined,
         category_ids: selectedCategories // Always send category_ids array (even if empty)
       };
       
-      console.log('🏢 EditBusinessModal: Update data:', updateData);
+      console.log('🏢 EditBusinessModal: Update data being sent:', updateData);
       
       // Make API call to update business
       const response = await updateBusiness(business.id, updateData);
       
       console.log('🏢 EditBusinessModal: Business update response:', response);
       
+      // FIXED: Get updated categories from the loaded categories array
+      const updatedCategories = categories.filter(cat => selectedCategories.includes(cat.id));
+      
       // Prepare updated business object for UI
       const updatedBusiness = {
         ...business,
         name: businessName.trim(),
         phone_number: phoneNumber.trim() ? formatPhoneNumber(phoneNumber.trim()) : '',
-        categories: categories.filter(cat => selectedCategories.includes(cat.id)),
+        categories: updatedCategories,
         // Keep the current logo URL unless we have a new local one
         logo_url: localLogoUrl || business.logo_url
       };
+
+      console.log('🏢 EditBusinessModal: Updated business object:', updatedBusiness);
 
       showToast.success('Business updated!', 'Changes have been saved successfully');
 
@@ -355,7 +395,19 @@ export default function EditBusinessModal({
       
     } catch (error: any) {
       console.error('🏢 EditBusinessModal: Update business error:', error);
-      showToast.error('Update failed', error.message || 'Please try again');
+      
+      // Provide more specific error messages based on error type
+      if (error.message.includes('Session expired')) {
+        showToast.error('Session Expired', 'Please log in again');
+      } else if (error.message.includes('not authorized')) {
+        showToast.error('Access Denied', 'You are not authorized to edit this business');
+      } else if (error.message.includes('Business not found')) {
+        showToast.error('Business Not Found', 'This business may have been deleted');
+      } else if (error.message.includes('Validation')) {
+        showToast.error('Validation Error', error.message);
+      } else {
+        showToast.error('Update Failed', error.message || 'Please try again');
+      }
     } finally {
       setLoading(false);
     }
@@ -385,7 +437,7 @@ export default function EditBusinessModal({
             
             <TouchableOpacity 
               onPress={handleSave} 
-              style={styles.saveButton}
+              style={[styles.saveButton, loading && styles.disabledButton]}
               disabled={loading}
             >
               {loading ? (
@@ -414,6 +466,7 @@ export default function EditBusinessModal({
                 <TouchableOpacity 
                   style={styles.logoButton}
                   onPress={pickBusinessLogo}
+                  disabled={loading}
                 >
                   <Feather name="camera" size={16} color="#fff" />
                   <Text style={styles.logoButtonText}>Change Logo</Text>
@@ -425,7 +478,7 @@ export default function EditBusinessModal({
             <View style={styles.section}>
               <Text style={styles.label}>Business Name *</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, loading && styles.disabledInput]}
                 value={businessName}
                 onChangeText={setBusinessName}
                 placeholder="Enter business name"
@@ -451,7 +504,7 @@ export default function EditBusinessModal({
                   <Text style={styles.countryCodeText}>🇰🇪 +254</Text>
                 </View>
                 <TextInput
-                  style={styles.phoneInput}
+                  style={[styles.phoneInput, loading && styles.disabledInput]}
                   value={phoneNumber}
                   onChangeText={handlePhoneNumberChange}
                   placeholder="712345678"
@@ -513,7 +566,8 @@ export default function EditBusinessModal({
                             key={`category-${category.id}`}
                             style={[
                               styles.categoryChip,
-                              isSelected && styles.selectedCategoryChip
+                              isSelected && styles.selectedCategoryChip,
+                              loading && styles.disabledChip
                             ]}
                             onPress={() => toggleCategory(category.id)}
                             disabled={loading}
@@ -588,6 +642,9 @@ const styles = StyleSheet.create({
     minWidth: 60,
     alignItems: 'center',
   },
+  disabledButton: {
+    opacity: 0.6,
+  },
   saveText: {
     color: '#fff',
     fontSize: 16,
@@ -646,6 +703,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     fontSize: 16,
     color: '#fff',
+  },
+  disabledInput: {
+    opacity: 0.6,
   },
   characterCount: {
     color: 'rgba(255, 255, 255, 0.5)',
@@ -789,6 +849,9 @@ const styles = StyleSheet.create({
   selectedCategoryChip: {
     backgroundColor: '#7c3aed',
     borderColor: '#7c3aed',
+  },
+  disabledChip: {
+    opacity: 0.6,
   },
   categoryChipText: {
     fontSize: 14,
