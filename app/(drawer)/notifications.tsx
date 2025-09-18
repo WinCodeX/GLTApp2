@@ -79,6 +79,9 @@ export default function NotificationsScreen() {
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
   const [fcmToken, setFcmToken] = useState<string | null>(null);
+  
+  // Track read status separately to avoid corrupting notification data
+  const [localReadStatus, setLocalReadStatus] = useState<Set<number>>(new Set());
 
   // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
@@ -578,19 +581,21 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [fetchNotifications]);
 
-  // Render notification item with enhanced details - FIXED to prevent blank notifications
+  // Render notification item with enhanced details - COMPLETELY REWRITTEN to prevent blank notifications
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
-    // Ensure we have valid data before rendering
-    if (!item || !item.title || !item.message) {
-      console.warn('🔔 Invalid notification item:', item);
+    // Extra safety checks
+    if (!item || typeof item.id === 'undefined' || !item.title || !item.message) {
+      console.warn('🔔 Skipping invalid notification item:', item);
       return null;
     }
+
+    const isRead = isNotificationRead(item);
 
     return (
       <TouchableOpacity
         style={[
           styles.notificationCard,
-          !item.read && styles.unreadCard,
+          !isRead && styles.unreadCard,
           item.expired && styles.expiredCard,
         ]}
         onPress={() => handleNotificationPress(item)}
@@ -602,24 +607,24 @@ export default function NotificationsScreen() {
             <View
               style={[
                 styles.iconBackground,
-                { backgroundColor: getNotificationColor(item.notification_type, item.read) + '40' }
+                { backgroundColor: getNotificationColor(item.notification_type, isRead) + '40' }
               ]}
             >
               <Feather
                 name={getNotificationIcon(item.notification_type, item.icon)}
                 size={20}
-                color={getNotificationColor(item.notification_type, item.read)}
+                color={getNotificationColor(item.notification_type, isRead)}
               />
             </View>
-            {!item.read && <View style={styles.unreadIndicator} />}
+            {!isRead && <View style={styles.unreadIndicator} />}
           </View>
 
           {/* Content */}
           <View style={styles.contentContainer}>
-            <Text style={[styles.title, !item.read && styles.unreadTitle]}>
+            <Text style={[styles.title, !isRead && styles.unreadTitle]}>
               {item.title}
             </Text>
-            <Text style={[styles.message, !item.read && styles.unreadMessage]}>
+            <Text style={[styles.message, !isRead && styles.unreadMessage]}>
               {item.message}
             </Text>
             
@@ -725,7 +730,9 @@ export default function NotificationsScreen() {
     </Animated.View>
   );
 
-  const unreadCount = Array.isArray(notifications) ? notifications.filter(n => !n.read).length : 0;
+  const unreadCount = Array.isArray(notifications) 
+    ? notifications.filter(n => !isNotificationRead(n)).length 
+    : 0;
 
   return (
     <View style={styles.container}>
