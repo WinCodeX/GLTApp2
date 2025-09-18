@@ -1,4 +1,4 @@
-// components/EditBusinessModal.tsx - FIXED VERSION
+// components/EditBusinessModal.tsx - FIXED: Removed unnecessary permission checks
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
@@ -91,19 +91,6 @@ export default function EditBusinessModal({
 }: EditBusinessModalProps) {
   const { user, triggerAvatarRefresh, clearUserCache, refreshBusinesses } = useUser();
   
-  // CRITICAL: Check if user can edit this business
-  const canEditBusiness = user && business && (
-    user.id === business.owner_id || 
-    user.id === business.owner?.id
-  );
-
-  console.log('🏢 EditBusinessModal: Permission check:', {
-    userId: user?.id,
-    businessOwnerId: business?.owner_id,
-    businessOwner: business?.owner?.id,
-    canEdit: canEditBusiness
-  });
-  
   // Form states
   const [businessName, setBusinessName] = useState(business?.name || '');
   const [phoneNumber, setPhoneNumber] = useState(business?.phone_number || '');
@@ -114,7 +101,8 @@ export default function EditBusinessModal({
   // Track if business originally had categories (to determine validation rules)
   const originallyHadCategories = business?.categories && business.categories.length > 0;
   
-  console.log('🏷️ EditBusinessModal: Business category info:', {
+  console.log('🏷️ EditBusinessModal: Business info:', {
+    businessId: business?.id,
     businessName: business?.name,
     originalCategories: business?.categories,
     originallyHadCategories,
@@ -134,14 +122,14 @@ export default function EditBusinessModal({
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
   const [localLogoUrl, setLocalLogoUrl] = useState<string | null>(null);
 
-  // FIXED: Load categories on mount and reset form properly
+  // Load categories when modal becomes visible
   useEffect(() => {
-    if (visible && canEditBusiness) {
+    if (visible) {
       loadCategories();
     }
-  }, [visible, canEditBusiness]);
+  }, [visible]);
 
-  // FIXED: Reset form when business changes with proper null checks
+  // Reset form when business changes
   useEffect(() => {
     if (business) {
       setBusinessName(business.name || '');
@@ -151,11 +139,6 @@ export default function EditBusinessModal({
       setLocalLogoUrl(null);
     }
   }, [business]);
-
-  // FIXED: Don't show modal if user can't edit
-  if (!canEditBusiness) {
-    return null;
-  }
 
   const loadCategories = async () => {
     setLoadingCategories(true);
@@ -330,19 +313,12 @@ export default function EditBusinessModal({
   const handleSave = async () => {
     if (!validateForm()) return;
 
-    // CRITICAL: Double-check permissions before attempting update
-    if (!canEditBusiness) {
-      showToast.error('Access Denied', 'You are not authorized to edit this business');
-      return;
-    }
-
     try {
       setLoading(true);
       
       console.log('🏢 EditBusinessModal: Starting business update...');
       console.log('🏢 EditBusinessModal: Business ID:', business.id);
       console.log('🏢 EditBusinessModal: User ID:', user?.id);
-      console.log('🏢 EditBusinessModal: Business Owner ID:', business?.owner_id || business?.owner?.id);
       console.log('🏷️ EditBusinessModal: Selected categories:', {
         selectedCategories,
         selectedCategoryNames: categories.filter(cat => selectedCategories.includes(cat.id)).map(cat => cat.name)
@@ -362,7 +338,7 @@ export default function EditBusinessModal({
       
       console.log('🏢 EditBusinessModal: Business update response:', response);
       
-      // FIXED: Get updated categories from the loaded categories array
+      // Get updated categories from the loaded categories array
       const updatedCategories = categories.filter(cat => selectedCategories.includes(cat.id));
       
       // Prepare updated business object for UI
