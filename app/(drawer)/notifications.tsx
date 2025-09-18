@@ -93,6 +93,11 @@ export default function NotificationsScreen() {
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
 
+  // Helper function to check if notification is read (combines API data + local state)
+  const isNotificationRead = (notification: NotificationData) => {
+    return notification.read || localReadStatus.has(notification.id);
+  };
+
   // Purple gradient colors
   const getGradientColors = () => {
     return ['#1a1b3d', '#2d1b4e', '#4c1d95'];
