@@ -1,4 +1,4 @@
-// app/(drawer)/BusinessDetails.tsx - Business Details Screen with Enhanced NavigationHelper
+// app/(drawer)/BusinessDetails.tsx - Business Details Screen with Real Staff and Activities
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -10,6 +10,7 @@ import {
   StatusBar,
   Modal,
   RefreshControl,
+  ActivityIndicator,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
@@ -19,6 +20,7 @@ import { useUser } from '../../context/UserContext';
 import colors from '../../theme/colors';
 import { createInvite } from '../../lib/helpers/business';
 import { SafeLogo } from '../../components/SafeLogo';
+import api from '../../lib/api';
 
 // Import Enhanced NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
@@ -32,6 +34,54 @@ const EditBusinessModal = React.lazy(() => import('../../components/EditBusiness
 
 interface BusinessDetailsProps {
   navigation: any;
+}
+
+interface StaffMember {
+  id: number;
+  name: string;
+  email: string;
+  avatar_url?: string;
+  role: 'owner' | 'staff';
+  joined_at: string;
+  active: boolean;
+}
+
+interface BusinessActivity {
+  id: number;
+  activity_type: string;
+  description: string;
+  formatted_time: string;
+  activity_icon: string;
+  activity_color: string;
+  user: {
+    id: number;
+    name: string;
+    avatar_url?: string;
+  };
+  target_user?: {
+    id: number;
+    name: string;
+  };
+  package?: {
+    id: number;
+    code: string;
+  };
+}
+
+interface StaffData {
+  owner: StaffMember;
+  staff: StaffMember[];
+  total_members: number;
+  active_members: number;
+}
+
+interface ActivitiesData {
+  activities: BusinessActivity[];
+  summary: {
+    total_activities: number;
+    package_activities: number;
+    staff_activities: number;
+  };
 }
 
 // Centralized toast helper
@@ -65,16 +115,6 @@ const showToast = {
       visibilityTime: 3500,
     });
   },
-  
-  info: (text1: string, text2?: string) => {
-    Toast.show({
-      type: 'info',
-      text1,
-      text2,
-      position: 'bottom',
-      visibilityTime: 3000,
-    });
-  },
 };
 
 export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
@@ -92,7 +132,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
 
   // Modal states
   const [showEditModal, setShowEditModal] = useState(false);
-  const [showMembersModal, setShowMembersModal] = useState(false);
+  const [showStaffModal, setShowStaffModal] = useState(false);
   
   // UI states
   const [refreshing, setRefreshing] = useState(false);
@@ -105,6 +145,12 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   // Image upload states
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [localBusinessLogo, setLocalBusinessLogo] = useState<string | null>(null);
+  
+  // Data states
+  const [staffData, setStaffData] = useState<StaffData | null>(null);
+  const [activitiesData, setActivitiesData] = useState<ActivitiesData | null>(null);
+  const [loadingStaff, setLoadingStaff] = useState(false);
+  const [loadingActivities, setLoadingActivities] = useState(false);
   
   // Update triggers for immediate visual feedback
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
@@ -124,6 +170,58 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       };
       
       redirectToBusiness();
+    } else {
+      // Load initial data
+      loadStaffData();
+      loadActivitiesData();
+    }
+  }, [selectedBusiness]);
+
+  // Load staff data
+  const loadStaffData = useCallback(async () => {
+    if (!selectedBusiness) return;
+    
+    try {
+      setLoadingStaff(true);
+      console.log('🔄 Loading staff data for business:', selectedBusiness.id);
+      
+      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/staff`);
+      
+      if (response.data.success) {
+        setStaffData(response.data.data);
+        console.log('✅ Staff data loaded:', response.data.data);
+      } else {
+        throw new Error(response.data.message || 'Failed to load staff data');
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading staff:', error);
+      showToast.error('Failed to load staff', error.message || 'Please try again');
+    } finally {
+      setLoadingStaff(false);
+    }
+  }, [selectedBusiness]);
+
+  // Load activities data
+  const loadActivitiesData = useCallback(async () => {
+    if (!selectedBusiness) return;
+    
+    try {
+      setLoadingActivities(true);
+      console.log('🔄 Loading activities data for business:', selectedBusiness.id);
+      
+      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/activities`);
+      
+      if (response.data.success) {
+        setActivitiesData(response.data.data);
+        console.log('✅ Activities data loaded:', response.data.data);
+      } else {
+        throw new Error(response.data.message || 'Failed to load activities data');
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading activities:', error);
+      showToast.error('Failed to load activities', error.message || 'Please try again');
+    } finally {
+      setLoadingActivities(false);
     }
   }, [selectedBusiness]);
 
@@ -142,6 +240,12 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       await refreshUser(true);
       await refreshBusinesses(true);
       
+      // Reload staff and activities data
+      await Promise.all([
+        loadStaffData(),
+        loadActivitiesData()
+      ]);
+      
       triggerAvatarRefresh();
       setLogoUpdateTrigger(Date.now());
       
@@ -155,7 +259,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness]);
+  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness, loadStaffData, loadActivitiesData]);
 
   // Enhanced back navigation using NavigationHelper
   const handleGoBack = useCallback(async () => {
@@ -233,6 +337,9 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         setLogoUpdateTrigger(Date.now());
         triggerAvatarRefresh();
         
+        // Reload activities to show logo update activity
+        loadActivitiesData();
+        
         showToast.success('Business logo updated!', 'Logo has been changed successfully');
         
         // Background refresh (don't await to keep UI responsive)
@@ -255,7 +362,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     } finally {
       setPreviewUri(null);
     }
-  }, [previewUri, selectedBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, setSelectedBusiness]);
+  }, [previewUri, selectedBusiness, refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, setSelectedBusiness, loadActivitiesData]);
 
   // Handle business update from edit modal
   const handleBusinessUpdate = async (updatedBusiness: any) => {
@@ -273,6 +380,9 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       await refreshBusinesses(true);
       setLogoUpdateTrigger(Date.now());
       triggerAvatarRefresh();
+      
+      // Reload activities to show update activity
+      loadActivitiesData();
     } catch (error) {
       console.error('Error refreshing after business update:', error);
     }
@@ -307,10 +417,14 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       if (result?.success && result?.data?.code) {
         setInviteLink(result.data.code);
         showToast.success('Invite link generated', 'Copy and share with your team');
+        
+        // Reload activities to show invite sent activity
+        loadActivitiesData();
       } else if (result?.code) {
         // Handle legacy response format
         setInviteLink(result.code);
         showToast.success('Invite link generated', 'Copy and share with your team');
+        loadActivitiesData();
       } else {
         throw new Error('No invite code received from server');
       }
@@ -339,22 +453,6 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   // Get current logo URL
   const getCurrentLogoUrl = () => {
     return localBusinessLogo || selectedBusiness?.logo_url;
-  };
-
-  // Mock data for demonstration
-  const mockMembers = [
-    { id: 1, name: 'John Doe', role: 'Manager', joinedAt: '2024-01-15', active: true },
-    { id: 2, name: 'Jane Smith', role: 'Staff', joinedAt: '2024-02-20', active: true },
-    { id: 3, name: 'Mike Johnson', role: 'Staff', joinedAt: '2024-03-10', active: false },
-  ];
-
-  const mockAnalytics = {
-    totalMembers: mockMembers.length,
-    activeMembers: mockMembers.filter(m => m.active).length,
-    totalInvites: 5,
-    recentActivity: '2 hours ago',
-    categories: selectedBusiness?.categories?.length || 0,
-    monthlyGrowth: '+12%',
   };
 
   if (!selectedBusiness) {
@@ -464,88 +562,150 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
           </TouchableOpacity>
         </View>
 
-        {/* Members Section */}
+        {/* Staff Section */}
         <View style={styles.section}>
           <TouchableOpacity 
-            style={styles.membersHeader}
-            onPress={() => setShowMembersModal(true)}
+            style={styles.staffHeader}
+            onPress={() => setShowStaffModal(true)}
           >
-            <View style={styles.membersInfo}>
-              <Text style={styles.sectionTitle}>Team Members</Text>
-              <Text style={styles.membersCount}>
-                {mockAnalytics.activeMembers} active • {mockAnalytics.totalMembers} total
-              </Text>
+            <View style={styles.staffInfo}>
+              <Text style={styles.sectionTitle}>Staff Members</Text>
+              {staffData ? (
+                <Text style={styles.staffCount}>
+                  {staffData.active_members} active • {staffData.total_members} total
+                </Text>
+              ) : loadingStaff ? (
+                <Text style={styles.staffCount}>Loading...</Text>
+              ) : (
+                <Text style={styles.staffCount}>Unable to load</Text>
+              )}
             </View>
             <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
           </TouchableOpacity>
 
-          <View style={styles.membersPreview}>
-            {mockMembers.slice(0, 3).map((member, index) => (
-              <View key={member.id} style={styles.memberItem}>
-                <View style={styles.memberAvatar}>
-                  <Text style={styles.memberInitials}>
-                    {member.name.split(' ').map(n => n[0]).join('')}
-                  </Text>
-                </View>
-                <View style={styles.memberInfo}>
-                  <Text style={styles.memberName}>{member.name}</Text>
-                  <Text style={styles.memberRole}>{member.role}</Text>
-                </View>
-                <View style={[
-                  styles.memberStatus,
-                  { backgroundColor: member.active ? '#10b981' : '#6b7280' }
-                ]} />
+          <View style={styles.staffPreview}>
+            {loadingStaff ? (
+              <View style={styles.loadingContainer}>
+                <ActivityIndicator color="#7c3aed" size="small" />
+                <Text style={styles.loadingText}>Loading staff...</Text>
               </View>
-            ))}
-            
-            {mockMembers.length > 3 && (
-              <TouchableOpacity 
-                style={styles.viewAllButton}
-                onPress={() => setShowMembersModal(true)}
-              >
-                <Text style={styles.viewAllText}>
-                  View all {mockMembers.length} members
-                </Text>
-                <Feather name="arrow-right" size={16} color="#7c3aed" />
-              </TouchableOpacity>
+            ) : staffData ? (
+              <>
+                {/* Show owner first */}
+                <View style={styles.staffItem}>
+                  <View style={styles.staffAvatar}>
+                    <Text style={styles.staffInitials}>
+                      {staffData.owner.name.split(' ').map(n => n[0]).join('')}
+                    </Text>
+                  </View>
+                  <View style={styles.staffItemInfo}>
+                    <Text style={styles.staffName}>{staffData.owner.name}</Text>
+                    <Text style={styles.staffRole}>Owner</Text>
+                  </View>
+                  <View style={[
+                    styles.staffStatus,
+                    { backgroundColor: '#10b981' } // Owner is always active
+                  ]} />
+                </View>
+                
+                {/* Show up to 2 staff members */}
+                {staffData.staff.slice(0, 2).map((staff) => (
+                  <View key={staff.id} style={styles.staffItem}>
+                    <View style={styles.staffAvatar}>
+                      <Text style={styles.staffInitials}>
+                        {staff.name.split(' ').map(n => n[0]).join('')}
+                      </Text>
+                    </View>
+                    <View style={styles.staffItemInfo}>
+                      <Text style={styles.staffName}>{staff.name}</Text>
+                      <Text style={styles.staffRole}>Staff</Text>
+                    </View>
+                    <View style={[
+                      styles.staffStatus,
+                      { backgroundColor: staff.active ? '#10b981' : '#6b7280' }
+                    ]} />
+                  </View>
+                ))}
+                
+                {staffData.total_members > 3 && (
+                  <TouchableOpacity 
+                    style={styles.viewAllButton}
+                    onPress={() => setShowStaffModal(true)}
+                  >
+                    <Text style={styles.viewAllText}>
+                      View all {staffData.total_members} members
+                    </Text>
+                    <Feather name="arrow-right" size={16} color="#7c3aed" />
+                  </TouchableOpacity>
+                )}
+              </>
+            ) : (
+              <View style={styles.errorContainer}>
+                <Text style={styles.errorText}>Unable to load staff members</Text>
+                <TouchableOpacity onPress={loadStaffData} style={styles.retryButton}>
+                  <Text style={styles.retryText}>Retry</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>
 
-        {/* Analytics Section */}
+        {/* Activities Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Business Analytics</Text>
+          <Text style={styles.sectionTitle}>Recent Activities</Text>
           
-          <View style={styles.analyticsGrid}>
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsValue}>{mockAnalytics.totalMembers}</Text>
-              <Text style={styles.analyticsLabel}>Total Members</Text>
+          {loadingActivities ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color="#7c3aed" size="small" />
+              <Text style={styles.loadingText}>Loading activities...</Text>
             </View>
-            
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsValue}>{mockAnalytics.activeMembers}</Text>
-              <Text style={styles.analyticsLabel}>Active Members</Text>
-            </View>
-            
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsValue}>{mockAnalytics.totalInvites}</Text>
-              <Text style={styles.analyticsLabel}>Total Invites</Text>
-            </View>
-            
-            <View style={styles.analyticsCard}>
-              <Text style={styles.analyticsValue}>{mockAnalytics.categories}</Text>
-              <Text style={styles.analyticsLabel}>Categories</Text>
-            </View>
-          </View>
+          ) : activitiesData ? (
+            <>
+              {/* Activities Summary */}
+              <View style={styles.activitiesSummary}>
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{activitiesData.summary.total_activities}</Text>
+                  <Text style={styles.summaryLabel}>Total Activities</Text>
+                </View>
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{activitiesData.summary.package_activities}</Text>
+                  <Text style={styles.summaryLabel}>Package Activities</Text>
+                </View>
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryValue}>{activitiesData.summary.staff_activities}</Text>
+                  <Text style={styles.summaryLabel}>Staff Activities</Text>
+                </View>
+              </View>
 
-          <View style={styles.recentActivityCard}>
-            <View style={styles.activityHeader}>
-              <Feather name="activity" size={20} color="#7c3aed" />
-              <Text style={styles.activityTitle}>Recent Activity</Text>
+              {/* Recent Activities List */}
+              <View style={styles.activitiesList}>
+                {activitiesData.activities.slice(0, 5).map((activity) => (
+                  <View key={activity.id} style={styles.activityItem}>
+                    <View style={[styles.activityIcon, { backgroundColor: activity.activity_color }]}>
+                      <Feather name={activity.activity_icon as any} size={16} color="#fff" />
+                    </View>
+                    <View style={styles.activityContent}>
+                      <Text style={styles.activityDescription}>{activity.description}</Text>
+                      <Text style={styles.activityTime}>{activity.formatted_time}</Text>
+                    </View>
+                  </View>
+                ))}
+                
+                {activitiesData.activities.length === 0 && (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No recent activities</Text>
+                  </View>
+                )}
+              </View>
+            </>
+          ) : (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Unable to load activities</Text>
+              <TouchableOpacity onPress={loadActivitiesData} style={styles.retryButton}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
             </View>
-            <Text style={styles.activityTime}>Last activity: {mockAnalytics.recentActivity}</Text>
-            <Text style={styles.activityGrowth}>Monthly growth: {mockAnalytics.monthlyGrowth}</Text>
-          </View>
+          )}
         </View>
       </ScrollView>
 
@@ -598,39 +758,60 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         </Modal>
       )}
 
-      {/* Members Modal */}
-      {showMembersModal && (
+      {/* Staff Modal */}
+      {showStaffModal && staffData && (
         <Modal visible transparent animationType="slide">
           <TouchableOpacity 
             style={styles.modalOverlay}
-            onPress={() => setShowMembersModal(false)}
+            onPress={() => setShowStaffModal(false)}
           >
-            <View style={styles.membersModal}>
-              <View style={styles.membersModalHeader}>
-                <Text style={styles.membersModalTitle}>Team Members</Text>
-                <TouchableOpacity onPress={() => setShowMembersModal(false)}>
+            <View style={styles.staffModal}>
+              <View style={styles.staffModalHeader}>
+                <Text style={styles.staffModalTitle}>Staff Members</Text>
+                <TouchableOpacity onPress={() => setShowStaffModal(false)}>
                   <Feather name="x" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
               
-              <ScrollView style={styles.membersModalContent}>
-                {mockMembers.map((member) => (
-                  <View key={member.id} style={styles.fullMemberItem}>
-                    <View style={styles.memberAvatar}>
-                      <Text style={styles.memberInitials}>
-                        {member.name.split(' ').map(n => n[0]).join('')}
+              <ScrollView style={styles.staffModalContent}>
+                {/* Owner */}
+                <View style={styles.fullStaffItem}>
+                  <View style={styles.staffAvatar}>
+                    <Text style={styles.staffInitials}>
+                      {staffData.owner.name.split(' ').map(n => n[0]).join('')}
+                    </Text>
+                  </View>
+                  <View style={styles.fullStaffInfo}>
+                    <Text style={styles.staffName}>{staffData.owner.name}</Text>
+                    <Text style={styles.staffRole}>Owner</Text>
+                    <Text style={styles.staffJoined}>
+                      Created {new Date(staffData.owner.joined_at).toLocaleDateString()}
+                    </Text>
+                  </View>
+                  <View style={[
+                    styles.staffStatus,
+                    { backgroundColor: '#10b981' }
+                  ]} />
+                </View>
+
+                {/* Staff Members */}
+                {staffData.staff.map((staff) => (
+                  <View key={staff.id} style={styles.fullStaffItem}>
+                    <View style={styles.staffAvatar}>
+                      <Text style={styles.staffInitials}>
+                        {staff.name.split(' ').map(n => n[0]).join('')}
                       </Text>
                     </View>
-                    <View style={styles.fullMemberInfo}>
-                      <Text style={styles.memberName}>{member.name}</Text>
-                      <Text style={styles.memberRole}>{member.role}</Text>
-                      <Text style={styles.memberJoined}>
-                        Joined {new Date(member.joinedAt).toLocaleDateString()}
+                    <View style={styles.fullStaffInfo}>
+                      <Text style={styles.staffName}>{staff.name}</Text>
+                      <Text style={styles.staffRole}>Staff</Text>
+                      <Text style={styles.staffJoined}>
+                        Joined {new Date(staff.joined_at).toLocaleDateString()}
                       </Text>
                     </View>
                     <View style={[
-                      styles.memberStatus,
-                      { backgroundColor: member.active ? '#10b981' : '#6b7280' }
+                      styles.staffStatus,
+                      { backgroundColor: staff.active ? '#10b981' : '#6b7280' }
                     ]} />
                   </View>
                 ))}
@@ -813,28 +994,28 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 16,
   },
-  membersHeader: {
+  staffHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 16,
   },
-  membersInfo: {
+  staffInfo: {
     flex: 1,
   },
-  membersCount: {
+  staffCount: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
     marginTop: 2,
   },
-  membersPreview: {
+  staffPreview: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     overflow: 'hidden',
   },
-  memberItem: {
+  staffItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -842,7 +1023,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  memberAvatar: {
+  staffAvatar: {
     width: 36,
     height: 36,
     borderRadius: 18,
@@ -851,24 +1032,24 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 12,
   },
-  memberInitials: {
+  staffInitials: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
-  memberInfo: {
+  staffItemInfo: {
     flex: 1,
   },
-  memberName: {
+  staffName: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
   },
-  memberRole: {
+  staffRole: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
   },
-  memberStatus: {
+  staffStatus: {
     width: 8,
     height: 8,
     borderRadius: 4,
@@ -885,15 +1066,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  analyticsGrid: {
+  activitiesSummary: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 12,
     marginBottom: 16,
   },
-  analyticsCard: {
+  summaryItem: {
     flex: 1,
-    minWidth: '45%',
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     borderWidth: 1,
@@ -901,44 +1080,93 @@ const styles = StyleSheet.create({
     padding: 16,
     alignItems: 'center',
   },
-  analyticsValue: {
+  summaryValue: {
     color: '#fff',
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '700',
     marginBottom: 4,
   },
-  analyticsLabel: {
+  summaryLabel: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
+    fontSize: 11,
     textAlign: 'center',
   },
-  recentActivityCard: {
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+  activitiesList: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    padding: 16,
+    overflow: 'hidden',
   },
-  activityHeader: {
+  activityItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    marginBottom: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  activityTitle: {
+  activityIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  activityContent: {
+    flex: 1,
+  },
+  activityDescription: {
     color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 2,
   },
   activityTime: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 12,
+  },
+  loadingContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  loadingText: {
     color: 'rgba(255,255,255,0.7)',
     fontSize: 14,
-    marginBottom: 4,
   },
-  activityGrowth: {
-    color: '#10b981',
+  errorContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    gap: 8,
+  },
+  errorText: {
+    color: 'rgba(255,255,255,0.6)',
     fontSize: 14,
+    textAlign: 'center',
+  },
+  retryButton: {
+    backgroundColor: '#7c3aed',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 6,
+  },
+  retryText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '600',
+  },
+  emptyContainer: {
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  emptyText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    textAlign: 'center',
   },
   modalOverlay: {
     flex: 1,
@@ -1009,7 +1237,7 @@ const styles = StyleSheet.create({
     color: 'rgba(255, 255, 255, 0.7)',
     fontSize: 16,
   },
-  membersModal: {
+  staffModal: {
     backgroundColor: '#1a1a2e',
     marginTop: 100,
     marginHorizontal: 20,
@@ -1018,7 +1246,7 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(124, 58, 237, 0.4)',
     maxHeight: '80%',
   },
-  membersModalHeader: {
+  staffModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1026,26 +1254,26 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  membersModalTitle: {
+  staffModalTitle: {
     color: '#fff',
     fontSize: 18,
     fontWeight: '600',
   },
-  membersModalContent: {
+  staffModalContent: {
     padding: 20,
   },
-  fullMemberItem: {
+  fullStaffItem: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 12,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  fullMemberInfo: {
+  fullStaffInfo: {
     flex: 1,
     marginLeft: 12,
   },
-  memberJoined: {
+  staffJoined: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 11,
     marginTop: 2,
