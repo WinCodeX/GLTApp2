@@ -1,4 +1,4 @@
-// lib/services/updateService.ts - Enhanced with Downloads folder and FileProvider support
+// lib/services/updateService.ts - Enhanced with Downloads folder and ChangelogModal version integration
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -86,7 +86,7 @@ class UpdateService {
    */
   private async initializeVersionTracking(): Promise<void> {
     try {
-      const currentVersion = this.getCurrentVersion();
+      const currentVersion = await this.getCurrentVersion();
       const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
       
       if (!lastKnownVersion) {
@@ -96,23 +96,6 @@ class UpdateService {
       }
     } catch (error) {
       console.error('Failed to initialize version tracking:', error);
-    }
-  }
-
-  private async requestDownloadsPermission(): Promise<boolean> {
-    try {
-      if (Platform.OS === 'android') {
-        const { status } = await MediaLibrary.requestPermissionsAsync();
-        if (status !== 'granted') {
-          console.warn('Media library permissions not granted - downloads will be limited');
-          return false;
-        }
-        return true;
-      }
-      return false;
-    } catch (error) {
-      console.error('Failed to request downloads permission:', error);
-      return false;
     }
   }
 
@@ -136,7 +119,7 @@ class UpdateService {
    */
   private async checkPostInstallation(): Promise<void> {
     try {
-      const currentVersion = this.getCurrentVersion();
+      const currentVersion = await this.getCurrentVersion();
       const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
       
       if (lastKnownVersion && lastKnownVersion !== currentVersion) {
@@ -244,7 +227,7 @@ class UpdateService {
     try {
       this.updateCheckInProgress = true;
       
-      const currentVersion = this.getCurrentVersion();
+      const currentVersion = await this.getCurrentVersion();
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com';
       
       console.log(`Checking for updates: current version ${currentVersion}`);
@@ -480,44 +463,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Copy APK to Downloads folder where users can find it
-   */
-  private async copyToDownloadsFolder(sourceUri: string, fileName: string): Promise<string> {
-    try {
-      // Request media library permissions if not already granted
-      const { status } = await MediaLibrary.getPermissionsAsync();
-      if (status !== 'granted') {
-        throw new Error('Media library permissions required');
-      }
-
-      // Create asset from the downloaded file
-      const asset = await MediaLibrary.createAssetAsync(sourceUri);
-      
-      // Try to get Downloads album or create it
-      let album = await MediaLibrary.getAlbumAsync('Download');
-      if (!album) {
-        // Try alternative names
-        const albums = await MediaLibrary.getAlbumsAsync();
-        album = albums.find(a => 
-          a.title.toLowerCase().includes('download') || 
-          a.title.toLowerCase().includes('downloads')
-        );
-      }
-
-      if (album) {
-        // Add to Downloads album
-        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
-        console.log('Added APK to Downloads album');
-      }
-
-      return asset.uri;
-    } catch (error) {
-      console.error('Failed to copy to Downloads folder:', error);
-      throw error;
-    }
-  }
-
   private createProgressHandler(metadata: UpdateMetadata) {
     return (downloadProgress: FileSystem.DownloadProgressData) => {
       const currentTime = Date.now();
@@ -580,31 +525,6 @@ class UpdateService {
         { text: 'OK', style: 'cancel' }
       ]
     );
-  }
-
-  /**
-   * Open Downloads folder for user to manually install
-   */
-  private async openDownloadsFolder() {
-    try {
-      // Try to open Downloads app
-      const canOpen = await Linking.canOpenURL('content://com.android.providers.downloads.ui.DownloadList');
-      if (canOpen) {
-        await Linking.openURL('content://com.android.providers.downloads.ui.DownloadList');
-      } else {
-        // Fallback to file manager
-        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
-          data: 'content://com.android.externalstorage.documents/document/primary%3ADownload',
-          type: 'resource/folder'
-        });
-      }
-    } catch (error) {
-      console.error('Failed to open Downloads folder:', error);
-      Alert.alert(
-        'Downloads Folder', 
-        'Please check your Downloads folder in your file manager for the GLT APK file.'
-      );
-    }
   }
 
   /**
@@ -809,10 +729,9 @@ class UpdateService {
   private showManualInstallOptions(fileUri: string): void {
     Alert.alert(
       'Manual Installation Required',
-      'Automatic installation failed. You can:\n\n• Use the Android system installer\n• Find the APK in Downloads folder\n• Share the file to install',
+      'Automatic installation failed. You can:\n\n• Find the APK in Downloads folder\n• Open your file manager to locate the file\n• Try installation again',
       [
         { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
-        { text: 'Share APK', onPress: () => this.shareAPKFile(fileUri) },
         { text: 'Try Again', onPress: () => this.tryInstallMethods(fileUri) },
         { text: 'Cancel', style: 'cancel' }
       ]
@@ -833,30 +752,6 @@ class UpdateService {
       console.log('Cleanup completed after installation');
     } catch (error) {
       console.error('Failed to cleanup after install:', error);
-    }
-  }
-
-  /**
-   * Share APK file for manual installation
-   */
-  private async shareAPKFile(fileUri: string): Promise<void> {
-    try {
-      const isAvailable = await Sharing.isAvailableAsync();
-      if (isAvailable) {
-        await Sharing.shareAsync(fileUri, {
-          mimeType: 'application/vnd.android.package-archive',
-          dialogTitle: 'Install GLT Update',
-        });
-      } else {
-        throw new Error('Sharing not available');
-      }
-    } catch (error) {
-      console.error('Failed to share APK:', error);
-      Alert.alert(
-        'Manual Installation Required',
-        'Please find the GLT APK file in your Downloads folder and install it manually.',
-        [{ text: 'Open Downloads', onPress: () => this.openDownloadsFolder() }]
-      );
     }
   }
 
@@ -1008,17 +903,61 @@ class UpdateService {
   }
 
   /**
-   * Get current app version from Constants
+   * Get current app version from ChangelogModal or Constants
    */
-  getCurrentVersion(): string {
-    return Constants.expoConfig?.version || '1.6.0';
+  async getCurrentVersion(): Promise<string> {
+    try {
+      // First try to get from stored version (set by ChangelogModal)
+      const storedVersion = await this.getStoredCurrentVersion();
+      if (storedVersion) {
+        return storedVersion;
+      }
+      
+      // Fallback to Constants
+      const configVersion = Constants.expoConfig?.version;
+      if (configVersion) {
+        // Store it for future use
+        await this.setCurrentVersion(configVersion);
+        return configVersion;
+      }
+      
+      // Final fallback
+      return '1.7.6';
+    } catch (error) {
+      console.error('Failed to get current version:', error);
+      return '1.7.6';
+    }
+  }
+
+  /**
+   * Set current version from external source (like ChangelogModal)
+   */
+  async setCurrentVersion(version: string): Promise<void> {
+    try {
+      await AsyncStorage.setItem('app_current_version', version);
+      console.log('Version set to:', version);
+    } catch (error) {
+      console.error('Failed to set current version:', error);
+    }
+  }
+
+  /**
+   * Get stored current version
+   */
+  private async getStoredCurrentVersion(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem('app_current_version');
+    } catch (error) {
+      console.error('Failed to get stored version:', error);
+      return null;
+    }
   }
 
   /**
    * Get update ID - for APK updates, return app version
    */
-  getUpdateId(): string | null {
-    return this.getCurrentVersion();
+  async getUpdateId(): Promise<string> {
+    return await this.getCurrentVersion();
   }
 
   /**
