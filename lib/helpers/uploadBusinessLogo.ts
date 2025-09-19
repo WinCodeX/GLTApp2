@@ -1,5 +1,5 @@
-// lib/helpers/uploadBusinessLogo.ts - Fixed to use API instance like avatar upload
-import * as FileSystem from 'expo-file-system';
+// lib/helpers/uploadBusinessLogo.ts - Fixed to use legacy FileSystem API
+import * as FileSystem from 'expo-file-system/legacy';
 import * as SecureStore from 'expo-secure-store';
 import { Platform } from 'react-native';
 import api from '../api';
