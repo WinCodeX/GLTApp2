@@ -1,4 +1,4 @@
-// components/BusinessModal.tsx - Updated with server categories and phone number
+// components/BusinessModal.tsx - Updated to always fetch fresh categories
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View,
@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { createBusiness, fetchCategories, validatePhoneNumber, formatPhoneNumber } from '../lib/helpers/business';
+import { createBusiness, fetchCategories, validatePhoneNumber, formatPhoneNumber, clearCategoriesCache } from '../lib/helpers/business';
 
 interface BusinessModalProps {
   visible: boolean;
@@ -72,45 +72,62 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
   const [loadingCategories, setLoadingCategories] = useState(false);
   const [categoriesError, setCategoriesError] = useState<string | null>(null);
 
-  // Load categories when modal opens
+  // Load fresh categories when modal opens
   useEffect(() => {
     if (visible) {
-      loadCategories();
+      loadFreshCategories();
     }
   }, [visible]);
 
-  const loadCategories = async () => {
+  // ALWAYS fetch fresh categories from server
+  const loadFreshCategories = async () => {
     setLoadingCategories(true);
     setCategoriesError(null);
+    setCategories([]); // Clear existing categories
     
     try {
-      console.log('🏷️ BusinessModal: Loading categories...');
-      const fetchedCategories = await fetchCategories();
-      setCategories(fetchedCategories);
-      console.log('🏷️ BusinessModal: Categories loaded:', fetchedCategories.length);
-    } catch (error: any) {
-      console.error('🏷️ BusinessModal: Error loading categories:', error);
-      setCategoriesError('Failed to load categories. Please try again.');
+      console.log('🏷️ BusinessModal: Force clearing cache and loading fresh categories...');
       
-      // Set some default categories as fallback
-      setCategories([
-        { id: 1, name: 'Technology', slug: 'technology' },
-        { id: 2, name: 'Retail', slug: 'retail' },
-        { id: 3, name: 'Food & Beverage', slug: 'food-beverage' },
-        { id: 4, name: 'Healthcare', slug: 'healthcare' },
-        { id: 5, name: 'Other', slug: 'other' }
-      ]);
+      // Always clear cache and force fresh fetch
+      await clearCategoriesCache();
+      const fetchedCategories = await fetchCategories(true); // Force refresh = true
+      
+      console.log('🏷️ BusinessModal: Fresh categories loaded:', {
+        count: fetchedCategories.length,
+        ids: fetchedCategories.map(c => c.id),
+        names: fetchedCategories.map(c => c.name)
+      });
+      
+      if (fetchedCategories.length === 0) {
+        throw new Error('No categories available. Please contact support.');
+      }
+      
+      setCategories(fetchedCategories);
+      
+    } catch (error: any) {
+      console.error('🏷️ BusinessModal: Error loading fresh categories:', error);
+      
+      // Don't use fallback categories - show error instead
+      setCategoriesError(error.message || 'Failed to load categories. Please try again.');
+      
+      // Show toast for user feedback
+      showToast.error('Failed to load categories', 'Please check your connection and try again');
     } finally {
       setLoadingCategories(false);
     }
   };
 
   const handleCategoryToggle = useCallback((categoryId: number) => {
+    console.log('🏷️ BusinessModal: Toggling category ID:', categoryId);
     setSelectedCategoryIds(prev => {
       if (prev.includes(categoryId)) {
-        return prev.filter(id => id !== categoryId);
+        const newSelection = prev.filter(id => id !== categoryId);
+        console.log('🏷️ BusinessModal: Removed category, new selection:', newSelection);
+        return newSelection;
       } else if (prev.length < 5) {
-        return [...prev, categoryId];
+        const newSelection = [...prev, categoryId];
+        console.log('🏷️ BusinessModal: Added category, new selection:', newSelection);
+        return newSelection;
       } else {
         showToast.warning('Maximum Categories', 'You can select up to 5 categories only');
         return prev;
@@ -171,6 +188,17 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
         category_ids: selectedCategoryIds
       });
 
+      // Add debug info about selected categories
+      const selectedCategoryNames = categories
+        .filter(cat => selectedCategoryIds.includes(cat.id))
+        .map(cat => cat.name);
+      
+      console.log('🏷️ BusinessModal: Selected categories details:', {
+        ids: selectedCategoryIds,
+        names: selectedCategoryNames,
+        totalAvailable: categories.length
+      });
+
       const result = await createBusiness({
         name: businessName.trim(),
         phone_number: formatPhoneNumber(phoneNumber),
@@ -187,6 +215,7 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       setSelectedCategoryIds([]);
       
       // Close modal and trigger refresh
+      onClose();
       onCreate();
       
     } catch (error: any) {
@@ -210,12 +239,13 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
       setPhoneNumber('');
       setSelectedCategoryIds([]);
       setCategoriesError(null);
+      setCategories([]);
       onClose();
     }
   };
 
   const retryLoadCategories = () => {
-    loadCategories();
+    loadFreshCategories();
   };
 
   return (
@@ -289,14 +319,24 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
                   {loadingCategories ? (
                     <View style={styles.loadingContainer}>
                       <ActivityIndicator size="small" color="#7c3aed" />
-                      <Text style={styles.loadingText}>Loading categories...</Text>
+                      <Text style={styles.loadingText}>Loading fresh categories...</Text>
                     </View>
                   ) : categoriesError ? (
                     <View style={styles.errorContainer}>
+                      <Feather name="alert-circle" size={24} color="#ef4444" />
                       <Text style={styles.errorText}>{categoriesError}</Text>
                       <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
                         <Feather name="refresh-cw" size={16} color="#7c3aed" />
                         <Text style={styles.retryButtonText}>Retry</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ) : categories.length === 0 ? (
+                    <View style={styles.errorContainer}>
+                      <Feather name="inbox" size={24} color="#6b7280" />
+                      <Text style={styles.errorText}>No categories available</Text>
+                      <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
+                        <Feather name="refresh-cw" size={16} color="#7c3aed" />
+                        <Text style={styles.retryButtonText}>Try Again</Text>
                       </TouchableOpacity>
                     </View>
                   ) : (
@@ -386,10 +426,10 @@ export default function BusinessModal({ visible, onClose, onCreate }: BusinessMo
               <TouchableOpacity
                 style={[
                   styles.primaryButton,
-                  (!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories) && styles.disabledButton
+                  (!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories || categories.length === 0) && styles.disabledButton
                 ]}
                 onPress={handleCreate}
-                disabled={!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories}
+                disabled={!businessName.trim() || !phoneNumber.trim() || selectedCategoryIds.length === 0 || loading || loadingCategories || categories.length === 0}
               >
                 {loading ? (
                   <View style={styles.loadingContainer}>
@@ -503,14 +543,14 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(239, 68, 68, 0.3)',
     borderRadius: 12,
-    padding: 20,
+    padding: 24,
     alignItems: 'center',
+    gap: 12,
   },
   errorText: {
     color: '#ef4444',
     fontSize: 14,
     textAlign: 'center',
-    marginBottom: 16,
     lineHeight: 20,
   },
   retryButton: {
