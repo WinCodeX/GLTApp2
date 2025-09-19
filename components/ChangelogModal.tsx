@@ -5,17 +5,17 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.7.6';
+export const CHANGELOG_VERSION = '1.7.7';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 7000;
 
 const CHANGELOG_CONTENT = [
-'Fixed going back in screens',
-'Terms and conditions update',
-'Auto reject feature added',
-'Polished UI in contact screen',
-'Push notifications and sounds added',
-'Other Bug fixes',
+  'Fixed going back in screens',
+  'Terms and conditions update',
+  'Auto reject feature added',
+  'Polished UI in contact screen',
+  'Push notifications and sounds added',
+  'Other Bug fixes',
 ];
 
 type Props = {
@@ -31,20 +31,23 @@ interface UpdateInfo {
   force_update?: boolean;
   isDownloading?: boolean;
   downloadProgress?: number;
+  hasCompletedDownload?: boolean;
+  completedVersion?: string;
 }
 
 export default function ChangelogModal({ visible, onClose }: Props) {
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo>({ isAvailable: false });
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [updateError, setUpdateError] = useState<string | null>(null);
+  const [updateService] = useState(() => UpdateService.getInstance());
 
   useEffect(() => {
     if (visible) {
-      checkForAPKUpdates();
+      initializeAndCheckUpdates();
       
       // Auto-dismiss if no updates available
       const timer = setTimeout(() => {
-        if (!updateInfo.isAvailable && !isCheckingUpdates) {
+        if (!updateInfo.isAvailable && !isCheckingUpdates && !updateInfo.hasCompletedDownload) {
           onClose();
         }
       }, autoDismissDelay);
@@ -53,12 +56,34 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     }
   }, [visible]);
 
+  const initializeAndCheckUpdates = async () => {
+    try {
+      // Set current version in UpdateService
+      updateService.setCurrentVersion(CHANGELOG_VERSION);
+      
+      // Check for completed downloads first
+      const { hasDownload, version } = await updateService.hasCompletedDownload();
+      if (hasDownload) {
+        setUpdateInfo({
+          isAvailable: false,
+          hasCompletedDownload: true,
+          completedVersion: version,
+        });
+        return;
+      }
+      
+      // Check for new updates
+      await checkForAPKUpdates();
+    } catch (error) {
+      console.error('Failed to initialize update check:', error);
+      setUpdateError('Failed to initialize update check');
+    }
+  };
+
   const checkForAPKUpdates = async () => {
     try {
       setIsCheckingUpdates(true);
       setUpdateError(null);
-      
-      const updateService = UpdateService.getInstance();
       
       // Only check for updates on Android
       if (!updateService.isUpdateSupported()) {
@@ -82,7 +107,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       }
     } catch (error) {
       console.error('Failed to check for APK updates:', error);
-      setUpdateError('Failed to check for updates');
+      setUpdateError('Failed to check for updates. Please check your internet connection.');
       setUpdateInfo({ isAvailable: false });
     } finally {
       setIsCheckingUpdates(false);
@@ -96,8 +121,6 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       setUpdateInfo(prev => ({ ...prev, isDownloading: true }));
       setUpdateError(null);
       
-      const updateService = UpdateService.getInstance();
-      
       // Create metadata object for download
       const metadata = {
         available: true,
@@ -105,11 +128,19 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         changelog: updateInfo.changelog,
         file_size: updateInfo.file_size,
         force_update: updateInfo.force_update,
-        download_url: `${process.env.EXPO_PUBLIC_API_URL}/api/v1/updates/download/${updateInfo.version}`, // Construct download URL
+        download_url: `${process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com'}/api/v1/updates/download?version=${updateInfo.version}`,
       };
       
-      // Download and install APK
-      const success = await updateService.downloadUpdate(metadata);
+      // Download with progress tracking
+      const success = await updateService.downloadUpdateWithProgress(
+        metadata,
+        (progress) => {
+          setUpdateInfo(prev => ({ 
+            ...prev, 
+            downloadProgress: Math.round(progress.percentage) 
+          }));
+        }
+      );
       
       if (success) {
         // Mark update as handled and close modal
@@ -117,25 +148,38 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         setUpdateInfo(prev => ({ ...prev, isDownloading: false }));
         onClose();
         
-        // Note: APK installation is handled by Android system, no reload needed
+        // Installation is handled by the UpdateService
       } else {
-        throw new Error('Failed to download or install APK');
+        throw new Error('Download failed. Please try again.');
       }
     } catch (error) {
       console.error('Failed to download APK update:', error);
       setUpdateError(`Update failed: ${error.message}`);
-      setUpdateInfo(prev => ({ ...prev, isDownloading: false }));
+      setUpdateInfo(prev => ({ ...prev, isDownloading: false, downloadProgress: 0 }));
+    }
+  };
+
+  const installCompletedDownload = async () => {
+    try {
+      setUpdateError(null);
+      const success = await updateService.installDownloadedAPK(updateInfo.completedVersion);
+      
+      if (success) {
+        setUpdateInfo(prev => ({ ...prev, hasCompletedDownload: false }));
+        onClose();
+      }
+    } catch (error) {
+      console.error('Failed to install completed download:', error);
+      setUpdateError('Installation failed. You can manually install from Downloads folder.');
     }
   };
 
   const installLater = async () => {
     if (updateInfo.force_update) {
-      // Cannot postpone force updates
       return;
     }
     
     try {
-      const updateService = UpdateService.getInstance();
       await updateService.scheduleInstallForLater();
       onClose();
     } catch (error) {
@@ -181,6 +225,33 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       );
     }
 
+    if (updateInfo.hasCompletedDownload) {
+      return (
+        <View>
+          <Text style={styles.title}>Update Ready to Install</Text>
+          <Text style={styles.text}>
+            GLT version {updateInfo.completedVersion} has been downloaded and is ready to install.
+          </Text>
+          
+          <View style={styles.buttonContainer}>
+            <TouchableOpacity 
+              onPress={onClose} 
+              style={[styles.button, styles.laterButton]}
+            >
+              <Text style={styles.laterButtonText}>Later</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              onPress={installCompletedDownload} 
+              style={[styles.button, styles.installButton]}
+            >
+              <Text style={styles.buttonText}>Install Now</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     if (updateInfo.isAvailable) {
       const fileSizeText = updateInfo.file_size ? ` (${formatFileSize(updateInfo.file_size)})` : '';
       
@@ -213,8 +284,18 @@ export default function ChangelogModal({ visible, onClose }: Props) {
             <View style={styles.downloadingContainer}>
               <ActivityIndicator size="small" color="#bd93f9" />
               <Text style={styles.downloadingText}>
-                Downloading APK update... This may take a few minutes.
+                Downloading APK update... {updateInfo.downloadProgress || 0}%
               </Text>
+              {updateInfo.downloadProgress && (
+                <View style={styles.progressBarContainer}>
+                  <View 
+                    style={[
+                      styles.progressBar, 
+                      { width: `${updateInfo.downloadProgress}%` }
+                    ]} 
+                  />
+                </View>
+              )}
             </View>
           )}
           
@@ -383,7 +464,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   downloadingContainer: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     marginVertical: 10,
@@ -395,9 +475,21 @@ const styles = StyleSheet.create({
   },
   downloadingText: {
     color: '#bd93f9',
-    marginLeft: 10,
     fontSize: 12,
     lineHeight: 16,
-    flex: 1,
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  progressBarContainer: {
+    width: '100%',
+    height: 4,
+    backgroundColor: 'rgba(189, 147, 249, 0.2)',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBar: {
+    height: '100%',
+    backgroundColor: '#bd93f9',
+    borderRadius: 2,
   },
 });
