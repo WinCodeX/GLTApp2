@@ -1239,12 +1239,15 @@ const styles = StyleSheet.create({
   },
   staffModal: {
     backgroundColor: '#1a1a2e',
-    marginTop: 100,
-    marginHorizontal: 20,
+    marginTop: 60,
+    marginBottom: 60,
+    marginHorizontal: 16,
     borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.4)',
-    maxHeight: '80%',
+    height: '75%',
+    width: '95%',
+    alignSelf: 'center',
   },
   staffModalHeader: {
     flexDirection: 'row',
