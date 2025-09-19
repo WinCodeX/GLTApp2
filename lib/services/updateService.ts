@@ -1,16 +1,16 @@
-// lib/services/updateService.ts - Fixed with proper notifications and installation
+// lib/services/updateService.ts - Enhanced with Downloads folder and FileProvider support
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
-import * as Notifications from 'expo-notifications';
+import * as MediaLibrary from 'expo-media-library';
+import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
-import { Platform, Alert, AppState, AppStateStatus } from 'react-native';
+import { Platform, Alert, AppState, AppStateStatus, Linking } from 'react-native';
 
 const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const DOWNLOAD_STORAGE_KEY = 'pending_apk_download';
 const DOWNLOAD_PROGRESS_KEY = 'download_progress';
-const UPDATE_NOTIFICATION_CHANNEL = 'app-updates';
 
 interface UpdateMetadata {
   available: boolean;
@@ -37,6 +37,7 @@ interface DownloadProgressCallback {
 interface StoredDownload {
   version: string;
   filePath: string;
+  downloadsPath?: string; // Path in Downloads folder
   metadata: UpdateMetadata;
   downloadedAt: number;
   isComplete: boolean;
@@ -49,7 +50,7 @@ class UpdateService {
   private downloadProgressCallback: DownloadProgressCallback | null = null;
   private downloadStartTime = 0;
   private appStateSubscription: any = null;
-  private notificationId = 'download_progress';
+  private isExpoGo = false;
 
   static getInstance(): UpdateService {
     if (!UpdateService.instance) {
@@ -60,8 +61,18 @@ class UpdateService {
 
   async initialize() {
     try {
-      // Setup notification channels and permissions
-      await this.setupNotifications();
+      // Detect if running in Expo Go
+      this.isExpoGo = Constants.appOwnership === 'expo';
+      
+      if (this.isExpoGo) {
+        console.log('Running in Expo Go - limited functionality');
+      }
+      
+      // Initialize version tracking
+      await this.initializeVersionTracking();
+      
+      // Request media library permissions for Downloads access
+      await this.requestDownloadsPermission();
       
       // Check for pending downloads
       await this.checkPendingDownloads();
@@ -75,47 +86,38 @@ class UpdateService {
     }
   }
 
-  private async setupNotifications() {
+  /**
+   * Initialize version tracking for update detection
+   */
+  private async initializeVersionTracking(): Promise<void> {
     try {
-      // Request notification permissions
-      const { status: existingStatus } = await Notifications.getPermissionsAsync();
-      let finalStatus = existingStatus;
+      const currentVersion = this.getCurrentVersion();
+      const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
       
-      if (existingStatus !== 'granted') {
-        const { status } = await Notifications.requestPermissionsAsync();
-        finalStatus = status;
+      if (!lastKnownVersion) {
+        // First run - set current version
+        await AsyncStorage.setItem('last_known_version', currentVersion);
+        console.log('Version tracking initialized:', currentVersion);
       }
-      
-      if (finalStatus !== 'granted') {
-        console.warn('Notification permissions not granted');
-      }
-
-      // Configure notification behavior
-      await Notifications.setNotificationHandler({
-        handleNotification: async () => ({
-          shouldShowAlert: true,
-          shouldPlaySound: true,
-          shouldSetBadge: true,
-        }),
-      });
-
-      // Setup Android notification channel
-      if (Platform.OS === 'android') {
-        await Notifications.setNotificationChannelAsync(UPDATE_NOTIFICATION_CHANNEL, {
-          name: 'App Updates',
-          description: 'Download progress and update notifications',
-          importance: Notifications.AndroidImportance.HIGH,
-          vibrationPattern: [0, 250, 250, 250],
-          lightColor: '#ff6b35',
-          sound: 'default',
-          lockscreenVisibility: Notifications.AndroidNotificationVisibility.PUBLIC,
-          bypassDnd: false,
-        });
-      }
-
-      console.log('Notifications setup completed successfully');
     } catch (error) {
-      console.error('Failed to setup notifications:', error);
+      console.error('Failed to initialize version tracking:', error);
+    }
+  }
+
+  private async requestDownloadsPermission(): Promise<boolean> {
+    try {
+      if (Platform.OS === 'android') {
+        const { status } = await MediaLibrary.requestPermissionsAsync();
+        if (status !== 'granted') {
+          console.warn('Media library permissions not granted - downloads will be limited');
+          return false;
+        }
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to request downloads permission:', error);
+      return false;
     }
   }
 
@@ -128,8 +130,58 @@ class UpdateService {
       // App going to background - check if we should start background download
       await this.checkAndStartBackgroundDownload();
     } else if (nextAppState === 'active') {
-      // App coming to foreground - check download status
+      // App coming to foreground - check download status and installation status
       await this.checkDownloadStatus();
+      await this.checkPostInstallation();
+    }
+  }
+
+  /**
+   * Check if app was updated after returning from background
+   */
+  private async checkPostInstallation(): Promise<void> {
+    try {
+      const currentVersion = this.getCurrentVersion();
+      const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
+      
+      if (lastKnownVersion && lastKnownVersion !== currentVersion) {
+        // Version changed - installation was successful!
+        console.log(`App updated successfully: ${lastKnownVersion} → ${currentVersion}`);
+        
+        // Clean up any remaining download files
+        await this.cleanupAfterSuccessfulInstall();
+        
+        // Show success message
+        Alert.alert(
+          'Update Successful! ✅',
+          `GLT has been updated to version ${currentVersion}. Enjoy the new features and improvements!`,
+          [{ text: 'Great!' }]
+        );
+      }
+      
+      // Always update the last known version
+      await AsyncStorage.setItem('last_known_version', currentVersion);
+    } catch (error) {
+      console.error('Failed to check post-installation status:', error);
+    }
+  }
+
+  /**
+   * Cleanup after successful installation
+   */
+  private async cleanupAfterSuccessfulInstall(): Promise<void> {
+    try {
+      // Clear all update-related storage
+      await AsyncStorage.multiRemove([
+        'stored_apk_download',
+        'pending_apk_download', 
+        'download_progress',
+        'user_postponed_update'
+      ]);
+      
+      console.log('Cleanup completed after successful installation');
+    } catch (error) {
+      console.error('Failed to cleanup after successful install:', error);
     }
   }
 
@@ -174,8 +226,8 @@ class UpdateService {
         if (fileInfo.exists) {
           console.log('Found completed download for version:', storedDownload.version);
           
-          // Show notification about available install
-          await this.showDownloadCompleteNotification(storedDownload);
+          // Show alert about available install
+          this.showDownloadCompleteAlert(storedDownload);
         } else {
           // File was deleted, clean up storage
           await this.clearStoredDownload();
@@ -221,7 +273,7 @@ class UpdateService {
   }
 
   /**
-   * Download update with progress tracking
+   * Download update with progress tracking and Downloads folder support
    */
   async downloadUpdateWithProgress(
     metadata: UpdateMetadata, 
@@ -241,11 +293,11 @@ class UpdateService {
       this.downloadProgressCallback = progressCallback || null;
       this.downloadStartTime = Date.now();
 
-      // Create download directory
+      // Create download directory in app storage
       const downloadDir = FileSystem.documentDirectory + 'downloads/';
       await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
       
-      const fileName = `glt_update_v${metadata.version}.apk`;
+      const fileName = `GLT_v${metadata.version?.replace(/\./g, '_')}_update.apk`;
       const fileUri = downloadDir + fileName;
       
       // Clean up any existing file
@@ -254,8 +306,8 @@ class UpdateService {
         await FileSystem.deleteAsync(fileUri);
       }
 
-      // Show initial progress notification in notification bar
-      await this.showDownloadStartNotification(metadata.version);
+      // Show download start alert
+      this.showDownloadStartAlert(metadata.version);
 
       // Start download with progress tracking
       const downloadResumable = FileSystem.createDownloadResumable(
@@ -277,10 +329,21 @@ class UpdateService {
         throw new Error('Downloaded file is invalid');
       }
 
+      // Copy to Downloads folder for user access
+      let downloadsPath: string | undefined;
+      try {
+        downloadsPath = await this.copyToDownloadsFolder(result.uri, fileName);
+        console.log('APK copied to Downloads folder:', downloadsPath);
+      } catch (error) {
+        console.warn('Failed to copy to Downloads folder:', error);
+        // Continue anyway - we still have the file in app storage
+      }
+
       // Store download info
       const storedDownload: StoredDownload = {
         version: metadata.version || 'latest',
         filePath: result.uri,
+        downloadsPath,
         metadata,
         downloadedAt: Date.now(),
         isComplete: true,
@@ -288,8 +351,8 @@ class UpdateService {
       
       await this.storeDownload(storedDownload);
       
-      // Show completion notification
-      await this.showDownloadCompleteNotification(storedDownload);
+      // Show completion alert
+      this.showDownloadCompleteAlert(storedDownload);
       
       // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
@@ -300,8 +363,8 @@ class UpdateService {
     } catch (error) {
       console.error('APK download failed:', error);
       
-      // Show error notification
-      await this.showDownloadErrorNotification(metadata.version || 'latest');
+      // Show error alert
+      this.showDownloadErrorAlert(metadata.version || 'latest');
       
       // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
@@ -310,6 +373,44 @@ class UpdateService {
     } finally {
       this.downloadInProgress = false;
       this.downloadProgressCallback = null;
+    }
+  }
+
+  /**
+   * Copy APK to Downloads folder where users can find it
+   */
+  private async copyToDownloadsFolder(sourceUri: string, fileName: string): Promise<string> {
+    try {
+      // Request media library permissions if not already granted
+      const { status } = await MediaLibrary.getPermissionsAsync();
+      if (status !== 'granted') {
+        throw new Error('Media library permissions required');
+      }
+
+      // Create asset from the downloaded file
+      const asset = await MediaLibrary.createAssetAsync(sourceUri);
+      
+      // Try to get Downloads album or create it
+      let album = await MediaLibrary.getAlbumAsync('Download');
+      if (!album) {
+        // Try alternative names
+        const albums = await MediaLibrary.getAlbumsAsync();
+        album = albums.find(a => 
+          a.title.toLowerCase().includes('download') || 
+          a.title.toLowerCase().includes('downloads')
+        );
+      }
+
+      if (album) {
+        // Add to Downloads album
+        await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
+        console.log('Added APK to Downloads album');
+      }
+
+      return asset.uri;
+    } catch (error) {
+      console.error('Failed to copy to Downloads folder:', error);
+      throw error;
     }
   }
 
@@ -336,11 +437,6 @@ class UpdateService {
       // Store progress for persistence
       AsyncStorage.setItem(DOWNLOAD_PROGRESS_KEY, JSON.stringify(progress)).catch(console.error);
 
-      // Update progress notification every 10%
-      if (Math.floor(percentage) % 10 === 0) {
-        this.updateDownloadProgressNotification(percentage, metadata.version, loaded, total).catch(console.error);
-      }
-
       // Call progress callback
       if (this.downloadProgressCallback) {
         this.downloadProgressCallback(progress);
@@ -348,94 +444,64 @@ class UpdateService {
     };
   }
 
-  private async showDownloadStartNotification(version?: string) {
-    try {
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Starting Update Download',
-          body: `Downloading GLT version ${version || 'latest'}...`,
-          data: { type: 'download_start', version },
-          categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
-          sound: 'default',
-        },
-        trigger: null,
-        identifier: this.notificationId,
-      });
-    } catch (error) {
-      console.error('Failed to show start notification:', error);
-    }
+  private showDownloadStartAlert(version?: string) {
+    console.log(`Starting download for GLT version ${version || 'latest'}...`);
   }
 
-  private async updateDownloadProgressNotification(percentage: number, version?: string, loaded?: number, total?: number) {
-    try {
-      const progressText = `${Math.round(percentage)}% complete`;
-      const sizeText = loaded && total ? ` • ${this.formatFileSize(loaded)}/${this.formatFileSize(total)}` : '';
-      
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Downloading GLT Update',
-          body: `Version ${version || 'latest'} - ${progressText}${sizeText}`,
-          data: { type: 'download_progress', version, percentage },
-          categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
-          sound: false, // Don't play sound for progress updates
-          sticky: true, // Keep notification visible
-        },
-        trigger: null,
-        identifier: this.notificationId,
-      });
-    } catch (error) {
-      console.error('Failed to update progress notification:', error);
-    }
+  private showDownloadCompleteAlert(download: StoredDownload) {
+    const message = download.downloadsPath 
+      ? `GLT version ${download.version} is ready to install.\n\nThe APK file has been saved to your Downloads folder and is ready to install.`
+      : `GLT version ${download.version} is ready to install.`;
+
+    Alert.alert(
+      'Update Downloaded ✓',
+      message,
+      [
+        { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
+        { text: 'Install Now', onPress: () => this.installDownloadedAPK(download.version) },
+        { text: 'Later', style: 'cancel' }
+      ]
+    );
   }
 
-  private async showDownloadCompleteNotification(download: StoredDownload) {
-    try {
-      // Cancel progress notification
-      await Notifications.cancelScheduledNotificationAsync(this.notificationId);
-      
-      // Show completion notification
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Update Downloaded ✓',
-          body: `GLT version ${download.version} is ready to install. Tap to install now.`,
-          data: { 
-            type: 'download_complete', 
-            version: download.version,
-            filePath: download.filePath 
-          },
-          categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
-          sound: 'default',
-          sticky: false,
-        },
-        trigger: null,
-      });
-    } catch (error) {
-      console.error('Failed to show completion notification:', error);
-    }
+  private showDownloadErrorAlert(version: string) {
+    Alert.alert(
+      'Download Failed',
+      `Failed to download GLT version ${version}. Please check your internet connection and try again.`,
+      [
+        { text: 'Retry', onPress: () => this.checkForUpdates() },
+        { text: 'OK', style: 'cancel' }
+      ]
+    );
   }
 
-  private async showDownloadErrorNotification(version: string) {
+  /**
+   * Open Downloads folder for user to manually install
+   */
+  private async openDownloadsFolder() {
     try {
-      // Cancel progress notification
-      await Notifications.cancelScheduledNotificationAsync(this.notificationId);
-      
-      await Notifications.scheduleNotificationAsync({
-        content: {
-          title: 'Download Failed',
-          body: `Failed to download GLT version ${version}. Please try again.`,
-          data: { type: 'download_error', version },
-          categoryIdentifier: UPDATE_NOTIFICATION_CHANNEL,
-          sound: 'default',
-        },
-        trigger: null,
-      });
+      // Try to open Downloads app
+      const canOpen = await Linking.canOpenURL('content://com.android.providers.downloads.ui.DownloadList');
+      if (canOpen) {
+        await Linking.openURL('content://com.android.providers.downloads.ui.DownloadList');
+      } else {
+        // Fallback to file manager
+        await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+          data: 'content://com.android.externalstorage.documents/document/primary%3ADownload',
+          type: 'resource/folder'
+        });
+      }
     } catch (error) {
-      console.error('Failed to show error notification:', error);
+      console.error('Failed to open Downloads folder:', error);
+      Alert.alert(
+        'Downloads Folder', 
+        'Please check your Downloads folder in your file manager for the GLT APK file.'
+      );
     }
   }
 
   /**
-   * Install downloaded APK with improved flow
+   * Install downloaded APK with multiple methods
    */
   async installDownloadedAPK(version?: string): Promise<boolean> {
     try {
@@ -445,79 +511,245 @@ class UpdateService {
         throw new Error('No matching download found');
       }
 
+      // Try app storage file first, then Downloads folder
+      let installPath = storedDownload.filePath;
+      
       // Verify file still exists
-      const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
+      const fileInfo = await FileSystem.getInfoAsync(installPath);
+      if (!fileInfo.exists && storedDownload.downloadsPath) {
+        // Try Downloads folder copy
+        installPath = storedDownload.downloadsPath;
+      }
+
       if (!fileInfo.exists) {
         await this.clearStoredDownload();
         throw new Error('Download file no longer exists');
       }
 
-      // Install APK with improved user experience
-      await this.installAPKImproved(storedDownload.filePath, storedDownload.version);
+      // Install APK with multiple methods
+      await this.installAPKMultipleMethods(installPath, storedDownload.version);
       
       return true;
     } catch (error) {
       console.error('Failed to install downloaded APK:', error);
       Alert.alert(
         'Installation Error',
-        `Unable to install update: ${error.message}\n\nPlease check your device settings allow app installation from unknown sources.`
+        `Unable to install update: ${error.message}\n\nYou can manually install the APK from your Downloads folder.`,
+        [
+          { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
+          { text: 'OK', style: 'cancel' }
+        ]
       );
       return false;
     }
   }
 
   /**
-   * Improved APK installation with better user guidance
+   * Check if app has install permissions and guide user through the process
    */
-  private async installAPKImproved(fileUri: string, version: string): Promise<void> {
+  private async checkInstallPermission(): Promise<boolean> {
     try {
-      console.log('Installing APK:', fileUri);
+      if (Platform.OS !== 'android') return false;
       
-      // Show user guidance before starting installation
-      Alert.alert(
-        'Installing Update',
-        `Installing GLT version ${version}. You may need to allow installation from unknown sources in your device settings.`,
-        [{ text: 'Continue', onPress: () => this.executeAPKInstall(fileUri) }]
-      );
+      // Check if we can install packages (Android 8.0+)
+      const hasPermission = await IntentLauncher.startActivityAsync('android.settings.MANAGE_UNKNOWN_APP_SOURCES', {
+        data: `package:${Constants.expoConfig?.android?.package || 'com.lvl0_x.gltapp2'}`
+      }).then(() => true).catch(() => false);
       
+      return hasPermission;
     } catch (error) {
-      console.error('APK installation preparation failed:', error);
-      throw error;
+      console.error('Failed to check install permission:', error);
+      return false;
     }
   }
 
-  private async executeAPKInstall(fileUri: string): Promise<void> {
-    try {
-      // Primary installation method
-      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+  /**
+   * Guide user to enable install permissions if needed
+   */
+  private async requestInstallPermission(): Promise<boolean> {
+    return new Promise((resolve) => {
+      Alert.alert(
+        'Enable App Installation',
+        `To install GLT updates, you need to allow this app to install other apps.\n\nSteps:\n1. Tap "Open Settings"\n2. Turn ON "Allow from this source"\n3. Come back to GLT\n4. Try installation again`,
+        [
+          { 
+            text: 'Open Settings', 
+            onPress: async () => {
+              try {
+                await IntentLauncher.startActivityAsync('android.settings.MANAGE_UNKNOWN_APP_SOURCES', {
+                  data: `package:${Constants.expoConfig?.android?.package || 'com.lvl0_x.gltapp2'}`
+                });
+                resolve(true);
+              } catch (error) {
+                console.error('Failed to open install permission settings:', error);
+                // Fallback to general security settings
+                try {
+                  await IntentLauncher.startActivityAsync('android.settings.SECURITY');
+                  resolve(true);
+                } catch (fallbackError) {
+                  console.error('Failed to open security settings:', fallbackError);
+                  resolve(false);
+                }
+              }
+            }
+          },
+          { text: 'Cancel', style: 'cancel', onPress: () => resolve(false) }
+        ]
+      );
+    });
+  }
+
+  /**
+   * Try multiple installation methods for better compatibility
+   */
+  private async installAPKMultipleMethods(fileUri: string, version: string): Promise<void> {
+    console.log('Installing APK:', fileUri);
+
+    // First check if we have install permissions
+    const hasPermission = await this.checkInstallPermission();
+    
+    if (!hasPermission) {
+      // Guide user to enable permissions
+      const permissionGranted = await this.requestInstallPermission();
+      if (!permissionGranted) {
+        // User cancelled or couldn't enable permissions
+        this.showManualInstallOptions(fileUri);
+        return;
+      }
+    }
+
+    // Show installation starting message
+    Alert.alert(
+      'Installing Update',
+      `Installing GLT version ${version}...\n\nThe Android installer will open. Please:\n• Tap "Install" when prompted\n• Wait for installation to complete\n• The app will restart automatically`,
+      [
+        { text: 'Start Installation', onPress: () => this.tryInstallMethods(fileUri) }
+      ]
+    );
+  }
+
+  private async tryInstallMethods(fileUri: string): Promise<void> {
+    const methods = [
+      // Method 1: Standard VIEW intent with proper flags
+      () => IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: fileUri,
         type: 'application/vnd.android.package-archive',
-        flags: 1, // FLAG_GRANT_READ_URI_PERMISSION
+        flags: 268435457, // FLAG_ACTIVITY_NEW_TASK | FLAG_GRANT_READ_URI_PERMISSION
         extra: {
           'android.intent.extra.NOT_UNKNOWN_SOURCE': true,
-          'android.intent.extra.INSTALLER_PACKAGE_NAME': 'com.lvl0_x.gltapp2'
+          'android.intent.extra.INSTALLER_PACKAGE_NAME': Constants.expoConfig?.android?.package || 'com.lvl0_x.gltapp2'
         }
-      });
+      }),
       
-      console.log('APK installation intent launched successfully');
-      
-    } catch (error) {
-      console.error('Primary installation failed, trying alternative:', error);
-      
-      // Alternative installation method
+      // Method 2: INSTALL_PACKAGE intent (Android 7.0+)
+      () => IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
+        data: fileUri,
+        type: 'application/vnd.android.package-archive',
+        flags: 268435457,
+        extra: {
+          'android.intent.extra.RETURN_RESULT': true,
+          'android.intent.extra.NOT_UNKNOWN_SOURCE': true
+        }
+      }),
+
+      // Method 3: Package manager intent
+      () => IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: fileUri,
+        type: 'application/vnd.android.package-archive',
+        flags: 1,
+        className: 'com.android.packageinstaller/.InstallAppProgress'
+      })
+    ];
+
+    for (let i = 0; i < methods.length; i++) {
       try {
-        await IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
-          data: fileUri,
-          type: 'application/vnd.android.package-archive',
-          flags: 1,
-        });
+        await methods[i]();
+        console.log(`Installation method ${i + 1} launched successfully`);
         
-        console.log('Alternative APK installation launched');
-        
-      } catch (fallbackError) {
-        console.error('Alternative installation also failed:', fallbackError);
-        throw new Error('Unable to launch APK installer. Please install manually from Downloads folder.');
+        // Show success message and cleanup
+        this.handleInstallationStarted();
+        return;
+      } catch (error) {
+        console.error(`Installation method ${i + 1} failed:`, error);
+        if (i === methods.length - 1) {
+          // All methods failed, show manual options
+          this.showManualInstallOptions(fileUri);
+        }
       }
+    }
+  }
+
+  /**
+   * Handle when installation process has started
+   */
+  private handleInstallationStarted(): void {
+    // Show success message
+    Alert.alert(
+      'Installation Started',
+      'The Android installer is now running. After installation completes, the app will restart with the new version.',
+      [{ text: 'OK' }]
+    );
+
+    // Schedule cleanup after a delay (installer is running)
+    setTimeout(() => {
+      this.cleanupAfterInstall();
+    }, 3000);
+  }
+
+  /**
+   * Show manual installation options when automatic fails
+   */
+  private showManualInstallOptions(fileUri: string): void {
+    Alert.alert(
+      'Manual Installation Required',
+      'Automatic installation failed. You can:\n\n• Use the Android system installer\n• Find the APK in Downloads folder\n• Share the file to install',
+      [
+        { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
+        { text: 'Share APK', onPress: () => this.shareAPKFile(fileUri) },
+        { text: 'Try Again', onPress: () => this.tryInstallMethods(fileUri) },
+        { text: 'Cancel', style: 'cancel' }
+      ]
+    );
+  }
+
+  /**
+   * Cleanup after installation attempt
+   */
+  private async cleanupAfterInstall(): Promise<void> {
+    try {
+      // Clear stored download info since installation is in progress
+      await this.clearStoredDownload();
+      
+      // Clear progress tracking
+      await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
+      
+      console.log('Cleanup completed after installation');
+    } catch (error) {
+      console.error('Failed to cleanup after install:', error);
+    }
+  }
+
+  /**
+   * Share APK file for manual installation
+   */
+  private async shareAPKFile(fileUri: string): Promise<void> {
+    try {
+      const isAvailable = await Sharing.isAvailableAsync();
+      if (isAvailable) {
+        await Sharing.shareAsync(fileUri, {
+          mimeType: 'application/vnd.android.package-archive',
+          dialogTitle: 'Install GLT Update',
+        });
+      } else {
+        throw new Error('Sharing not available');
+      }
+    } catch (error) {
+      console.error('Failed to share APK:', error);
+      Alert.alert(
+        'Manual Installation Required',
+        'Please find the GLT APK file in your Downloads folder and install it manually.',
+        [{ text: 'Open Downloads', onPress: () => this.openDownloadsFolder() }]
+      );
     }
   }
 
@@ -651,7 +883,7 @@ class UpdateService {
       
       Alert.alert(
         metadata.force_update ? 'Required Update' : 'Update Available',
-        `Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\nThis will download and install a new APK file.`,
+        `Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\nThis will download and install a new APK file to your Downloads folder.`,
         [
           ...(metadata.force_update ? [] : [{
             text: 'Later',
