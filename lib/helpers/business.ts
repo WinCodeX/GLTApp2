@@ -1,4 +1,4 @@
-// lib/helpers/business.ts - COMPLETE FIXED VERSION
+// lib/helpers/business.ts - IMPROVED VERSION with Better Cache Management
 import Toast from 'react-native-toast-message';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
@@ -26,7 +26,7 @@ interface UpdateBusinessData {
 
 const CATEGORIES_CACHE_KEY = '@business_categories';
 const CATEGORIES_CACHE_EXPIRY = '@categories_cache_expiry';
-const CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+const CACHE_DURATION = 1 * 60 * 60 * 1000; // Reduced to 1 hour for more frequent updates
 
 // Get auth token with proper error handling
 const getAuthToken = async (): Promise<string> => {
@@ -56,19 +56,131 @@ const isValidationError = (error: any): boolean => {
   return error.response?.status === 422;
 };
 
-// Fetch categories from server with caching and auth verification
+// IMPROVED: Clear categories cache with better error handling
+export const clearCategoriesCache = async (): Promise<void> => {
+  try {
+    console.log('🗑️ Clearing categories cache...');
+    await AsyncStorage.multiRemove([CATEGORIES_CACHE_KEY, CATEGORIES_CACHE_EXPIRY]);
+    console.log('✅ Categories cache cleared successfully');
+  } catch (error) {
+    console.error('❌ Error clearing categories cache:', error);
+    // Try individual removal as fallback
+    try {
+      await AsyncStorage.removeItem(CATEGORIES_CACHE_KEY);
+      await AsyncStorage.removeItem(CATEGORIES_CACHE_EXPIRY);
+      console.log('✅ Categories cache cleared using fallback method');
+    } catch (fallbackError) {
+      console.error('❌ Fallback cache clear also failed:', fallbackError);
+    }
+  }
+};
+
+// IMPROVED: Cache categories with validation and error handling
+const cacheCategories = async (categories: Category[]): Promise<void> => {
+  try {
+    if (!Array.isArray(categories) || categories.length === 0) {
+      console.warn('⚠️ Attempted to cache invalid or empty categories array');
+      return;
+    }
+
+    // Validate categories structure
+    const validCategories = categories.filter(cat => 
+      cat && typeof cat.id === 'number' && typeof cat.name === 'string'
+    );
+
+    if (validCategories.length !== categories.length) {
+      console.warn('⚠️ Some categories had invalid structure and were filtered out');
+    }
+
+    const cacheData = JSON.stringify(validCategories);
+    const expiry = Date.now() + CACHE_DURATION;
+    
+    await AsyncStorage.multiSet([
+      [CATEGORIES_CACHE_KEY, cacheData],
+      [CATEGORIES_CACHE_EXPIRY, expiry.toString()]
+    ]);
+    
+    console.log(`✅ Cached ${validCategories.length} categories successfully`);
+  } catch (error) {
+    console.error('❌ Error caching categories:', error);
+    // Don't throw error - caching failure shouldn't break the flow
+  }
+};
+
+// IMPROVED: Get cached categories with better validation
+const getCachedCategories = async (): Promise<Category[]> => {
+  try {
+    const [cachedData, expiryStr] = await AsyncStorage.multiGet([
+      CATEGORIES_CACHE_KEY,
+      CATEGORIES_CACHE_EXPIRY
+    ]);
+    
+    const categoriesData = cachedData[1];
+    const expiry = expiryStr[1];
+    
+    if (!categoriesData || !expiry) {
+      console.log('📭 No cached categories found');
+      return [];
+    }
+    
+    const expiryTime = parseInt(expiry, 10);
+    const now = Date.now();
+    
+    if (isNaN(expiryTime) || now > expiryTime) {
+      console.log('⏰ Categories cache expired or invalid');
+      await clearCategoriesCache();
+      return [];
+    }
+    
+    const categories: Category[] = JSON.parse(categoriesData);
+    
+    // Validate cached data structure
+    if (!Array.isArray(categories)) {
+      console.warn('⚠️ Cached categories data is not an array, clearing cache');
+      await clearCategoriesCache();
+      return [];
+    }
+
+    // Validate each category has required fields
+    const validCategories = categories.filter(cat => 
+      cat && typeof cat.id === 'number' && typeof cat.name === 'string'
+    );
+
+    if (validCategories.length === 0) {
+      console.warn('⚠️ No valid categories in cache, clearing cache');
+      await clearCategoriesCache();
+      return [];
+    }
+
+    console.log(`📦 Retrieved ${validCategories.length} cached categories`);
+    return validCategories;
+  } catch (error) {
+    console.error('❌ Error reading cached categories:', error);
+    // Clear potentially corrupted cache
+    await clearCategoriesCache();
+    return [];
+  }
+};
+
+// COMPLETELY REWRITTEN: Fetch categories with aggressive cache clearing and fresh data guarantee
 export const fetchCategories = async (forceRefresh = false): Promise<Category[]> => {
   try {
-    // Check cache first unless force refresh
-    if (!forceRefresh) {
+    console.log(`🔄 Fetching categories (forceRefresh: ${forceRefresh})...`);
+
+    // ALWAYS clear cache when force refresh is requested
+    if (forceRefresh) {
+      console.log('🗑️ Force refresh requested - clearing all cached data');
+      await clearCategoriesCache();
+    } else {
+      // Check cache first only if not forcing refresh
       const cachedCategories = await getCachedCategories();
       if (cachedCategories.length > 0) {
-        console.log('Using cached categories:', cachedCategories.length);
+        console.log(`📦 Using ${cachedCategories.length} cached categories`);
         return cachedCategories;
       }
     }
 
-    console.log('Fetching categories from server...');
+    console.log('🌐 Fetching fresh categories from server...');
     
     // Get auth token
     const token = await getAuthToken();
@@ -77,7 +189,14 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 15000, // Increased timeout for server requests
+    });
+    
+    console.log('📡 Categories API response:', {
+      status: response.status,
+      success: response.data?.success,
+      dataType: typeof response.data?.data,
+      dataLength: Array.isArray(response.data?.data) ? response.data.data.length : 'not array'
     });
     
     if (!response.data.success) {
@@ -86,17 +205,43 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
 
     const categories: Category[] = response.data.data || [];
     
-    console.log('Categories fetched successfully:', categories.length);
+    if (!Array.isArray(categories)) {
+      throw new Error('Invalid categories data format received from server');
+    }
+
+    if (categories.length === 0) {
+      console.warn('⚠️ Server returned empty categories array');
+      return [];
+    }
+
+    // Validate categories structure
+    const validCategories = categories.filter(cat => 
+      cat && 
+      typeof cat.id === 'number' && 
+      typeof cat.name === 'string' &&
+      cat.id > 0 &&
+      cat.name.trim().length > 0
+    );
+
+    if (validCategories.length === 0) {
+      throw new Error('No valid categories received from server');
+    }
+
+    console.log(`✅ Successfully fetched ${validCategories.length} categories from server`);
+    console.log('📋 Category IDs:', validCategories.map(c => c.id));
+    console.log('📋 Category names:', validCategories.map(c => c.name));
     
-    // Cache categories for future use
-    await cacheCategories(categories);
+    // Cache the fresh categories
+    await cacheCategories(validCategories);
     
-    return categories;
+    return validCategories;
   } catch (error: any) {
-    console.error('Fetch Categories Error:', error?.response?.data || error?.message);
+    console.error('❌ Fetch Categories Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors
     if (isAuthenticationError(error)) {
+      console.log('🔐 Authentication error - clearing cache and showing error');
+      await clearCategoriesCache();
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -107,26 +252,31 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
       throw new Error('Session expired. Please log in again.');
     }
     
-    // Try to return cached categories as fallback for other errors
-    const cachedCategories = await getCachedCategories();
-    if (cachedCategories.length > 0) {
-      console.log('Falling back to cached categories');
-      
-      Toast.show({
-        type: 'warning',
-        text1: 'Using cached categories',
-        text2: 'Could not fetch latest categories',
-        position: 'bottom',
-        visibilityTime: 3000,
-      });
-      
-      return cachedCategories;
+    // For other errors, try to return cached categories ONLY if not force refreshing
+    if (!forceRefresh) {
+      const cachedCategories = await getCachedCategories();
+      if (cachedCategories.length > 0) {
+        console.log('⚠️ Using cached categories as fallback due to server error');
+        
+        Toast.show({
+          type: 'warning',
+          text1: 'Using cached categories',
+          text2: 'Could not fetch latest categories',
+          position: 'bottom',
+          visibilityTime: 3000,
+        });
+        
+        return cachedCategories;
+      }
     }
     
+    // No cache available or force refresh failed
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
                         error?.message || 
                         'Failed to fetch categories';
+    
+    console.error('❌ No fallback available, throwing error:', errorMessage);
     
     Toast.show({
       type: 'error',
@@ -140,73 +290,14 @@ export const fetchCategories = async (forceRefresh = false): Promise<Category[]>
   }
 };
 
-// Cache categories in AsyncStorage
-const cacheCategories = async (categories: Category[]): Promise<void> => {
-  try {
-    const cacheData = JSON.stringify(categories);
-    const expiry = Date.now() + CACHE_DURATION;
-    
-    await AsyncStorage.multiSet([
-      [CATEGORIES_CACHE_KEY, cacheData],
-      [CATEGORIES_CACHE_EXPIRY, expiry.toString()]
-    ]);
-    
-    console.log('Categories cached successfully');
-  } catch (error) {
-    console.error('Error caching categories:', error);
-  }
-};
-
-// Get cached categories if they exist and are not expired
-const getCachedCategories = async (): Promise<Category[]> => {
-  try {
-    const [cachedData, expiryStr] = await AsyncStorage.multiGet([
-      CATEGORIES_CACHE_KEY,
-      CATEGORIES_CACHE_EXPIRY
-    ]);
-    
-    const categoriesData = cachedData[1];
-    const expiry = expiryStr[1];
-    
-    if (!categoriesData || !expiry) {
-      return [];
-    }
-    
-    const expiryTime = parseInt(expiry, 10);
-    const now = Date.now();
-    
-    if (now > expiryTime) {
-      console.log('Categories cache expired');
-      await clearCategoriesCache();
-      return [];
-    }
-    
-    const categories: Category[] = JSON.parse(categoriesData);
-    return categories;
-  } catch (error) {
-    console.error('Error reading cached categories:', error);
-    return [];
-  }
-};
-
-// Clear categories cache
-export const clearCategoriesCache = async (): Promise<void> => {
-  try {
-    await AsyncStorage.multiRemove([CATEGORIES_CACHE_KEY, CATEGORIES_CACHE_EXPIRY]);
-    console.log('Categories cache cleared');
-  } catch (error) {
-    console.error('Error clearing categories cache:', error);
-  }
-};
-
-// Create a new business with proper error handling
+// IMPROVED: Create business with cache clearing on successful creation
 export const createBusiness = async (businessData: string | BusinessData) => {
   try {
-    console.log('Starting business creation process...');
+    console.log('🏢 Starting business creation process...');
     
     // Get auth token with verification
     const token = await getAuthToken();
-    console.log('Found auth token for business creation');
+    console.log('🔐 Found auth token for business creation');
 
     // Handle both legacy string input and new object input
     let requestData: any;
@@ -227,20 +318,31 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       };
     }
 
-    console.log('Creating business with data:', requestData);
+    console.log('📤 Creating business with data:', JSON.stringify(requestData, null, 2));
 
     const response = await api.post('/api/v1/businesses', requestData, {
       headers: {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      timeout: 15000, // 15 second timeout
+      timeout: 15000,
     });
     
-    console.log('Business creation response:', response.data);
+    console.log('📥 Business creation response:', {
+      status: response.status,
+      success: response.data?.success,
+      hasData: !!response.data?.data
+    });
     
     // Check if the response indicates success
     if (response.data.success) {
+      console.log('✅ Business created successfully');
+      
+      // Clear categories cache to ensure fresh data on next fetch
+      // (in case new categories were added or business affects category visibility)
+      await clearCategoriesCache();
+      console.log('🗑️ Cleared categories cache after business creation');
+      
       return response.data;
     } else {
       // Server returned success=false
@@ -248,11 +350,12 @@ export const createBusiness = async (businessData: string | BusinessData) => {
     }
     
   } catch (error: any) {
-    console.error('Create Business Error:', error?.response?.data || error?.message);
+    console.error('❌ Create Business Error:', error?.response?.data || error?.message);
     
     // Handle authentication errors specifically
     if (isAuthenticationError(error)) {
-      console.log('Authentication failed during business creation');
+      console.log('🔐 Authentication failed during business creation');
+      await clearCategoriesCache(); // Clear cache on auth failure
       Toast.show({
         type: 'error',
         text1: 'Session expired',
@@ -268,7 +371,7 @@ export const createBusiness = async (businessData: string | BusinessData) => {
       const errorMessage = error.response?.data?.message || 'Validation failed';
       const errorDetails = error.response?.data?.errors?.join(', ') || '';
       
-      console.log('Validation error during business creation:', errorMessage, errorDetails);
+      console.log('⚠️ Validation error during business creation:', errorMessage, errorDetails);
       
       Toast.show({
         type: 'error',
@@ -335,7 +438,19 @@ export const createBusiness = async (businessData: string | BusinessData) => {
   }
 };
 
-// Fixed invite generation with better error handling and response parsing
+// UTILITY: Force refresh all cached data (useful for debugging)
+export const clearAllBusinessCache = async (): Promise<void> => {
+  try {
+    console.log('🗑️ Clearing all business-related cache...');
+    await clearCategoriesCache();
+    // Add other cache clearing here if you have more cached data
+    console.log('✅ All business cache cleared');
+  } catch (error) {
+    console.error('❌ Error clearing all business cache:', error);
+  }
+};
+
+// Keep all other functions the same but export the cache functions
 export const createInvite = async (businessId: number) => {
   try {
     console.log('🔗 Creating invite for business ID:', businessId);
@@ -344,7 +459,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error('Invalid business ID');
     }
     
-    // Get auth token with verification
     const token = await getAuthToken();
     console.log('🔗 Auth token found for invite creation');
     
@@ -356,14 +470,13 @@ export const createInvite = async (businessId: number) => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      timeout: 15000, // 15 second timeout
+      timeout: 15000,
     });
     
     console.log('🔗 Invite creation response:', response.data);
     
     // Handle various response formats
     if (response.data) {
-      // Format 1: { success: true, data: { code: "abc123" } }
       if (response.data.success && response.data.data?.code) {
         console.log('🔗 Invite created successfully (format 1):', response.data.data.code);
         return {
@@ -373,7 +486,6 @@ export const createInvite = async (businessId: number) => {
         };
       }
       
-      // Format 2: { success: true, code: "abc123" }
       if (response.data.success && response.data.code) {
         console.log('🔗 Invite created successfully (format 2):', response.data.code);
         return {
@@ -383,7 +495,6 @@ export const createInvite = async (businessId: number) => {
         };
       }
       
-      // Format 3: { code: "abc123" } (legacy)
       if (response.data.code) {
         console.log('🔗 Invite created successfully (legacy format):', response.data.code);
         return {
@@ -393,21 +504,18 @@ export const createInvite = async (businessId: number) => {
         };
       }
       
-      // Format 4: { success: false, message: "error" }
       if (response.data.success === false) {
         const errorMessage = response.data.message || response.data.error || 'Failed to create invite';
         throw new Error(errorMessage);
       }
     }
     
-    // If none of the expected formats match
     console.error('🔗 Unexpected response format:', response.data);
     throw new Error('Unexpected response format from server');
     
   } catch (error: any) {
     console.error('🔗 Create Invite Error:', error?.response?.data || error?.message);
     
-    // Handle authentication errors
     if (isAuthenticationError(error)) {
       console.log('🔗 Authentication failed during invite creation');
       const errorMessage = 'Session expired. Please log in again.';
@@ -421,7 +529,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error(errorMessage);
     }
     
-    // Handle validation errors
     if (isValidationError(error)) {
       const errorMessage = error.response?.data?.message || 
                           error.response?.data?.error || 
@@ -439,7 +546,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error(errorMessage);
     }
     
-    // Handle network/connection errors
     if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
       const errorMessage = 'Network error. Please check your connection.';
       Toast.show({
@@ -452,7 +558,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error(errorMessage);
     }
     
-    // Handle timeout errors
     if (error.code === 'ECONNABORTED' || error.message.includes('timeout')) {
       const errorMessage = 'Request timeout. Please try again.';
       Toast.show({
@@ -465,7 +570,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error(errorMessage);
     }
     
-    // Handle server errors
     if (error.response?.status >= 500) {
       const errorMessage = 'Server error. Please try again later.';
       Toast.show({
@@ -478,7 +582,6 @@ export const createInvite = async (businessId: number) => {
       throw new Error(errorMessage);
     }
     
-    // Handle other errors
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
                         error?.message || 
@@ -498,12 +601,11 @@ export const createInvite = async (businessId: number) => {
   }
 };
 
-// Join a business via invite code with proper error handling
+// Keep other functions unchanged
 export const joinBusiness = async (code: string) => {
   try {
     console.log('Joining business with code:', code);
     
-    // Get auth token with verification
     const token = await getAuthToken();
     
     const response = await api.post('/api/v1/invites/accept', { code }, {
@@ -511,7 +613,7 @@ export const joinBusiness = async (code: string) => {
         Authorization: `Bearer ${token}`,
         'Content-Type': 'application/json',
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 10000,
     });
     
     console.log('Join business response:', response.data);
@@ -520,7 +622,6 @@ export const joinBusiness = async (code: string) => {
   } catch (error: any) {
     console.error('Join Business Error:', error?.response?.data || error?.message);
     
-    // Handle authentication errors
     if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
@@ -548,35 +649,30 @@ export const joinBusiness = async (code: string) => {
   }
 };
 
-// Fetch both owned and joined businesses with proper error handling
 export const getBusinesses = async () => {
   try {
     console.log('Fetching businesses...');
     
-    // Get auth token with verification
     const token = await getAuthToken();
     
     const response = await api.get('/api/v1/businesses', {
       headers: {
         Authorization: `Bearer ${token}`,
       },
-      timeout: 10000, // 10 second timeout
+      timeout: 10000,
     });
     
     if (!response.data || typeof response.data !== 'object') {
       throw new Error('Invalid business data received from server');
     }
 
-    // Handle both old and new API response formats
     let businessData;
     if (response.data.data) {
-      // New format with success flag and data wrapper
       businessData = {
         owned: Array.isArray(response.data.data.owned) ? response.data.data.owned : [],
         joined: Array.isArray(response.data.data.joined) ? response.data.data.joined : []
       };
     } else {
-      // Legacy format
       businessData = {
         owned: Array.isArray(response.data.owned) ? response.data.owned : [],
         joined: Array.isArray(response.data.joined) ? response.data.joined : []
@@ -592,7 +688,6 @@ export const getBusinesses = async () => {
   } catch (error: any) {
     console.error('Get Businesses Error:', error?.response?.data || error?.message);
     
-    // Handle authentication errors
     if (isAuthenticationError(error)) {
       Toast.show({
         type: 'error',
@@ -604,7 +699,6 @@ export const getBusinesses = async () => {
       throw new Error('Session expired. Please log in again.');
     }
     
-    // Handle network/connection errors
     if (error.code === 'NETWORK_ERROR' || error.message.includes('Network')) {
       Toast.show({
         type: 'error',
@@ -613,7 +707,6 @@ export const getBusinesses = async () => {
         position: 'bottom',
         visibilityTime: 4000,
       });
-      // Return safe fallback for network errors
       return { owned: [], joined: [] };
     }
     
@@ -629,66 +722,51 @@ export const getBusinesses = async () => {
       visibilityTime: 4000,
     });
     
-    // Return safe fallback
     return { owned: [], joined: [] };
   }
 };
 
-// Utility function to validate phone number
 export const validatePhoneNumber = (phoneNumber: string): boolean => {
   if (!phoneNumber.trim()) return false;
   
-  // Remove all non-digits
   const cleaned = phoneNumber.replace(/\D/g, '');
   
-  // Check if it's a valid Kenyan number
-  // Should be 9 digits (without country code) or 12 digits (with +254)
   if (cleaned.length === 9) {
-    // Local format: 712345678
     return /^[17]\d{8}$/.test(cleaned);
   } else if (cleaned.length === 12) {
-    // International format: 254712345678
     return /^254[17]\d{8}$/.test(cleaned);
   }
   
   return false;
 };
 
-// Utility function to format phone number
 export const formatPhoneNumber = (phoneNumber: string): string => {
   const cleaned = phoneNumber.replace(/\D/g, '');
   
   if (cleaned.length === 9) {
-    // Add +254 prefix
     return `+254${cleaned}`;
   } else if (cleaned.length === 12 && cleaned.startsWith('254')) {
-    // Add + prefix
     return `+${cleaned}`;
   }
   
   return phoneNumber;
 };
 
-// COMPLETELY FIXED: updateBusiness function with comprehensive error handling
 export const updateBusiness = async (businessId: number, businessData: UpdateBusinessData) => {
   try {
     console.log('🏢 Starting business update process...', { businessId, businessData });
     
-    // CRITICAL: Validate business ID
     if (!businessId || isNaN(businessId) || businessId <= 0) {
       throw new Error('Invalid business ID provided');
     }
     
-    // Get auth token with verification
     const token = await getAuthToken();
     console.log('🏢 Found auth token for business update');
 
-    // CRITICAL: Validate required data
     if (!businessData.name || !businessData.name.trim()) {
       throw new Error('Business name is required');
     }
 
-    // Prepare request data - match backend expectations exactly
     const requestData = {
       business: {
         name: businessData.name.trim(),
@@ -702,10 +780,7 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
     };
 
     console.log('🏢 Request data being sent:', JSON.stringify(requestData, null, 2));
-    console.log('🏢 Using endpoint:', `/api/v1/businesses/${businessId}`);
-    console.log('🏢 Request headers will include:', { 'Authorization': 'Bearer [TOKEN]', 'Content-Type': 'application/json' });
 
-    // Make the API request with detailed logging
     const response = await api.patch(`/api/v1/businesses/${businessId}`, requestData, {
       headers: {
         Authorization: `Bearer ${token}`,
@@ -717,22 +792,18 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
     console.log('🏢 Business update response status:', response.status);
     console.log('🏢 Business update response data:', response.data);
     
-    // Check if the response indicates success
     if (response.data && response.data.success) {
       console.log('✅ Business update successful');
       return response.data;
     } else if (response.status === 200) {
-      // Some APIs return 200 without explicit success flag
       console.log('✅ Business update successful (200 OK)');
       return { success: true, data: response.data };
     } else {
-      // Server returned success=false
       console.error('❌ Server returned success=false');
       throw new Error(response.data?.message || 'Business update failed');
     }
     
   } catch (error: any) {
-    // COMPREHENSIVE ERROR LOGGING
     console.error('🏢 Update Business Error - Full Details:', {
       status: error?.response?.status,
       statusText: error?.response?.statusText,
@@ -744,8 +815,6 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       message: error?.message,
       code: error?.code
     });
-    
-    // SPECIFIC ERROR HANDLING WITH CLEAR MESSAGES
     
     if (error?.response?.status === 401) {
       console.error('🚨 401 UNAUTHORIZED - Token invalid or expired');
@@ -772,13 +841,11 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error(errorMessage);
     }
     
-    // Check if server returned HTML instead of JSON (routing/config issue)
     if (error?.response?.headers?.['content-type']?.includes('text/html')) {
       console.error('🚨 SERVER RETURNED HTML - Route configuration issue');
       throw new Error('Server configuration error. The API endpoint may not be properly configured.');
     }
     
-    // Network/timeout errors
     if (error?.code === 'NETWORK_ERROR' || error?.message?.includes('Network')) {
       console.error('🚨 NETWORK ERROR');
       throw new Error('Network error. Please check your internet connection and try again.');
@@ -789,13 +856,11 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Request timeout. Please try again.');
     }
     
-    // Server errors (5xx)
     if (error?.response?.status >= 500) {
       console.error('🚨 SERVER ERROR (5xx)');
       throw new Error('Server error. Please try again later.');
     }
     
-    // Axios request configuration errors
     if (!error?.response && error?.request) {
       console.error('🚨 REQUEST ERROR - No response received');
       throw new Error('No response from server. Please check your connection.');
@@ -806,7 +871,6 @@ export const updateBusiness = async (businessId: number, businessData: UpdateBus
       throw new Error('Failed to set up request. Please try again.');
     }
     
-    // Generic error fallback
     const errorMessage = error?.response?.data?.message || 
                         error?.response?.data?.error || 
                         error?.message || 
