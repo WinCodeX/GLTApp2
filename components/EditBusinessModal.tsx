@@ -1,4 +1,4 @@
-// components/EditBusinessModal.tsx - FIXED: Removed unnecessary permission checks
+// components/EditBusinessModal.tsx - Updated to Always Fetch Fresh Categories
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Modal,
@@ -16,7 +16,7 @@ import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
 import * as ImagePicker from 'expo-image-picker';
 import { SafeLogo } from './SafeLogo';
-import { fetchCategories, validatePhoneNumber, formatPhoneNumber, updateBusiness } from '../lib/helpers/business';
+import { fetchCategories, validatePhoneNumber, formatPhoneNumber, updateBusiness, clearCategoriesCache } from '../lib/helpers/business';
 import { uploadBusinessLogo } from '../lib/helpers/uploadBusinessLogo';
 import { useUser } from '../context/UserContext';
 import colors from '../theme/colors';
@@ -122,16 +122,23 @@ export default function EditBusinessModal({
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
   const [localLogoUrl, setLocalLogoUrl] = useState<string | null>(null);
 
-  // Load categories when modal becomes visible
+  // ALWAYS load fresh categories when modal becomes visible
   useEffect(() => {
     if (visible) {
-      loadCategories();
+      console.log('🔄 EditBusinessModal: Modal opened - loading fresh categories...');
+      loadFreshCategories();
+    } else {
+      console.log('🔄 EditBusinessModal: Modal closed - cleaning up');
+      // Clean up states when modal closes
+      setCategoriesError(null);
+      setPreviewUri(null);
     }
   }, [visible]);
 
   // Reset form when business changes
   useEffect(() => {
     if (business) {
+      console.log('🔄 EditBusinessModal: Business changed - updating form data');
       setBusinessName(business.name || '');
       setPhoneNumber(business.phone_number || '');
       setSelectedCategories(business.categories?.map(cat => cat.id) || []);
@@ -140,38 +147,49 @@ export default function EditBusinessModal({
     }
   }, [business]);
 
-  const loadCategories = async () => {
+  // UPDATED: Always load fresh categories from server
+  const loadFreshCategories = async () => {
     setLoadingCategories(true);
     setCategoriesError(null);
     
     try {
-      console.log('🏷️ EditBusinessModal: Loading categories...');
-      const categoriesData = await fetchCategories();
+      console.log('🗑️ EditBusinessModal: Clearing categories cache...');
+      // Always clear cache first to ensure fresh data
+      await clearCategoriesCache();
+      
+      console.log('🌐 EditBusinessModal: Fetching fresh categories from server...');
+      // Force refresh from server
+      const categoriesData = await fetchCategories(true);
+      
+      console.log('✅ EditBusinessModal: Fresh categories loaded:', {
+        count: categoriesData.length,
+        categoryIds: categoriesData.map(c => c.id),
+        categoryNames: categoriesData.map(c => c.name)
+      });
+      
       setCategories(categoriesData);
-      console.log('🏷️ EditBusinessModal: Categories loaded:', categoriesData.length);
+      
+      if (categoriesData.length === 0) {
+        setCategoriesError('No categories available. Please try again later.');
+      }
     } catch (error: any) {
-      console.error('🏷️ EditBusinessModal: Error loading categories:', error);
+      console.error('❌ EditBusinessModal: Error loading fresh categories:', error);
       setCategoriesError('Failed to load categories. Please try again.');
       
-      // Set some default categories as fallback
-      setCategories([
-        { id: 1, name: 'Technology', slug: 'technology' },
-        { id: 2, name: 'Retail', slug: 'retail' },
-        { id: 3, name: 'Food & Beverage', slug: 'food-beverage' },
-        { id: 4, name: 'Healthcare', slug: 'healthcare' },
-        { id: 5, name: 'Other', slug: 'other' }
-      ]);
+      // Don't set fallback categories - let user retry with fresh data
+      setCategories([]);
     } finally {
       setLoadingCategories(false);
     }
   };
 
   const retryLoadCategories = () => {
-    loadCategories();
+    console.log('🔄 EditBusinessModal: User requested category retry');
+    loadFreshCategories();
   };
 
   const toggleCategory = useCallback((categoryId: number) => {
-    console.log('🏷️ EditBusinessModal: Toggling category:', categoryId);
+    console.log('🏷️ EditBusinessModal: Toggling category ID:', categoryId);
     setSelectedCategories(prev => {
       let newSelection;
       if (prev.includes(categoryId)) {
@@ -316,7 +334,7 @@ export default function EditBusinessModal({
     try {
       setLoading(true);
       
-      console.log('🏢 EditBusinessModal: Starting business update...');
+      console.log('🏢 EditBusinessModal: Starting business update with fresh categories...');
       console.log('🏢 EditBusinessModal: Business ID:', business.id);
       console.log('🏢 EditBusinessModal: User ID:', user?.id);
       console.log('🏷️ EditBusinessModal: Selected categories:', {
@@ -516,14 +534,22 @@ export default function EditBusinessModal({
               {loadingCategories ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator size="small" color={colors.primary} />
-                  <Text style={styles.loadingText}>Loading categories...</Text>
+                  <Text style={styles.loadingText}>Loading fresh categories from server...</Text>
                 </View>
               ) : categoriesError ? (
                 <View style={styles.errorContainer}>
                   <Text style={styles.errorText}>{categoriesError}</Text>
                   <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
                     <Feather name="refresh-cw" size={16} color={colors.primary} />
-                    <Text style={styles.retryButtonText}>Retry</Text>
+                    <Text style={styles.retryButtonText}>Load Fresh Categories</Text>
+                  </TouchableOpacity>
+                </View>
+              ) : categories.length === 0 ? (
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>No categories available</Text>
+                  <TouchableOpacity style={styles.retryButton} onPress={retryLoadCategories}>
+                    <Feather name="refresh-cw" size={16} color={colors.primary} />
+                    <Text style={styles.retryButtonText}>Reload Categories</Text>
                   </TouchableOpacity>
                 </View>
               ) : (
@@ -562,6 +588,13 @@ export default function EditBusinessModal({
                       })}
                     </View>
                   </ScrollView>
+                  
+                  {/* Debug info in development */}
+                  {__DEV__ && (
+                    <Text style={styles.debugText}>
+                      Loaded {categories.length} fresh categories from server
+                    </Text>
+                  )}
                 </View>
               )}
             </View>
@@ -841,5 +874,11 @@ const styles = StyleSheet.create({
   },
   categoryCheckIcon: {
     marginLeft: 6,
+  },
+  debugText: {
+    color: 'rgba(255, 255, 255, 0.4)',
+    fontSize: 10,
+    textAlign: 'center',
+    marginTop: 8,
   },
 });
