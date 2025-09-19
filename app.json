@@ -107,19 +107,6 @@
         }
       ],
       [
-        "expo-notifications",
-        {
-          "icon": "@drawable/notification_icon",
-          "color": "#7c3aed",
-          "defaultChannel": "default",
-          "sounds": [
-            "@raw/notification_sound",
-            "@raw/notification_high", 
-            "@raw/notification_urgent"
-          ]
-        }
-      ],
-      [
         "expo-build-properties",
         {
           "android": {
