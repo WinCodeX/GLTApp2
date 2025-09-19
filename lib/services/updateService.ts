@@ -2,8 +2,6 @@
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
-import * as MediaLibrary from 'expo-media-library';
-import * as Sharing from 'expo-sharing';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform, Alert, AppState, AppStateStatus, Linking } from 'react-native';
@@ -70,9 +68,6 @@ class UpdateService {
       
       // Initialize version tracking
       await this.initializeVersionTracking();
-      
-      // Request media library permissions for Downloads access
-      await this.requestDownloadsPermission();
       
       // Check for pending downloads
       await this.checkPendingDownloads();
@@ -273,7 +268,7 @@ class UpdateService {
   }
 
   /**
-   * Download update with progress tracking and Downloads folder support
+   * Download update with progress tracking and Downloads folder support (SDK 54)
    */
   async downloadUpdateWithProgress(
     metadata: UpdateMetadata, 
@@ -293,17 +288,17 @@ class UpdateService {
       this.downloadProgressCallback = progressCallback || null;
       this.downloadStartTime = Date.now();
 
-      // Create download directory in app storage
-      const downloadDir = FileSystem.documentDirectory + 'downloads/';
+      // First download to cache, then copy to Downloads using SAF
+      const downloadDir = FileSystem.cacheDirectory + 'downloads/';
       await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
       
       const fileName = `GLT_v${metadata.version?.replace(/\./g, '_')}_update.apk`;
-      const fileUri = downloadDir + fileName;
+      const tempFileUri = downloadDir + fileName;
       
       // Clean up any existing file
-      const existingFile = await FileSystem.getInfoAsync(fileUri);
+      const existingFile = await FileSystem.getInfoAsync(tempFileUri);
       if (existingFile.exists) {
-        await FileSystem.deleteAsync(fileUri);
+        await FileSystem.deleteAsync(tempFileUri);
       }
 
       // Show download start alert
@@ -312,7 +307,7 @@ class UpdateService {
       // Start download with progress tracking
       const downloadResumable = FileSystem.createDownloadResumable(
         metadata.download_url,
-        fileUri,
+        tempFileUri,
         {},
         this.createProgressHandler(metadata)
       );
@@ -329,14 +324,16 @@ class UpdateService {
         throw new Error('Downloaded file is invalid');
       }
 
-      // Copy to Downloads folder for user access
+      console.log('APK downloaded to cache:', result.uri);
+
+      // Copy to Downloads folder using Storage Access Framework
       let downloadsPath: string | undefined;
       try {
-        downloadsPath = await this.copyToDownloadsFolder(result.uri, fileName);
-        console.log('APK copied to Downloads folder:', downloadsPath);
+        downloadsPath = await this.saveToDownloadsFolder(result.uri, fileName);
+        console.log('APK saved to Downloads folder:', downloadsPath);
       } catch (error) {
-        console.warn('Failed to copy to Downloads folder:', error);
-        // Continue anyway - we still have the file in app storage
+        console.warn('Failed to save to Downloads folder:', error);
+        // Continue anyway - we still have the file in cache
       }
 
       // Store download info
@@ -373,6 +370,113 @@ class UpdateService {
     } finally {
       this.downloadInProgress = false;
       this.downloadProgressCallback = null;
+    }
+  }
+
+  /**
+   * Save file to Downloads folder using Storage Access Framework (SDK 54)
+   */
+  private async saveToDownloadsFolder(sourceUri: string, fileName: string): Promise<string> {
+    try {
+      // Get or request Downloads folder permission
+      const downloadsUri = await this.getDownloadsFolderPermission();
+      if (!downloadsUri) {
+        throw new Error('Downloads folder permission not granted');
+      }
+
+      // Create the APK file in Downloads folder
+      const downloadedFileUri = await FileSystem.StorageAccessFramework.createFileAsync(
+        downloadsUri,
+        fileName,
+        'application/vnd.android.package-archive'
+      );
+
+      // Read the source file and write to Downloads
+      const fileContent = await FileSystem.readAsStringAsync(sourceUri, {
+        encoding: FileSystem.EncodingType.Base64,
+      });
+
+      await FileSystem.StorageAccessFramework.writeAsStringAsync(
+        downloadedFileUri,
+        fileContent,
+        { encoding: FileSystem.EncodingType.Base64 }
+      );
+
+      return downloadedFileUri;
+    } catch (error) {
+      console.error('Failed to save to Downloads folder:', error);
+      throw error;
+    }
+  }
+
+  /**
+   * Get Downloads folder permission using Storage Access Framework
+   */
+  private async getDownloadsFolderPermission(): Promise<string | null> {
+    try {
+      // Check if we already have permission stored
+      const storedUri = await AsyncStorage.getItem('downloads_folder_uri');
+      if (storedUri) {
+        // Verify the permission is still valid
+        try {
+          await FileSystem.StorageAccessFramework.readDirectoryAsync(storedUri);
+          return storedUri;
+        } catch (error) {
+          // Permission invalid, need to request again
+          await AsyncStorage.removeItem('downloads_folder_uri');
+        }
+      }
+
+      // Request Downloads folder permission
+      const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
+      if (permissions.granted && permissions.directoryUri) {
+        // Save the permission for future use
+        await AsyncStorage.setItem('downloads_folder_uri', permissions.directoryUri);
+        return permissions.directoryUri;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('Failed to get Downloads folder permission:', error);
+      return null;
+    }
+  }
+
+  /**
+   * Open Downloads folder using file manager intent
+   */
+  private async openDownloadsFolder() {
+    try {
+      // Method 1: Try Downloads app
+      const downloadsIntent = 'content://com.android.providers.downloads.ui.DownloadList';
+      const canOpenDownloads = await Linking.canOpenURL(downloadsIntent);
+      
+      if (canOpenDownloads) {
+        await Linking.openURL(downloadsIntent);
+        return;
+      }
+
+      // Method 2: Try file manager with Downloads path
+      await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
+        data: 'content://com.android.externalstorage.documents/document/primary%3ADownload',
+        type: 'resource/folder'
+      });
+    } catch (error) {
+      console.error('Failed to open Downloads folder:', error);
+      
+      // Method 3: Generic file manager
+      try {
+        await IntentLauncher.startActivityAsync('android.intent.action.GET_CONTENT', {
+          type: '*/*',
+          category: 'android.intent.category.OPENABLE'
+        });
+      } catch (fallbackError) {
+        console.error('All methods failed to open Downloads:', fallbackError);
+        Alert.alert(
+          'Downloads Folder', 
+          'Please check your Downloads folder in your file manager for the GLT APK file.'
+        );
+      }
     }
   }
 
@@ -449,19 +553,22 @@ class UpdateService {
   }
 
   private showDownloadCompleteAlert(download: StoredDownload) {
-    const message = download.downloadsPath 
-      ? `GLT version ${download.version} is ready to install.\n\nThe APK file has been saved to your Downloads folder and is ready to install.`
-      : `GLT version ${download.version} is ready to install.`;
+    const hasDownloadsPath = !!download.downloadsPath;
+    const message = hasDownloadsPath 
+      ? `GLT version ${download.version} is ready to install.\n\nThe APK has been saved to your Downloads folder and is ready for installation.`
+      : `GLT version ${download.version} is ready to install.\n\nThe APK has been downloaded and is ready for installation.`;
 
-    Alert.alert(
-      'Update Downloaded ✓',
-      message,
-      [
-        { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
-        { text: 'Install Now', onPress: () => this.installDownloadedAPK(download.version) },
-        { text: 'Later', style: 'cancel' }
-      ]
-    );
+    const buttons = [
+      { text: 'Install Now', onPress: () => this.installDownloadedAPK(download.version) },
+      { text: 'Later', style: 'cancel' as const }
+    ];
+
+    // Add Downloads button if we successfully saved to Downloads folder
+    if (hasDownloadsPath) {
+      buttons.unshift({ text: 'Open Downloads', onPress: () => this.openDownloadsFolder() });
+    }
+
+    Alert.alert('Update Downloaded ✓', message, buttons);
   }
 
   private showDownloadErrorAlert(version: string) {
