@@ -90,7 +90,10 @@
         {
           "android_default_channel_id": "default",
           "android_default_notification_color": "#7c3aed",
-          "android_default_notification_icon": "@drawable/notification_icon"
+          "android_default_notification_icon": "@drawable/notification_icon",
+          "android_default_notification_sound": "@raw/notification_sound",
+          "android_notification_sound_high": "@raw/notification_high",
+          "android_notification_sound_urgent": "@raw/notification_urgent"
         }
       ],
       [
@@ -100,6 +103,19 @@
             "NSBluetoothAlwaysUsageDescription",
             "NSBluetoothPeripheralUsageDescription",
             "NSLocationWhenInUseUsageDescription"
+          ]
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "@drawable/notification_icon",
+          "color": "#7c3aed",
+          "defaultChannel": "default",
+          "sounds": [
+            "@raw/notification_sound",
+            "@raw/notification_high", 
+            "@raw/notification_urgent"
           ]
         }
       ],
