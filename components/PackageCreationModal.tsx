@@ -2183,7 +2183,7 @@ const styles = StyleSheet.create({
   selectionItem: {
     marginBottom: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(30, 41, 59, 0.9)',
+    backgroundColor: 'rgba(30, 41, 59, 1.0)',
     overflow: 'hidden',
   },
   selectedItem: {
@@ -2221,7 +2221,7 @@ const styles = StyleSheet.create({
   },
   selectionLocation: {
     fontSize: 14,
-    color: '#888',
+    color: '#bbb',
     marginBottom: 2,
   },
   selectionPhone: {
