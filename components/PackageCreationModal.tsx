@@ -40,8 +40,9 @@ interface PackageCreationModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
 }
 
-// UPDATED: New step titles with better labeling
+// UPDATED: New step titles with package size as first step
 const STEP_TITLES = [
+  'Package Size',
   'Sender Office',
   'Receiver Details', 
   'Delivery Method',
@@ -64,7 +65,7 @@ const STORAGE_KEYS = {
 
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
-// NEW: Extended PackageData interface with size and notes
+// Extended PackageData interface with size and notes
 interface ExtendedPackageData extends PackageData {
   delivery_type: DeliveryType;
   package_size?: PackageSize;
@@ -72,7 +73,7 @@ interface ExtendedPackageData extends PackageData {
   rider_notes?: string;
 }
 
-// NEW: Interface for pending packages
+// Interface for pending packages
 interface PendingPackage extends ExtendedPackageData {
   id: string;
   created_at: number;
@@ -164,11 +165,11 @@ export default function PackageCreationModal({
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
 
-  // NEW: Multi-package states
+  // Multi-package states
   const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
   const [isCreatingMultiple, setIsCreatingMultiple] = useState(false);
 
-  // FIXED: Separate state for large package modal to prevent input refreshing
+  // Large package modal state
   const [showLargePackageModal, setShowLargePackageModal] = useState(false);
   const [largePackageInstructions, setLargePackageInstructions] = useState('');
 
@@ -257,7 +258,7 @@ export default function PackageCreationModal({
     [agents, packageData.destination_agent_id]
   );
 
-  // NEW: Calculate total packages (pending + current)
+  // Calculate total packages (pending + current)
   const totalPackages = pendingPackages.length + (currentStep === STEP_TITLES.length - 1 ? 1 : 0);
 
   useEffect(() => {
@@ -389,12 +390,11 @@ export default function PackageCreationModal({
     setSortConfig({ field: 'name', direction: 'asc' });
     setShowLargePackageModal(false);
     setLargePackageInstructions('');
-    // FIXED: Clear pending packages on full reset
     setPendingPackages([]);
     setIsCreatingMultiple(false);
   }, []);
 
-  // NEW: Reset only for new package (keep pending packages)
+  // Reset only for new package (keep pending packages)
   const resetFormForNewPackage = useCallback(() => {
     setCurrentStep(0);
     setPackageData({
@@ -423,7 +423,7 @@ export default function PackageCreationModal({
   }, []);
 
   const closeModal = useCallback(() => {
-    // NEW: Show warning if there are pending packages
+    // Show warning if there are pending packages
     if (pendingPackages.length > 0) {
       Alert.alert(
         'Unsaved Packages',
@@ -463,7 +463,7 @@ export default function PackageCreationModal({
     }
   }, [slideAnim, onClose, pendingPackages.length]);
 
-  // NEW: Package size cost calculation with pricing tiers
+  // Package size cost calculation with pricing tiers
   const calculateSizeCost = useCallback((size: PackageSize) => {
     switch (size) {
       case 'small': return 0; // No additional cost
@@ -520,7 +520,7 @@ export default function PackageCreationModal({
       }
     }
     
-    // NEW: Add package size cost for doorstep delivery
+    // Add package size cost for doorstep delivery
     if (packageData.delivery_type === 'doorstep') {
       const sizeCost = calculateSizeCost(packageData.package_size || 'medium');
       baseCost += sizeCost;
@@ -534,7 +534,7 @@ export default function PackageCreationModal({
     setEstimatedCost(baseCost);
   }, [selectedOriginAgent, selectedDestinationArea, areas, packageData.delivery_type, packageData.package_size, calculateSizeCost]);
 
-  // FIXED: Updated updatePackageData to handle both origin and destination agents
+  // Updated updatePackageData to handle both origin and destination agents
   const updatePackageData = useCallback((field: keyof ExtendedPackageData, value: string) => {
     setPackageData(prev => {
       const updated = { ...prev, [field]: value };
@@ -557,7 +557,7 @@ export default function PackageCreationModal({
     });
   }, [agents]);
 
-  // FIXED: Separate handler for package size with modal trigger
+  // Handler for package size with modal trigger
   const handlePackageSizeChange = useCallback((size: PackageSize) => {
     updatePackageData('package_size', size);
     
@@ -678,36 +678,39 @@ export default function PackageCreationModal({
     }));
   }, []);
 
+  // UPDATED: Step validation with new step order
   const isCurrentStepValid = useCallback(() => {
     switch (currentStep) {
-      case 0: return packageData.origin_agent_id.length > 0;
-      case 1: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
-      case 2: return packageData.delivery_type.length > 0;
-      case 3: 
+      case 0: return packageData.package_size && packageData.package_size.length > 0;
+      case 1: return packageData.origin_agent_id.length > 0;
+      case 2: return packageData.receiver_name.trim().length > 0 && packageData.receiver_phone.trim().length > 0;
+      case 3: return packageData.delivery_type.length > 0;
+      case 4: 
         if (packageData.delivery_type === 'agent') {
           return packageData.destination_agent_id.length > 0;
         } else {
           return packageData.destination_area_id.length > 0;
         }
-      case 4:
+      case 5:
         if (packageData.delivery_type === 'doorstep') {
           return deliveryLocation.trim().length > 0;
         }
         return true;
-      case 5: return true;
+      case 6: return true;
       default: return false;
     }
   }, [currentStep, packageData, deliveryLocation]);
 
+  // UPDATED: Navigation with new step order
   const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isCurrentStepValid()) {
-      if (currentStep === 3 && packageData.delivery_type === 'agent') {
-        setCurrentStep(5);
+      if (currentStep === 4 && packageData.delivery_type === 'agent') {
+        setCurrentStep(6);
         calculateCost();
       } else {
         setCurrentStep(prev => {
           const newStep = prev + 1;
-          if (newStep === 5) calculateCost();
+          if (newStep === 6) calculateCost();
           return newStep;
         });
       }
@@ -716,15 +719,15 @@ export default function PackageCreationModal({
 
   const prevStep = useCallback(() => {
     if (currentStep > 0) {
-      if (currentStep === 5 && packageData.delivery_type === 'agent') {
-        setCurrentStep(3);
+      if (currentStep === 6 && packageData.delivery_type === 'agent') {
+        setCurrentStep(4);
       } else {
         setCurrentStep(prev => prev - 1);
       }
     }
   }, [currentStep, packageData.delivery_type]);
 
-  // NEW: Add current package to pending list
+  // Add current package to pending list
   const addAnotherPackage = useCallback(() => {
     const newPendingPackage: PendingPackage = {
       ...packageData,
@@ -738,12 +741,12 @@ export default function PackageCreationModal({
     resetFormForNewPackage();
   }, [packageData, deliveryLocation, resetFormForNewPackage]);
 
-  // NEW: Remove package from pending list
+  // Remove package from pending list
   const removePendingPackage = useCallback((packageId: string) => {
     setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
   }, []);
 
-  // FIXED: Submit all packages without calling onSubmit to avoid duplication
+  // Submit all packages without calling onSubmit to avoid duplication
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
@@ -764,7 +767,7 @@ export default function PackageCreationModal({
         delivery_location: deliveryLocation
       };
 
-      // FIXED: Only create packages that haven't been submitted yet
+      // Only create packages that haven't been submitted yet
       const packagesToSubmit = [
         ...pendingPackages.map(pkg => ({
           ...pkg,
@@ -836,7 +839,7 @@ export default function PackageCreationModal({
     }
   }, [clearCache, loadModalData]);
 
-  // FIXED: Save large package instructions and close modal
+  // Save large package instructions and close modal
   const handleSaveLargePackageInstructions = useCallback(() => {
     updatePackageData('special_instructions', largePackageInstructions);
     setShowLargePackageModal(false);
@@ -927,7 +930,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // FIXED: Large Package Notes Modal with separate state
+  // Large Package Notes Modal with separate state
   const renderLargePackageModal = useCallback(() => (
     <Modal visible={showLargePackageModal} transparent animationType="fade">
       <View style={styles.largePackageModalOverlay}>
@@ -976,7 +979,68 @@ export default function PackageCreationModal({
     </Modal>
   ), [showLargePackageModal, largePackageInstructions, handleSaveLargePackageInstructions]);
 
-  // Step 0: UPDATED - Sender Office Selection
+  // NEW: Step 0 - Package Size Selection
+  const renderPackageSizeSelection = useCallback(() => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>What are you sending?</Text>
+      <Text style={styles.stepSubtitle}>Choose the size of your package</Text>
+      
+      <View style={styles.packageSizeOptions}>
+        <TouchableOpacity
+          style={[
+            styles.packageSizeOption,
+            packageData.package_size === 'small' && styles.selectedPackageSizeOption
+          ]}
+          onPress={() => handlePackageSizeChange('small')}
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabel}>Small Package</Text>
+            <Text style={styles.packageSizeDescription}>Perfect for documents and small items</Text>
+          </View>
+          {packageData.package_size === 'small' && (
+            <Feather name="check-circle" size={20} color="#10b981" />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.packageSizeOption,
+            packageData.package_size === 'medium' && styles.selectedPackageSizeOption
+          ]}
+          onPress={() => handlePackageSizeChange('medium')}
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabel}>Medium</Text>
+            <Text style={styles.packageSizeDescription}>For electronics, clothing, and medium-sized items</Text>
+          </View>
+          {packageData.package_size === 'medium' && (
+            <Feather name="check-circle" size={20} color="#10b981" />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.packageSizeOption, styles.disabledPackageSize]}
+          onPress={() => {}}
+          disabled
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabelDisabled}>Large</Text>
+            <Text style={styles.packageSizeDescriptionDisabled}>Coming Soon</Text>
+          </View>
+          <Feather name="lock" size={20} color="#666" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.packageSizeNote}>
+        <Feather name="info" size={16} color="#7c3aed" />
+        <Text style={styles.packageSizeNoteText}>
+          Pricing is calculated automatically based on your selection and delivery options
+        </Text>
+      </View>
+    </View>
+  ), [packageData.package_size, handlePackageSizeChange]);
+
+  // Step 1: Sender Office Selection (previously step 0)
   const renderOriginAgentSelection = useCallback(() => {
     const groupedAgents = getGroupedItems(agents, searchQueries.originAgent, 'agent');
     
@@ -1079,6 +1143,7 @@ export default function PackageCreationModal({
     );
   }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery]);
 
+  // Step 2: Receiver Details (previously step 1)
   const renderReceiverDetails = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -1106,7 +1171,7 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.receiver_name, packageData.receiver_phone, updatePackageData]);
 
-  // FIXED: Delivery method selection with fixed package size handler
+  // Step 3: Delivery method selection (previously step 2) - UPDATED: Removed "RECOMMENDED" text
   const renderDeliveryMethodSelection = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Method</Text>
@@ -1123,8 +1188,8 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="home" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>🏠 Home Delivery</Text>
-              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address (RECOMMENDED)</Text>
+              <Text style={styles.deliveryOptionTitle}>Home Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
             </View>
             {packageData.delivery_type === 'doorstep' && (
               <Feather name="check-circle" size={20} color="#10b981" />
@@ -1142,7 +1207,7 @@ export default function PackageCreationModal({
           <View style={styles.deliveryOptionContent}>
             <Feather name="briefcase" size={24} color="#fff" />
             <View style={styles.deliveryOptionText}>
-              <Text style={styles.deliveryOptionTitle}>🏢 Office Delivery</Text>
+              <Text style={styles.deliveryOptionTitle}>Office Delivery</Text>
               <Text style={styles.deliveryOptionSubtitle}>Collect from destination office</Text>
             </View>
             {packageData.delivery_type === 'agent' && (
@@ -1152,63 +1217,6 @@ export default function PackageCreationModal({
         </TouchableOpacity>
       </View>
 
-      {/* FIXED: Package Size Selection for Home Delivery with proper handler */}
-      {packageData.delivery_type === 'doorstep' && (
-        <View style={styles.packageSizeContainer}>
-          <Text style={styles.packageSizeTitle}>Package Size</Text>
-          
-          <View style={styles.packageSizeOptions}>
-            <TouchableOpacity
-              style={[
-                styles.packageSizeOption,
-                packageData.package_size === 'small' && styles.selectedPackageSizeOption
-              ]}
-              onPress={() => handlePackageSizeChange('small')}
-            >
-              <View style={styles.packageSizeContent}>
-                <Text style={styles.packageSizeLabel}>Small</Text>
-                <Text style={styles.packageSizeDescription}>Up to 2kg • Free</Text>
-              </View>
-              {packageData.package_size === 'small' && (
-                <Feather name="check-circle" size={16} color="#10b981" />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.packageSizeOption,
-                packageData.package_size === 'medium' && styles.selectedPackageSizeOption
-              ]}
-              onPress={() => handlePackageSizeChange('medium')}
-            >
-              <View style={styles.packageSizeContent}>
-                <Text style={styles.packageSizeLabel}>Medium</Text>
-                <Text style={styles.packageSizeDescription}>Up to 10kg • +KES 50</Text>
-              </View>
-              {packageData.package_size === 'medium' && (
-                <Feather name="check-circle" size={16} color="#10b981" />
-              )}
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.packageSizeOption,
-                packageData.package_size === 'large' && styles.selectedPackageSizeOption
-              ]}
-              onPress={() => handlePackageSizeChange('large')}
-            >
-              <View style={styles.packageSizeContent}>
-                <Text style={styles.packageSizeLabel}>Large</Text>
-                <Text style={styles.packageSizeDescription}>Up to 25kg • +KES 120</Text>
-              </View>
-              {packageData.package_size === 'large' && (
-                <Feather name="check-circle" size={16} color="#10b981" />
-              )}
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
       <View style={styles.deliveryNote}>
         <Feather name="info" size={16} color="#7c3aed" />
         <Text style={styles.deliveryNoteText}>
@@ -1216,8 +1224,9 @@ export default function PackageCreationModal({
         </Text>
       </View>
     </View>
-  ), [packageData.delivery_type, packageData.package_size, updatePackageData, handlePackageSizeChange]);
+  ), [packageData.delivery_type, updatePackageData]);
 
+  // Step 4: Destination selection (previously step 3)
   const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
       return (
@@ -1341,6 +1350,7 @@ export default function PackageCreationModal({
     }
   }, [packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id, agents, areas, searchQueries.destinationAgent, searchQueries.destinationArea, renderSearchAndSortHeader, getGroupedItems, updatePackageData]);
 
+  // Step 5: Delivery Location (previously step 4)
   const renderDeliveryLocation = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Delivery Location</Text>
@@ -1363,7 +1373,7 @@ export default function PackageCreationModal({
     </View>
   ), [deliveryLocation]);
 
-  // NEW: Enhanced confirmation with pending packages and size info
+  // Step 6: Enhanced confirmation (previously step 5)
   const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
       <Text style={styles.stepTitle}>Confirm Package Details</Text>
@@ -1391,7 +1401,7 @@ export default function PackageCreationModal({
               </View>
               <Text style={styles.pendingPackageSummary}>
                 {pkg.receiver_name} • {pkg.delivery_type === 'doorstep' ? 'Home' : 'Office'} Delivery
-                {pkg.package_size && pkg.delivery_type === 'doorstep' && ` • ${pkg.package_size.charAt(0).toUpperCase() + pkg.package_size.slice(1)}`}
+                {pkg.package_size && ` • ${pkg.package_size.charAt(0).toUpperCase() + pkg.package_size.slice(1)}`}
               </Text>
             </View>
           ))}
@@ -1404,6 +1414,13 @@ export default function PackageCreationModal({
           {pendingPackages.length > 0 ? `Package ${pendingPackages.length + 1}` : 'Current Package'}
         </Text>
         
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Package Size</Text>
+          <Text style={styles.confirmationDetail}>
+            {packageData.package_size?.charAt(0).toUpperCase() + packageData.package_size?.slice(1)} Package
+          </Text>
+        </View>
+
         <View style={styles.confirmationSection}>
           <Text style={styles.confirmationSectionTitle}>Route</Text>
           <View style={styles.routeDisplay}>
@@ -1451,13 +1468,6 @@ export default function PackageCreationModal({
             {packageData.delivery_type === 'doorstep' ? 'Home Delivery' : 'Office Delivery'}
           </Text>
           
-          {/* Show package size for home delivery */}
-          {packageData.delivery_type === 'doorstep' && packageData.package_size && (
-            <Text style={styles.confirmationDetail}>
-              Package Size: {packageData.package_size.charAt(0).toUpperCase() + packageData.package_size.slice(1)}
-            </Text>
-          )}
-          
           {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
             <View style={styles.agentInfo}>
               <Text style={styles.confirmationDetail}>Receiving Office: {selectedDestinationAgent?.name}</Text>
@@ -1485,11 +1495,6 @@ export default function PackageCreationModal({
           {estimatedCost ? (
             <View style={styles.costDisplay}>
               <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
-              {packageData.delivery_type === 'doorstep' && packageData.package_size !== 'small' && (
-                <Text style={styles.costBreakdown}>
-                  Base cost + {packageData.package_size} package fee
-                </Text>
-              )}
             </View>
           ) : (
             <Text style={styles.pricingError}>Unable to calculate cost</Text>
@@ -1518,17 +1523,19 @@ export default function PackageCreationModal({
     deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep
   ]);
 
+  // UPDATED: Step routing with new order
   const renderCurrentStep = useCallback(() => {
     switch (currentStep) {
-      case 0: return renderOriginAgentSelection();
-      case 1: return renderReceiverDetails();
-      case 2: return renderDeliveryMethodSelection();
-      case 3: return renderDestinationSelection();
-      case 4: return renderDeliveryLocation();
-      case 5: return renderConfirmation();
-      default: return renderOriginAgentSelection();
+      case 0: return renderPackageSizeSelection();
+      case 1: return renderOriginAgentSelection();
+      case 2: return renderReceiverDetails();
+      case 3: return renderDeliveryMethodSelection();
+      case 4: return renderDestinationSelection();
+      case 5: return renderDeliveryLocation();
+      case 6: return renderConfirmation();
+      default: return renderPackageSizeSelection();
     }
-  }, [currentStep, renderOriginAgentSelection, renderReceiverDetails, renderDeliveryMethodSelection, renderDestinationSelection, renderDeliveryLocation, renderConfirmation]);
+  }, [currentStep, renderPackageSizeSelection, renderOriginAgentSelection, renderReceiverDetails, renderDeliveryMethodSelection, renderDestinationSelection, renderDeliveryLocation, renderConfirmation]);
 
   const renderNavigationButtons = useCallback(() => (
     <View style={styles.navigationContainer}>
@@ -1541,7 +1548,7 @@ export default function PackageCreationModal({
       
       <View style={styles.spacer} />
       
-      {__DEV__ && currentStep === 0 && (
+      {__DEV__ && currentStep === 1 && (
         <TouchableOpacity onPress={handleClearCache} style={styles.debugButton}>
           <Text style={styles.debugButtonText}>Clear Cache</Text>
         </TouchableOpacity>
@@ -1688,7 +1695,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced styles with new package size and multi-package features
+// Enhanced styles with new package size selection and updated features
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1800,6 +1807,70 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
+  // NEW: Package Size Selection Styles
+  packageSizeOptions: {
+    gap: 12,
+    marginBottom: 20,
+  },
+  packageSizeOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    padding: 16,
+  },
+  selectedPackageSizeOption: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  disabledPackageSize: {
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    opacity: 0.6,
+  },
+  packageSizeContent: {
+    flex: 1,
+  },
+  packageSizeLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  packageSizeLabelDisabled: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  packageSizeDescription: {
+    fontSize: 14,
+    color: '#888',
+    lineHeight: 18,
+  },
+  packageSizeDescriptionDisabled: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 18,
+  },
+  packageSizeNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  packageSizeNoteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#7c3aed',
+    lineHeight: 18,
+  },
+  
   dataInfoContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1845,49 +1916,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   
-  // NEW: Package Size Styles
-  packageSizeContainer: {
-    marginTop: 20,
-    marginBottom: 10,
-  },
-  packageSizeTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 12,
-  },
-  packageSizeOptions: {
-    gap: 8,
-  },
-  packageSizeOption: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-    padding: 12,
-  },
-  selectedPackageSizeOption: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderColor: '#7c3aed',
-  },
-  packageSizeContent: {
-    flex: 1,
-  },
-  packageSizeLabel: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 2,
-  },
-  packageSizeDescription: {
-    fontSize: 13,
-    color: '#888',
-  },
-  
-  // NEW: Large Package Modal Styles
+  // Large Package Modal Styles
   largePackageModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1960,7 +1989,7 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // NEW: Pending Packages Styles
+  // Pending Packages Styles
   pendingPackagesContainer: {
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
     borderRadius: 12,
@@ -2006,7 +2035,7 @@ const styles = StyleSheet.create({
     marginBottom: 16,
   },
   
-  // NEW: Add Another Package Styles
+  // Add Another Package Styles
   addAnotherContainer: {
     marginTop: 20,
     alignItems: 'center',
