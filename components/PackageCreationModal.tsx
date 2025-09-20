@@ -2183,7 +2183,7 @@ const styles = StyleSheet.create({
   selectionItem: {
     marginBottom: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(30, 41, 59, 0.6)',
+    backgroundColor: 'rgba(30, 41, 59, 0.9)',
     overflow: 'hidden',
   },
   selectedItem: {
