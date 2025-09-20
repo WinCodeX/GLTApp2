@@ -769,6 +769,7 @@ export default function PackageCreationModal({
         sender_name: getDisplayName(),
         sender_phone: getUserPhone(),
         delivery_location: deliveryLocation,
+        business_id: selectedBusiness?.id || null,
         business_name: selectedBusiness?.name || '',
         business_phone: selectedBusiness?.phone_number || ''
       };
@@ -779,6 +780,7 @@ export default function PackageCreationModal({
           ...pkg,
           sender_name: getDisplayName(),
           sender_phone: getUserPhone(),
+          business_id: selectedBusiness?.id || null,
           business_name: selectedBusiness?.name || '',
           business_phone: selectedBusiness?.phone_number || ''
         })),
@@ -821,7 +823,7 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, onSubmit, closeModal]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, onSubmit, closeModal, getDisplayName, getUserPhone, selectedBusiness]);
 
   const retryDataLoad = useCallback(() => {
     loadModalData();
@@ -1149,7 +1151,7 @@ export default function PackageCreationModal({
         </ScrollView>
       </View>
     );
-  }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery]);
+  }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery, sortConfig.field]);
 
   // Step 2: Receiver Details (previously step 1) - UPDATED: Removed business input section
   const renderReceiverDetails = useCallback(() => (
@@ -1364,7 +1366,7 @@ export default function PackageCreationModal({
         </View>
       );
     }
-  }, [packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id, agents, areas, searchQueries.destinationAgent, searchQueries.destinationArea, renderSearchAndSortHeader, getGroupedItems, updatePackageData]);
+  }, [packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id, agents, areas, searchQueries.destinationAgent, searchQueries.destinationArea, renderSearchAndSortHeader, getGroupedItems, updatePackageData, sortConfig.field]);
 
   // Step 5: Delivery Location (previously step 4)
   const renderDeliveryLocation = useCallback(() => (
@@ -1547,7 +1549,7 @@ export default function PackageCreationModal({
     </View>
   ), [
     selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, 
-    deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep
+    deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep, selectedBusiness
   ]);
 
   // UPDATED: Step routing with new order
