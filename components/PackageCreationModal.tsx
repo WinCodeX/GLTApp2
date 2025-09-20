@@ -1094,7 +1094,7 @@ export default function PackageCreationModal({
                   const agentId = agentData.id || '';
                   
                   const areaName = agentData.area?.name || 'Unknown Area';
-                  const locationName = agentData.area?.location?.name || group.locationName;
+                  const locationName = agentData.area?.location?.name || group.locationName || 'Unknown Location';
                   
                   return (
                     <TouchableOpacity
@@ -1244,7 +1244,7 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.delivery_type, updatePackageData]);
 
-  // Step 4: Destination selection (previously step 3)
+  // Step 4: Destination selection (previously step 3) - FIXED: Added proper fallbacks for text fields
   const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
       return (
@@ -1275,7 +1275,7 @@ export default function PackageCreationModal({
                   const agentId = agentData.id || '';
                   
                   const areaName = agentData.area?.name || 'Unknown Area';
-                  const locationName = agentData.area?.location?.name || group.locationName;
+                  const locationName = agentData.area?.location?.name || group.locationName || 'Unknown Location';
                   
                   return (
                     <TouchableOpacity
@@ -1333,33 +1333,41 @@ export default function PackageCreationModal({
                   </View>
                 )}
                 
-                {group.items.map((area) => (
-                  <TouchableOpacity
-                    key={area.id}
-                    style={[
-                      styles.selectionItem,
-                      packageData.destination_area_id === area.id && styles.selectedItem
-                    ]}
-                    onPress={() => updatePackageData('destination_area_id', area.id)}
-                  >
-                    <View style={styles.selectionItemContent}>
-                      <View style={styles.selectionInitials}>
-                        <Text style={styles.selectionInitialsText}>
-                          {(area as Area).initials || (area as Area).name?.substring(0, 2).toUpperCase() || 'AR'}
-                        </Text>
+                {group.items.map((area) => {
+                  const areaData = area as Area;
+                  const areaName = areaData.name || 'Unknown Area';
+                  const areaId = areaData.id || '';
+                  const locationName = areaData.location?.name || group.locationName || 'Unknown Location';
+                  const initials = areaData.initials || areaName.substring(0, 2).toUpperCase() || 'AR';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={areaId}
+                      style={[
+                        styles.selectionItem,
+                        packageData.destination_area_id === areaId && styles.selectedItem
+                      ]}
+                      onPress={() => updatePackageData('destination_area_id', areaId)}
+                    >
+                      <View style={styles.selectionItemContent}>
+                        <View style={styles.selectionInitials}>
+                          <Text style={styles.selectionInitialsText}>
+                            {initials}
+                          </Text>
+                        </View>
+                        <View style={styles.selectionInfo}>
+                          <Text style={styles.selectionName}>{areaName}</Text>
+                          <Text style={styles.selectionLocation}>
+                            {locationName}
+                          </Text>
+                        </View>
+                        {packageData.destination_area_id === areaId && (
+                          <Feather name="check-circle" size={20} color="#10b981" />
+                        )}
                       </View>
-                      <View style={styles.selectionInfo}>
-                        <Text style={styles.selectionName}>{(area as Area).name}</Text>
-                        <Text style={styles.selectionLocation}>
-                          {(area as Area).location?.name}
-                        </Text>
-                      </View>
-                      {packageData.destination_area_id === area.id && (
-                        <Feather name="check-circle" size={20} color="#10b981" />
-                      )}
-                    </View>
-                  </TouchableOpacity>
-                ))}
+                    </TouchableOpacity>
+                  );
+                })}
               </View>
             ))}
           </ScrollView>
