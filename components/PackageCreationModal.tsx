@@ -2183,11 +2183,11 @@ const styles = StyleSheet.create({
   selectionItem: {
     marginBottom: 8,
     borderRadius: 12,
-    backgroundColor: 'rgba(30, 41, 59, 1.0)',
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
     overflow: 'hidden',
   },
   selectedItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.4)',
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderWidth: 1,
     borderColor: '#7c3aed',
   },
@@ -2221,7 +2221,7 @@ const styles = StyleSheet.create({
   },
   selectionLocation: {
     fontSize: 14,
-    color: '#bbb',
+    color: '#888',
     marginBottom: 2,
   },
   selectionPhone: {
