@@ -10,8 +10,7 @@ export interface PackageData {
   origin_agent_id?: string;
   destination_agent_id?: string;
   delivery_type: 'doorstep' | 'agent' | 'mixed';
-  business_name?: string;
-  business_phone?: string;
+  business_id?: string | null;
   package_size?: string;
   special_instructions?: string;
   delivery_location?: string;
@@ -27,8 +26,7 @@ export interface PackageResponse {
   sender_name: string;
   receiver_name: string;
   delivery_type: string;
-  business_name?: string;
-  business_phone?: string;
+  business_id?: string | null;
 }
 
 export async function createPackage(packageData: PackageData): Promise<PackageResponse> {
@@ -39,9 +37,8 @@ export async function createPackage(packageData: PackageData): Promise<PackageRe
     const response = await api.post('/api/v1/packages', {
       package: {
         ...packageData,
-        // Ensure business information is included if provided
-        ...(packageData.business_name && { business_name: packageData.business_name }),
-        ...(packageData.business_phone && { business_phone: packageData.business_phone }),
+        // Ensure business_id is included if provided
+        ...(packageData.business_id && { business_id: packageData.business_id }),
         ...(packageData.package_size && { package_size: packageData.package_size }),
         ...(packageData.special_instructions && { special_instructions: packageData.special_instructions }),
         ...(packageData.delivery_location && { delivery_location: packageData.delivery_location })
