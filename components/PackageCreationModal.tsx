@@ -2221,7 +2221,7 @@ const styles = StyleSheet.create({
   },
   selectionLocation: {
     fontSize: 14,
-    color: '#888',
+    color: '#ccc',
     marginBottom: 2,
   },
   selectionPhone: {
