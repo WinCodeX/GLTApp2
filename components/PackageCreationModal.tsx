@@ -2187,7 +2187,7 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   selectedItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.8)',
+    backgroundColor: 'rgba(124, 58, 237, 0.4)',
     borderWidth: 1,
     borderColor: '#7c3aed',
   },
