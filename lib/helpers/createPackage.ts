@@ -10,6 +10,11 @@ export interface PackageData {
   origin_agent_id?: string;
   destination_agent_id?: string;
   delivery_type: 'doorstep' | 'agent' | 'mixed';
+  business_name?: string;
+  business_phone?: string;
+  package_size?: string;
+  special_instructions?: string;
+  delivery_location?: string;
 }
 
 export interface PackageResponse {
@@ -22,6 +27,8 @@ export interface PackageResponse {
   sender_name: string;
   receiver_name: string;
   delivery_type: string;
+  business_name?: string;
+  business_phone?: string;
 }
 
 export async function createPackage(packageData: PackageData): Promise<PackageResponse> {
@@ -30,7 +37,15 @@ export async function createPackage(packageData: PackageData): Promise<PackageRe
     console.log('📦 Package data:', packageData);
     
     const response = await api.post('/api/v1/packages', {
-      package: packageData
+      package: {
+        ...packageData,
+        // Ensure business information is included if provided
+        ...(packageData.business_name && { business_name: packageData.business_name }),
+        ...(packageData.business_phone && { business_phone: packageData.business_phone }),
+        ...(packageData.package_size && { package_size: packageData.package_size }),
+        ...(packageData.special_instructions && { special_instructions: packageData.special_instructions }),
+        ...(packageData.delivery_location && { delivery_location: packageData.delivery_location })
+      }
     });
     
     console.log('📦 Package creation response:', response.data);
