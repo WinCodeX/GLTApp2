@@ -66,14 +66,12 @@ const STORAGE_KEYS = {
 
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
-// Extended PackageData interface with size, notes, and business information
+// Extended PackageData interface with size and notes (business info auto-populated)
 interface ExtendedPackageData extends PackageData {
   delivery_type: DeliveryType;
   package_size?: PackageSize;
   receiver_notes?: string;
   rider_notes?: string;
-  business_name?: string;
-  business_phone?: string;
 }
 
 // Interface for pending packages
@@ -179,7 +177,7 @@ export default function PackageCreationModal({
   const [showLargePackageModal, setShowLargePackageModal] = useState(false);
   const [largePackageInstructions, setLargePackageInstructions] = useState('');
 
-  // Form data with extended properties including business information
+  // Form data with extended properties (business info auto-populated)
   const [packageData, setPackageData] = useState<ExtendedPackageData>({
     sender_name: '',
     sender_phone: '',
@@ -192,9 +190,7 @@ export default function PackageCreationModal({
     delivery_type: 'doorstep' as DeliveryType,
     package_size: 'medium' as PackageSize, // Default to medium
     receiver_notes: '',
-    rider_notes: '',
-    business_name: '',
-    business_phone: ''
+    rider_notes: ''
   });
 
   const [deliveryLocation, setDeliveryLocation] = useState<string>('');
@@ -385,9 +381,7 @@ export default function PackageCreationModal({
       destination_agent_id: '',
       delivery_type: 'doorstep' as DeliveryType,
       package_size: 'medium' as PackageSize,
-      special_instructions: '',
-      business_name: selectedBusiness?.name || '',
-      business_phone: selectedBusiness?.phone_number || ''
+      special_instructions: ''
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -402,7 +396,7 @@ export default function PackageCreationModal({
     setLargePackageInstructions('');
     setPendingPackages([]);
     setIsCreatingMultiple(false);
-  }, [selectedBusiness]);
+  }, []);
 
   // Reset only for new package (keep pending packages)
   const resetFormForNewPackage = useCallback(() => {
@@ -418,9 +412,7 @@ export default function PackageCreationModal({
       destination_agent_id: '',
       delivery_type: 'doorstep' as DeliveryType,
       package_size: 'medium' as PackageSize,
-      special_instructions: '',
-      business_name: selectedBusiness?.name || '',
-      business_phone: selectedBusiness?.phone_number || ''
+      special_instructions: ''
     });
     setDeliveryLocation('');
     setEstimatedCost(null);
@@ -432,7 +424,7 @@ export default function PackageCreationModal({
     setSortConfig({ field: 'name', direction: 'asc' });
     setShowLargePackageModal(false);
     setLargePackageInstructions('');
-  }, [selectedBusiness]);
+  }, []);
 
   const closeModal = useCallback(() => {
     // Show warning if there are pending packages
@@ -777,8 +769,8 @@ export default function PackageCreationModal({
         sender_name: getDisplayName(),
         sender_phone: getUserPhone(),
         delivery_location: deliveryLocation,
-        business_name: packageData.business_name || selectedBusiness?.name || '',
-        business_phone: packageData.business_phone || selectedBusiness?.phone_number || ''
+        business_name: selectedBusiness?.name || '',
+        business_phone: selectedBusiness?.phone_number || ''
       };
 
       // Only create packages that haven't been submitted yet
@@ -787,8 +779,8 @@ export default function PackageCreationModal({
           ...pkg,
           sender_name: getDisplayName(),
           sender_phone: getUserPhone(),
-          business_name: pkg.business_name || selectedBusiness?.name || '',
-          business_phone: pkg.business_phone || selectedBusiness?.phone_number || ''
+          business_name: selectedBusiness?.name || '',
+          business_phone: selectedBusiness?.phone_number || ''
         })),
         currentPackageData
       ];
@@ -1159,7 +1151,7 @@ export default function PackageCreationModal({
     );
   }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery]);
 
-  // Step 2: Receiver Details (previously step 1) - UPDATED: Added business information
+  // Step 2: Receiver Details (previously step 1) - UPDATED: Removed business input section
   const renderReceiverDetails = useCallback(() => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>Receiver Details</Text>
@@ -1183,35 +1175,17 @@ export default function PackageCreationModal({
           onChangeText={(value) => updatePackageData('receiver_phone', value)}
           keyboardType="phone-pad"
         />
-
-        {/* Business Information Section */}
-        <View style={styles.businessSection}>
-          <Text style={styles.businessSectionTitle}>Business Information</Text>
-          <Text style={styles.businessSectionSubtitle}>
-            {selectedBusiness ? `For ${selectedBusiness.name}` : 'Optional business details'}
-          </Text>
-          
-          <TextInput
-            style={styles.input}
-            placeholder={selectedBusiness ? selectedBusiness.name : "Business Name (Optional)"}
-            placeholderTextColor="#888"
-            value={packageData.business_name}
-            onChangeText={(value) => updatePackageData('business_name', value)}
-            autoCapitalize="words"
-          />
-          
-          <TextInput
-            style={styles.input}
-            placeholder="Business Phone (Optional)"
-            placeholderTextColor="#888"
-            value={packageData.business_phone}
-            onChangeText={(value) => updatePackageData('business_phone', value)}
-            keyboardType="phone-pad"
-          />
-        </View>
       </View>
+
+      {/* Show selected business info (read-only) */}
+      {selectedBusiness && (
+        <View style={styles.businessPreviewSection}>
+          <Text style={styles.businessPreviewTitle}>Package for Business</Text>
+          <Text style={styles.businessPreviewText}>{selectedBusiness.name}</Text>
+        </View>
+      )}
     </View>
-  ), [packageData.receiver_name, packageData.receiver_phone, packageData.business_name, packageData.business_phone, selectedBusiness, updatePackageData]);
+  ), [packageData.receiver_name, packageData.receiver_phone, selectedBusiness, updatePackageData]);
 
   // Step 3: Delivery method selection (previously step 2) - UPDATED: Removed "RECOMMENDED" text
   const renderDeliveryMethodSelection = useCallback(() => (
@@ -1503,15 +1477,13 @@ export default function PackageCreationModal({
           <Text style={styles.confirmationDetail}>{packageData.receiver_name}</Text>
           <Text style={styles.confirmationDetail}>{packageData.receiver_phone}</Text>
           
-          {/* Show business information if provided */}
-          {(packageData.business_name || packageData.business_phone) && (
+          {/* Show business information if available */}
+          {selectedBusiness && (
             <View style={styles.businessInfoSection}>
               <Text style={styles.confirmationSubDetail}>Business Information:</Text>
-              {packageData.business_name && (
-                <Text style={styles.confirmationDetail}>{packageData.business_name}</Text>
-              )}
-              {packageData.business_phone && (
-                <Text style={styles.confirmationDetail}>{packageData.business_phone}</Text>
+              <Text style={styles.confirmationDetail}>{selectedBusiness.name}</Text>
+              {selectedBusiness.phone_number && (
+                <Text style={styles.confirmationDetail}>{selectedBusiness.phone_number}</Text>
               )}
             </View>
           )}
@@ -2295,24 +2267,28 @@ const styles = StyleSheet.create({
     paddingTop: 14,
   },
   
-  // Business Information Styles
-  businessSection: {
+  // Business Preview Styles (read-only display)
+  businessPreviewSection: {
     marginTop: 20,
-    paddingTop: 16,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(124, 58, 237, 0.2)',
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.2)',
   },
-  businessSectionTitle: {
-    fontSize: 16,
+  businessPreviewTitle: {
+    fontSize: 14,
     fontWeight: '600',
     color: '#7c3aed',
     marginBottom: 4,
   },
-  businessSectionSubtitle: {
-    fontSize: 13,
-    color: '#888',
-    marginBottom: 12,
+  businessPreviewText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '500',
   },
+  
+  // Business Information Confirmation Styles
   businessInfoSection: {
     marginTop: 8,
     paddingTop: 8,
