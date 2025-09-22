@@ -7,7 +7,7 @@ import UpdateService from '../lib/services/updateService';
 
 export const CHANGELOG_VERSION = '1.7.7';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
-const autoDismissDelay = 7000;
+const autoDismissDelay = 10000; // Increased from 7000 to 10000 to allow more time for update checks
 
 const CHANGELOG_CONTENT = [
   'Fixed going back in screens',
@@ -43,81 +43,145 @@ export default function ChangelogModal({ visible, onClose }: Props) {
 
   useEffect(() => {
     if (visible) {
+      console.log('📱 ChangelogModal: Modal became visible, initializing...');
       initializeAndCheckUpdates();
       
-      // Auto-dismiss if no updates available
+      // Auto-dismiss if no updates available (increased delay)
       const timer = setTimeout(() => {
+        console.log('⏰ ChangelogModal: Auto-dismiss timer triggered');
+        console.log('📋 ChangelogModal: Current state:', { 
+          isAvailable: updateInfo.isAvailable, 
+          isChecking: isCheckingUpdates, 
+          hasCompleted: updateInfo.hasCompletedDownload 
+        });
+        
         if (!updateInfo.isAvailable && !isCheckingUpdates && !updateInfo.hasCompletedDownload) {
+          console.log('🔄 ChangelogModal: Auto-dismissing modal - no updates found');
           onClose();
+        } else {
+          console.log('✋ ChangelogModal: Not auto-dismissing - updates available or checking in progress');
         }
       }, autoDismissDelay);
       
-      return () => clearTimeout(timer);
+      return () => {
+        console.log('🧹 ChangelogModal: Cleaning up timer');
+        clearTimeout(timer);
+      };
     }
-  }, [visible]);
+  }, [visible, updateInfo.isAvailable, isCheckingUpdates, updateInfo.hasCompletedDownload]);
 
   const initializeAndCheckUpdates = async () => {
     try {
-      // Set current version in UpdateService
-      updateService.setCurrentVersion(CHANGELOG_VERSION);
+      console.log('🚀 ChangelogModal: Starting initialization and update check...');
       
-      // Check for completed downloads first
+      // Set current version in UpdateService
+      console.log('💾 ChangelogModal: Setting current version to:', CHANGELOG_VERSION);
+      await updateService.setCurrentVersion(CHANGELOG_VERSION);
+      
+      // FIXED: Always check for new updates first, then handle completed downloads
+      console.log('🔍 ChangelogModal: Checking for new updates first...');
+      await checkForAPKUpdates();
+      
+      // Then check for completed downloads (but don't skip update check)
+      console.log('📦 ChangelogModal: Checking for completed downloads...');
       const { hasDownload, version } = await updateService.hasCompletedDownload();
       if (hasDownload) {
-        setUpdateInfo({
-          isAvailable: false,
+        console.log('📦 ChangelogModal: Found completed download for version:', version);
+        setUpdateInfo(prev => ({
+          ...prev, // FIXED: Don't override update check results
           hasCompletedDownload: true,
           completedVersion: version,
-        });
-        return;
+        }));
+      } else {
+        console.log('✅ ChangelogModal: No completed downloads found');
       }
       
-      // Check for new updates
-      await checkForAPKUpdates();
     } catch (error) {
-      console.error('Failed to initialize update check:', error);
+      console.error('❌ ChangelogModal: Failed to initialize update check:', error);
       setUpdateError('Failed to initialize update check');
     }
   };
 
   const checkForAPKUpdates = async () => {
     try {
+      console.log('🚀 ChangelogModal: Starting APK update check...');
       setIsCheckingUpdates(true);
       setUpdateError(null);
       
-      // Only check for updates on Android
+      // Check platform support
       if (!updateService.isUpdateSupported()) {
-        console.log('APK updates not supported on this platform');
+        console.log('❌ ChangelogModal: APK updates not supported on this platform');
         setUpdateInfo({ isAvailable: false });
         return;
       }
       
-      const { hasUpdate, metadata } = await updateService.checkForUpdates();
+      console.log('✅ ChangelogModal: Platform supports updates, proceeding...');
       
-      if (hasUpdate && metadata) {
-        setUpdateInfo({
-          isAvailable: true,
-          version: metadata.version,
-          changelog: metadata.changelog,
-          file_size: metadata.file_size,
-          force_update: metadata.force_update,
+      // Get current version for logging
+      const currentVersion = await updateService.getCurrentVersion();
+      console.log('📱 ChangelogModal: Current version for update check:', currentVersion);
+      
+      // Call the updateService method and log everything
+      console.log('📞 ChangelogModal: Calling updateService.checkForUpdates()...');
+      const result = await updateService.checkForUpdates();
+      
+      console.log('📋 ChangelogModal: UpdateService result:', result);
+      console.log('📋 ChangelogModal: Has update:', result.hasUpdate);
+      console.log('📋 ChangelogModal: Metadata:', result.metadata);
+      
+      if (result.hasUpdate && result.metadata) {
+        console.log('✅ ChangelogModal: Update detected! Version:', result.metadata.version);
+        console.log('📋 ChangelogModal: Full metadata:', {
+          version: result.metadata.version,
+          changelog: result.metadata.changelog,
+          file_size: result.metadata.file_size,
+          force_update: result.metadata.force_update,
+          download_url: result.metadata.download_url
         });
+        
+        setUpdateInfo(prev => ({
+          ...prev, // Preserve any completed download state
+          isAvailable: true,
+          version: result.metadata.version,
+          changelog: result.metadata.changelog,
+          file_size: result.metadata.file_size,
+          force_update: result.metadata.force_update,
+        }));
+        
+        console.log('💾 ChangelogModal: Update info set successfully');
       } else {
-        setUpdateInfo({ isAvailable: false });
+        console.log('❌ ChangelogModal: No updates detected by updateService');
+        
+        // Only set isAvailable to false if we don't have a completed download
+        setUpdateInfo(prev => ({
+          ...prev,
+          isAvailable: false,
+        }));
       }
     } catch (error) {
-      console.error('Failed to check for APK updates:', error);
+      console.error('❌ ChangelogModal: Failed to check for APK updates:', error);
+      console.error('📋 ChangelogModal: Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
+      
       setUpdateError('Failed to check for updates. Please check your internet connection.');
-      setUpdateInfo({ isAvailable: false });
+      setUpdateInfo(prev => ({ ...prev, isAvailable: false }));
     } finally {
       setIsCheckingUpdates(false);
+      console.log('🏁 ChangelogModal: Update check completed');
     }
   };
 
   const downloadAndInstallAPK = async () => {
-    if (!updateInfo.isAvailable || updateInfo.isDownloading) return;
+    if (!updateInfo.isAvailable || updateInfo.isDownloading) {
+      console.log('🚫 ChangelogModal: Download blocked - not available or already downloading');
+      return;
+    }
     
     try {
+      console.log('📥 ChangelogModal: Starting download and install process...');
       setUpdateInfo(prev => ({ ...prev, isDownloading: true }));
       setUpdateError(null);
       
@@ -131,10 +195,14 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         download_url: `${process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com'}/api/v1/updates/download?version=${updateInfo.version}`,
       };
       
+      console.log('📋 ChangelogModal: Download metadata:', metadata);
+      
       // Download with progress tracking
+      console.log('📥 ChangelogModal: Starting download with progress tracking...');
       const success = await updateService.downloadUpdateWithProgress(
         metadata,
         (progress) => {
+          console.log('📊 ChangelogModal: Download progress:', Math.round(progress.percentage), '%');
           setUpdateInfo(prev => ({ 
             ...prev, 
             downloadProgress: Math.round(progress.percentage) 
@@ -143,17 +211,19 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       );
       
       if (success) {
+        console.log('✅ ChangelogModal: Download completed successfully');
+        
         // Mark update as handled and close modal
         await AsyncStorage.setItem('apk_update_handled', updateInfo.version || 'latest');
         setUpdateInfo(prev => ({ ...prev, isDownloading: false }));
         onClose();
         
-        // Installation is handled by the UpdateService
+        console.log('🎉 ChangelogModal: Process completed, modal closing');
       } else {
         throw new Error('Download failed. Please try again.');
       }
     } catch (error) {
-      console.error('Failed to download APK update:', error);
+      console.error('❌ ChangelogModal: Failed to download APK update:', error);
       setUpdateError(`Update failed: ${error.message}`);
       setUpdateInfo(prev => ({ ...prev, isDownloading: false, downloadProgress: 0 }));
     }
@@ -161,29 +231,36 @@ export default function ChangelogModal({ visible, onClose }: Props) {
 
   const installCompletedDownload = async () => {
     try {
+      console.log('🔧 ChangelogModal: Installing completed download...');
       setUpdateError(null);
+      
       const success = await updateService.installDownloadedAPK(updateInfo.completedVersion);
       
       if (success) {
+        console.log('✅ ChangelogModal: Installation started successfully');
         setUpdateInfo(prev => ({ ...prev, hasCompletedDownload: false }));
         onClose();
+      } else {
+        console.log('❌ ChangelogModal: Installation failed');
       }
     } catch (error) {
-      console.error('Failed to install completed download:', error);
+      console.error('❌ ChangelogModal: Failed to install completed download:', error);
       setUpdateError('Installation failed. You can manually install from Downloads folder.');
     }
   };
 
   const installLater = async () => {
     if (updateInfo.force_update) {
+      console.log('🚫 ChangelogModal: Cannot postpone force update');
       return;
     }
     
     try {
+      console.log('⏰ ChangelogModal: Scheduling install for later...');
       await updateService.scheduleInstallForLater();
       onClose();
     } catch (error) {
-      console.error('Failed to schedule update for later:', error);
+      console.error('❌ ChangelogModal: Failed to schedule update for later:', error);
       onClose();
     }
   };
@@ -197,6 +274,13 @@ export default function ChangelogModal({ visible, onClose }: Props) {
   };
 
   const renderUpdateContent = () => {
+    console.log('🎨 ChangelogModal: Rendering content with state:', {
+      isCheckingUpdates,
+      updateError: !!updateError,
+      hasCompletedDownload: updateInfo.hasCompletedDownload,
+      isAvailable: updateInfo.isAvailable
+    });
+
     if (isCheckingUpdates) {
       return (
         <View style={styles.loadingContainer}>
@@ -334,6 +418,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     }
 
     // Default changelog view (no updates available)
+    console.log('🎨 ChangelogModal: Showing default changelog view');
     return (
       <View>
         <Text style={styles.title}>{`What's New (v${CHANGELOG_VERSION})`}</Text>
