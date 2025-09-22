@@ -1050,7 +1050,7 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.package_size, handlePackageSizeChange]);
 
-  // Step 1: Sender Office Selection (previously step 0)
+  // Step 1: Sender Office Selection - UPDATED: Using package size option styling
   const renderOriginAgentSelection = useCallback(() => {
     const groupedAgents = getGroupedItems(agents, searchQueries.originAgent, 'agent');
     
@@ -1100,27 +1100,20 @@ export default function PackageCreationModal({
                     <TouchableOpacity
                       key={agentId}
                       style={[
-                        styles.selectionItem,
-                        packageData.origin_agent_id === agentId && styles.selectedItem
+                        styles.packageSizeOption,
+                        packageData.origin_agent_id === agentId && styles.selectedPackageSizeOption
                       ]}
                       onPress={() => updatePackageData('origin_agent_id', agentId)}
                     >
-                      <View style={styles.selectionItemContent}>
-                        <View style={styles.selectionInitials}>
-                          <Text style={styles.selectionInitialsText}>
-                            {agentName.substring(0, 2).toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={styles.selectionInfo}>
-                          <Text style={styles.selectionName}>{agentName}</Text>
-                          <Text style={styles.selectionLocation}>
-                            {areaName} • {locationName}
-                          </Text>
-                        </View>
-                        {packageData.origin_agent_id === agentId && (
-                          <Feather name="check-circle" size={20} color="#10b981" />
-                        )}
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{agentName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {areaName} • {locationName}
+                        </Text>
                       </View>
+                      {packageData.origin_agent_id === agentId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -1244,7 +1237,7 @@ export default function PackageCreationModal({
     </View>
   ), [packageData.delivery_type, updatePackageData]);
 
-  // Step 4: Destination selection (previously step 3) - FIXED: Added proper fallbacks for text fields
+  // Step 4: Destination selection - UPDATED: Using package size option styling for both agents and areas
   const renderDestinationSelection = useCallback(() => {
     if (packageData.delivery_type === 'agent') {
       return (
@@ -1281,27 +1274,20 @@ export default function PackageCreationModal({
                     <TouchableOpacity
                       key={agentId}
                       style={[
-                        styles.selectionItem,
-                        packageData.destination_agent_id === agentId && styles.selectedItem
+                        styles.packageSizeOption,
+                        packageData.destination_agent_id === agentId && styles.selectedPackageSizeOption
                       ]}
                       onPress={() => updatePackageData('destination_agent_id', agentId)}
                     >
-                      <View style={styles.selectionItemContent}>
-                        <View style={styles.selectionInitials}>
-                          <Text style={styles.selectionInitialsText}>
-                            {agentName.substring(0, 2).toUpperCase()}
-                          </Text>
-                        </View>
-                        <View style={styles.selectionInfo}>
-                          <Text style={styles.selectionName}>{agentName}</Text>
-                          <Text style={styles.selectionLocation}>
-                            {areaName} • {locationName}
-                          </Text>
-                        </View>
-                        {packageData.destination_agent_id === agentId && (
-                          <Feather name="check-circle" size={20} color="#10b981" />
-                        )}
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{agentName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {areaName} • {locationName}
+                        </Text>
                       </View>
+                      {packageData.destination_agent_id === agentId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -1338,33 +1324,25 @@ export default function PackageCreationModal({
                   const areaName = areaData.name || 'Unknown Area';
                   const areaId = areaData.id || '';
                   const locationName = areaData.location?.name || group.locationName || 'Unknown Location';
-                  const initials = areaData.initials || areaName.substring(0, 2).toUpperCase() || 'AR';
                   
                   return (
                     <TouchableOpacity
                       key={areaId}
                       style={[
-                        styles.selectionItem,
-                        packageData.destination_area_id === areaId && styles.selectedItem
+                        styles.packageSizeOption,
+                        packageData.destination_area_id === areaId && styles.selectedPackageSizeOption
                       ]}
                       onPress={() => updatePackageData('destination_area_id', areaId)}
                     >
-                      <View style={styles.selectionItemContent}>
-                        <View style={styles.selectionInitials}>
-                          <Text style={styles.selectionInitialsText}>
-                            {initials}
-                          </Text>
-                        </View>
-                        <View style={styles.selectionInfo}>
-                          <Text style={styles.selectionName}>{areaName}</Text>
-                          <Text style={styles.selectionLocation}>
-                            {locationName}
-                          </Text>
-                        </View>
-                        {packageData.destination_area_id === areaId && (
-                          <Feather name="check-circle" size={20} color="#10b981" />
-                        )}
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{areaName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {locationName}
+                        </Text>
                       </View>
+                      {packageData.destination_area_id === areaId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
                     </TouchableOpacity>
                   );
                 })}
@@ -1732,7 +1710,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced styles with new package size selection and updated features
+// Enhanced styles with consistent selection styling across all components
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1844,7 +1822,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // NEW: Package Size Selection Styles
+  // CONSISTENT: Package Size Selection Styles (used across all selection components)
   packageSizeOptions: {
     gap: 12,
     marginBottom: 20,
@@ -1858,6 +1836,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
     padding: 16,
+    marginBottom: 8,
   },
   selectedPackageSizeOption: {
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
@@ -2187,54 +2166,6 @@ const styles = StyleSheet.create({
   
   selectionList: {
     flex: 1,
-  },
-  selectionItem: {
-    marginBottom: 8,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
-    overflow: 'hidden',
-  },
-  selectedItem: {
-    backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    borderWidth: 1,
-    borderColor: '#7c3aed',
-  },
-  selectionItemContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 14,
-  },
-  selectionInitials: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: 'rgba(124, 58, 237, 0.3)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  selectionInitialsText: {
-    fontSize: 15,
-    fontWeight: '600',
-    color: '#fff',
-  },
-  selectionInfo: {
-    flex: 1,
-  },
-  selectionName: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#fff',
-    marginBottom: 3,
-  },
-  selectionLocation: {
-    fontSize: 14,
-    color: '#ccc',
-    marginBottom: 2,
-  },
-  selectionPhone: {
-    fontSize: 12,
-    color: '#666',
   },
   
   noResultsContainer: {
