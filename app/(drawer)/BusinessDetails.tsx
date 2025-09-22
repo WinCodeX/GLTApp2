@@ -1,4 +1,4 @@
-// app/(drawer)/BusinessDetails.tsx - Business Details Screen with Real Staff and Activities
+// app/(drawer)/BusinessDetails.tsx - Business Details Screen with Enhanced Activities and Analytics
 import React, { useState, Suspense, useCallback, useEffect } from 'react';
 import {
   View,
@@ -11,6 +11,7 @@ import {
   Modal,
   RefreshControl,
   ActivityIndicator,
+  Dimensions,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
@@ -31,6 +32,8 @@ import { uploadBusinessLogo } from '../../lib/helpers/uploadBusinessLogo';
 // Lazy load components
 const ImagePreviewModal = React.lazy(() => import('../../components/ImagePreviewModal'));
 const EditBusinessModal = React.lazy(() => import('../../components/EditBusinessModal'));
+
+const { width: screenWidth } = Dimensions.get('window');
 
 interface BusinessDetailsProps {
   navigation: any;
@@ -83,6 +86,25 @@ interface ActivitiesData {
     staff_activities: number;
   };
 }
+
+interface PackageGraphData {
+  current_month: {
+    month: string;
+    packages: number;
+  };
+  previous_month: {
+    month: string;
+    packages: number;
+  };
+}
+
+interface LocationData {
+  location: string;
+  count: number;
+  percentage: number;
+}
+
+type ActivityFilter = 'total' | 'package' | 'staff';
 
 // FIXED: Client-side timezone-aware time formatting
 const formatLocalTime = (timeString: string): string => {
@@ -183,6 +205,89 @@ const showToast = {
   },
 };
 
+// Simple Line Graph Component
+const SimpleLineGraph = ({ data }: { data: PackageGraphData }) => {
+  const graphWidth = screenWidth - 80;
+  const graphHeight = 120;
+  const maxValue = Math.max(data.current_month.packages, data.previous_month.packages) || 1;
+  
+  // Calculate positions
+  const prevHeight = (data.previous_month.packages / maxValue) * (graphHeight - 20);
+  const currHeight = (data.current_month.packages / maxValue) * (graphHeight - 20);
+  
+  return (
+    <View style={styles.graphContainer}>
+      <Text style={styles.graphTitle}>Package Comparison (2 Months)</Text>
+      
+      <View style={styles.graphWrapper}>
+        <View style={[styles.graph, { width: graphWidth, height: graphHeight }]}>
+          {/* Y-axis labels */}
+          <View style={styles.yAxisLabels}>
+            <Text style={styles.axisLabel}>{maxValue}</Text>
+            <Text style={styles.axisLabel}>{Math.floor(maxValue / 2)}</Text>
+            <Text style={styles.axisLabel}>0</Text>
+          </View>
+          
+          {/* Graph area */}
+          <View style={styles.graphArea}>
+            {/* Grid lines */}
+            <View style={[styles.gridLine, { top: 0 }]} />
+            <View style={[styles.gridLine, { top: '50%' }]} />
+            <View style={[styles.gridLine, { bottom: 0 }]} />
+            
+            {/* Data points and line */}
+            <View style={styles.dataContainer}>
+              {/* Previous month */}
+              <View style={styles.dataPoint}>
+                <View 
+                  style={[
+                    styles.dataBar, 
+                    { 
+                      height: prevHeight,
+                      backgroundColor: 'rgba(124, 58, 237, 0.7)'
+                    }
+                  ]} 
+                />
+                <View style={[styles.dot, { backgroundColor: '#7c3aed' }]} />
+                <Text style={styles.dataValue}>{data.previous_month.packages}</Text>
+                <Text style={styles.monthLabel}>{data.previous_month.month}</Text>
+              </View>
+              
+              {/* Current month */}
+              <View style={styles.dataPoint}>
+                <View 
+                  style={[
+                    styles.dataBar, 
+                    { 
+                      height: currHeight,
+                      backgroundColor: 'rgba(16, 185, 129, 0.7)'
+                    }
+                  ]} 
+                />
+                <View style={[styles.dot, { backgroundColor: '#10b981' }]} />
+                <Text style={styles.dataValue}>{data.current_month.packages}</Text>
+                <Text style={styles.monthLabel}>{data.current_month.month}</Text>
+              </View>
+            </div>
+          </View>
+        </View>
+      </View>
+      
+      {/* Legend */}
+      <View style={styles.legend}>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#7c3aed' }]} />
+          <Text style={styles.legendText}>Previous Month</Text>
+        </View>
+        <View style={styles.legendItem}>
+          <View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
+          <Text style={styles.legendText}>Current Month</Text>
+        </View>
+      </View>
+    </View>
+  );
+};
+
 export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   const { 
     user, 
@@ -199,6 +304,8 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   // Modal states
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStaffModal, setShowStaffModal] = useState(false);
+  const [showStaffActivityModal, setShowStaffActivityModal] = useState(false);
+  const [selectedStaffMember, setSelectedStaffMember] = useState<StaffMember | null>(null);
   
   // UI states
   const [refreshing, setRefreshing] = useState(false);
@@ -215,8 +322,19 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   // Data states
   const [staffData, setStaffData] = useState<StaffData | null>(null);
   const [activitiesData, setActivitiesData] = useState<ActivitiesData | null>(null);
+  const [staffActivities, setStaffActivities] = useState<BusinessActivity[]>([]);
+  const [packageGraphData, setPackageGraphData] = useState<PackageGraphData | null>(null);
+  const [locationsData, setLocationsData] = useState<LocationData[]>([]);
+  
+  // Loading states
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [loadingActivities, setLoadingActivities] = useState(false);
+  const [loadingStaffActivities, setLoadingStaffActivities] = useState(false);
+  const [loadingGraphData, setLoadingGraphData] = useState(false);
+  const [loadingLocations, setLoadingLocations] = useState(false);
+  
+  // Activity filter state
+  const [activityFilter, setActivityFilter] = useState<ActivityFilter>('total');
   
   // Update triggers for immediate visual feedback
   const [logoUpdateTrigger, setLogoUpdateTrigger] = useState(Date.now());
@@ -240,6 +358,8 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       // Load initial data
       loadStaffData();
       loadActivitiesData();
+      loadPackageGraphData();
+      loadLocationsData();
     }
   }, [selectedBusiness]);
 
@@ -305,6 +425,83 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     }
   }, [selectedBusiness]);
 
+  // Load staff activities for specific staff member
+  const loadStaffActivities = useCallback(async (staffId: number) => {
+    if (!selectedBusiness) return;
+    
+    try {
+      setLoadingStaffActivities(true);
+      console.log('🔄 Loading activities for staff:', staffId);
+      
+      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/staff/${staffId}/activities`);
+      
+      if (response.data.success) {
+        const processedActivities = response.data.data.map((activity: any) => ({
+          ...activity,
+          formatted_time: formatLocalTime(activity.created_at || activity.formatted_time || new Date().toISOString())
+        }));
+        
+        setStaffActivities(processedActivities);
+        console.log('✅ Staff activities loaded:', processedActivities.length);
+      } else {
+        throw new Error(response.data.message || 'Failed to load staff activities');
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading staff activities:', error);
+      showToast.error('Failed to load staff activities', error.message || 'Please try again');
+    } finally {
+      setLoadingStaffActivities(false);
+    }
+  }, [selectedBusiness]);
+
+  // Load package graph data
+  const loadPackageGraphData = useCallback(async () => {
+    if (!selectedBusiness) return;
+    
+    try {
+      setLoadingGraphData(true);
+      console.log('🔄 Loading package graph data for business:', selectedBusiness.id);
+      
+      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/analytics/packages-comparison`);
+      
+      if (response.data.success) {
+        setPackageGraphData(response.data.data);
+        console.log('✅ Package graph data loaded:', response.data.data);
+      } else {
+        throw new Error(response.data.message || 'Failed to load graph data');
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading graph data:', error);
+      showToast.error('Failed to load graph data', error.message || 'Please try again');
+    } finally {
+      setLoadingGraphData(false);
+    }
+  }, [selectedBusiness]);
+
+  // Load best locations data
+  const loadLocationsData = useCallback(async () => {
+    if (!selectedBusiness) return;
+    
+    try {
+      setLoadingLocations(true);
+      console.log('🔄 Loading locations data for business:', selectedBusiness.id);
+      
+      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/analytics/best-locations`);
+      
+      if (response.data.success) {
+        setLocationsData(response.data.data);
+        console.log('✅ Locations data loaded:', response.data.data);
+      } else {
+        throw new Error(response.data.message || 'Failed to load locations data');
+      }
+    } catch (error: any) {
+      console.error('❌ Error loading locations data:', error);
+      showToast.error('Failed to load locations data', error.message || 'Please try again');
+    } finally {
+      setLoadingLocations(false);
+    }
+  }, [selectedBusiness]);
+
   // Enhanced refresh handler
   const onRefresh = useCallback(async () => {
     try {
@@ -320,10 +517,12 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       await refreshUser(true);
       await refreshBusinesses(true);
       
-      // Reload staff and activities data
+      // Reload all data
       await Promise.all([
         loadStaffData(),
-        loadActivitiesData()
+        loadActivitiesData(),
+        loadPackageGraphData(),
+        loadLocationsData()
       ]);
       
       triggerAvatarRefresh();
@@ -339,7 +538,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness, loadStaffData, loadActivitiesData]);
+  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness, loadStaffData, loadActivitiesData, loadPackageGraphData, loadLocationsData]);
 
   // Enhanced back navigation using NavigationHelper
   const handleGoBack = useCallback(async () => {
@@ -358,6 +557,13 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       console.error('🔙 BusinessDetails: Back navigation failed:', error);
     }
   }, []);
+
+  // Handle staff member click
+  const handleStaffClick = useCallback(async (staff: StaffMember) => {
+    setSelectedStaffMember(staff);
+    await loadStaffActivities(staff.id);
+    setShowStaffActivityModal(true);
+  }, [loadStaffActivities]);
 
   // Handle business logo picker
   const pickBusinessLogo = useCallback(async () => {
@@ -530,6 +736,28 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     }
   };
 
+  // Get filtered activities based on current filter
+  const getFilteredActivities = () => {
+    if (!activitiesData) return [];
+    
+    switch (activityFilter) {
+      case 'package':
+        return activitiesData.activities.filter(activity => 
+          activity.activity_type.includes('package') || 
+          activity.package
+        );
+      case 'staff':
+        return activitiesData.activities.filter(activity => 
+          activity.activity_type.includes('staff') || 
+          activity.activity_type.includes('user') ||
+          activity.target_user
+        );
+      case 'total':
+      default:
+        return activitiesData.activities;
+    }
+  };
+
   // Get current logo URL
   const getCurrentLogoUrl = () => {
     return localBusinessLogo || selectedBusiness?.logo_url;
@@ -672,7 +900,10 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
             ) : staffData ? (
               <>
                 {/* Show owner first */}
-                <View style={styles.staffItem}>
+                <TouchableOpacity 
+                  style={styles.staffItem}
+                  onPress={() => handleStaffClick(staffData.owner)}
+                >
                   <View style={styles.staffAvatar}>
                     <Text style={styles.staffInitials}>
                       {staffData.owner.name.split(' ').map(n => n[0]).join('')}
@@ -686,11 +917,15 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                     styles.staffStatus,
                     { backgroundColor: '#10b981' } // Owner is always active
                   ]} />
-                </View>
+                </TouchableOpacity>
                 
                 {/* Show up to 2 staff members */}
                 {staffData.staff.slice(0, 2).map((staff) => (
-                  <View key={staff.id} style={styles.staffItem}>
+                  <TouchableOpacity 
+                    key={staff.id} 
+                    style={styles.staffItem}
+                    onPress={() => handleStaffClick(staff)}
+                  >
                     <View style={styles.staffAvatar}>
                       <Text style={styles.staffInitials}>
                         {staff.name.split(' ').map(n => n[0]).join('')}
@@ -704,7 +939,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                       styles.staffStatus,
                       { backgroundColor: staff.active ? '#10b981' : '#6b7280' }
                     ]} />
-                  </View>
+                  </TouchableOpacity>
                 ))}
                 
                 {staffData.total_members > 3 && (
@@ -730,9 +965,136 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
           </View>
         </View>
 
+        {/* Package Analytics Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Package Analytics</Text>
+          
+          {loadingGraphData ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color="#7c3aed" size="small" />
+              <Text style={styles.loadingText}>Loading analytics...</Text>
+            </View>
+          ) : packageGraphData ? (
+            <SimpleLineGraph data={packageGraphData} />
+          ) : (
+            <View style={styles.errorContainer}>
+              <Text style={styles.errorText}>Unable to load analytics</Text>
+              <TouchableOpacity onPress={loadPackageGraphData} style={styles.retryButton}>
+                <Text style={styles.retryText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+        </View>
+
+        {/* Best Locations Section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>Best Locations This Month</Text>
+          <Text style={styles.sectionSubtitle}>Based on delivered and collected packages</Text>
+          
+          {loadingLocations ? (
+            <View style={styles.loadingContainer}>
+              <ActivityIndicator color="#7c3aed" size="small" />
+              <Text style={styles.loadingText}>Loading locations...</Text>
+            </View>
+          ) : locationsData.length > 0 ? (
+            <View style={styles.locationsContainer}>
+              {locationsData.map((location, index) => (
+                <View key={index} style={styles.locationItem}>
+                  <View style={styles.locationRank}>
+                    <Text style={styles.locationRankText}>{index + 1}</Text>
+                  </View>
+                  <View style={styles.locationInfo}>
+                    <Text style={styles.locationName}>{location.location}</Text>
+                    <Text style={styles.locationCount}>{location.count} packages</Text>
+                  </View>
+                  <View style={styles.locationPercentage}>
+                    <Text style={styles.locationPercentageText}>{location.percentage}%</Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyContainer}>
+              <Text style={styles.emptyText}>No location data available</Text>
+            </View>
+          )}
+        </View>
+
         {/* Activities Section */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Recent Activities</Text>
+          
+          {/* Activity Filter Buttons */}
+          <View style={styles.activityFilters}>
+            <TouchableOpacity 
+              style={[
+                styles.filterButton,
+                activityFilter === 'total' && styles.filterButtonActive
+              ]}
+              onPress={() => setActivityFilter('total')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                activityFilter === 'total' && styles.filterButtonTextActive
+              ]}>
+                Total Activities
+              </Text>
+              {activitiesData && (
+                <Text style={[
+                  styles.filterButtonCount,
+                  activityFilter === 'total' && styles.filterButtonCountActive
+                ]}>
+                  {activitiesData.summary.total_activities}
+                </Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[
+                styles.filterButton,
+                activityFilter === 'package' && styles.filterButtonActive
+              ]}
+              onPress={() => setActivityFilter('package')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                activityFilter === 'package' && styles.filterButtonTextActive
+              ]}>
+                Package Activities
+              </Text>
+              {activitiesData && (
+                <Text style={[
+                  styles.filterButtonCount,
+                  activityFilter === 'package' && styles.filterButtonCountActive
+                ]}>
+                  {activitiesData.summary.package_activities}
+                </Text>
+              )}
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[
+                styles.filterButton,
+                activityFilter === 'staff' && styles.filterButtonActive
+              ]}
+              onPress={() => setActivityFilter('staff')}
+            >
+              <Text style={[
+                styles.filterButtonText,
+                activityFilter === 'staff' && styles.filterButtonTextActive
+              ]}>
+                Staff Activities
+              </Text>
+              {activitiesData && (
+                <Text style={[
+                  styles.filterButtonCount,
+                  activityFilter === 'staff' && styles.filterButtonCountActive
+                ]}>
+                  {activitiesData.summary.staff_activities}
+                </Text>
+              )}
+            </TouchableOpacity>
+          </View>
           
           {loadingActivities ? (
             <View style={styles.loadingContainer}>
@@ -741,25 +1103,9 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
             </View>
           ) : activitiesData ? (
             <>
-              {/* Activities Summary */}
-              <View style={styles.activitiesSummary}>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryValue}>{activitiesData.summary.total_activities}</Text>
-                  <Text style={styles.summaryLabel}>Total Activities</Text>
-                </View>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryValue}>{activitiesData.summary.package_activities}</Text>
-                  <Text style={styles.summaryLabel}>Package Activities</Text>
-                </View>
-                <View style={styles.summaryItem}>
-                  <Text style={styles.summaryValue}>{activitiesData.summary.staff_activities}</Text>
-                  <Text style={styles.summaryLabel}>Staff Activities</Text>
-                </View>
-              </View>
-
               {/* Recent Activities List */}
               <View style={styles.activitiesList}>
-                {activitiesData.activities.slice(0, 5).map((activity) => (
+                {getFilteredActivities().slice(0, 10).map((activity) => (
                   <View key={activity.id} style={styles.activityItem}>
                     <View style={[styles.activityIcon, { backgroundColor: activity.activity_color }]}>
                       <Feather name={activity.activity_icon as any} size={16} color="#fff" />
@@ -772,9 +1118,9 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                   </View>
                 ))}
                 
-                {activitiesData.activities.length === 0 && (
+                {getFilteredActivities().length === 0 && (
                   <View style={styles.emptyContainer}>
-                    <Text style={styles.emptyText}>No recent activities</Text>
+                    <Text style={styles.emptyText}>No activities found for this filter</Text>
                   </View>
                 )}
               </View>
@@ -856,7 +1202,13 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
               
               <ScrollView style={styles.staffModalContent}>
                 {/* Owner */}
-                <View style={styles.fullStaffItem}>
+                <TouchableOpacity 
+                  style={styles.fullStaffItem}
+                  onPress={() => {
+                    setShowStaffModal(false);
+                    handleStaffClick(staffData.owner);
+                  }}
+                >
                   <View style={styles.staffAvatar}>
                     <Text style={styles.staffInitials}>
                       {staffData.owner.name.split(' ').map(n => n[0]).join('')}
@@ -873,11 +1225,18 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                     styles.staffStatus,
                     { backgroundColor: '#10b981' }
                   ]} />
-                </View>
+                </TouchableOpacity>
 
                 {/* Staff Members */}
                 {staffData.staff.map((staff) => (
-                  <View key={staff.id} style={styles.fullStaffItem}>
+                  <TouchableOpacity 
+                    key={staff.id} 
+                    style={styles.fullStaffItem}
+                    onPress={() => {
+                      setShowStaffModal(false);
+                      handleStaffClick(staff);
+                    }}
+                  >
                     <View style={styles.staffAvatar}>
                       <Text style={styles.staffInitials}>
                         {staff.name.split(' ').map(n => n[0]).join('')}
@@ -894,8 +1253,54 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                       styles.staffStatus,
                       { backgroundColor: staff.active ? '#10b981' : '#6b7280' }
                     ]} />
-                  </View>
+                  </TouchableOpacity>
                 ))}
+              </ScrollView>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
+      {/* Staff Activity Modal */}
+      {showStaffActivityModal && selectedStaffMember && (
+        <Modal visible transparent animationType="slide">
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            onPress={() => setShowStaffActivityModal(false)}
+          >
+            <View style={styles.staffModal}>
+              <View style={styles.staffModalHeader}>
+                <Text style={styles.staffModalTitle}>
+                  {selectedStaffMember.name}'s Activities
+                </Text>
+                <TouchableOpacity onPress={() => setShowStaffActivityModal(false)}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.staffModalContent}>
+                {loadingStaffActivities ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator color="#7c3aed" size="small" />
+                    <Text style={styles.loadingText}>Loading activities...</Text>
+                  </View>
+                ) : staffActivities.length > 0 ? (
+                  staffActivities.map((activity) => (
+                    <View key={activity.id} style={styles.activityItem}>
+                      <View style={[styles.activityIcon, { backgroundColor: activity.activity_color }]}>
+                        <Feather name={activity.activity_icon as any} size={16} color="#fff" />
+                      </View>
+                      <View style={styles.activityContent}>
+                        <Text style={styles.activityDescription}>{activity.description}</Text>
+                        <Text style={styles.activityTime}>{activity.formatted_time}</Text>
+                      </View>
+                    </View>
+                  ))
+                ) : (
+                  <View style={styles.emptyContainer}>
+                    <Text style={styles.emptyText}>No activities found for this staff member</Text>
+                  </View>
+                )}
               </ScrollView>
             </View>
           </TouchableOpacity>
@@ -1075,6 +1480,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginBottom: 16,
   },
+  sectionSubtitle: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+    marginBottom: 16,
+    marginTop: -12,
+  },
   staffHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1147,30 +1558,194 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
-  activitiesSummary: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
-  },
-  summaryItem: {
-    flex: 1,
+  // Graph Styles
+  graphContainer: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     padding: 16,
+    marginBottom: 8,
+  },
+  graphTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  graphWrapper: {
     alignItems: 'center',
   },
-  summaryValue: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: '700',
+  graph: {
+    flexDirection: 'row',
+    position: 'relative',
+  },
+  yAxisLabels: {
+    justifyContent: 'space-between',
+    paddingRight: 8,
+    width: 30,
+    height: '100%',
+  },
+  axisLabel: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 10,
+    textAlign: 'right',
+  },
+  graphArea: {
+    flex: 1,
+    position: 'relative',
+  },
+  gridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+  },
+  dataContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    alignItems: 'flex-end',
+    height: '100%',
+    paddingTop: 20,
+  },
+  dataPoint: {
+    alignItems: 'center',
+    flex: 1,
+    position: 'relative',
+  },
+  dataBar: {
+    width: 20,
+    backgroundColor: '#7c3aed',
+    borderRadius: 2,
     marginBottom: 4,
   },
-  summaryLabel: {
+  dot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#7c3aed',
+    marginBottom: 8,
+  },
+  dataValue: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  monthLabel: {
     color: 'rgba(255,255,255,0.7)',
-    fontSize: 11,
+    fontSize: 12,
     textAlign: 'center',
+  },
+  legend: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 20,
+    marginTop: 16,
+  },
+  legendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  legendDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  legendText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+  },
+  // Locations Styles
+  locationsContainer: {
+    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    overflow: 'hidden',
+  },
+  locationItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,255,255,0.1)',
+  },
+  locationRank: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  locationRankText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  locationInfo: {
+    flex: 1,
+  },
+  locationName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  locationCount: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+  },
+  locationPercentage: {
+    alignItems: 'flex-end',
+  },
+  locationPercentageText: {
+    color: '#10b981',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  // Activity Filter Styles
+  activityFilters: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  filterButton: {
+    flex: 1,
+    backgroundColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    padding: 12,
+    alignItems: 'center',
+  },
+  filterButtonActive: {
+    backgroundColor: 'rgba(124, 58, 237, 0.3)',
+    borderColor: '#7c3aed',
+  },
+  filterButtonText: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    fontWeight: '500',
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  filterButtonTextActive: {
+    color: '#fff',
+  },
+  filterButtonCount: {
+    color: 'rgba(255,255,255,0.5)',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  filterButtonCountActive: {
+    color: '#bd93f9',
   },
   activitiesList: {
     backgroundColor: 'rgba(255,255,255,0.05)',
