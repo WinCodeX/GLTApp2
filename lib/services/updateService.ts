@@ -5,6 +5,7 @@ import * as IntentLauncher from 'expo-intent-launcher';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform, Alert, AppState, AppStateStatus, Linking } from 'react-native';
+import api from '../api'; // Import your API service to get auth headers
 
 const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const DOWNLOAD_STORAGE_KEY = 'pending_apk_download';
@@ -255,7 +256,7 @@ class UpdateService {
   }
 
   /**
-   * Check for available APK updates - COMPLETELY BYPASS API SERVICE
+   * Check for available APK updates - Using authenticated request
    */
   async checkForUpdates(): Promise<{ hasUpdate: boolean; metadata?: UpdateMetadata }> {
     if (this.updateCheckInProgress) {
@@ -268,106 +269,41 @@ class UpdateService {
       console.log('UpdateService: Starting update check...');
       
       const currentVersion = await this.getCurrentVersion();
-      const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com';
-      const requestUrl = `${apiUrl}/api/v1/updates/info?current_version=${currentVersion}`;
-      
       console.log('UpdateService: Current version:', currentVersion);
-      console.log('UpdateService: API URL:', apiUrl);
-      console.log('UpdateService: Full request URL:', requestUrl);
-      console.log('UpdateService: Expected newer versions available: 1.7.8, 1.7.8-1, 1.8.1');
       
-      console.log('UpdateService: Making COMPLETELY unauthenticated request (bypassing API service)...');
+      // Use the authenticated API service
+      console.log('UpdateService: Making authenticated request via API service...');
       
-      // COMPLETELY BYPASS YOUR API SERVICE - Use raw fetch with explicit no-auth headers
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 15000);
+      const response = await api.get(`/api/v1/updates/info?current_version=${currentVersion}`);
       
-      try {
-        const response = await fetch(requestUrl, {
-          method: 'GET',
-          headers: {
-            'Accept': 'application/json',
-            'Content-Type': 'application/json',
-            'User-Agent': 'GLT-Mobile-App/1.0',
-            // EXPLICITLY NO AUTHORIZATION HEADERS AT ALL
-            // This completely bypasses your api.ts service
-          },
-          signal: controller.signal,
-          cache: 'no-cache',
-          // Additional fetch options to ensure no interference
-          mode: 'cors',
-          credentials: 'omit', // This is key - don't send any credentials/auth
-        });
-        
-        clearTimeout(timeoutId);
-        
-        console.log('UpdateService: Raw fetch response received');
-        console.log('UpdateService: Status:', response.status);
-        console.log('UpdateService: Status Text:', response.statusText);
-        console.log('UpdateService: OK:', response.ok);
-        console.log('UpdateService: Headers:', JSON.stringify(Object.fromEntries(response.headers.entries())));
-        
-        if (!response.ok) {
-          // Get detailed error info
-          let errorText = '';
-          try {
-            errorText = await response.text();
-          } catch (e) {
-            errorText = 'Unable to read error response';
-          }
-          
-          console.error('UpdateService: Error response body:', errorText);
-          
-          if (response.status === 401) {
-            console.error('UpdateService: 401 Unauthorized - This should NOT happen with raw fetch!');
-            console.error('UpdateService: Check if your backend requires auth for /api/v1/updates/info');
-            console.error('UpdateService: Backend should exclude this endpoint from authentication');
-          }
-          
-          throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
-        }
-        
-        const responseText = await response.text();
-        console.log('UpdateService: Raw response length:', responseText.length);
-        console.log('UpdateService: Raw response preview:', responseText.substring(0, 200));
-        
-        let data: UpdateMetadata;
-        try {
-          data = JSON.parse(responseText);
-          console.log('UpdateService: Successfully parsed JSON response');
-          console.log('UpdateService: Parsed data keys:', Object.keys(data));
-          console.log('UpdateService: Available:', data.available);
-          console.log('UpdateService: Version:', data.version);
-        } catch (parseError) {
-          console.error('UpdateService: JSON parse failed:', parseError);
-          console.error('UpdateService: Response content:', responseText);
-          throw new Error(`Invalid JSON response: ${parseError.message}`);
-        }
-        
-        if (data.available === true) {
-          console.log(`UpdateService: Update IS available! Version ${data.version} (current: ${currentVersion})`);
-          console.log('UpdateService: Full update metadata:', JSON.stringify(data, null, 2));
-          return { hasUpdate: true, metadata: data };
-        } else {
-          console.log('UpdateService: No updates available (available = false)');
-          console.log('UpdateService: Full response:', JSON.stringify(data, null, 2));
-          return { hasUpdate: false };
-        }
-        
-      } finally {
-        clearTimeout(timeoutId);
+      console.log('UpdateService: Response received');
+      console.log('UpdateService: Status:', response.status);
+      console.log('UpdateService: Data keys:', Object.keys(response.data || {}));
+      
+      const data: UpdateMetadata = response.data;
+      
+      console.log('UpdateService: Available:', data.available);
+      console.log('UpdateService: Version:', data.version);
+      
+      if (data.available === true) {
+        console.log(`UpdateService: Update IS available! Version ${data.version} (current: ${currentVersion})`);
+        console.log('UpdateService: Full update metadata:', JSON.stringify(data, null, 2));
+        return { hasUpdate: true, metadata: data };
+      } else {
+        console.log('UpdateService: No updates available (available = false)');
+        console.log('UpdateService: Full response:', JSON.stringify(data, null, 2));
+        return { hasUpdate: false };
       }
       
     } catch (error) {
-      console.error('UpdateService: Update check completely failed:', error);
+      console.error('UpdateService: Update check failed:', error);
       console.error('UpdateService: Error type:', typeof error);
       console.error('UpdateService: Error constructor:', error.constructor.name);
       console.error('UpdateService: Error message:', error.message);
-      console.error('UpdateService: Error stack:', error.stack);
       
-      // Special handling for abort errors
-      if (error.name === 'AbortError') {
-        console.error('UpdateService: Request was aborted (timeout)');
+      if (error.response) {
+        console.error('UpdateService: Response status:', error.response.status);
+        console.error('UpdateService: Response data:', error.response.data);
       }
       
       return { hasUpdate: false };
