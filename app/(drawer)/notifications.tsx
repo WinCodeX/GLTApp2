@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Enhanced Purple-themed notifications screen with Firebase Push Notifications
+// app/(drawer)/notifications.tsx - Fixed Enhanced Purple-themed notifications screen
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -80,8 +80,11 @@ export default function NotificationsScreen() {
   const [error, setError] = useState<string | null>(null);
   const [fcmToken, setFcmToken] = useState<string | null>(null);
   
-  // Track read status separately to avoid corrupting notification data
-  const [localReadStatus, setLocalReadStatus] = useState<Set<number>>(new Set());
+  // FIXED: Track pressed notifications to prevent blank states
+  const [pressedNotifications, setPressedNotifications] = useState<Set<number>>(new Set());
+  
+  // FIXED: Track read operations in progress to prevent race conditions
+  const [markingAsRead, setMarkingAsRead] = useState<Set<number>>(new Set());
 
   // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
@@ -93,9 +96,14 @@ export default function NotificationsScreen() {
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
 
-  // Helper function to check if notification is read (combines API data + local state)
+  // FIXED: Helper function to check if notification is read
   const isNotificationRead = (notification: NotificationData) => {
-    return notification.read || localReadStatus.has(notification.id);
+    return notification.read;
+  };
+
+  // FIXED: Helper function to check if notification is being processed
+  const isNotificationPressed = (notificationId: number) => {
+    return pressedNotifications.has(notificationId);
   };
 
   // Purple gradient colors
@@ -104,17 +112,15 @@ export default function NotificationsScreen() {
   };
 
   // ============================================
-  // FIREBASE SETUP - Same as header
+  // FIREBASE SETUP - Same as original
   // ============================================
   useEffect(() => {
-    // Wait a bit to ensure authentication is established
     const timer = setTimeout(() => {
       setupFirebaseMessaging();
     }, 2000);
     
     return () => {
       clearTimeout(timer);
-      // Cleanup Firebase listeners
       if (unsubscribeOnMessage.current) {
         unsubscribeOnMessage.current();
       }
@@ -136,23 +142,18 @@ export default function NotificationsScreen() {
         hasMessaging: !!firebase.messaging()
       });
       
-      // Try Firebase setup regardless of platform check
       const messaging = firebase.messaging();
       if (!messaging) {
         console.log('🔥 Firebase messaging not available, skipping setup');
         return;
       }
 
-      // Request permission first
       const permissionGranted = await requestFirebasePermissions();
       if (!permissionGranted) {
         return;
       }
 
-      // Get FCM token
       await getFirebaseToken();
-      
-      // Set up Firebase notification handlers
       setupFirebaseListeners();
       
       console.log('✅ NOTIFICATIONS SCREEN: Firebase messaging setup complete');
@@ -173,7 +174,7 @@ export default function NotificationsScreen() {
       }
       
       const authStatus = await messaging.requestPermission();
-      const enabled = authStatus === 1 || authStatus === 2; // AUTHORIZED or PROVISIONAL
+      const enabled = authStatus === 1 || authStatus === 2;
 
       if (enabled) {
         console.log('✅ NOTIFICATIONS SCREEN: Firebase authorization granted:', authStatus);
@@ -199,16 +200,13 @@ export default function NotificationsScreen() {
         return;
       }
       
-      // Get FCM token
       const token = await messaging.getToken();
       
       console.log('🔥 NOTIFICATIONS SCREEN: FCM token received:', token?.substring(0, 50) + '...');
       setFcmToken(token);
 
-      // Register with backend using same method as header
       await registerFCMTokenWithBackend(token);
       
-      // Listen for token refresh
       unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
         console.log('🔥 NOTIFICATIONS SCREEN: FCM token refreshed:', newToken?.substring(0, 50) + '...');
         setFcmToken(newToken);
@@ -224,7 +222,6 @@ export default function NotificationsScreen() {
     try {
       console.log('🔥 NOTIFICATIONS SCREEN: Registering FCM token with backend...');
       
-      // Check if user is authenticated first
       const authToken = await AsyncStorage.getItem('authToken');
       if (!authToken) {
         console.log('No auth token available, skipping push token registration');
@@ -233,7 +230,7 @@ export default function NotificationsScreen() {
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
-        platform: 'fcm', // Same as header
+        platform: 'fcm',
         device_info: {
           platform: Platform.OS,
           version: Platform.Version,
@@ -256,7 +253,6 @@ export default function NotificationsScreen() {
     } catch (error) {
       console.error('❌ NOTIFICATIONS SCREEN: FCM token backend registration failed:', error);
       
-      // If authentication error, don't show error toast to user
       if (error.response?.status === 401) {
         console.log('Authentication required for push token registration');
         return;
@@ -270,16 +266,13 @@ export default function NotificationsScreen() {
     const messaging = firebase.messaging();
     if (!messaging) return;
 
-    // Listen for foreground messages
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
       console.log('🔥 NOTIFICATIONS SCREEN: Foreground message received:', remoteMessage);
       
-      // Refresh notifications list
       fetchNotifications(1, true);
       showToast('New notification received', 'success');
     });
 
-    // Listen for notification opened app (from background)
     unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
       console.log('🔥 NOTIFICATIONS SCREEN: Notification opened app from background:', remoteMessage);
       handleNotificationData(remoteMessage.data);
@@ -290,7 +283,6 @@ export default function NotificationsScreen() {
     console.log('🔥 NOTIFICATIONS SCREEN: Handling notification data:', data);
     
     try {
-      // Handle different notification types
       if (data?.type === 'package_update' && data?.package_id) {
         await NavigationHelper.navigateTo('/(drawer)/track', {
           params: { packageId: data.package_id },
@@ -303,7 +295,6 @@ export default function NotificationsScreen() {
         });
       }
       
-      // Mark notification as read if we have the ID
       if (data?.notification_id) {
         markNotificationAsRead(data.notification_id);
       }
@@ -318,7 +309,6 @@ export default function NotificationsScreen() {
       await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       console.log('✅ NOTIFICATIONS SCREEN: Notification marked as read');
       
-      // Refresh notification list
       fetchNotifications(1, true);
       
     } catch (error) {
@@ -381,8 +371,10 @@ export default function NotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
+          // FIXED: Clear pressed states on refresh
+          setPressedNotifications(new Set());
+          setMarkingAsRead(new Set());
         } else {
-          // Append new notifications for pagination
           setNotifications(prev => {
             if (!Array.isArray(prev)) return newNotifications;
             return [...prev, ...newNotifications];
@@ -404,17 +396,26 @@ export default function NotificationsScreen() {
     }
   }, [filter]);
 
-  // Mark notification as read - FIXED to prevent blank notifications completely
+  // FIXED: Mark notification as read with proper state management
   const markAsRead = async (notificationId: number) => {
     try {
       console.log('🔔 Marking notification as read:', notificationId);
       
-      // Make API call without touching the UI state
+      // Prevent duplicate calls
+      if (markingAsRead.has(notificationId)) {
+        console.log('🔔 Already marking notification as read, skipping:', notificationId);
+        return;
+      }
+      
+      // Add to marking set
+      setMarkingAsRead(prev => new Set(prev).add(notificationId));
+      
       const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       
       if (response.data && response.data.success) {
         console.log('✅ Notification marked as read successfully');
-        // Only update state after successful API call
+        
+        // Update notifications state
         setNotifications(prev => {
           if (!Array.isArray(prev)) return prev;
           return prev.map(notification =>
@@ -423,13 +424,22 @@ export default function NotificationsScreen() {
               : notification
           );
         });
+      } else {
+        console.error('🔔 API returned unsuccessful response:', response.data);
       }
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
+    } finally {
+      // Remove from marking set
+      setMarkingAsRead(prev => {
+        const newSet = new Set(prev);
+        newSet.delete(notificationId);
+        return newSet;
+      });
     }
   };
 
-  // Mark all notifications as read - FIXED 
+  // FIXED: Mark all notifications as read
   const markAllAsRead = async () => {
     try {
       console.log('🔔 Marking all notifications as read');
@@ -437,7 +447,6 @@ export default function NotificationsScreen() {
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
       
       if (response.data && response.data.success) {
-        // Update all notifications in the local state after successful API call
         setNotifications(prev => {
           if (!Array.isArray(prev)) return prev;
           return prev.map(notification => ({ ...notification, read: true }));
@@ -452,40 +461,59 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Handle notification press - COMPLETELY FIXED to prevent blank notifications
+  // FIXED: Handle notification press with proper state management
   const handleNotificationPress = (notification: NotificationData) => {
     console.log('🔔 Notification pressed:', notification.id, 'read:', notification.read);
     
-    // Navigate first, then mark as read in background without affecting UI immediately
-    if (notification.action_url) {
-      try {
-        // Extract route from action_url
+    // Prevent multiple presses
+    if (isNotificationPressed(notification.id)) {
+      console.log('🔔 Notification already being processed, ignoring press');
+      return;
+    }
+    
+    // FIXED: Add immediate visual feedback
+    setPressedNotifications(prev => new Set(prev).add(notification.id));
+    
+    try {
+      // FIXED: Consistent navigation handling
+      let navigationParams: any = null;
+      
+      if (notification.action_url) {
         const url = notification.action_url;
         
         if (url.includes('/track/')) {
-          // Package tracking URL
           const packageCode = url.split('/track/')[1];
-          NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { code: packageCode },
-            trackInHistory: true
-          });
-        } else if (notification.package?.code) {
-          // Navigate to package details
-          NavigationHelper.navigateTo('/(drawer)/track', {
-            params: { code: notification.package.code },
-            trackInHistory: true
-          });
+          navigationParams = { code: packageCode }; // FIXED: Use consistent 'code' parameter
         }
-      } catch (error) {
-        console.error('🔔 Navigation error:', error);
+      } else if (notification.package?.code) {
+        navigationParams = { code: notification.package.code }; // FIXED: Use consistent 'code' parameter
       }
-    }
-
-    // Mark as read after navigation, in background, with delay to prevent UI issues
-    if (!notification.read) {
-      setTimeout(() => {
+      
+      // Navigate if we have parameters
+      if (navigationParams) {
+        NavigationHelper.navigateTo('/(drawer)/track', {
+          params: navigationParams,
+          trackInHistory: true
+        });
+      }
+      
+      // FIXED: Mark as read without delay if not already read
+      if (!notification.read) {
         markAsRead(notification.id);
-      }, 500); // Delay to ensure navigation completes first
+      }
+      
+    } catch (error) {
+      console.error('🔔 Navigation error:', error);
+      showToast('Failed to navigate', 'error');
+    } finally {
+      // FIXED: Remove pressed state after a short delay
+      setTimeout(() => {
+        setPressedNotifications(prev => {
+          const newSet = new Set(prev);
+          newSet.delete(notification.id);
+          return newSet;
+        });
+      }, 1000);
     }
   };
 
@@ -519,25 +547,25 @@ export default function NotificationsScreen() {
 
   // Get notification color based on type and read status
   const getNotificationColor = (type: string, read: boolean) => {
-    if (read) return '#a78bfa'; // Light purple for read notifications
+    if (read) return '#a78bfa';
 
     switch (type) {
       case 'package_delivered':
       case 'package_collected':
-        return '#10b981'; // Green
+        return '#10b981';
       case 'package_rejected':
       case 'package_expired':
-        return '#ef4444'; // Red
+        return '#ef4444';
       case 'final_warning':
       case 'resubmission_available':
-        return '#f59e0b'; // Amber
+        return '#f59e0b';
       case 'payment_received':
       case 'payment_reminder':
-        return '#c084fc'; // Purple
+        return '#c084fc';
       case 'general':
-        return '#8b5cf6'; // Purple for general notifications
+        return '#8b5cf6';
       default:
-        return '#8b5cf6'; // Default purple
+        return '#8b5cf6';
     }
   };
 
@@ -586,15 +614,21 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [fetchNotifications]);
 
-  // Render notification item with enhanced details - COMPLETELY REWRITTEN to prevent blank notifications
+  // FIXED: Render notification item with proper state management
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
-    // Extra safety checks
-    if (!item || typeof item.id === 'undefined' || !item.title || !item.message) {
-      console.warn('🔔 Skipping invalid notification item:', item);
+    // FIXED: Extra safety checks with better error handling
+    if (!item || typeof item.id === 'undefined') {
+      console.warn('🔔 Invalid notification item detected, skipping render');
       return null;
     }
 
+    // FIXED: Ensure required fields exist with fallbacks
+    const title = item.title || 'No Title';
+    const message = item.message || 'No Message';
+    
     const isRead = isNotificationRead(item);
+    const isPressed = isNotificationPressed(item.id);
+    const isBeingMarkedAsRead = markingAsRead.has(item.id);
 
     return (
       <TouchableOpacity
@@ -602,9 +636,11 @@ export default function NotificationsScreen() {
           styles.notificationCard,
           !isRead && styles.unreadCard,
           item.expired && styles.expiredCard,
+          isPressed && styles.pressedCard, // FIXED: Add pressed state visual feedback
         ]}
         onPress={() => handleNotificationPress(item)}
         activeOpacity={0.7}
+        disabled={isPressed || isBeingMarkedAsRead} // FIXED: Prevent multiple presses
       >
         <View style={styles.notificationContent}>
           {/* Icon and status indicator */}
@@ -622,15 +658,21 @@ export default function NotificationsScreen() {
               />
             </View>
             {!isRead && <View style={styles.unreadIndicator} />}
+            {/* FIXED: Add loading indicator for marking as read */}
+            {isBeingMarkedAsRead && (
+              <View style={styles.loadingIndicator}>
+                <ActivityIndicator size={12} color="#c084fc" />
+              </View>
+            )}
           </View>
 
           {/* Content */}
           <View style={styles.contentContainer}>
             <Text style={[styles.title, !isRead && styles.unreadTitle]}>
-              {item.title}
+              {title}
             </Text>
             <Text style={[styles.message, !isRead && styles.unreadMessage]}>
-              {item.message}
+              {message}
             </Text>
             
             {/* Package info if available */}
@@ -819,6 +861,8 @@ export default function NotificationsScreen() {
             initialNumToRender={10}
             maxToRenderPerBatch={10}
             windowSize={10}
+            // FIXED: Add key prop to force re-render when notifications change
+            key={`notifications-${filter}-${notifications.length}`}
           />
         )}
       </LinearGradient>
@@ -938,6 +982,11 @@ const styles = StyleSheet.create({
   expiredCard: {
     opacity: 0.6,
   },
+  // FIXED: Add pressed card style for visual feedback
+  pressedCard: {
+    backgroundColor: 'rgba(139, 92, 246, 0.35)',
+    transform: [{ scale: 0.98 }],
+  },
   notificationContent: {
     flexDirection: 'row',
     padding: 16,
@@ -961,6 +1010,18 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#c084fc',
+  },
+  // FIXED: Add loading indicator for marking as read
+  loadingIndicator: {
+    position: 'absolute',
+    top: -4,
+    right: -4,
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    backgroundColor: 'rgba(192, 132, 252, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   contentContainer: {
     flex: 1,
