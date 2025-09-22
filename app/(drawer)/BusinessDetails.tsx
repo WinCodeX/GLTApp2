@@ -84,6 +84,72 @@ interface ActivitiesData {
   };
 }
 
+// FIXED: Client-side timezone-aware time formatting
+const formatLocalTime = (timeString: string): string => {
+  try {
+    // Parse the time string - handle both ISO format and backend formatted time
+    let date: Date;
+    
+    // If it's already formatted by backend (contains AM/PM), return as-is for now
+    if (timeString.includes('AM') || timeString.includes('PM')) {
+      return timeString;
+    }
+    
+    // Parse ISO string or Unix timestamp
+    if (timeString.includes('T') || timeString.includes('Z')) {
+      date = new Date(timeString);
+    } else {
+      // Assume it's a Unix timestamp if it's just numbers
+      const timestamp = parseInt(timeString);
+      date = isNaN(timestamp) ? new Date(timeString) : new Date(timestamp * 1000);
+    }
+    
+    // Check if date is valid
+    if (isNaN(date.getTime())) {
+      console.warn('Invalid date string:', timeString);
+      return 'Unknown time';
+    }
+    
+    const now = new Date();
+    const diffInHours = Math.abs(now.getTime() - date.getTime()) / (1000 * 60 * 60);
+    
+    // If it's today (within 24 hours and same day)
+    if (diffInHours < 24 && now.toDateString() === date.toDateString()) {
+      return date.toLocaleTimeString([], { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    }
+    
+    // If it's within the last week
+    if (diffInHours < 168) { // 7 days * 24 hours
+      return date.toLocaleDateString([], { 
+        weekday: 'short', 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true 
+      });
+    }
+    
+    // For older dates
+    return date.toLocaleDateString([], { 
+      month: 'short', 
+      day: 'numeric', 
+      year: 'numeric' 
+    });
+    
+  } catch (error) {
+    console.error('Error formatting time:', error, 'Input:', timeString);
+    return 'Unknown time';
+  }
+};
+
+// Enhanced activity interface to handle both server and client time
+interface EnhancedBusinessActivity extends BusinessActivity {
+  created_at?: string; // Add created_at field for client-side formatting
+}
+
 // Centralized toast helper
 const showToast = {
   success: (text1: string, text2?: string) => {
@@ -201,7 +267,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     }
   }, [selectedBusiness]);
 
-  // Load activities data
+  // FIXED: Enhanced load activities with client-side time formatting
   const loadActivitiesData = useCallback(async () => {
     if (!selectedBusiness) return;
     
@@ -212,8 +278,22 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/activities`);
       
       if (response.data.success) {
-        setActivitiesData(response.data.data);
-        console.log('✅ Activities data loaded:', response.data.data);
+        // Process activities to add client-side formatted time
+        const processedActivities = response.data.data.activities.map((activity: any) => ({
+          ...activity,
+          // Override formatted_time with client-side formatting
+          formatted_time: formatLocalTime(activity.created_at || activity.formatted_time || new Date().toISOString())
+        }));
+        
+        setActivitiesData({
+          ...response.data.data,
+          activities: processedActivities
+        });
+        
+        console.log('✅ Activities data loaded and processed:', {
+          total: processedActivities.length,
+          firstActivity: processedActivities[0]
+        });
       } else {
         throw new Error(response.data.message || 'Failed to load activities data');
       }
@@ -686,6 +766,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                     </View>
                     <View style={styles.activityContent}>
                       <Text style={styles.activityDescription}>{activity.description}</Text>
+                      {/* FIXED: Now uses client-side formatted time */}
                       <Text style={styles.activityTime}>{activity.formatted_time}</Text>
                     </View>
                   </View>
