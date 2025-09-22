@@ -593,12 +593,16 @@ export default function HomeScreen() {
     }, [])
   );
 
-  // Initialize app with APK update system
+  // Initialize app with APK update system - ENHANCED WITH LOGGING
   useEffect(() => {
+    console.log('🏠 HomeScreen: Component mounted, initializing app...');
     initializeApp();
     
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription?.remove();
+    return () => {
+      console.log('🏠 HomeScreen: Component unmounting, cleaning up...');
+      subscription?.remove();
+    };
   }, []);
 
   // Load additional data in background while showing default locations immediately
@@ -702,117 +706,167 @@ export default function HomeScreen() {
     })
   ).current;
 
-  // Initialize app with APK update system
+  // Initialize app with APK update system - ENHANCED WITH LOGGING
   const initializeApp = async () => {
     try {
+      console.log('🚀 HomeScreen: Starting app initialization...');
+      
       // Initialize APK update service
+      console.log('🔧 HomeScreen: Initializing UpdateService...');
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
+      console.log('✅ HomeScreen: UpdateService initialized successfully');
 
       // Check if changelog should be shown
+      console.log('📖 HomeScreen: Checking changelog display requirements...');
       await checkChangelogDisplay();
       
       // Check for APK updates on app start (delay to not block UI)
-      setTimeout(checkForAPKUpdates, 2000);
+      console.log('⏰ HomeScreen: Scheduling APK update check in 2 seconds...');
+      setTimeout(() => {
+        console.log('🔍 HomeScreen: Starting scheduled APK update check...');
+        checkForAPKUpdates();
+      }, 2000);
+      
+      console.log('✅ HomeScreen: App initialization completed successfully');
     } catch (error) {
-      console.error('App initialization error:', error);
+      console.error('❌ HomeScreen: App initialization error:', error);
     }
   };
 
-  // Check if user has seen the current changelog version
+  // Check if user has seen the current changelog version - ENHANCED WITH LOGGING
   const checkChangelogDisplay = async () => {
     try {
+      console.log('📖 HomeScreen: Checking if user has seen changelog for version:', CHANGELOG_VERSION);
+      
       const hasSeenChangelog = await AsyncStorage.getItem(CHANGELOG_KEY);
+      console.log('📋 HomeScreen: Changelog status for', CHANGELOG_VERSION, ':', hasSeenChangelog ? 'seen' : 'not seen');
       
       if (!hasSeenChangelog) {
+        console.log('📖 HomeScreen: User has not seen changelog, scheduling display in 1 second...');
         setTimeout(() => {
+          console.log('📖 HomeScreen: Showing changelog modal');
           setShowChangelogModal(true);
         }, 1000);
+      } else {
+        console.log('✅ HomeScreen: User has already seen changelog, skipping display');
       }
     } catch (error) {
-      console.error('Error checking changelog status:', error);
+      console.error('❌ HomeScreen: Error checking changelog status:', error);
     }
   };
 
-  // Check for APK updates
+  // Check for APK updates - ENHANCED WITH DETAILED LOGGING
   const checkForAPKUpdates = async () => {
     try {
+      console.log('🔍 HomeScreen: Starting APK update check...');
+      
       const updateService = UpdateService.getInstance();
       
       // Only check for updates on Android devices
       if (!updateService.isUpdateSupported()) {
-        console.log('APK updates not supported on this platform');
+        console.log('❌ HomeScreen: APK updates not supported on this platform (Platform:', Platform.OS, ')');
         return;
       }
       
+      console.log('✅ HomeScreen: Platform supports APK updates, proceeding...');
+      
       const { hasUpdate, metadata } = await updateService.checkForUpdates();
       
+      console.log('📋 HomeScreen: Update check result:', { hasUpdate, metadata });
+      
       if (hasUpdate && metadata) {
-        console.log('APK update available:', metadata.version);
+        console.log('🎉 HomeScreen: APK update available!', {
+          version: metadata.version,
+          force_update: metadata.force_update,
+          file_size: metadata.file_size,
+          changelog: metadata.changelog
+        });
         
         // Check if user previously postponed this update
+        console.log('🔍 HomeScreen: Checking if user previously postponed this update...');
         const hasPostponed = await updateService.hasUserPostponedUpdate();
+        console.log('📋 HomeScreen: User postponed status:', hasPostponed);
+        
         if (hasPostponed && !metadata.force_update) {
-          console.log('User previously postponed this update');
+          console.log('⏰ HomeScreen: User previously postponed this update and it\'s not forced, skipping display');
           return;
         }
         
         // Show update modal instead of alert
+        console.log('📱 HomeScreen: Showing update modal to user...');
         setUpdateMetadata(metadata);
         setShowUpdateModal(true);
+      } else {
+        console.log('✅ HomeScreen: No APK updates available');
       }
     } catch (error) {
-      console.error('Error checking for APK updates:', error);
+      console.error('❌ HomeScreen: Error checking for APK updates:', error);
     }
   };
 
-  // Handle app state changes
+  // Handle app state changes - ENHANCED WITH LOGGING
   const handleAppStateChange = (nextAppState: string) => {
+    console.log('🔄 HomeScreen: App state changed to:', nextAppState);
+    
     if (nextAppState === 'background' || nextAppState === 'inactive') {
+      console.log('📱 HomeScreen: App going to background/inactive, handling background tasks...');
       // App going to background - schedule any pending downloads
       handleAppGoingBackground();
     } else if (nextAppState === 'active') {
+      console.log('📱 HomeScreen: App becoming active, checking for updates...');
       // App coming to foreground - check for updates and download status
-      setTimeout(checkForAPKUpdates, 1000);
+      setTimeout(() => {
+        console.log('🔍 HomeScreen: Starting update check after app became active...');
+        checkForAPKUpdates();
+      }, 1000);
     }
   };
 
-  // FIXED: Handle changelog modal close
+  // FIXED: Handle changelog modal close - ENHANCED WITH LOGGING
   const handleChangelogClose = async () => {
     try {
+      console.log('📖 HomeScreen: User closing changelog modal, marking as seen...');
       await AsyncStorage.setItem(CHANGELOG_KEY, 'true');
+      console.log('✅ HomeScreen: Changelog marked as seen successfully');
       setShowChangelogModal(false);
     } catch (error) {
-      console.error('Error saving changelog status:', error);
+      console.error('❌ HomeScreen: Error saving changelog status:', error);
       setShowChangelogModal(false);
     }
   };
 
-  // Handle app going to background
+  // Handle app going to background - ENHANCED WITH LOGGING
   const handleAppGoingBackground = async () => {
     try {
+      console.log('📱 HomeScreen: Handling app going to background...');
+      
       // If user has seen an update but didn't download, schedule background download
       if (updateMetadata && !showUpdateModal) {
+        console.log('📥 HomeScreen: Scheduling background download for version:', updateMetadata.version);
         const updateService = UpdateService.getInstance();
         await updateService.scheduleBackgroundDownload(updateMetadata);
-        console.log('Scheduled background download for when app is backgrounded');
+        console.log('✅ HomeScreen: Background download scheduled successfully');
+      } else {
+        console.log('ℹ️ HomeScreen: No pending updates to schedule for background download');
       }
     } catch (error) {
-      console.error('Failed to schedule background download:', error);
+      console.error('❌ HomeScreen: Failed to schedule background download:', error);
     }
   };
 
-  // Handle update modal events
+  // Handle update modal events - ENHANCED WITH LOGGING
   const handleUpdateStart = () => {
-    console.log('Update download started');
+    console.log('📥 HomeScreen: Update download started');
   };
 
   const handleUpdateComplete = () => {
-    console.log('Update download completed');
+    console.log('✅ HomeScreen: Update download completed');
     // Metadata will be cleared when modal closes
   };
 
   const handleUpdateModalClose = () => {
+    console.log('📱 HomeScreen: Update modal closing, clearing metadata...');
     setShowUpdateModal(false);
     setUpdateMetadata(null);
   };
@@ -820,14 +874,17 @@ export default function HomeScreen() {
   // Load form data in background without blocking UI
   const loadFormDataInBackground = async () => {
     try {
-      console.log('Loading additional location data in background...');
+      console.log('📊 HomeScreen: Loading additional location data in background...');
       const formData = await getPackageFormData();
       
       if (formData.locations && formData.locations.length > 0) {
+        console.log('📍 HomeScreen: Loaded', formData.locations.length, 'locations from API');
         setLocations(formData.locations);
+      } else {
+        console.log('⚠️ HomeScreen: No additional locations loaded, keeping defaults');
       }
     } catch (error) {
-      console.error('Failed to load additional form data (non-critical):', error);
+      console.error('❌ HomeScreen: Failed to load additional form data (non-critical):', error);
     }
   };
 
