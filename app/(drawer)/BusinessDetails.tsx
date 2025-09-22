@@ -268,7 +268,7 @@ const SimpleLineGraph = ({ data }: { data: PackageGraphData }) => {
                 <Text style={styles.dataValue}>{data.current_month.packages}</Text>
                 <Text style={styles.monthLabel}>{data.current_month.month}</Text>
               </View>
-            
+            </View>
           </View>
         </View>
       </View>
