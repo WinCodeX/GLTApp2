@@ -59,11 +59,15 @@ class UpdateService {
 
   async initialize() {
     try {
+      console.log('🚀 UpdateService: Starting initialization...');
+      
       // Detect if running in Expo Go
       this.isExpoGo = Constants.appOwnership === 'expo';
       
       if (this.isExpoGo) {
-        console.log('Running in Expo Go - limited functionality');
+        console.log('📱 UpdateService: Running in Expo Go - limited functionality');
+      } else {
+        console.log('📱 UpdateService: Running in standalone app - full functionality available');
       }
       
       // Initialize version tracking
@@ -75,9 +79,9 @@ class UpdateService {
       // Monitor app state changes for background downloads
       this.setupAppStateMonitoring();
       
-      console.log('UpdateService initialized successfully');
+      console.log('✅ UpdateService: Initialization completed successfully');
     } catch (error) {
-      console.error('UpdateService initialization failed:', error);
+      console.error('❌ UpdateService: Initialization failed:', error);
     }
   }
 
@@ -86,24 +90,34 @@ class UpdateService {
    */
   private async initializeVersionTracking(): Promise<void> {
     try {
+      console.log('🔧 UpdateService: Initializing version tracking...');
+      
       const currentVersion = await this.getCurrentVersion();
       const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
+      
+      console.log('📱 UpdateService: Current version:', currentVersion);
+      console.log('💾 UpdateService: Last known version:', lastKnownVersion);
       
       if (!lastKnownVersion) {
         // First run - set current version
         await AsyncStorage.setItem('last_known_version', currentVersion);
-        console.log('Version tracking initialized:', currentVersion);
+        console.log('✅ UpdateService: Version tracking initialized for first run');
+      } else {
+        console.log('✅ UpdateService: Version tracking already initialized');
       }
     } catch (error) {
-      console.error('Failed to initialize version tracking:', error);
+      console.error('❌ UpdateService: Failed to initialize version tracking:', error);
     }
   }
 
   private setupAppStateMonitoring() {
+    console.log('🔧 UpdateService: Setting up app state monitoring...');
     this.appStateSubscription = AppState.addEventListener('change', this.handleAppStateChange.bind(this));
   }
 
   private async handleAppStateChange(nextAppState: AppStateStatus) {
+    console.log(`🔄 UpdateService: App state changed to: ${nextAppState}`);
+    
     if (nextAppState === 'background' || nextAppState === 'inactive') {
       // App going to background - check if we should start background download
       await this.checkAndStartBackgroundDownload();
@@ -119,12 +133,17 @@ class UpdateService {
    */
   private async checkPostInstallation(): Promise<void> {
     try {
+      console.log('🔍 UpdateService: Checking post-installation status...');
+      
       const currentVersion = await this.getCurrentVersion();
       const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
       
+      console.log('📱 UpdateService: Current version:', currentVersion);
+      console.log('💾 UpdateService: Last known version:', lastKnownVersion);
+      
       if (lastKnownVersion && lastKnownVersion !== currentVersion) {
         // Version changed - installation was successful!
-        console.log(`App updated successfully: ${lastKnownVersion} → ${currentVersion}`);
+        console.log(`🎉 UpdateService: App updated successfully: ${lastKnownVersion} → ${currentVersion}`);
         
         // Clean up any remaining download files
         await this.cleanupAfterSuccessfulInstall();
@@ -135,12 +154,14 @@ class UpdateService {
           `GLT has been updated to version ${currentVersion}. Enjoy the new features and improvements!`,
           [{ text: 'Great!' }]
         );
+      } else {
+        console.log('✅ UpdateService: No version change detected');
       }
       
       // Always update the last known version
       await AsyncStorage.setItem('last_known_version', currentVersion);
     } catch (error) {
-      console.error('Failed to check post-installation status:', error);
+      console.error('❌ UpdateService: Failed to check post-installation status:', error);
     }
   }
 
@@ -149,6 +170,8 @@ class UpdateService {
    */
   private async cleanupAfterSuccessfulInstall(): Promise<void> {
     try {
+      console.log('🧹 UpdateService: Cleaning up after successful installation...');
+      
       // Clear all update-related storage
       await AsyncStorage.multiRemove([
         'stored_apk_download',
@@ -157,96 +180,150 @@ class UpdateService {
         'user_postponed_update'
       ]);
       
-      console.log('Cleanup completed after successful installation');
+      console.log('✅ UpdateService: Cleanup completed after successful installation');
     } catch (error) {
-      console.error('Failed to cleanup after successful install:', error);
+      console.error('❌ UpdateService: Failed to cleanup after successful install:', error);
     }
   }
 
   private async checkAndStartBackgroundDownload() {
     try {
+      console.log('🔍 UpdateService: Checking for background downloads...');
+      
       const pendingDownload = await AsyncStorage.getItem(DOWNLOAD_STORAGE_KEY);
       if (pendingDownload) {
         const downloadInfo = JSON.parse(pendingDownload);
-        console.log('Starting background download for version:', downloadInfo.version);
+        console.log('📥 UpdateService: Starting background download for version:', downloadInfo.version);
         
         // Start download in background
         this.startBackgroundDownload(downloadInfo.metadata);
+      } else {
+        console.log('✅ UpdateService: No background downloads pending');
       }
     } catch (error) {
-      console.error('Failed to start background download:', error);
+      console.error('❌ UpdateService: Failed to start background download:', error);
     }
   }
 
   private async checkDownloadStatus() {
     try {
+      console.log('🔍 UpdateService: Checking download status...');
+      
       const progressData = await AsyncStorage.getItem(DOWNLOAD_PROGRESS_KEY);
       if (progressData) {
         const progress = JSON.parse(progressData);
-        console.log('Resuming download progress tracking:', progress);
+        console.log('📊 UpdateService: Resuming download progress tracking:', progress);
         
         // Update progress callback if set
         if (this.downloadProgressCallback) {
           this.downloadProgressCallback(progress);
         }
+      } else {
+        console.log('✅ UpdateService: No download progress to resume');
       }
     } catch (error) {
-      console.error('Failed to check download status:', error);
+      console.error('❌ UpdateService: Failed to check download status:', error);
     }
   }
 
   async checkPendingDownloads() {
     try {
+      console.log('🔍 UpdateService: Checking for pending downloads...');
+      
       const storedDownload = await this.getStoredDownload();
       if (storedDownload && storedDownload.isComplete) {
+        console.log('📦 UpdateService: Found completed download for version:', storedDownload.version);
+        
         // Check if file still exists
         const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
         if (fileInfo.exists) {
-          console.log('Found completed download for version:', storedDownload.version);
+          console.log('✅ UpdateService: Download file exists, showing alert');
           
           // Show alert about available install
           this.showDownloadCompleteAlert(storedDownload);
         } else {
+          console.log('🗑️ UpdateService: Download file was deleted, cleaning up storage');
           // File was deleted, clean up storage
           await this.clearStoredDownload();
         }
+      } else {
+        console.log('✅ UpdateService: No pending downloads found');
       }
     } catch (error) {
-      console.error('Error checking pending downloads:', error);
+      console.error('❌ UpdateService: Error checking pending downloads:', error);
     }
   }
 
   /**
-   * Check for available APK updates
+   * Check for available APK updates - ENHANCED WITH DETAILED LOGGING
    */
   async checkForUpdates(): Promise<{ hasUpdate: boolean; metadata?: UpdateMetadata }> {
     if (this.updateCheckInProgress) {
+      console.log('🚫 UpdateService: Update check already in progress, skipping');
       return { hasUpdate: false };
     }
 
     try {
       this.updateCheckInProgress = true;
+      console.log('🚀 UpdateService: Starting update check...');
       
       const currentVersion = await this.getCurrentVersion();
       const apiUrl = process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com';
+      const requestUrl = `${apiUrl}/api/v1/updates/info?current_version=${currentVersion}`;
       
-      console.log(`Checking for updates: current version ${currentVersion}`);
+      console.log('📱 UpdateService: Current version:', currentVersion);
+      console.log('🌐 UpdateService: API URL:', apiUrl);
+      console.log('🔗 UpdateService: Full request URL:', requestUrl);
+      console.log('📋 UpdateService: Expected newer versions available: 1.7.8, 1.7.8-1, 1.8.1');
       
-      const response = await fetch(`${apiUrl}/api/v1/updates/info?current_version=${currentVersion}`);
-      const data: UpdateMetadata = await response.json();
+      console.log('📡 UpdateService: Making API request...');
+      const response = await fetch(requestUrl);
       
-      if (data.available) {
-        console.log(`APK Update available: ${data.version} (current: ${currentVersion})`);
-        return { hasUpdate: true, metadata: data };
+      console.log('📡 UpdateService: Response status:', response.status);
+      console.log('📡 UpdateService: Response headers:', Object.fromEntries(response.headers.entries()));
+      
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
       }
       
-      console.log('No APK updates available');
-      return { hasUpdate: false };
+      const responseText = await response.text();
+      console.log('📡 UpdateService: Raw response text:', responseText);
+      
+      let data: UpdateMetadata;
+      try {
+        data = JSON.parse(responseText);
+        console.log('📋 UpdateService: Parsed response data:', data);
+      } catch (parseError) {
+        console.error('❌ UpdateService: Failed to parse JSON response:', parseError);
+        throw new Error(`Invalid JSON response: ${responseText.substring(0, 100)}...`);
+      }
+      
+      if (data.available) {
+        console.log(`✅ UpdateService: Update available! Version ${data.version} (current: ${currentVersion})`);
+        console.log('📋 UpdateService: Update metadata:', {
+          version: data.version,
+          changelog: data.changelog,
+          force_update: data.force_update,
+          file_size: data.file_size,
+          download_url: data.download_url
+        });
+        return { hasUpdate: true, metadata: data };
+      } else {
+        console.log('❌ UpdateService: No updates available');
+        console.log('📋 UpdateService: Response indicates current version is up to date');
+        return { hasUpdate: false };
+      }
     } catch (error) {
-      console.error('APK update check failed:', error);
+      console.error('❌ UpdateService: Update check failed with error:', error);
+      console.error('📋 UpdateService: Error details:', {
+        message: error.message,
+        stack: error.stack,
+        name: error.name
+      });
       return { hasUpdate: false };
     } finally {
       this.updateCheckInProgress = false;
+      console.log('🏁 UpdateService: Update check completed');
     }
   }
 
@@ -258,15 +335,19 @@ class UpdateService {
     progressCallback?: DownloadProgressCallback
   ): Promise<boolean> {
     if (!metadata.download_url || this.downloadInProgress) {
+      console.log('🚫 UpdateService: Download blocked - no URL or already in progress');
       return false;
     }
 
     if (Platform.OS !== 'android') {
+      console.log('🚫 UpdateService: APK updates only supported on Android');
       Alert.alert('Unsupported', 'APK updates are only supported on Android devices.');
       return false;
     }
 
     try {
+      console.log('📥 UpdateService: Starting download for version:', metadata.version);
+      
       this.downloadInProgress = true;
       this.downloadProgressCallback = progressCallback || null;
       this.downloadStartTime = Date.now();
@@ -278,9 +359,14 @@ class UpdateService {
       const fileName = `GLT_v${metadata.version?.replace(/\./g, '_')}_update.apk`;
       const tempFileUri = downloadDir + fileName;
       
+      console.log('📁 UpdateService: Download directory:', downloadDir);
+      console.log('📄 UpdateService: File name:', fileName);
+      console.log('📍 UpdateService: Temp file URI:', tempFileUri);
+      
       // Clean up any existing file
       const existingFile = await FileSystem.getInfoAsync(tempFileUri);
       if (existingFile.exists) {
+        console.log('🗑️ UpdateService: Removing existing file');
         await FileSystem.deleteAsync(tempFileUri);
       }
 
@@ -288,6 +374,7 @@ class UpdateService {
       this.showDownloadStartAlert(metadata.version);
 
       // Start download with progress tracking
+      console.log('📥 UpdateService: Creating download resumable...');
       const downloadResumable = FileSystem.createDownloadResumable(
         metadata.download_url,
         tempFileUri,
@@ -295,7 +382,10 @@ class UpdateService {
         this.createProgressHandler(metadata)
       );
 
+      console.log('📥 UpdateService: Starting download...');
       const result = await downloadResumable.downloadAsync();
+      
+      console.log('📥 UpdateService: Download result:', result);
       
       if (!result || result.status !== 200) {
         throw new Error(`Download failed with status ${result?.status || 'unknown'}`);
@@ -303,19 +393,22 @@ class UpdateService {
 
       // Verify file integrity
       const fileInfo = await FileSystem.getInfoAsync(result.uri);
+      console.log('📄 UpdateService: Downloaded file info:', fileInfo);
+      
       if (!fileInfo.exists || fileInfo.size === 0) {
         throw new Error('Downloaded file is invalid');
       }
 
-      console.log('APK downloaded to cache:', result.uri);
+      console.log('✅ UpdateService: APK downloaded to cache:', result.uri);
 
       // Copy to Downloads folder using Storage Access Framework
       let downloadsPath: string | undefined;
       try {
+        console.log('📁 UpdateService: Attempting to save to Downloads folder...');
         downloadsPath = await this.saveToDownloadsFolder(result.uri, fileName);
-        console.log('APK saved to Downloads folder:', downloadsPath);
+        console.log('✅ UpdateService: APK saved to Downloads folder:', downloadsPath);
       } catch (error) {
-        console.warn('Failed to save to Downloads folder:', error);
+        console.warn('⚠️ UpdateService: Failed to save to Downloads folder:', error);
         // Continue anyway - we still have the file in cache
       }
 
@@ -329,6 +422,7 @@ class UpdateService {
         isComplete: true,
       };
       
+      console.log('💾 UpdateService: Storing download info:', storedDownload);
       await this.storeDownload(storedDownload);
       
       // Show completion alert
@@ -337,11 +431,11 @@ class UpdateService {
       // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
       
-      console.log('APK download completed successfully:', result.uri);
+      console.log('🎉 UpdateService: APK download completed successfully');
       return true;
 
     } catch (error) {
-      console.error('APK download failed:', error);
+      console.error('❌ UpdateService: APK download failed:', error);
       
       // Show error alert
       this.showDownloadErrorAlert(metadata.version || 'latest');
@@ -353,6 +447,7 @@ class UpdateService {
     } finally {
       this.downloadInProgress = false;
       this.downloadProgressCallback = null;
+      console.log('🏁 UpdateService: Download process completed');
     }
   }
 
@@ -494,7 +589,7 @@ class UpdateService {
   }
 
   private showDownloadStartAlert(version?: string) {
-    console.log(`Starting download for GLT version ${version || 'latest'}...`);
+    console.log(`📥 UpdateService: Starting download for GLT version ${version || 'latest'}...`);
   }
 
   private showDownloadCompleteAlert(download: StoredDownload) {
@@ -857,20 +952,28 @@ class UpdateService {
    */
   async hasCompletedDownload(): Promise<{ hasDownload: boolean; version?: string }> {
     try {
+      console.log('🔍 UpdateService: Checking for completed downloads...');
+      
       const storedDownload = await this.getStoredDownload();
       if (storedDownload && storedDownload.isComplete) {
+        console.log('📦 UpdateService: Found completed download for version:', storedDownload.version);
+        
         // Verify file still exists
         const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
         if (fileInfo.exists) {
+          console.log('✅ UpdateService: Completed download file exists');
           return { hasDownload: true, version: storedDownload.version };
         } else {
+          console.log('🗑️ UpdateService: Completed download file was deleted, cleaning up');
           // File was deleted, clean up
           await this.clearStoredDownload();
         }
+      } else {
+        console.log('❌ UpdateService: No completed downloads found');
       }
       return { hasDownload: false };
     } catch (error) {
-      console.error('Failed to check completed download:', error);
+      console.error('❌ UpdateService: Failed to check completed download:', error);
       return { hasDownload: false };
     }
   }
@@ -903,41 +1006,47 @@ class UpdateService {
   }
 
   /**
-   * Get current app version from ChangelogModal or Constants
+   * Get current app version from ChangelogModal or Constants - ENHANCED WITH LOGGING
    */
   async getCurrentVersion(): Promise<string> {
     try {
+      console.log('🔍 UpdateService: Getting current version...');
+      
       // First try to get from stored version (set by ChangelogModal)
       const storedVersion = await this.getStoredCurrentVersion();
       if (storedVersion) {
+        console.log('📱 UpdateService: Found stored version:', storedVersion);
         return storedVersion;
       }
       
       // Fallback to Constants
       const configVersion = Constants.expoConfig?.version;
       if (configVersion) {
+        console.log('📱 UpdateService: Using config version:', configVersion);
         // Store it for future use
         await this.setCurrentVersion(configVersion);
         return configVersion;
       }
       
       // Final fallback
+      console.log('⚠️ UpdateService: Using fallback version: 1.7.6');
       return '1.7.6';
     } catch (error) {
-      console.error('Failed to get current version:', error);
+      console.error('❌ UpdateService: Failed to get current version:', error);
       return '1.7.6';
     }
   }
 
   /**
-   * Set current version from external source (like ChangelogModal)
+   * Set current version from external source (like ChangelogModal) - ENHANCED WITH LOGGING
    */
   async setCurrentVersion(version: string): Promise<void> {
     try {
+      console.log('💾 UpdateService: Setting current version to:', version);
       await AsyncStorage.setItem('app_current_version', version);
-      console.log('Version set to:', version);
+      console.log('✅ UpdateService: Version stored successfully');
     } catch (error) {
-      console.error('Failed to set current version:', error);
+      console.error('❌ UpdateService: Failed to set current version:', error);
     }
   }
 
@@ -946,9 +1055,11 @@ class UpdateService {
    */
   private async getStoredCurrentVersion(): Promise<string | null> {
     try {
-      return await AsyncStorage.getItem('app_current_version');
+      const version = await AsyncStorage.getItem('app_current_version');
+      console.log('📱 UpdateService: Retrieved stored version:', version);
+      return version;
     } catch (error) {
-      console.error('Failed to get stored version:', error);
+      console.error('❌ UpdateService: Failed to get stored version:', error);
       return null;
     }
   }
@@ -974,7 +1085,9 @@ class UpdateService {
    * Check if device supports APK installation
    */
   isUpdateSupported(): boolean {
-    return Platform.OS === 'android';
+    const supported = Platform.OS === 'android';
+    console.log('🔍 UpdateService: Update support check - Platform:', Platform.OS, 'Supported:', supported);
+    return supported;
   }
 
   /**
@@ -1004,6 +1117,7 @@ class UpdateService {
    * Cleanup method
    */
   cleanup(): void {
+    console.log('🧹 UpdateService: Cleaning up...');
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
