@@ -1,4 +1,4 @@
-// components/FragileDeliveryModal.tsx - Enhanced with edit/resubmit functionality
+// components/FragileDeliveryModal.tsx - Enhanced with business integration and edit/resubmit functionality
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -34,6 +34,7 @@ import {
   getAreas,
   getAgents
 } from '../lib/helpers/packageHelpers';
+import { useUser } from '../context/UserContext';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 const STATUS_BAR_HEIGHT = Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 24;
@@ -69,6 +70,11 @@ interface Package {
   destination_area_id?: string;
   origin_agent_id?: string;
   destination_agent_id?: string;
+  business_name?: string;
+  business_phone?: string;
+  sender_phone?: string;
+  sender_email?: string;
+  receiver_email?: string;
 }
 
 interface SavedFragilePackage {
@@ -84,6 +90,9 @@ interface SavedFragilePackage {
   selectedDeliveryArea: Area | null;
   selectedDeliveryAgent: Agent | null;
   createdAt: string;
+  businessId?: string | null;
+  businessName?: string;
+  businessPhone?: string;
 }
 
 interface FragileDeliveryModalProps {
@@ -356,6 +365,9 @@ export default function FragileDeliveryModal({
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
+  // Access user context for business information and user data
+  const { selectedBusiness, getDisplayName, getUserPhone } = useUser();
+  
   // Location states
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
   const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(null);
@@ -387,7 +399,7 @@ export default function FragileDeliveryModal({
     'Confirm Fragile Delivery'
   ];
 
-  // NEW: Get modal title based on mode
+  // Get modal title based on mode
   const getModalTitle = useCallback(() => {
     const currentStepTitle = STEP_TITLES[currentStep];
     
@@ -401,7 +413,7 @@ export default function FragileDeliveryModal({
     }
   }, [mode, currentStep]);
 
-  // NEW: Get action button text based on mode
+  // Get action button text based on mode
   const getActionButtonText = useCallback(() => {
     const packageCount = savedPackages.length + 1;
     
@@ -421,7 +433,7 @@ export default function FragileDeliveryModal({
     }
   }, [mode, savedPackages.length]);
 
-  // NEW: Load package data for editing/resubmitting
+  // Load package data for editing/resubmitting
   const loadPackageForEditing = useCallback((pkg: Package) => {
     console.log('🔧 Loading fragile package for editing:', pkg.code);
     
@@ -484,7 +496,7 @@ export default function FragileDeliveryModal({
         loadPendingPackages().then(setSavedPackages);
       }
       
-      // NEW: Load package data for editing/resubmitting
+      // Load package data for editing/resubmitting
       if (mode === 'edit' && editPackage) {
         loadPackageForEditing(editPackage);
       } else if (mode === 'resubmit' && resubmitPackage) {
@@ -683,6 +695,9 @@ export default function FragileDeliveryModal({
       selectedDeliveryArea,
       selectedDeliveryAgent,
       createdAt: new Date().toISOString(),
+      businessId: selectedBusiness?.id || null,
+      businessName: selectedBusiness?.name || '',
+      businessPhone: selectedBusiness?.phone_number || '',
     };
 
     const updatedPackages = [...savedPackages, currentPackage];
@@ -702,7 +717,7 @@ export default function FragileDeliveryModal({
     await savePendingPackages(updatedPackages);
   };
 
-  // UPDATED: Handle submission for different modes
+  // Handle submission for different modes
   const handleSubmit = async () => {
     if (!isStepValid(currentStep)) return;
 
@@ -715,8 +730,8 @@ export default function FragileDeliveryModal({
       if (mode === 'create') {
         savedPackages.forEach(pkg => {
           const packageData: PackageData = {
-            sender_name: 'Fragile Service',
-            sender_phone: '+254700000000',
+            sender_name: getDisplayName(),
+            sender_phone: getUserPhone(),
             receiver_name: pkg.receiverName,
             receiver_phone: pkg.receiverPhone,
             origin_area_id: pkg.selectedPickupArea?.id,
@@ -727,6 +742,9 @@ export default function FragileDeliveryModal({
             delivery_location: pkg.deliveryAddress,
             package_description: `FRAGILE DELIVERY: ${pkg.itemDescription}${pkg.specialInstructions ? `\nSpecial Instructions: ${pkg.specialInstructions}` : ''}`,
             pickup_location: pkg.pickupLocation?.address || '',
+            business_id: selectedBusiness?.id || null,
+            business_name: selectedBusiness?.name || '',
+            business_phone: selectedBusiness?.phone_number || '',
             coordinates: pkg.pickupLocation && pkg.deliveryLocation ? {
               pickup: pkg.pickupLocation,
               delivery: pkg.deliveryLocation
@@ -738,8 +756,8 @@ export default function FragileDeliveryModal({
 
       // Add current package
       const currentPackageData: PackageData = {
-        sender_name: 'Fragile Service',
-        sender_phone: '+254700000000',
+        sender_name: getDisplayName(),
+        sender_phone: getUserPhone(),
         receiver_name: receiverName,
         receiver_phone: receiverPhone,
         origin_area_id: selectedPickupArea?.id,
@@ -750,6 +768,9 @@ export default function FragileDeliveryModal({
         delivery_location: deliveryAddress,
         package_description: `FRAGILE DELIVERY: ${itemDescription}${specialInstructions ? `\nSpecial Instructions: ${specialInstructions}` : ''}`,
         pickup_location: pickupLocation?.address || '',
+        business_id: selectedBusiness?.id || null,
+        business_name: selectedBusiness?.name || '',
+        business_phone: selectedBusiness?.phone_number || '',
         coordinates: pickupLocation && deliveryLocation ? {
           pickup: pickupLocation,
           delivery: deliveryLocation
@@ -934,6 +955,17 @@ export default function FragileDeliveryModal({
           returnKeyType="next"
         />
       </View>
+
+      {/* Show selected business info (read-only) */}
+      {selectedBusiness && (
+        <View style={styles.businessPreviewSection}>
+          <Text style={styles.businessPreviewTitle}>Package for Business</Text>
+          <Text style={styles.businessPreviewText}>{selectedBusiness.name}</Text>
+          {selectedBusiness.phone_number && (
+            <Text style={styles.businessPreviewDetail}>{selectedBusiness.phone_number}</Text>
+          )}
+        </View>
+      )}
     </View>
   );
 
@@ -1084,6 +1116,25 @@ export default function FragileDeliveryModal({
               Special Instructions: {specialInstructions}
             </Text>
           )}
+        </View>
+
+        {/* Show business information if available */}
+        {selectedBusiness && (
+          <View style={styles.confirmationSection}>
+            <Text style={styles.confirmationSectionTitle}>Business Information</Text>
+            <Text style={styles.confirmationDetail}>{selectedBusiness.name}</Text>
+            {selectedBusiness.phone_number && (
+              <Text style={styles.confirmationDetail}>{selectedBusiness.phone_number}</Text>
+            )}
+            <Text style={styles.confirmationSubDetail}>Package will be tagged with business information</Text>
+          </View>
+        )}
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Sender Information</Text>
+          <Text style={styles.confirmationDetail}>{getDisplayName()}</Text>
+          <Text style={styles.confirmationDetail}>{getUserPhone()}</Text>
+          <Text style={styles.confirmationSubDetail}>Your contact information for the delivery</Text>
         </View>
 
         <View style={styles.confirmationSection}>
@@ -1377,7 +1428,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // NEW: Mode notice section for edit/resubmit
+  // Mode notice section for edit/resubmit
   modeNoticeSection: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1499,6 +1550,33 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingTop: 14,
   },
+  
+  // Business Preview Styles (read-only display)
+  businessPreviewSection: {
+    marginTop: 20,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(249, 115, 22, 0.2)',
+  },
+  businessPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#f97316',
+    marginBottom: 4,
+  },
+  businessPreviewText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  businessPreviewDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginTop: 2,
+  },
+  
   addAnotherSection: {
     marginTop: 20,
     marginBottom: 10,
