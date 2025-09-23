@@ -706,6 +706,62 @@ export default function HomeScreen() {
     })
   ).current;
 
+  // FIXED: Version-specific postponement helper functions
+  const getVersionPostponementKey = (version: string): string => {
+    return `user_postponed_update_${version}`;
+  };
+
+  const hasUserPostponedSpecificVersion = async (version: string): Promise<boolean> => {
+    try {
+      const key = getVersionPostponementKey(version);
+      const postponed = await AsyncStorage.getItem(key);
+      return postponed === 'true';
+    } catch (error) {
+      console.error('Failed to check version-specific postponement:', error);
+      return false;
+    }
+  };
+
+  const setVersionPostponement = async (version: string, postponed: boolean): Promise<void> => {
+    try {
+      const key = getVersionPostponementKey(version);
+      if (postponed) {
+        await AsyncStorage.setItem(key, 'true');
+      } else {
+        await AsyncStorage.removeItem(key);
+      }
+    } catch (error) {
+      console.error('Failed to set version-specific postponement:', error);
+    }
+  };
+
+  const clearAllOldPostponements = async (currentVersion: string): Promise<void> => {
+    try {
+      console.log('🧹 HomeScreen: Clearing old postponement flags for versions other than:', currentVersion);
+      
+      // Get all AsyncStorage keys
+      const allKeys = await AsyncStorage.getAllKeys();
+      
+      // Find postponement keys for other versions
+      const postponementKeys = allKeys.filter(key => 
+        key.startsWith('user_postponed_update_') && 
+        key !== getVersionPostponementKey(currentVersion)
+      );
+      
+      if (postponementKeys.length > 0) {
+        console.log('🧹 HomeScreen: Removing old postponement flags:', postponementKeys);
+        await AsyncStorage.multiRemove(postponementKeys);
+      }
+      
+      // Also clear the generic postponement flag if it exists
+      await AsyncStorage.removeItem('user_postponed_update');
+      
+      console.log('✅ HomeScreen: Old postponement flags cleared successfully');
+    } catch (error) {
+      console.error('❌ HomeScreen: Failed to clear old postponement flags:', error);
+    }
+  };
+
   // Initialize app with APK update system - ENHANCED WITH LOGGING
   const initializeApp = async () => {
     try {
@@ -756,7 +812,7 @@ export default function HomeScreen() {
     }
   };
 
-  // Check for APK updates - ENHANCED WITH DETAILED LOGGING
+  // FIXED: Check for APK updates with proper version-specific postponement logic
   const checkForAPKUpdates = async () => {
     try {
       console.log('🔍 HomeScreen: Starting APK update check...');
@@ -775,7 +831,7 @@ export default function HomeScreen() {
       
       console.log('📋 HomeScreen: Update check result:', { hasUpdate, metadata });
       
-      if (hasUpdate && metadata) {
+      if (hasUpdate && metadata && metadata.version) {
         console.log('🎉 HomeScreen: APK update available!', {
           version: metadata.version,
           force_update: metadata.force_update,
@@ -783,13 +839,16 @@ export default function HomeScreen() {
           changelog: metadata.changelog
         });
         
-        // Check if user previously postponed this update
-        console.log('🔍 HomeScreen: Checking if user previously postponed this update...');
-        const hasPostponed = await updateService.hasUserPostponedUpdate();
-        console.log('📋 HomeScreen: User postponed status:', hasPostponed);
+        // FIXED: Check if user previously postponed THIS SPECIFIC VERSION
+        console.log('🔍 HomeScreen: Checking if user previously postponed version:', metadata.version);
+        const hasPostponedThisVersion = await hasUserPostponedSpecificVersion(metadata.version);
+        console.log('📋 HomeScreen: User postponed status for version', metadata.version, ':', hasPostponedThisVersion);
         
-        if (hasPostponed && !metadata.force_update) {
-          console.log('⏰ HomeScreen: User previously postponed this update and it\'s not forced, skipping display');
+        // FIXED: Clear old postponement flags for different versions
+        await clearAllOldPostponements(metadata.version);
+        
+        if (hasPostponedThisVersion && !metadata.force_update) {
+          console.log('⏰ HomeScreen: User previously postponed this specific version and it\'s not forced, skipping display');
           return;
         }
         
@@ -799,6 +858,9 @@ export default function HomeScreen() {
         setShowUpdateModal(true);
       } else {
         console.log('✅ HomeScreen: No APK updates available');
+        
+        // Clear any old postponement flags when no updates are available
+        await clearAllOldPostponements('none');
       }
     } catch (error) {
       console.error('❌ HomeScreen: Error checking for APK updates:', error);
@@ -865,8 +927,15 @@ export default function HomeScreen() {
     // Metadata will be cleared when modal closes
   };
 
-  const handleUpdateModalClose = () => {
+  // FIXED: Handle update modal close with proper version-specific postponement
+  const handleUpdateModalClose = async (wasPostponed: boolean = false) => {
     console.log('📱 HomeScreen: Update modal closing, clearing metadata...');
+    
+    if (wasPostponed && updateMetadata?.version) {
+      console.log('⏰ HomeScreen: User postponed update for version:', updateMetadata.version);
+      await setVersionPostponement(updateMetadata.version, true);
+    }
+    
     setShowUpdateModal(false);
     setUpdateMetadata(null);
   };
@@ -1592,10 +1661,10 @@ export default function HomeScreen() {
         onClose={handleChangelogClose}
       />
 
-      {/* Enhanced Update Modal */}
+      {/* FIXED: Enhanced Update Modal with proper postponement callback */}
       <UpdateModal
         visible={showUpdateModal}
-        onClose={handleUpdateModalClose}
+        onClose={(wasPostponed) => handleUpdateModalClose(wasPostponed)}
         metadata={updateMetadata}
         onUpdateStart={handleUpdateStart}
         onUpdateComplete={handleUpdateComplete}
