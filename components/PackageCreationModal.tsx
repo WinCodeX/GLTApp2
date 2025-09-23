@@ -1,3 +1,5 @@
+// components/PackageCreationModal.tsx - Enhanced with edit/resubmit functionality
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   Modal,
@@ -21,6 +23,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
+import api from '@/lib/api';
 import { 
   getPackageFormData,
   getPackagePricing, 
@@ -35,10 +38,36 @@ import { useUser } from '../context/UserContext';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
+interface Package {
+  id: string;
+  code: string;
+  state: string;
+  sender_name: string;
+  receiver_name: string;
+  receiver_phone: string;
+  delivery_type: string;
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+  delivery_location?: string;
+  package_description?: string;
+  package_size?: string;
+  special_instructions?: string;
+  business_name?: string;
+  business_phone?: string;
+  sender_phone?: string;
+  sender_email?: string;
+  receiver_email?: string;
+}
+
 interface PackageCreationModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
+  editPackage?: Package;
+  resubmitPackage?: Package;
+  mode: 'create' | 'edit' | 'resubmit';
 }
 
 // UPDATED: New step titles with package size as first step
@@ -149,7 +178,10 @@ const useDataCache = () => {
 export default function PackageCreationModal({
   visible,
   onClose,
-  onSubmit
+  onSubmit,
+  editPackage,
+  resubmitPackage,
+  mode
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -211,6 +243,66 @@ export default function PackageCreationModal({
     direction: 'asc'
   });
 
+  // NEW: Get modal title based on mode and package type
+  const getModalTitle = useCallback(() => {
+    const currentStepTitle = STEP_TITLES[currentStep];
+    
+    switch (mode) {
+      case 'edit':
+        return `Edit Package - ${currentStepTitle}`;
+      case 'resubmit':
+        return `Resubmit Package - ${currentStepTitle}`;
+      default:
+        return currentStepTitle;
+    }
+  }, [mode, currentStep]);
+
+  // NEW: Get action button text based on mode
+  const getActionButtonText = useCallback(() => {
+    const packageCount = pendingPackages.length + 1;
+    
+    switch (mode) {
+      case 'edit':
+        return pendingPackages.length > 0 
+          ? `Update ${packageCount} Package${packageCount > 1 ? 's' : ''}`
+          : 'Update Package';
+      case 'resubmit':
+        return pendingPackages.length > 0 
+          ? `Resubmit ${packageCount} Package${packageCount > 1 ? 's' : ''}`
+          : 'Resubmit Package';
+      default:
+        return pendingPackages.length > 0 
+          ? `Submit ${packageCount} Package${packageCount > 1 ? 's' : ''}`
+          : 'Create Package';
+    }
+  }, [mode, pendingPackages.length]);
+
+  // NEW: Load package data for editing/resubmitting
+  const loadPackageForEditing = useCallback((pkg: Package) => {
+    console.log('🔧 Loading package for editing:', pkg.code);
+    
+    setPackageData({
+      sender_name: pkg.sender_name || '',
+      sender_phone: pkg.sender_phone || '',
+      receiver_name: pkg.receiver_name || '',
+      receiver_phone: pkg.receiver_phone || '',
+      origin_area_id: pkg.origin_area_id || '',
+      destination_area_id: pkg.destination_area_id || '',
+      origin_agent_id: pkg.origin_agent_id || '',
+      destination_agent_id: pkg.destination_agent_id || '',
+      delivery_type: (pkg.delivery_type as DeliveryType) || 'doorstep',
+      package_size: (pkg.package_size as PackageSize) || 'medium',
+      special_instructions: pkg.special_instructions || '',
+      business_name: pkg.business_name || selectedBusiness?.name || '',
+      business_phone: pkg.business_phone || selectedBusiness?.phone_number || '',
+      receiver_notes: '',
+      rider_notes: ''
+    });
+    
+    setDeliveryLocation(pkg.delivery_location || '');
+    setLargePackageInstructions(pkg.special_instructions || '');
+  }, [selectedBusiness]);
+
   // Keyboard handling
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -271,13 +363,20 @@ export default function PackageCreationModal({
       resetForm();
       loadModalData();
       
+      // NEW: Load package data for editing/resubmitting
+      if (mode === 'edit' && editPackage) {
+        loadPackageForEditing(editPackage);
+      } else if (mode === 'resubmit' && resubmitPackage) {
+        loadPackageForEditing(resubmitPackage);
+      }
+      
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
         useNativeDriver: true,
       }).start();
     }
-  }, [visible]);
+  }, [visible, mode, editPackage, resubmitPackage]);
 
   const loadModalData = useCallback(async () => {
     try {
@@ -750,7 +849,7 @@ export default function PackageCreationModal({
     setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
   }, []);
 
-  // Submit all packages without calling onSubmit to avoid duplication
+  // UPDATED: Handle submission for different modes
   const handleSubmit = useCallback(async () => {
     if (!isCurrentStepValid()) return;
 
@@ -789,33 +888,55 @@ export default function PackageCreationModal({
 
       console.log(`📦 Submitting ${packagesToSubmit.length} packages...`);
 
-      // Submit all packages via API
-      const responses = await Promise.all(
-        packagesToSubmit.map(pkg => createPackage(pkg))
-      );
+      if (mode === 'edit' && editPackage) {
+        // Update existing package
+        console.log('✏️ Updating package:', editPackage.code);
+        
+        const response = await api.put(`/api/v1/packages/${editPackage.code}`, {
+          package: currentPackageData
+        });
 
-      console.log('✅ All packages created successfully:', responses);
+        if (response.data.success) {
+          console.log('✅ Package updated successfully');
+        } else {
+          throw new Error(response.data.message || 'Failed to update package');
+        }
+      } else if (mode === 'resubmit' && resubmitPackage) {
+        // Resubmit existing package
+        console.log('🔄 Resubmitting package:', resubmitPackage.code);
+        
+        const response = await api.post(`/api/v1/packages/${resubmitPackage.code}/resubmit`, {
+          package: currentPackageData,
+          reason: 'Package updated and resubmitted by user'
+        });
 
-      // Show success message instead of calling onSubmit to avoid duplicate creation
-      Toast.show({
-        type: 'success',
-        text1: 'Packages Created Successfully',
-        text2: `${packagesToSubmit.length} package${packagesToSubmit.length > 1 ? 's' : ''} created`,
-        position: 'top',
-        visibilityTime: 3000,
-      });
+        if (response.data.success) {
+          console.log('✅ Package resubmitted successfully');
+        } else {
+          throw new Error(response.data.message || 'Failed to resubmit package');
+        }
+      } else {
+        // Create new packages via API
+        const responses = await Promise.all(
+          packagesToSubmit.map(pkg => createPackage(pkg))
+        );
+
+        console.log('✅ All packages created successfully:', responses);
+      }
 
       // Clear pending packages and close modal
       setPendingPackages([]);
       setIsCreatingMultiple(false);
-      closeModal();
+      
+      // Call onSubmit to trigger parent component refresh
+      await onSubmit(currentPackageData);
       
     } catch (error: any) {
       console.error('❌ Failed to submit packages:', error);
       
       Toast.show({
         type: 'error',
-        text1: 'Failed to Create Packages',
+        text1: `Failed to ${mode === 'edit' ? 'Update' : mode === 'resubmit' ? 'Resubmit' : 'Create'} Package`,
         text2: error.message,
         position: 'top',
         visibilityTime: 4000,
@@ -823,7 +944,7 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, onSubmit, closeModal, getDisplayName, getUserPhone, selectedBusiness]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, mode, editPackage, resubmitPackage, onSubmit, getDisplayName, getUserPhone, selectedBusiness]);
 
   const retryDataLoad = useCallback(() => {
     loadModalData();
@@ -926,19 +1047,20 @@ export default function PackageCreationModal({
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
         {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length > 1 ? 's' : ''} pending`}
+        {mode !== 'create' && ` • ${mode === 'edit' ? 'Editing' : 'Resubmitting'} Package`}
       </Text>
     </View>
-  ), [currentStep, pendingPackages.length]);
+  ), [currentStep, pendingPackages.length, mode]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.header}>
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
+      <Text style={styles.headerTitle}>{getModalTitle()}</Text>
       <View style={styles.placeholder} />
     </View>
-  ), [closeModal, currentStep]);
+  ), [closeModal, getModalTitle]);
 
   // Large Package Notes Modal with separate state
   const renderLargePackageModal = useCallback(() => (
@@ -1380,13 +1502,31 @@ export default function PackageCreationModal({
   // Step 6: Enhanced confirmation (previously step 5)
   const renderConfirmation = useCallback(() => (
     <View style={[styles.stepContent, styles.stepContentConfirmation]}>
-      <Text style={styles.stepTitle}>Confirm Package Details</Text>
+      <Text style={styles.stepTitle}>
+        {mode === 'edit' ? 'Confirm Package Updates' : 
+         mode === 'resubmit' ? 'Confirm Package Resubmission' : 
+         'Confirm Package Details'}
+      </Text>
       <Text style={styles.stepSubtitle}>
         {pendingPackages.length > 0 
-          ? `Review all ${totalPackages} package${totalPackages > 1 ? 's' : ''} before submitting`
-          : 'Review all information before submitting'
+          ? `Review all ${totalPackages} package${totalPackages > 1 ? 's' : ''} before ${mode === 'edit' ? 'updating' : mode === 'resubmit' ? 'resubmitting' : 'submitting'}`
+          : `Review all information before ${mode === 'edit' ? 'updating' : mode === 'resubmit' ? 'resubmitting' : 'submitting'}`
         }
       </Text>
+      
+      {/* Show editing/resubmit notice */}
+      {(mode === 'edit' || mode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={mode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={mode === 'edit' ? '#8b5cf6' : '#f97316'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: mode === 'edit' ? '#8b5cf6' : '#f97316' }]}>
+            {mode === 'edit' ? 'You are editing an existing package' : 'You are resubmitting a rejected package'}
+          </Text>
+        </View>
+      )}
       
       {/* Show pending packages if any */}
       {pendingPackages.length > 0 && (
@@ -1415,7 +1555,10 @@ export default function PackageCreationModal({
       {/* Current package confirmation */}
       <View style={styles.confirmationContainer}>
         <Text style={styles.currentPackageTitle}>
-          {pendingPackages.length > 0 ? `Package ${pendingPackages.length + 1}` : 'Current Package'}
+          {pendingPackages.length > 0 ? `Package ${pendingPackages.length + 1}` : 
+           mode === 'edit' ? 'Package Updates' :
+           mode === 'resubmit' ? 'Package Resubmission' :
+           'Current Package'}
         </Text>
         
         <View style={styles.confirmationSection}>
@@ -1517,8 +1660,8 @@ export default function PackageCreationModal({
         </View>
       </View>
 
-      {/* Add Another Package Button */}
-      {currentStep === STEP_TITLES.length - 1 && (
+      {/* Add Another Package Button - Only for create mode */}
+      {mode === 'create' && currentStep === STEP_TITLES.length - 1 && (
         <View style={styles.addAnotherContainer}>
           <TouchableOpacity 
             onPress={addAnotherPackage}
@@ -1534,7 +1677,7 @@ export default function PackageCreationModal({
       )}
     </View>
   ), [
-    selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, 
+    mode, selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, 
     deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep, selectedBusiness
   ]);
 
@@ -1603,18 +1746,19 @@ export default function PackageCreationModal({
                 styles.submitButtonText,
                 (!isCurrentStepValid() || isSubmitting) && styles.disabledButtonText
               ]}>
-                {pendingPackages.length > 0 
-                  ? `Submit ${totalPackages} Package${totalPackages > 1 ? 's' : ''}`
-                  : 'Create Package'
-                }
+                {getActionButtonText()}
               </Text>
-              <Feather name="check" size={20} color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} />
+              <Feather 
+                name={mode === 'edit' ? 'save' : mode === 'resubmit' ? 'refresh-cw' : 'check'} 
+                size={20} 
+                color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} 
+              />
             </>
           )}
         </TouchableOpacity>
       )}
     </View>
-  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, pendingPackages.length, totalPackages]);
+  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, getActionButtonText, mode]);
 
   const renderMainContent = useCallback(() => {
     if (isDataLoading) {
@@ -1710,7 +1854,7 @@ export default function PackageCreationModal({
   );
 }
 
-// Enhanced styles with consistent selection styling across all components
+// Enhanced styles with mode notice section
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1820,6 +1964,23 @@ const styles = StyleSheet.create({
     color: '#888',
     marginBottom: 20,
     lineHeight: 20,
+  },
+  
+  // NEW: Mode notice section for edit/resubmit
+  modeNoticeSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  modeNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   
   // CONSISTENT: Package Size Selection Styles (used across all selection components)
