@@ -1,4 +1,4 @@
-// app/(drawer)/track.tsx - Track screen with Report button and enhanced rejected package handling
+// app/(drawer)/track.tsx - Enhanced with modal routing for edit/resubmit functionality
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -21,6 +21,8 @@ import Toast from 'react-native-toast-message';
 import api from '@/lib/api';
 import colors from '@/theme/colors';
 import PackageCreationModal from '@/components/PackageCreationModal';
+import FragileDeliveryModal from '@/components/FragileDeliveryModal';
+import CollectDeliverModal from '@/components/CollectDeliverModal';
 import MpesaPaymentModal from '@/components/MpesaPaymentModal';
 
 // Import NavigationHelper
@@ -55,6 +57,22 @@ interface Package {
   to_name?: string;
   from_location?: string;
   to_location?: string;
+  package_description?: string;
+  package_size?: string;
+  special_instructions?: string;
+  pickup_location?: string;
+  // Collection specific fields
+  shop_name?: string;
+  shop_contact?: string;
+  collection_address?: string;
+  items_to_collect?: string;
+  item_value?: number;
+  item_description?: string;
+  // Fragile specific fields
+  pickup_latitude?: number;
+  pickup_longitude?: number;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
 }
 
 interface PackageResponse {
@@ -78,6 +96,9 @@ type DrawerState =
   | 'delivered' 
   | 'collected' 
   | 'rejected';
+
+type ModalType = 'package' | 'fragile' | 'collection';
+type ModalAction = 'create' | 'edit' | 'resubmit';
 
 const STATE_MAPPING: Record<DrawerState, string | null> = {
   'all': null,          
@@ -106,7 +127,17 @@ export default function Track() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAnimation] = useState(new Animated.Value(0));
   
-  const [showCreateModal, setShowCreateModal] = useState(false);
+  // Modal states - UPDATED: Enhanced modal management
+  const [activeModal, setActiveModal] = useState<{
+    type: ModalType | null;
+    action: ModalAction;
+    package?: Package;
+  }>({
+    type: null,
+    action: 'create',
+    package: undefined
+  });
+
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [selectedPackageForPayment, setSelectedPackageForPayment] = useState<Package | null>(null);
 
@@ -133,29 +164,45 @@ export default function Track() {
     });
   }, []);
 
-  // Enhanced navigation to edit package using NavigationHelper
+  // UPDATED: Enhanced edit package handler with modal routing
   const handleEditPackage = useCallback((packageItem: Package) => {
-    console.log('🔧 Editing package:', packageItem.code);
+    console.log('🔧 Editing package:', packageItem.code, 'Type:', packageItem.delivery_type);
     
-    NavigationHelper.navigateTo('/(drawer)/(tabs)/send', {
-      params: { 
-        edit: 'true',
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString()
-      }
+    // Determine which modal to open based on delivery type
+    let modalType: ModalType = 'package';
+    if (packageItem.delivery_type === 'fragile') {
+      modalType = 'fragile';
+    } else if (packageItem.delivery_type === 'collection') {
+      modalType = 'collection';
+    } else if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type)) {
+      modalType = 'package';
+    }
+
+    setActiveModal({
+      type: modalType,
+      action: 'edit',
+      package: packageItem
     });
   }, []);
 
-  // NEW: Handle resubmit package (for rejected packages)
+  // UPDATED: Enhanced resubmit package handler with modal routing
   const handleResubmitPackage = useCallback((packageItem: Package) => {
-    console.log('🔄 Resubmitting package:', packageItem.code);
+    console.log('🔄 Resubmitting package:', packageItem.code, 'Type:', packageItem.delivery_type);
     
-    NavigationHelper.navigateTo('/(drawer)/(tabs)/send', {
-      params: { 
-        resubmit: 'true',
-        packageCode: packageItem.code,
-        packageId: packageItem.id.toString()
-      }
+    // Determine which modal to open based on delivery type
+    let modalType: ModalType = 'package';
+    if (packageItem.delivery_type === 'fragile') {
+      modalType = 'fragile';
+    } else if (packageItem.delivery_type === 'collection') {
+      modalType = 'collection';
+    } else if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type)) {
+      modalType = 'package';
+    }
+
+    setActiveModal({
+      type: modalType,
+      action: 'resubmit',
+      package: packageItem
     });
   }, []);
 
@@ -163,7 +210,6 @@ export default function Track() {
   const handleReportPackage = useCallback((packageItem: Package) => {
     console.log('📋 Reporting package:', packageItem.code);
     
-    // Navigate to support screen with package pre-filled
     NavigationHelper.navigateTo('/(drawer)/support', {
       params: { 
         autoSelectPackage: 'true',
@@ -172,6 +218,44 @@ export default function Track() {
       }
     });
   }, []);
+
+  // NEW: Modal management handlers
+  const handleOpenCreateModal = useCallback((type: ModalType = 'package') => {
+    setActiveModal({
+      type,
+      action: 'create',
+      package: undefined
+    });
+  }, []);
+
+  const handleCloseModal = useCallback(() => {
+    setActiveModal({
+      type: null,
+      action: 'create',
+      package: undefined
+    });
+  }, []);
+
+  // UPDATED: Enhanced package submission handler
+  const handlePackageSubmitted = useCallback(async () => {
+    console.log('✅ Package submitted/updated successfully');
+    handleCloseModal();
+    
+    // Refresh packages list
+    loadPackages(true);
+    
+    // Show success message based on action
+    const actionText = activeModal.action === 'edit' ? 'updated' : 
+                      activeModal.action === 'resubmit' ? 'resubmitted' : 'created';
+    
+    Toast.show({
+      type: 'success',
+      text1: `Package ${actionText} successfully!`,
+      text2: activeModal.action === 'resubmit' ? 'Your package has been resubmitted for review' : undefined,
+      position: 'top',
+      visibilityTime: 4000,
+    });
+  }, [activeModal.action, handleCloseModal]);
 
   // Get packages with proper "all" handling
   const getPackages = useCallback(async (filters?: { state?: string | null; search?: string }): Promise<PackageResponse> => {
@@ -242,6 +326,22 @@ export default function Track() {
         to_name: pkg.to_name || pkg.receiver_name,
         from_location: pkg.from_location || pkg.origin_area?.name,
         to_location: pkg.to_location || pkg.destination_area?.name,
+        package_description: pkg.package_description,
+        package_size: pkg.package_size,
+        special_instructions: pkg.special_instructions,
+        pickup_location: pkg.pickup_location,
+        // Collection specific fields
+        shop_name: pkg.shop_name,
+        shop_contact: pkg.shop_contact,
+        collection_address: pkg.collection_address,
+        items_to_collect: pkg.items_to_collect,
+        item_value: pkg.item_value,
+        item_description: pkg.item_description,
+        // Fragile specific fields
+        pickup_latitude: pkg.pickup_latitude,
+        pickup_longitude: pkg.pickup_longitude,
+        delivery_latitude: pkg.delivery_latitude,
+        delivery_longitude: pkg.delivery_longitude,
       }));
       
       const result: PackageResponse = {
@@ -378,19 +478,6 @@ export default function Track() {
 
   const clearSearch = useCallback(() => {
     setSearchQuery('');
-  }, []);
-
-  const handleOpenCreateModal = useCallback(() => {
-    setShowCreateModal(true);
-  }, []);
-
-  const handleCloseCreateModal = useCallback(() => {
-    setShowCreateModal(false);
-  }, []);
-
-  const handlePackageCreated = useCallback(() => {
-    setShowCreateModal(false);
-    loadPackages(true);
   }, []);
 
   const handleOpenPaymentModal = useCallback((packageItem: Package) => {
@@ -666,7 +753,7 @@ export default function Track() {
       });
     }
 
-    // Resubmit button (for rejected packages) - UPDATED: Orange color
+    // Resubmit button (for rejected packages)
     if (canResubmit) {
       actionButtons.push({
         key: 'resubmit',
@@ -692,7 +779,7 @@ export default function Track() {
       });
     }
 
-    // Report button (always present) - NEW: Orange color
+    // Report button (always present)
     actionButtons.push({
       key: 'report',
       icon: 'flag',
@@ -778,7 +865,7 @@ export default function Track() {
         </Text>
         
         {!searchQuery && (
-          <TouchableOpacity style={styles.emptyStateButton} onPress={handleOpenCreateModal}>
+          <TouchableOpacity style={styles.emptyStateButton} onPress={() => handleOpenCreateModal('package')}>
             <Feather name="plus" size={20} color="#fff" />
             <Text style={styles.emptyStateButtonText}>Create Package</Text>
           </TouchableOpacity>
@@ -937,10 +1024,34 @@ export default function Track() {
         </ScrollView>
       )}
       
+      {/* UPDATED: Enhanced modal rendering with proper routing */}
       <PackageCreationModal
-        visible={showCreateModal}
-        onClose={handleCloseCreateModal}
-        onPackageCreated={handlePackageCreated}
+        visible={activeModal.type === 'package'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
+        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
+        mode={activeModal.action}
+      />
+
+      <FragileDeliveryModal
+        visible={activeModal.type === 'fragile'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        currentLocation={null}
+        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
+        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
+        mode={activeModal.action}
+      />
+
+      <CollectDeliverModal
+        visible={activeModal.type === 'collection'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        currentLocation={null}
+        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
+        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
+        mode={activeModal.action}
       />
 
       <MpesaPaymentModal
@@ -1344,9 +1455,8 @@ const styles = StyleSheet.create({
     color: '#8b5cf6',
   },
 
-  // NEW: Resubmit button styles (orange theme)
   resubmitButton: {
-    borderColor: '#f97316',
+    borderColor: '#8b5cf6',
     backgroundColor: 'transparent',
   },
   resubmitButtonText: {
@@ -1362,7 +1472,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
 
-  // NEW: Report button styles (orange theme)
   reportButton: {
     borderColor: '#f97316',
     backgroundColor: 'transparent',
