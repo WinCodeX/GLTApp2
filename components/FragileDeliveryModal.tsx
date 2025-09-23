@@ -1,4 +1,4 @@
-// components/FragileDeliveryModal.tsx - ENHANCED: Multiple packages creation with AsyncStorage
+// components/FragileDeliveryModal.tsx - Enhanced with edit/resubmit functionality
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -24,6 +24,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import api from '@/lib/api';
 import { 
   type PackageData, 
   type Area, 
@@ -48,6 +49,28 @@ interface LocationData {
   description?: string;
 }
 
+interface Package {
+  id: string;
+  code: string;
+  state: string;
+  sender_name: string;
+  receiver_name: string;
+  receiver_phone: string;
+  delivery_type: string;
+  delivery_location?: string;
+  package_description?: string;
+  special_instructions?: string;
+  pickup_location?: string;
+  pickup_latitude?: number;
+  pickup_longitude?: number;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+}
+
 interface SavedFragilePackage {
   id: string;
   receiverName: string;
@@ -67,8 +90,10 @@ interface FragileDeliveryModalProps {
   visible: boolean;
   onClose: () => void;
   onSubmit: (packageData: PackageData) => Promise<void>;
-  onCreateAnother?: () => void;
   currentLocation: LocationData | null;
+  editPackage?: Package;
+  resubmitPackage?: Package;
+  mode: 'create' | 'edit' | 'resubmit';
 }
 
 // Location Selection Modal
@@ -319,8 +344,10 @@ export default function FragileDeliveryModal({
   visible,
   onClose,
   onSubmit,
-  onCreateAnother,
-  currentLocation: initialLocation
+  currentLocation: initialLocation,
+  editPackage,
+  resubmitPackage,
+  mode
 }: FragileDeliveryModalProps) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
@@ -360,6 +387,68 @@ export default function FragileDeliveryModal({
     'Confirm Fragile Delivery'
   ];
 
+  // NEW: Get modal title based on mode
+  const getModalTitle = useCallback(() => {
+    const currentStepTitle = STEP_TITLES[currentStep];
+    
+    switch (mode) {
+      case 'edit':
+        return `Edit Fragile Package - ${currentStepTitle}`;
+      case 'resubmit':
+        return `Resubmit Fragile Package - ${currentStepTitle}`;
+      default:
+        return currentStepTitle;
+    }
+  }, [mode, currentStep]);
+
+  // NEW: Get action button text based on mode
+  const getActionButtonText = useCallback(() => {
+    const packageCount = savedPackages.length + 1;
+    
+    switch (mode) {
+      case 'edit':
+        return packageCount > 1 
+          ? `Update ${packageCount} Fragile Deliveries`
+          : 'Update Fragile Delivery';
+      case 'resubmit':
+        return packageCount > 1 
+          ? `Resubmit ${packageCount} Fragile Deliveries`
+          : 'Resubmit Fragile Delivery';
+      default:
+        return packageCount > 1 
+          ? `Schedule ${packageCount} Fragile Deliveries`
+          : 'Schedule Fragile Delivery';
+    }
+  }, [mode, savedPackages.length]);
+
+  // NEW: Load package data for editing/resubmitting
+  const loadPackageForEditing = useCallback((pkg: Package) => {
+    console.log('🔧 Loading fragile package for editing:', pkg.code);
+    
+    setReceiverName(pkg.receiver_name || '');
+    setReceiverPhone(pkg.receiver_phone || '');
+    setDeliveryAddress(pkg.delivery_location || '');
+    setItemDescription(pkg.package_description?.replace('FRAGILE DELIVERY: ', '') || '');
+    setSpecialInstructions(pkg.special_instructions || '');
+    
+    // Set locations if available
+    if (pkg.pickup_latitude && pkg.pickup_longitude) {
+      setPickupLocation({
+        latitude: pkg.pickup_latitude,
+        longitude: pkg.pickup_longitude,
+        address: pkg.pickup_location || 'Pickup Location'
+      });
+    }
+    
+    if (pkg.delivery_latitude && pkg.delivery_longitude) {
+      setDeliveryLocation({
+        latitude: pkg.delivery_latitude,
+        longitude: pkg.delivery_longitude,
+        address: pkg.delivery_location || 'Delivery Location'
+      });
+    }
+  }, []);
+
   // AsyncStorage functions
   const savePendingPackages = async (packages: SavedFragilePackage[]) => {
     try {
@@ -391,9 +480,18 @@ export default function FragileDeliveryModal({
   // Load saved packages when modal opens
   useEffect(() => {
     if (visible) {
-      loadPendingPackages().then(setSavedPackages);
+      if (mode === 'create') {
+        loadPendingPackages().then(setSavedPackages);
+      }
+      
+      // NEW: Load package data for editing/resubmitting
+      if (mode === 'edit' && editPackage) {
+        loadPackageForEditing(editPackage);
+      } else if (mode === 'resubmit' && resubmitPackage) {
+        loadPackageForEditing(resubmitPackage);
+      }
     }
-  }, [visible]);
+  }, [visible, mode, editPackage, resubmitPackage]);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -417,6 +515,7 @@ export default function FragileDeliveryModal({
     };
   }, []);
 
+  // Calculate modal height based on keyboard state
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
       const availableHeight = SCREEN_HEIGHT - keyboardHeight;
@@ -428,7 +527,7 @@ export default function FragileDeliveryModal({
 
   useEffect(() => {
     if (visible) {
-      if (!isCreatingMultiple) {
+      if (!isCreatingMultiple && mode === 'create') {
         resetForm();
       }
       requestLocationPermission();
@@ -439,7 +538,7 @@ export default function FragileDeliveryModal({
         useNativeDriver: true,
       }).start();
     }
-  }, [visible, isCreatingMultiple]);
+  }, [visible, isCreatingMultiple, mode]);
 
   const resetForm = () => {
     setCurrentStep(0);
@@ -458,16 +557,45 @@ export default function FragileDeliveryModal({
   };
 
   const closeModal = useCallback(() => {
-    Keyboard.dismiss();
-    Animated.timing(slideAnim, {
-      toValue: SCREEN_HEIGHT,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      setIsCreatingMultiple(false);
-      onClose();
-    });
-  }, [slideAnim, onClose]);
+    // Show warning if there are pending packages and we're in create mode
+    if (savedPackages.length > 0 && mode === 'create') {
+      Alert.alert(
+        'Unsaved Packages',
+        `You have ${savedPackages.length} unsaved package(s). If you close now, all progress will be lost.`,
+        [
+          {
+            text: 'Continue Editing',
+            style: 'cancel'
+          },
+          {
+            text: 'Close and Lose Progress',
+            style: 'destructive',
+            onPress: () => {
+              setSavedPackages([]);
+              setIsCreatingMultiple(false);
+              Keyboard.dismiss();
+              Animated.timing(slideAnim, {
+                toValue: SCREEN_HEIGHT,
+                duration: 250,
+                useNativeDriver: true,
+              }).start(() => {
+                onClose();
+              });
+            }
+          }
+        ]
+      );
+    } else {
+      Keyboard.dismiss();
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        onClose();
+      });
+    }
+  }, [slideAnim, onClose, savedPackages.length, mode]);
 
   const requestLocationPermission = async () => {
     try {
@@ -574,6 +702,7 @@ export default function FragileDeliveryModal({
     await savePendingPackages(updatedPackages);
   };
 
+  // UPDATED: Handle submission for different modes
   const handleSubmit = async () => {
     if (!isStepValid(currentStep)) return;
 
@@ -582,28 +711,30 @@ export default function FragileDeliveryModal({
       // Create array of all packages to submit
       const packagesToSubmit: PackageData[] = [];
 
-      // Add saved packages
-      savedPackages.forEach(pkg => {
-        const packageData: PackageData = {
-          sender_name: 'Fragile Service',
-          sender_phone: '+254700000000',
-          receiver_name: pkg.receiverName,
-          receiver_phone: pkg.receiverPhone,
-          origin_area_id: pkg.selectedPickupArea?.id,
-          destination_area_id: pkg.selectedDeliveryArea?.id || pkg.selectedDeliveryAgent?.area?.id,
-          origin_agent_id: null,
-          destination_agent_id: pkg.selectedDeliveryAgent?.id || null,
-          delivery_type: 'fragile',
-          delivery_location: pkg.deliveryAddress,
-          package_description: `FRAGILE DELIVERY: ${pkg.itemDescription}${pkg.specialInstructions ? `\nSpecial Instructions: ${pkg.specialInstructions}` : ''}`,
-          pickup_location: pkg.pickupLocation?.address || '',
-          coordinates: pkg.pickupLocation && pkg.deliveryLocation ? {
-            pickup: pkg.pickupLocation,
-            delivery: pkg.deliveryLocation
-          } : undefined,
-        };
-        packagesToSubmit.push(packageData);
-      });
+      // Add saved packages (only for create mode)
+      if (mode === 'create') {
+        savedPackages.forEach(pkg => {
+          const packageData: PackageData = {
+            sender_name: 'Fragile Service',
+            sender_phone: '+254700000000',
+            receiver_name: pkg.receiverName,
+            receiver_phone: pkg.receiverPhone,
+            origin_area_id: pkg.selectedPickupArea?.id,
+            destination_area_id: pkg.selectedDeliveryArea?.id || pkg.selectedDeliveryAgent?.area?.id,
+            origin_agent_id: null,
+            destination_agent_id: pkg.selectedDeliveryAgent?.id || null,
+            delivery_type: 'fragile',
+            delivery_location: pkg.deliveryAddress,
+            package_description: `FRAGILE DELIVERY: ${pkg.itemDescription}${pkg.specialInstructions ? `\nSpecial Instructions: ${pkg.specialInstructions}` : ''}`,
+            pickup_location: pkg.pickupLocation?.address || '',
+            coordinates: pkg.pickupLocation && pkg.deliveryLocation ? {
+              pickup: pkg.pickupLocation,
+              delivery: pkg.deliveryLocation
+            } : undefined,
+          };
+          packagesToSubmit.push(packageData);
+        });
+      }
 
       // Add current package
       const currentPackageData: PackageData = {
@@ -624,17 +755,49 @@ export default function FragileDeliveryModal({
           delivery: deliveryLocation
         } : undefined,
       };
-      packagesToSubmit.push(currentPackageData);
 
-      // Submit each package individually
-      for (const packageData of packagesToSubmit) {
-        await onSubmit(packageData);
+      if (mode === 'edit' && editPackage) {
+        // Update existing package
+        console.log('✏️ Updating fragile package:', editPackage.code);
+        
+        const response = await api.put(`/api/v1/packages/${editPackage.code}`, {
+          package: currentPackageData
+        });
+
+        if (response.data.success) {
+          console.log('✅ Fragile package updated successfully');
+        } else {
+          throw new Error(response.data.message || 'Failed to update package');
+        }
+      } else if (mode === 'resubmit' && resubmitPackage) {
+        // Resubmit existing package
+        console.log('🔄 Resubmitting fragile package:', resubmitPackage.code);
+        
+        const response = await api.post(`/api/v1/packages/${resubmitPackage.code}/resubmit`, {
+          package: currentPackageData,
+          reason: 'Fragile package updated and resubmitted by user'
+        });
+
+        if (response.data.success) {
+          console.log('✅ Fragile package resubmitted successfully');
+        } else {
+          throw new Error(response.data.message || 'Failed to resubmit package');
+        }
+      } else {
+        // Create new packages
+        packagesToSubmit.push(currentPackageData);
+
+        // Submit each package individually
+        for (const packageData of packagesToSubmit) {
+          await onSubmit(packageData);
+        }
+
+        // Clear saved packages after successful submission
+        await clearPendingPackages();
       }
-
-      // Clear saved packages after successful submission
-      await clearPendingPackages();
       
       closeModal();
+      
     } catch (error) {
       console.error('Error submitting fragile deliveries:', error);
     } finally {
@@ -654,6 +817,7 @@ export default function FragileDeliveryModal({
       </View>
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length} • {savedPackages.length + 1} Packages
+        {mode !== 'create' && ` • ${mode === 'edit' ? 'Editing' : 'Resubmitting'} Package`}
       </Text>
     </View>
   );
@@ -663,7 +827,7 @@ export default function FragileDeliveryModal({
       <TouchableOpacity onPress={closeModal} style={styles.closeButton}>
         <Feather name="x" size={24} color="#fff" />
       </TouchableOpacity>
-      <Text style={styles.headerTitle}>{STEP_TITLES[currentStep]}</Text>
+      <Text style={styles.headerTitle}>{getModalTitle()}</Text>
       <View style={styles.placeholder} />
     </View>
   );
@@ -674,6 +838,20 @@ export default function FragileDeliveryModal({
       <Text style={styles.stepSubtitle}>
         Set your pickup and delivery locations for fragile items
       </Text>
+      
+      {/* Show editing/resubmit notice */}
+      {(mode === 'edit' || mode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={mode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={mode === 'edit' ? '#8b5cf6' : '#f97316'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: mode === 'edit' ? '#8b5cf6' : '#f97316' }]}>
+            {mode === 'edit' ? 'You are editing an existing fragile package' : 'You are resubmitting a rejected fragile package'}
+          </Text>
+        </View>
+      )}
       
       {locationError && (
         <View style={styles.errorBanner}>
@@ -804,7 +982,8 @@ export default function FragileDeliveryModal({
         />
       </View>
 
-      {isStepValid(2) && (
+      {/* Only show add another button for create mode */}
+      {mode === 'create' && isStepValid(2) && (
         <View style={styles.addAnotherSection}>
           <TouchableOpacity 
             style={styles.addAnotherButton}
@@ -846,15 +1025,21 @@ export default function FragileDeliveryModal({
 
   const renderConfirmation = () => (
     <View style={styles.stepContent}>
-      <Text style={styles.stepTitle}>Confirm Fragile Deliveries</Text>
+      <Text style={styles.stepTitle}>
+        {mode === 'edit' ? 'Confirm Fragile Package Updates' :
+         mode === 'resubmit' ? 'Confirm Fragile Package Resubmission' :
+         'Confirm Fragile Deliveries'}
+      </Text>
       <Text style={styles.stepSubtitle}>
-        Please review your fragile delivery details ({savedPackages.length + 1} packages)
+        {mode === 'edit' ? 'Please review your fragile delivery updates' :
+         mode === 'resubmit' ? 'Please review your fragile delivery resubmission' :
+         `Please review your fragile delivery details (${savedPackages.length + 1} packages)`}
       </Text>
       
       <ScrollView style={styles.confirmationContainer} showsVerticalScrollIndicator={false}>
         
-        {/* Saved Packages */}
-        {savedPackages.length > 0 && (
+        {/* Saved Packages - Only show for create mode */}
+        {mode === 'create' && savedPackages.length > 0 && (
           <View style={styles.confirmationSection}>
             <Text style={styles.confirmationSectionTitle}>Saved Packages ({savedPackages.length})</Text>
             {savedPackages.map((pkg, index) => renderSavedPackageItem(pkg, index))}
@@ -863,7 +1048,11 @@ export default function FragileDeliveryModal({
 
         {/* Current Package */}
         <View style={styles.confirmationSection}>
-          <Text style={styles.confirmationSectionTitle}>Current Package</Text>
+          <Text style={styles.confirmationSectionTitle}>
+            {mode === 'edit' ? 'Package Updates' :
+             mode === 'resubmit' ? 'Package Resubmission' :
+             'Current Package'}
+          </Text>
           <View style={styles.routeDisplay}>
             <View style={styles.routePoint}>
               <Text style={styles.routeLabel}>From</Text>
@@ -929,8 +1118,8 @@ export default function FragileDeliveryModal({
           </View>
         </View>
 
-        {/* Add Another Package */}
-        {isStepValid(2) && (
+        {/* Add Another Package - Only for create mode */}
+        {mode === 'create' && isStepValid(2) && (
           <View style={styles.confirmationSection}>
             <Text style={styles.confirmationSectionTitle}>Add More Packages</Text>
             <TouchableOpacity 
@@ -1004,9 +1193,13 @@ export default function FragileDeliveryModal({
                 styles.submitButtonText,
                 (!isStepValid(currentStep) || isSubmitting) && styles.disabledButtonText
               ]}>
-                Schedule {savedPackages.length + 1} Fragile Deliver{savedPackages.length > 0 ? 'ies' : 'y'}
+                {getActionButtonText()}
               </Text>
-              <Feather name="alert-triangle" size={20} color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#666"} />
+              <Feather 
+                name={mode === 'edit' ? 'save' : mode === 'resubmit' ? 'refresh-cw' : 'alert-triangle'} 
+                size={20} 
+                color={isStepValid(currentStep) && !isSubmitting ? "#fff" : "#666"} 
+              />
             </>
           )}
         </TouchableOpacity>
@@ -1183,6 +1376,24 @@ const styles = StyleSheet.create({
     marginBottom: 20,
     lineHeight: 20,
   },
+  
+  // NEW: Mode notice section for edit/resubmit
+  modeNoticeSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  modeNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+  
   errorBanner: {
     flexDirection: 'row',
     alignItems: 'center',
