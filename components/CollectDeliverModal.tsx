@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - FIXED: User details integration and keyboard avoidance
+// components/CollectDeliverModal.tsx - ENHANCED: Improved location system with user details
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -24,14 +24,16 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useUser } from '../context/UserContext'; // ADDED: Import user context
+import { useUser } from '../context/UserContext'; // User context integration
 import { 
   type PackageData, 
   type Area, 
   type Agent, 
   type Location as LocationType,
   getPackageFormData,
-  updatePackage
+  updatePackage,
+  getAreas,
+  getAgents
 } from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -74,24 +76,25 @@ interface PendingCollection {
   createdAt: number;
 }
 
-// Enhanced Location/Area Selection Modal Component  
+// ENHANCED: Improved Location/Area Selection Modal with better error handling
 const LocationAreaSelectorModal: React.FC<{
   visible: boolean;
   onClose: () => void;
   onLocationSelect: (location: LocationData, area?: Area, agent?: Agent) => void;
   title: string;
   type: 'collection' | 'delivery';
-  areas: Area[];
-  agents: Agent[];
   currentLocation?: LocationData | null;
-}> = ({ visible, onClose, onLocationSelect, title, type, areas, agents }) => {
+}> = ({ visible, onClose, onLocationSelect, title, type, currentLocation }) => {
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
-  const [searchResults, setSearchResults] = useState<{areas: Area[], agents: Agent[]}>({areas: [], agents: []});
-  const [isSearching, setIsSearching] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   useEffect(() => {
     if (visible) {
+      loadLocationData();
       Animated.timing(slideAnim, {
         toValue: 0,
         duration: 300,
@@ -100,6 +103,27 @@ const LocationAreaSelectorModal: React.FC<{
     }
   }, [visible]);
 
+  const loadLocationData = async () => {
+    try {
+      setIsLoading(true);
+      setLocationError(null);
+      
+      const [areasData, agentsData] = await Promise.all([
+        getAreas(),
+        type === 'delivery' ? getAgents() : Promise.resolve([])
+      ]);
+      
+      setAreas(areasData || []);
+      setAgents(agentsData || []);
+      
+    } catch (error) {
+      console.error('Failed to load location data:', error);
+      setLocationError('Failed to load locations');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
   const closeModal = () => {
     Animated.timing(slideAnim, {
       toValue: SCREEN_HEIGHT,
@@ -107,39 +131,29 @@ const LocationAreaSelectorModal: React.FC<{
       useNativeDriver: true,
     }).start(() => {
       setSearchQuery('');
+      setLocationError(null);
       onClose();
     });
   };
 
-  const handleSearch = (query: string) => {
-    setSearchQuery(query);
-    if (query.length < 2) {
-      setSearchResults({areas: [], agents: []});
-      return;
-    }
-    
-    setIsSearching(true);
-    try {
-      const lowercaseQuery = query.toLowerCase();
-      
-      const filteredAreas = areas.filter(area => 
-        area.name.toLowerCase().includes(lowercaseQuery) ||
-        area.location?.name.toLowerCase().includes(lowercaseQuery)
-      );
-      
-      const filteredAgents = type === 'delivery' ? agents.filter(agent => 
-        agent.name.toLowerCase().includes(lowercaseQuery) ||
-        agent.area?.name.toLowerCase().includes(lowercaseQuery) ||
-        agent.area?.location?.name.toLowerCase().includes(lowercaseQuery)
-      ) : [];
-      
-      setSearchResults({ areas: filteredAreas, agents: filteredAgents });
-    } catch (error) {
-      console.error('Search error:', error);
-    } finally {
-      setIsSearching(false);
-    }
-  };
+  const filteredAreas = useMemo(() => {
+    if (!searchQuery) return areas;
+    const query = searchQuery.toLowerCase();
+    return areas.filter(area => 
+      area.name.toLowerCase().includes(query) ||
+      area.location?.name.toLowerCase().includes(query)
+    );
+  }, [areas, searchQuery]);
+
+  const filteredAgents = useMemo(() => {
+    if (!searchQuery || type === 'collection') return agents;
+    const query = searchQuery.toLowerCase();
+    return agents.filter(agent => 
+      agent.name.toLowerCase().includes(query) ||
+      agent.area?.name.toLowerCase().includes(query) ||
+      agent.area?.location?.name.toLowerCase().includes(query)
+    );
+  }, [agents, searchQuery, type]);
 
   const handleAreaSelect = (area: Area) => {
     const locationData: LocationData = {
@@ -169,9 +183,11 @@ const LocationAreaSelectorModal: React.FC<{
 
   const useCurrentLocation = async () => {
     try {
+      setLocationError(null);
+      
       const { status } = await Location.requestForegroundPermissionsAsync();
       if (status !== 'granted') {
-        Alert.alert('Permission Required', 'Location permission is needed to use your current location');
+        setLocationError('Location permission denied. Please enable location services.');
         return;
       }
 
@@ -195,7 +211,7 @@ const LocationAreaSelectorModal: React.FC<{
       closeModal();
     } catch (error) {
       console.error('Location error:', error);
-      Alert.alert('Error', 'Failed to get current location');
+      setLocationError('Failed to get current location');
     }
   };
 
@@ -211,6 +227,7 @@ const LocationAreaSelectorModal: React.FC<{
         <Text style={styles.locationAddress}>{item.location?.name}</Text>
         <Text style={styles.locationDescription}>Area</Text>
       </View>
+      <Feather name="chevron-right" size={20} color="#10b981" />
     </TouchableOpacity>
   );
 
@@ -226,6 +243,7 @@ const LocationAreaSelectorModal: React.FC<{
         <Text style={styles.locationAddress}>{item.area?.name} • {item.area?.location?.name}</Text>
         <Text style={styles.locationDescription}>Agent • {item.phone}</Text>
       </View>
+      <Feather name="chevron-right" size={20} color="#10b981" />
     </TouchableOpacity>
   );
 
@@ -254,49 +272,65 @@ const LocationAreaSelectorModal: React.FC<{
                   placeholder="Search for areas or agents..."
                   placeholderTextColor="#888"
                   value={searchQuery}
-                  onChangeText={handleSearch}
+                  onChangeText={setSearchQuery}
                 />
-                {isSearching && <ActivityIndicator size="small" color="#10b981" />}
               </View>
 
-              <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
-                <View>
-                  {(searchQuery.length > 0 ? searchResults.areas : areas).length > 0 && (
-                    <View>
-                      <Text style={styles.sectionTitle}>
-                        Areas ({searchQuery.length > 0 ? searchResults.areas.length : areas.length})
-                      </Text>
-                      <FlatList
-                        data={searchQuery.length > 0 ? searchResults.areas : areas}
-                        keyExtractor={(item) => `area-${item.id}`}
-                        renderItem={renderAreaItem}
-                        scrollEnabled={false}
-                      />
-                    </View>
-                  )}
-                  
-                  {type === 'delivery' && (searchQuery.length > 0 ? searchResults.agents : agents).length > 0 && (
-                    <View style={{ marginTop: 16 }}>
-                      <Text style={styles.sectionTitle}>
-                        Agents ({searchQuery.length > 0 ? searchResults.agents.length : agents.length})
-                      </Text>
-                      <FlatList
-                        data={searchQuery.length > 0 ? searchResults.agents : agents}
-                        keyExtractor={(item) => `agent-${item.id}`}
-                        renderItem={renderAgentItem}
-                        scrollEnabled={false}
-                      />
-                    </View>
-                  )}
-                  
-                  {searchQuery.length > 0 && searchResults.areas.length === 0 && searchResults.agents.length === 0 && (
-                    <View style={styles.noResults}>
-                      <Feather name="search" size={48} color="#666" />
-                      <Text style={styles.noResultsText}>No locations found</Text>
-                      <Text style={styles.noResultsSubtext}>Try a different search term</Text>
-                    </View>
-                  )}
+              {locationError && (
+                <View style={styles.errorBanner}>
+                  <Feather name="alert-circle" size={16} color="#ef4444" />
+                  <Text style={styles.errorText}>{locationError}</Text>
+                  <TouchableOpacity onPress={() => setLocationError(null)}>
+                    <Text style={styles.dismissText}>Dismiss</Text>
+                  </TouchableOpacity>
                 </View>
+              )}
+
+              <ScrollView style={styles.searchResults} showsVerticalScrollIndicator={false}>
+                {isLoading ? (
+                  <View style={styles.loadingContainer}>
+                    <ActivityIndicator size="large" color="#10b981" />
+                    <Text style={styles.loadingText}>Loading locations...</Text>
+                  </View>
+                ) : (
+                  <View>
+                    {filteredAreas.length > 0 && (
+                      <View>
+                        <Text style={styles.sectionTitle}>
+                          Areas ({filteredAreas.length})
+                        </Text>
+                        <FlatList
+                          data={filteredAreas}
+                          keyExtractor={(item) => `area-${item.id}`}
+                          renderItem={renderAreaItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {type === 'delivery' && filteredAgents.length > 0 && (
+                      <View style={{ marginTop: 16 }}>
+                        <Text style={styles.sectionTitle}>
+                          Agents ({filteredAgents.length})
+                        </Text>
+                        <FlatList
+                          data={filteredAgents}
+                          keyExtractor={(item) => `agent-${item.id}`}
+                          renderItem={renderAgentItem}
+                          scrollEnabled={false}
+                        />
+                      </View>
+                    )}
+                    
+                    {filteredAreas.length === 0 && (type === 'collection' || filteredAgents.length === 0) && (
+                      <View style={styles.noResults}>
+                        <Feather name="search" size={48} color="#666" />
+                        <Text style={styles.noResultsText}>No locations found</Text>
+                        <Text style={styles.noResultsSubtext}>Try a different search term</Text>
+                      </View>
+                    )}
+                  </View>
+                )}
               </ScrollView>
             </LinearGradient>
           </View>
@@ -316,7 +350,7 @@ export default function CollectDeliverModal({
   existingPackage,
   packageId
 }: CollectDeliverModalProps) {
-  // ADDED: Use user context for user details
+  // User context integration
   const { user, getDisplayName, getUserPhone } = useUser();
   
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -326,17 +360,14 @@ export default function CollectDeliverModal({
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
-  // Areas and agents data
-  const [areas, setAreas] = useState<Area[]>([]);
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [isLoadingFormData, setIsLoadingFormData] = useState(false);
-  
-  // Location states with area support
+  // Location states with enhanced error handling
   const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
   const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(initialLocation);
   const [selectedCollectionArea, setSelectedCollectionArea] = useState<Area | null>(null);
   const [selectedDeliveryArea, setSelectedDeliveryArea] = useState<Area | null>(null);
   const [selectedDeliveryAgent, setSelectedDeliveryAgent] = useState<Agent | null>(null);
+  const [isLocationLoading, setIsLocationLoading] = useState(false);
+  const [locationError, setLocationError] = useState<string | null>(null);
   
   // Pending collections state (only for create mode)
   const [pendingCollections, setPendingCollections] = useState<PendingCollection[]>([]);
@@ -434,7 +465,6 @@ export default function CollectDeliverModal({
       });
     }
 
-    // Skip step 1 for edit/resubmit (start with collection details)
     setCurrentStep(0);
   }, [existingPackage, mode]);
 
@@ -466,21 +496,47 @@ export default function CollectDeliverModal({
     }
   };
 
-  // Load form data including areas
-  useEffect(() => {
-    const loadFormData = async () => {
-      if (!visible) return;
+  // ENHANCED: Location permission handling with better error states
+  const requestLocationPermission = async () => {
+    try {
+      setIsLocationLoading(true);
+      setLocationError(null);
       
-      try {
-        setIsLoadingFormData(true);
-        const formData = await getPackageFormData();
-        setAreas(formData.areas || []);
-        setAgents(formData.agents || []);
-        console.log('Loaded areas and agents:', { 
-          areas: formData.areas?.length || 0, 
-          agents: formData.agents?.length || 0 
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (status !== 'granted') {
+        setLocationError('Location permission denied. Please enable location services.');
+        return;
+      }
+      
+      if (!deliveryLocation) {
+        const location = await Location.getCurrentPositionAsync({});
+        const address = await Location.reverseGeocodeAsync({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
         });
+        
+        setDeliveryLocation({
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          address: address[0] ? `${address[0].street}, ${address[0].city}` : 'Current Location'
+        });
+      }
+    } catch (error) {
+      setLocationError('Failed to get current location');
+    } finally {
+      setIsLocationLoading(false);
+    }
+  };
 
+  // Load form data and setup
+  useEffect(() => {
+    if (!visible) return;
+    
+    const initializeModal = async () => {
+      try {
+        // Request location permission and get current location
+        await requestLocationPermission();
+        
         // Load pending collections only for create mode
         if (mode === 'create') {
           await loadPendingCollections();
@@ -491,16 +547,14 @@ export default function CollectDeliverModal({
           populateFormFromExistingPackage();
         }
       } catch (error) {
-        console.error('Failed to load form data:', error);
-      } finally {
-        setIsLoadingFormData(false);
+        console.error('Failed to initialize modal:', error);
       }
     };
 
-    loadFormData();
+    initializeModal();
   }, [visible, mode, existingPackage, populateFormFromExistingPackage]);
 
-  // FIXED: Enhanced keyboard handling with proper offset
+  // ENHANCED: Keyboard handling with better offset calculation
   useEffect(() => {
     let keyboardWillShowListener: any;
     let keyboardWillHideListener: any;
@@ -556,17 +610,14 @@ export default function CollectDeliverModal({
     }
   }, [visible, slideAnim]);
 
-  // FIXED: Modal height calculation with better keyboard handling
+  // ENHANCED: Modal height calculation with improved keyboard handling
   const modalHeight = useMemo(() => {
-    const baseHeight = SCREEN_HEIGHT * 0.95;
-    
-    if (isKeyboardVisible && Platform.OS === 'ios') {
-      // On iOS, reduce height when keyboard is visible
-      const availableHeight = SCREEN_HEIGHT - keyboardHeight - STATUS_BAR_HEIGHT;
-      return Math.max(SCREEN_HEIGHT * 0.5, Math.min(availableHeight, baseHeight));
+    if (isKeyboardVisible) {
+      const availableHeight = SCREEN_HEIGHT - keyboardHeight;
+      const maxModalHeight = availableHeight - STATUS_BAR_HEIGHT - 20;
+      return Math.min(maxModalHeight, availableHeight * 0.85);
     }
-    
-    return baseHeight;
+    return SCREEN_HEIGHT * 0.90;
   }, [isKeyboardVisible, keyboardHeight]);
 
   const resetForm = useCallback(async () => {
@@ -585,6 +636,7 @@ export default function CollectDeliverModal({
     setSelectedCollectionArea(null);
     setSelectedDeliveryArea(null);
     setSelectedDeliveryAgent(null);
+    setLocationError(null);
     
     if (mode === 'create') {
       setPendingCollections([]);
@@ -626,9 +678,16 @@ export default function CollectDeliverModal({
         ]
       );
     } else {
-      resetForm();
+      Keyboard.dismiss();
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }).start(() => {
+        resetForm();
+      });
     }
-  }, [pendingCollections.length, resetForm, mode]);
+  }, [pendingCollections.length, resetForm, mode, slideAnim]);
 
   // Location selection handlers
   const handleCollectionLocationSelect = (location: LocationData, area?: Area) => {
@@ -656,7 +715,7 @@ export default function CollectDeliverModal({
       shopName,
       shopContact,
       collectionAddress,
-      itemsToCollected: itemsToCollect,
+      itemsToCollect,
       itemValue,
       itemDescription,
       specialInstructions,
@@ -736,7 +795,7 @@ export default function CollectDeliverModal({
 
     setIsSubmitting(true);
     try {
-      // FIXED: Use actual user details instead of hardcoded values
+      // Use actual user details instead of hardcoded values
       const userName = getDisplayName();
       const userPhone = getUserPhone();
       
@@ -745,10 +804,10 @@ export default function CollectDeliverModal({
       
       // Create package data
       const packageData: PackageData = {
-        sender_name: userName, // FIXED: Use actual user name
-        sender_phone: userPhone, // FIXED: Use actual user phone
-        receiver_name: userName, // FIXED: Use actual user name  
-        receiver_phone: userPhone, // FIXED: Use actual user phone
+        sender_name: userName,
+        sender_phone: userPhone,
+        receiver_name: userName,
+        receiver_phone: userPhone,
         
         origin_area_id: selectedCollectionArea?.id || undefined,
         destination_area_id: destinationAreaId,
@@ -874,6 +933,39 @@ export default function CollectDeliverModal({
       <Text style={styles.stepSubtitle}>
         {mode === 'edit' ? 'Update collection details' : mode === 'resubmit' ? 'Review and update collection information' : 'Where should we collect your items from?'}
       </Text>
+      
+      {/* Mode-specific notices */}
+      {(mode === 'edit' || mode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={mode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={mode === 'edit' ? '#8b5cf6' : '#10b981'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: mode === 'edit' ? '#8b5cf6' : '#10b981' }]}>
+            {mode === 'edit' ? 'You are editing an existing collection request' : 'You are resubmitting a collection request'}
+          </Text>
+        </View>
+      )}
+
+      {/* Location error banner */}
+      {locationError && (
+        <View style={styles.errorBanner}>
+          <Feather name="alert-circle" size={16} color="#ef4444" />
+          <Text style={styles.errorText}>{locationError}</Text>
+          <TouchableOpacity onPress={requestLocationPermission}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
+      {/* Location loading banner */}
+      {isLocationLoading && (
+        <View style={styles.loadingBanner}>
+          <ActivityIndicator size="small" color="#10b981" />
+          <Text style={styles.loadingText}>Getting your location...</Text>
+        </View>
+      )}
       
       <View style={styles.formContainer}>
         <TextInput
@@ -1277,15 +1369,6 @@ export default function CollectDeliverModal({
   };
 
   const renderStepContent = () => {
-    if (isLoadingFormData) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#10b981" />
-          <Text style={styles.loadingText}>Loading areas...</Text>
-        </View>
-      );
-    }
-
     switch (currentStep) {
       case 0:
         return renderCollectionDetails();
@@ -1372,13 +1455,13 @@ export default function CollectDeliverModal({
       >
         <StatusBar backgroundColor="rgba(0, 0, 0, 0.8)" barStyle="light-content" />
         
-        <SafeAreaView style={styles.safeArea}>
-          <View style={styles.overlay}>
-            <KeyboardAvoidingView 
-              behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-              style={styles.keyboardAvoidingView}
-              keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20} // FIXED: Added proper offset
-            >
+        <View style={styles.modalWrapper}>
+          <KeyboardAvoidingView 
+            style={styles.keyboardContainer}
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            keyboardVerticalOffset={0}
+          >
+            <View style={styles.overlay}>
               <Animated.View 
                 style={[
                   styles.modalContainer,
@@ -1395,24 +1478,27 @@ export default function CollectDeliverModal({
                   {renderHeader()}
                   {renderProgressBar()}
                   
-                  <ScrollView 
-                    style={styles.contentContainer}
-                    contentContainerStyle={[
-                      styles.scrollContentContainer,
-                      isKeyboardVisible && { paddingBottom: 20 }
-                    ]}
-                    showsVerticalScrollIndicator={false}
-                    keyboardShouldPersistTaps="handled"
-                  >
-                    {renderStepContent()}
-                  </ScrollView>
+                  <View style={styles.contentWrapper}>
+                    <ScrollView 
+                      style={styles.contentContainer}
+                      contentContainerStyle={[
+                        styles.scrollContentContainer,
+                        isKeyboardVisible && styles.keyboardVisiblePadding
+                      ]}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                      keyboardDismissMode="interactive"
+                    >
+                      {renderStepContent()}
+                    </ScrollView>
+                  </View>
                   
                   {renderNavigationButtons()}
                 </LinearGradient>
               </Animated.View>
-            </KeyboardAvoidingView>
-          </View>
-        </SafeAreaView>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
 
       {/* Location Picker Modals */}
@@ -1422,8 +1508,7 @@ export default function CollectDeliverModal({
         onLocationSelect={handleCollectionLocationSelect}
         title="Select Collection Area"
         type="collection"
-        areas={areas}
-        agents={agents}
+        currentLocation={collectionLocation}
       />
       
       <LocationAreaSelectorModal
@@ -1432,37 +1517,33 @@ export default function CollectDeliverModal({
         onLocationSelect={handleDeliveryLocationSelect}
         title="Select Delivery Area"
         type="delivery"
-        areas={areas}
-        agents={agents}
+        currentLocation={deliveryLocation}
       />
     </>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: {
+  modalWrapper: {
     flex: 1,
-    backgroundColor: 'transparent',
+    paddingTop: STATUS_BAR_HEIGHT,
+  },
+  keyboardContainer: {
+    flex: 1,
   },
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  keyboardAvoidingView: {
-    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    backgroundColor: 'transparent',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
+    width: SCREEN_WIDTH,
+    maxHeight: SCREEN_HEIGHT - STATUS_BAR_HEIGHT - 20,
   },
   modalContent: {
     flex: 1,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
     overflow: 'hidden',
   },
   
@@ -1524,15 +1605,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: 8,
   },
+  contentWrapper: {
+    flex: 1,
+  },
   contentContainer: {
     flex: 1,
   },
   scrollContentContainer: {
     flexGrow: 1,
+    paddingHorizontal: 20,
     paddingBottom: 20,
   },
+  keyboardVisiblePadding: {
+    paddingBottom: 40,
+  },
   stepContent: {
-    padding: 20,
+    flex: 1,
+    minHeight: 200,
   },
   stepTitle: {
     fontSize: 24,
@@ -1546,18 +1635,63 @@ const styles = StyleSheet.create({
     marginBottom: 24,
     lineHeight: 22,
   },
-  
-  // Loading
-  loadingContainer: {
-    flex: 1,
+
+  // Mode notice section
+  modeNoticeSection: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
+  },
+  modeNoticeText: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
+  },
+
+  // Error and loading banners
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(239, 68, 68, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    gap: 8,
+  },
+  errorText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  retryText: {
+    fontSize: 14,
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  dismissText: {
+    fontSize: 14,
+    color: '#ef4444',
+    fontWeight: '600',
+  },
+  loadingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginHorizontal: 20,
+    marginBottom: 10,
+    gap: 8,
   },
   loadingText: {
-    fontSize: 16,
-    color: '#888',
-    marginTop: 12,
+    fontSize: 14,
+    color: '#10b981',
   },
   
   formContainer: {
@@ -1825,11 +1959,11 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
 
-  // NEW: Mode-specific note styles
+  // Mode-specific note styles
   editNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
     padding: 12,
     gap: 8,
@@ -1837,13 +1971,13 @@ const styles = StyleSheet.create({
   editNoteText: {
     flex: 1,
     fontSize: 14,
-    color: '#7c3aed',
+    color: '#10b981',
     lineHeight: 18,
   },
   resubmitNote: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
     borderRadius: 8,
     padding: 12,
     gap: 8,
@@ -1851,7 +1985,7 @@ const styles = StyleSheet.create({
   resubmitNoteText: {
     flex: 1,
     fontSize: 14,
-    color: '#f97316',
+    color: '#10b981',
     lineHeight: 18,
   },
   
@@ -2057,5 +2191,10 @@ const styles = StyleSheet.create({
   locationDescription: {
     fontSize: 12,
     color: '#666',
+  },
+  loadingContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
   },
 });
