@@ -96,12 +96,10 @@ interface PackageGraphData {
     month: string;
     packages: number;
   };
-}
-
-interface LocationData {
-  location: string;
-  count: number;
-  percentage: number;
+  yearly_data?: Array<{
+    month: string;
+    packages: number;
+  }>;
 }
 
 type ActivityFilter = 'total' | 'package' | 'staff';
@@ -205,70 +203,52 @@ const showToast = {
   },
 };
 
-// Simple Line Graph Component
-const SimpleLineGraph = ({ data }: { data: PackageGraphData }) => {
+// Updated Horizontal Bar Graph Component (like second image)
+const HorizontalBarGraph = ({ data, onPress }: { data: PackageGraphData; onPress: () => void }) => {
   const graphWidth = screenWidth - 80;
-  const graphHeight = 120;
   const maxValue = Math.max(data.current_month.packages, data.previous_month.packages) || 1;
   
-  // Calculate positions
-  const prevHeight = (data.previous_month.packages / maxValue) * (graphHeight - 20);
-  const currHeight = (data.current_month.packages / maxValue) * (graphHeight - 20);
+  // Calculate bar widths as percentages
+  const prevWidth = (data.previous_month.packages / maxValue) * 100;
+  const currWidth = (data.current_month.packages / maxValue) * 100;
   
   return (
-    <View style={styles.graphContainer}>
-      <Text style={styles.graphTitle}>Package Comparison (2 Months)</Text>
+    <TouchableOpacity style={styles.graphContainer} onPress={onPress}>
+      <Text style={styles.graphTitle}>Analytics</Text>
       
-      <View style={styles.graphWrapper}>
-        <View style={[styles.graph, { width: graphWidth, height: graphHeight }]}>
-          {/* Y-axis labels */}
-          <View style={styles.yAxisLabels}>
-            <Text style={styles.axisLabel}>{maxValue}</Text>
-            <Text style={styles.axisLabel}>{Math.floor(maxValue / 2)}</Text>
-            <Text style={styles.axisLabel}>0</Text>
+      <View style={styles.horizontalGraphWrapper}>
+        <View style={styles.verticalAxis}>
+          <Text style={styles.gameLabel}>{data.current_month.month}</Text>
+          <Text style={styles.gameLabel}>{data.previous_month.month}</Text>
+        </View>
+        
+        <View style={styles.barsContainer}>
+          {/* Current Month Bar */}
+          <View style={styles.barRow}>
+            <View 
+              style={[
+                styles.horizontalBar, 
+                { 
+                  width: `${currWidth}%`,
+                  backgroundColor: '#10b981'
+                }
+              ]} 
+            />
+            <Text style={styles.barValue}>{data.current_month.packages}</Text>
           </View>
           
-          {/* Graph area */}
-          <View style={styles.graphArea}>
-            {/* Grid lines */}
-            <View style={[styles.gridLine, { top: 0 }]} />
-            <View style={[styles.gridLine, { top: '50%' }]} />
-            <View style={[styles.gridLine, { bottom: 0 }]} />
-            
-            {/* Data points and line */}
-            <View style={styles.dataContainer}>
-              {/* Previous month */}
-              <View style={styles.dataPoint}>
-                <View 
-                  style={[
-                    styles.dataBar, 
-                    { 
-                      height: prevHeight,
-                      backgroundColor: 'rgba(124, 58, 237, 0.7)'
-                    }
-                  ]} 
-                />
-                <View style={[styles.dot, { backgroundColor: '#7c3aed' }]} />
-                <Text style={styles.dataValue}>{data.previous_month.packages}</Text>
-                <Text style={styles.monthLabel}>{data.previous_month.month}</Text>
-              </View>
-              
-              {/* Current month */}
-              <View style={styles.dataPoint}>
-                <View 
-                  style={[
-                    styles.dataBar, 
-                    { 
-                      height: currHeight,
-                      backgroundColor: 'rgba(16, 185, 129, 0.7)'
-                    }
-                  ]} 
-                />
-                <View style={[styles.dot, { backgroundColor: '#10b981' }]} />
-                <Text style={styles.dataValue}>{data.current_month.packages}</Text>
-                <Text style={styles.monthLabel}>{data.current_month.month}</Text>
-              </View>
-            </View>
+          {/* Previous Month Bar */}
+          <View style={styles.barRow}>
+            <View 
+              style={[
+                styles.horizontalBar, 
+                { 
+                  width: `${prevWidth}%`,
+                  backgroundColor: '#ef4444'
+                }
+              ]} 
+            />
+            <Text style={styles.barValue}>{data.previous_month.packages}</Text>
           </View>
         </View>
       </View>
@@ -276,15 +256,15 @@ const SimpleLineGraph = ({ data }: { data: PackageGraphData }) => {
       {/* Legend */}
       <View style={styles.legend}>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#7c3aed' }]} />
-          <Text style={styles.legendText}>Previous Month</Text>
+          <View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
+          <Text style={styles.legendText}>Current</Text>
         </View>
         <View style={styles.legendItem}>
-          <View style={[styles.legendDot, { backgroundColor: '#10b981' }]} />
-          <Text style={styles.legendText}>Current Month</Text>
+          <View style={[styles.legendDot, { backgroundColor: '#ef4444' }]} />
+          <Text style={styles.legendText}>Previous</Text>
         </View>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 };
 
@@ -305,6 +285,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   const [showEditModal, setShowEditModal] = useState(false);
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showStaffActivityModal, setShowStaffActivityModal] = useState(false);
+  const [showAnalyticsModal, setShowAnalyticsModal] = useState(false);
   const [selectedStaffMember, setSelectedStaffMember] = useState<StaffMember | null>(null);
   
   // UI states
@@ -324,14 +305,12 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   const [activitiesData, setActivitiesData] = useState<ActivitiesData | null>(null);
   const [staffActivities, setStaffActivities] = useState<BusinessActivity[]>([]);
   const [packageGraphData, setPackageGraphData] = useState<PackageGraphData | null>(null);
-  const [locationsData, setLocationsData] = useState<LocationData[]>([]);
   
   // Loading states
   const [loadingStaff, setLoadingStaff] = useState(false);
   const [loadingActivities, setLoadingActivities] = useState(false);
   const [loadingStaffActivities, setLoadingStaffActivities] = useState(false);
   const [loadingGraphData, setLoadingGraphData] = useState(false);
-  const [loadingLocations, setLoadingLocations] = useState(false);
   
   // Activity filter state
   const [activityFilter, setActivityFilter] = useState<ActivityFilter>('total');
@@ -359,7 +338,6 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       loadStaffData();
       loadActivitiesData();
       loadPackageGraphData();
-      loadLocationsData();
     }
   }, [selectedBusiness]);
 
@@ -478,30 +456,6 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     }
   }, [selectedBusiness]);
 
-  // Load best locations data
-  const loadLocationsData = useCallback(async () => {
-    if (!selectedBusiness) return;
-    
-    try {
-      setLoadingLocations(true);
-      console.log('🔄 Loading locations data for business:', selectedBusiness.id);
-      
-      const response = await api.get(`/api/v1/businesses/${selectedBusiness.id}/analytics/best-locations`);
-      
-      if (response.data.success) {
-        setLocationsData(response.data.data);
-        console.log('✅ Locations data loaded:', response.data.data);
-      } else {
-        throw new Error(response.data.message || 'Failed to load locations data');
-      }
-    } catch (error: any) {
-      console.error('❌ Error loading locations data:', error);
-      showToast.error('Failed to load locations data', error.message || 'Please try again');
-    } finally {
-      setLoadingLocations(false);
-    }
-  }, [selectedBusiness]);
-
   // Enhanced refresh handler
   const onRefresh = useCallback(async () => {
     try {
@@ -521,8 +475,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
       await Promise.all([
         loadStaffData(),
         loadActivitiesData(),
-        loadPackageGraphData(),
-        loadLocationsData()
+        loadPackageGraphData()
       ]);
       
       triggerAvatarRefresh();
@@ -538,7 +491,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness, loadStaffData, loadActivitiesData, loadPackageGraphData, loadLocationsData]);
+  }, [refreshUser, refreshBusinesses, clearUserCache, triggerAvatarRefresh, user, selectedBusiness, loadStaffData, loadActivitiesData, loadPackageGraphData]);
 
   // Enhanced back navigation using NavigationHelper
   const handleGoBack = useCallback(async () => {
@@ -564,6 +517,11 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     await loadStaffActivities(staff.id);
     setShowStaffActivityModal(true);
   }, [loadStaffActivities]);
+
+  // Handle analytics graph click
+  const handleAnalyticsPress = useCallback(() => {
+    setShowAnalyticsModal(true);
+  }, []);
 
   // Handle business logo picker
   const pickBusinessLogo = useCallback(async () => {
@@ -870,112 +828,75 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
           </TouchableOpacity>
         </View>
 
-        {/* Staff Section */}
+        {/* Joined Section (Redesigned Staff Section) */}
         <View style={styles.section}>
-          <TouchableOpacity 
-            style={styles.staffHeader}
-            onPress={() => setShowStaffModal(true)}
-          >
-            <View style={styles.staffInfo}>
-              <Text style={styles.sectionTitle}>Staff Members</Text>
-              {staffData ? (
-                <Text style={styles.staffCount}>
-                  {staffData.active_members} active • {staffData.total_members} total
-                </Text>
-              ) : loadingStaff ? (
-                <Text style={styles.staffCount}>Loading...</Text>
+          <View style={styles.joinedSectionContainer}>
+            <View style={styles.joinedHeader}>
+              <Text style={styles.joinedTitle}>Joined</Text>
+            </View>
+            
+            <View style={styles.joinedMembers}>
+              {loadingStaff ? (
+                <View style={styles.loadingContainer}>
+                  <ActivityIndicator color="#7c3aed" size="small" />
+                  <Text style={styles.loadingText}>Loading members...</Text>
+                </View>
+              ) : staffData ? (
+                <>
+                  {/* Show only staff members (excluding owner) */}
+                  {staffData.staff.slice(0, 4).map((staff) => (
+                    <TouchableOpacity 
+                      key={staff.id} 
+                      style={styles.joinedMember}
+                      onPress={() => handleStaffClick(staff)}
+                    >
+                      <View style={styles.memberInitial}>
+                        <Text style={styles.memberInitialText}>
+                          {staff.name.charAt(0).toUpperCase()}
+                        </Text>
+                      </View>
+                      <Text style={styles.memberName}>{staff.name}</Text>
+                    </TouchableOpacity>
+                  ))}
+                  
+                  {staffData.staff.length > 4 && (
+                    <TouchableOpacity 
+                      style={styles.viewMoreButton}
+                      onPress={() => setShowStaffModal(true)}
+                    >
+                      <View style={styles.viewMoreIcon}>
+                        <Text style={styles.viewMoreText}>+{staffData.staff.length - 4}</Text>
+                      </View>
+                    </TouchableOpacity>
+                  )}
+                  
+                  {staffData.staff.length === 0 && (
+                    <View style={styles.emptyMembers}>
+                      <Text style={styles.emptyMembersText}>No staff members yet</Text>
+                    </View>
+                  )}
+                </>
               ) : (
-                <Text style={styles.staffCount}>Unable to load</Text>
+                <View style={styles.errorContainer}>
+                  <Text style={styles.errorText}>Unable to load members</Text>
+                  <TouchableOpacity onPress={loadStaffData} style={styles.retryButton}>
+                    <Text style={styles.retryText}>Retry</Text>
+                  </TouchableOpacity>
+                </View>
               )}
             </View>
-            <Feather name="chevron-right" size={20} color="rgba(255,255,255,0.7)" />
-          </TouchableOpacity>
-
-          <View style={styles.staffPreview}>
-            {loadingStaff ? (
-              <View style={styles.loadingContainer}>
-                <ActivityIndicator color="#7c3aed" size="small" />
-                <Text style={styles.loadingText}>Loading staff...</Text>
-              </View>
-            ) : staffData ? (
-              <>
-                {/* Show owner first */}
-                <TouchableOpacity 
-                  style={styles.staffItem}
-                  onPress={() => handleStaffClick(staffData.owner)}
-                >
-                  <View style={styles.staffAvatar}>
-                    <Text style={styles.staffInitials}>
-                      {staffData.owner.name.split(' ').map(n => n[0]).join('')}
-                    </Text>
-                  </View>
-                  <View style={styles.staffItemInfo}>
-                    <Text style={styles.staffName}>{staffData.owner.name}</Text>
-                    <Text style={styles.staffRole}>Owner</Text>
-                  </View>
-                  <View style={[
-                    styles.staffStatus,
-                    { backgroundColor: '#10b981' } // Owner is always active
-                  ]} />
-                </TouchableOpacity>
-                
-                {/* Show up to 2 staff members */}
-                {staffData.staff.slice(0, 2).map((staff) => (
-                  <TouchableOpacity 
-                    key={staff.id} 
-                    style={styles.staffItem}
-                    onPress={() => handleStaffClick(staff)}
-                  >
-                    <View style={styles.staffAvatar}>
-                      <Text style={styles.staffInitials}>
-                        {staff.name.split(' ').map(n => n[0]).join('')}
-                      </Text>
-                    </View>
-                    <View style={styles.staffItemInfo}>
-                      <Text style={styles.staffName}>{staff.name}</Text>
-                      <Text style={styles.staffRole}>Staff</Text>
-                    </View>
-                    <View style={[
-                      styles.staffStatus,
-                      { backgroundColor: staff.active ? '#10b981' : '#6b7280' }
-                    ]} />
-                  </TouchableOpacity>
-                ))}
-                
-                {staffData.total_members > 3 && (
-                  <TouchableOpacity 
-                    style={styles.viewAllButton}
-                    onPress={() => setShowStaffModal(true)}
-                  >
-                    <Text style={styles.viewAllText}>
-                      View all {staffData.total_members} members
-                    </Text>
-                    <Feather name="arrow-right" size={16} color="#7c3aed" />
-                  </TouchableOpacity>
-                )}
-              </>
-            ) : (
-              <View style={styles.errorContainer}>
-                <Text style={styles.errorText}>Unable to load staff members</Text>
-                <TouchableOpacity onPress={loadStaffData} style={styles.retryButton}>
-                  <Text style={styles.retryText}>Retry</Text>
-                </TouchableOpacity>
-              </View>
-            )}
           </View>
         </View>
 
-        {/* Package Analytics Section */}
+        {/* Analytics Section (Updated Package Analytics) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Package Analytics</Text>
-          
           {loadingGraphData ? (
             <View style={styles.loadingContainer}>
               <ActivityIndicator color="#7c3aed" size="small" />
               <Text style={styles.loadingText}>Loading analytics...</Text>
             </View>
           ) : packageGraphData ? (
-            <SimpleLineGraph data={packageGraphData} />
+            <HorizontalBarGraph data={packageGraphData} onPress={handleAnalyticsPress} />
           ) : (
             <View style={styles.errorContainer}>
               <Text style={styles.errorText}>Unable to load analytics</Text>
@@ -986,43 +907,9 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
           )}
         </View>
 
-        {/* Best Locations Section */}
+        {/* Recent Section (Updated Activities Section) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Best Locations This Month</Text>
-          <Text style={styles.sectionSubtitle}>Based on delivered and collected packages</Text>
-          
-          {loadingLocations ? (
-            <View style={styles.loadingContainer}>
-              <ActivityIndicator color="#7c3aed" size="small" />
-              <Text style={styles.loadingText}>Loading locations...</Text>
-            </View>
-          ) : locationsData.length > 0 ? (
-            <View style={styles.locationsContainer}>
-              {locationsData.map((location, index) => (
-                <View key={index} style={styles.locationItem}>
-                  <View style={styles.locationRank}>
-                    <Text style={styles.locationRankText}>{index + 1}</Text>
-                  </View>
-                  <View style={styles.locationInfo}>
-                    <Text style={styles.locationName}>{location.location}</Text>
-                    <Text style={styles.locationCount}>{location.count} packages</Text>
-                  </View>
-                  <View style={styles.locationPercentage}>
-                    <Text style={styles.locationPercentageText}>{location.percentage}%</Text>
-                  </View>
-                </View>
-              ))}
-            </View>
-          ) : (
-            <View style={styles.emptyContainer}>
-              <Text style={styles.emptyText}>No location data available</Text>
-            </View>
-          )}
-        </View>
-
-        {/* Activities Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Activities</Text>
+          <Text style={styles.sectionTitle}>Recent</Text>
           
           {/* Activity Filter Buttons */}
           <View style={styles.activityFilters}>
@@ -1136,6 +1023,46 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         </View>
       </ScrollView>
 
+      {/* Analytics Modal */}
+      {showAnalyticsModal && packageGraphData && (
+        <Modal visible transparent animationType="slide">
+          <TouchableOpacity 
+            style={styles.modalOverlay}
+            onPress={() => setShowAnalyticsModal(false)}
+          >
+            <View style={styles.analyticsModal}>
+              <View style={styles.analyticsModalHeader}>
+                <Text style={styles.analyticsModalTitle}>Year Analytics Overview</Text>
+                <TouchableOpacity onPress={() => setShowAnalyticsModal(false)}>
+                  <Feather name="x" size={24} color="#fff" />
+                </TouchableOpacity>
+              </View>
+              
+              <ScrollView style={styles.analyticsModalContent}>
+                <View style={styles.modalGraphContainer}>
+                  <Text style={styles.modalSubtitle}>Current Year Comparison</Text>
+                  <View style={styles.modalCurrentData}>
+                    <View style={styles.modalDataItem}>
+                      <Text style={styles.modalDataLabel}>This Month</Text>
+                      <Text style={styles.modalDataValue}>{packageGraphData.current_month.packages}</Text>
+                      <Text style={styles.modalDataMonth}>{packageGraphData.current_month.month}</Text>
+                    </View>
+                    <View style={styles.modalDataItem}>
+                      <Text style={styles.modalDataLabel}>Previous Month</Text>
+                      <Text style={styles.modalDataValue}>{packageGraphData.previous_month.packages}</Text>
+                      <Text style={styles.modalDataMonth}>{packageGraphData.previous_month.month}</Text>
+                    </View>
+                  </View>
+                  <Text style={styles.modalNote}>
+                    Swipe to view previous years (Coming Soon)
+                  </Text>
+                </View>
+              </ScrollView>
+            </View>
+          </TouchableOpacity>
+        </Modal>
+      )}
+
       {/* Share Business Modal */}
       {showShareModal && (
         <Modal visible transparent animationType="fade">
@@ -1194,40 +1121,14 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
           >
             <View style={styles.staffModal}>
               <View style={styles.staffModalHeader}>
-                <Text style={styles.staffModalTitle}>Staff Members</Text>
+                <Text style={styles.staffModalTitle}>Joined Members</Text>
                 <TouchableOpacity onPress={() => setShowStaffModal(false)}>
                   <Feather name="x" size={24} color="#fff" />
                 </TouchableOpacity>
               </View>
               
               <ScrollView style={styles.staffModalContent}>
-                {/* Owner */}
-                <TouchableOpacity 
-                  style={styles.fullStaffItem}
-                  onPress={() => {
-                    setShowStaffModal(false);
-                    handleStaffClick(staffData.owner);
-                  }}
-                >
-                  <View style={styles.staffAvatar}>
-                    <Text style={styles.staffInitials}>
-                      {staffData.owner.name.split(' ').map(n => n[0]).join('')}
-                    </Text>
-                  </View>
-                  <View style={styles.fullStaffInfo}>
-                    <Text style={styles.staffName}>{staffData.owner.name}</Text>
-                    <Text style={styles.staffRole}>Owner</Text>
-                    <Text style={styles.staffJoined}>
-                      Created {new Date(staffData.owner.joined_at).toLocaleDateString()}
-                    </Text>
-                  </View>
-                  <View style={[
-                    styles.staffStatus,
-                    { backgroundColor: '#10b981' }
-                  ]} />
-                </TouchableOpacity>
-
-                {/* Staff Members */}
+                {/* Staff Members (excluding owner) */}
                 {staffData.staff.map((staff) => (
                   <TouchableOpacity 
                     key={staff.id} 
@@ -1486,79 +1387,87 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     marginTop: -12,
   },
-  staffHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 16,
-  },
-  staffInfo: {
-    flex: 1,
-  },
-  staffCount: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 14,
-    marginTop: 2,
-  },
-  staffPreview: {
+  
+  // New Joined Section Styles
+  joinedSectionContainer: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
     overflow: 'hidden',
   },
-  staffItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
+  joinedHeader: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
     paddingVertical: 12,
+    paddingHorizontal: 16,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
+    borderBottomColor: 'rgba(124, 58, 237, 0.3)',
   },
-  staffAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+  joinedTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  joinedMembers: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    padding: 16,
+    gap: 12,
+  },
+  joinedMember: {
+    alignItems: 'center',
+    width: 60,
+  },
+  memberInitial: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: '#7c3aed',
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginBottom: 6,
   },
-  staffInitials: {
+  memberInitialText: {
     color: '#fff',
-    fontSize: 14,
+    fontSize: 16,
     fontWeight: '600',
   },
-  staffItemInfo: {
-    flex: 1,
-  },
-  staffName: {
+  memberName: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
+    fontSize: 10,
+    textAlign: 'center',
+    flexWrap: 'wrap',
   },
-  staffRole: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
+  viewMoreButton: {
+    alignItems: 'center',
+    width: 60,
   },
-  staffStatus: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  viewAllButton: {
-    flexDirection: 'row',
+  viewMoreIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.2)',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 12,
-    gap: 8,
+    marginBottom: 6,
   },
-  viewAllText: {
-    color: '#7c3aed',
-    fontSize: 14,
+  viewMoreText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: '600',
   },
-  // Graph Styles
+  emptyMembers: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 20,
+  },
+  emptyMembersText: {
+    color: 'rgba(255,255,255,0.6)',
+    fontSize: 14,
+  },
+
+  // Updated Graph Styles for Horizontal Bar
   graphContainer: {
     backgroundColor: 'rgba(255,255,255,0.05)',
     borderRadius: 12,
@@ -1574,71 +1483,42 @@ const styles = StyleSheet.create({
     marginBottom: 16,
     textAlign: 'center',
   },
-  graphWrapper: {
-    alignItems: 'center',
-  },
-  graph: {
+  horizontalGraphWrapper: {
     flexDirection: 'row',
-    position: 'relative',
+    alignItems: 'center',
+    height: 120,
   },
-  yAxisLabels: {
-    justifyContent: 'space-between',
-    paddingRight: 8,
-    width: 30,
+  verticalAxis: {
+    justifyContent: 'space-around',
     height: '100%',
+    marginRight: 16,
+    width: 60,
   },
-  axisLabel: {
-    color: 'rgba(255,255,255,0.6)',
-    fontSize: 10,
+  gameLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
     textAlign: 'right',
   },
-  graphArea: {
+  barsContainer: {
     flex: 1,
-    position: 'relative',
-  },
-  gridLine: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  dataContainer: {
-    flex: 1,
-    flexDirection: 'row',
     justifyContent: 'space-around',
-    alignItems: 'flex-end',
     height: '100%',
-    paddingTop: 20,
   },
-  dataPoint: {
+  barRow: {
+    flexDirection: 'row',
     alignItems: 'center',
-    flex: 1,
-    position: 'relative',
+    height: 20,
   },
-  dataBar: {
-    width: 20,
-    backgroundColor: '#7c3aed',
-    borderRadius: 2,
-    marginBottom: 4,
-  },
-  dot: {
-    width: 8,
-    height: 8,
+  horizontalBar: {
+    height: 20,
     borderRadius: 4,
-    backgroundColor: '#7c3aed',
-    marginBottom: 8,
+    minWidth: 20,
   },
-  dataValue: {
+  barValue: {
     color: '#fff',
     fontSize: 14,
     fontWeight: '600',
-    marginBottom: 4,
-  },
-  monthLabel: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    textAlign: 'center',
+    marginLeft: 8,
   },
   legend: {
     flexDirection: 'row',
@@ -1660,56 +1540,76 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.7)',
     fontSize: 12,
   },
-  // Locations Styles
-  locationsContainer: {
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    borderRadius: 12,
+
+  // Analytics Modal Styles
+  analyticsModal: {
+    backgroundColor: '#1a1a2e',
+    marginTop: 60,
+    marginBottom: 60,
+    marginHorizontal: 16,
+    borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    overflow: 'hidden',
+    borderColor: 'rgba(124, 58, 237, 0.4)',
+    height: '75%',
+    width: '95%',
+    alignSelf: 'center',
   },
-  locationItem: {
+  analyticsModalHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    justifyContent: 'space-between',
+    padding: 20,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
-  locationRank: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    backgroundColor: '#7c3aed',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  locationRankText: {
+  analyticsModalTitle: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 18,
     fontWeight: '600',
   },
-  locationInfo: {
-    flex: 1,
+  analyticsModalContent: {
+    padding: 20,
   },
-  locationName: {
+  modalGraphContainer: {
+    alignItems: 'center',
+  },
+  modalSubtitle: {
     color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 20,
+  },
+  modalCurrentData: {
+    flexDirection: 'row',
+    gap: 40,
+    marginBottom: 30,
+  },
+  modalDataItem: {
+    alignItems: 'center',
+  },
+  modalDataLabel: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    marginBottom: 8,
+  },
+  modalDataValue: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  modalDataMonth: {
+    color: '#7c3aed',
     fontSize: 14,
     fontWeight: '500',
   },
-  locationCount: {
-    color: 'rgba(255,255,255,0.7)',
+  modalNote: {
+    color: 'rgba(255,255,255,0.5)',
     fontSize: 12,
+    fontStyle: 'italic',
+    textAlign: 'center',
   },
-  locationPercentage: {
-    alignItems: 'flex-end',
-  },
-  locationPercentageText: {
-    color: '#10b981',
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  
   // Activity Filter Styles
   activityFilters: {
     flexDirection: 'row',
@@ -1928,13 +1828,41 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.1)',
   },
+  staffAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  staffInitials: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
   fullStaffInfo: {
     flex: 1,
     marginLeft: 12,
+  },
+  staffName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  staffRole: {
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
   },
   staffJoined: {
     color: 'rgba(255,255,255,0.5)',
     fontSize: 11,
     marginTop: 2,
+  },
+  staffStatus: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });
