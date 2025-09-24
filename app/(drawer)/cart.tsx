@@ -1,4 +1,4 @@
-// app/(drawer)/cart.tsx - FIXED: Fetch ALL pending_unpaid packages with Enhanced NavigationHelper
+// app/(drawer)/cart.tsx - ENHANCED: Added Edit functionality with modal routing
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   StyleSheet,
@@ -20,9 +20,15 @@ import GLTHeader from '@/components/GLTHeader';
 import MpesaPaymentModal from '@/components/MpesaPaymentModal';
 import PackageTypeSelectionModal from '@/components/PackageTypeSelectionModal';
 
+// ENHANCED: Import modal components for edit functionality
+import PackageCreationModal from '@/components/PackageCreationModal';
+import FragileDeliveryModal from '@/components/FragileDeliveryModal';
+import CollectDeliverModal from '@/components/CollectDeliverModal';
+
 // Import Enhanced NavigationHelper
 import { NavigationHelper } from '@/lib/helpers/navigation';
 
+// ENHANCED: Comprehensive Package interface matching track.tsx
 interface Package {
   id: string;
   code: string;
@@ -35,6 +41,100 @@ interface Package {
   cost: number;
   delivery_type: string;
   created_at: string;
+  updated_at?: string;
+  
+  // CRITICAL: Area and agent IDs for proper auto-population
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+  
+  // Area and agent relationship objects (may contain nested IDs)
+  origin_area?: {
+    id: string;
+    name: string;
+    initials?: string;
+    location?: { id: string; name: string };
+  };
+  destination_area?: {
+    id: string;
+    name: string;
+    initials?: string;
+    location?: { id: string; name: string };
+  };
+  origin_agent?: {
+    id: string;
+    name: string;
+    phone?: string;
+    area_id?: string;
+    area?: {
+      id: string;
+      name: string;
+      location?: { id: string; name: string };
+    };
+  };
+  destination_agent?: {
+    id: string;
+    name: string;
+    phone?: string;
+    area_id?: string;
+    area?: {
+      id: string;
+      name: string;
+      location?: { id: string; name: string };
+    };
+  };
+  
+  // Location and delivery details
+  delivery_location?: string;
+  pickup_location?: string;
+  sender_phone?: string;
+  sender_email?: string;
+  receiver_email?: string;
+  
+  // Business information
+  business_name?: string;
+  business_phone?: string;
+  business_id?: string;
+  
+  // Receiver name variations (for compatibility)
+  recipient_name?: string;
+  receiver?: { name: string };
+  recipient?: { name: string };
+  to_name?: string;
+  from_location?: string;
+  to_location?: string;
+  
+  // Package details
+  package_description?: string;
+  package_size?: string;
+  special_instructions?: string;
+  
+  // Collection service specific fields
+  shop_name?: string;
+  shop_contact?: string;
+  collection_address?: string;
+  items_to_collect?: string;
+  item_value?: number;
+  item_description?: string;
+  
+  // Fragile service specific fields  
+  pickup_latitude?: number;
+  pickup_longitude?: number;
+  delivery_latitude?: number;
+  delivery_longitude?: number;
+}
+
+// ENHANCED: Modal management with comprehensive type support
+type ModalType = 'package' | 'fragile' | 'collection';
+type ModalAction = 'create' | 'edit' | 'resubmit';
+
+// Enhanced modal state interface
+interface ModalState {
+  type: ModalType | null;
+  action: ModalAction;
+  package?: Package;
+  isVisible: boolean;
 }
 
 export default function CartPage() {
@@ -46,6 +146,14 @@ export default function CartPage() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPackageTypeModal, setShowPackageTypeModal] = useState(false);
+
+  // ENHANCED: Modal state management with comprehensive support
+  const [modalState, setModalState] = useState<ModalState>({
+    type: null,
+    action: 'create',
+    package: undefined,
+    isVisible: false
+  });
 
   // Enhanced back navigation using NavigationHelper
   const handleGoBack = useCallback(async () => {
@@ -72,7 +180,242 @@ export default function CartPage() {
       .reduce((total, pkg) => total + pkg.cost, 0);
   }, [packages, selectedPackages]);
 
-  // FIXED: Load ALL unpaid packages without limit
+  // ENHANCED: Intelligent modal routing with comprehensive package type detection
+  const determineModalType = useCallback((packageItem: Package): ModalType => {
+    console.log('🎯 Determining modal type for package:', {
+      code: packageItem.code,
+      delivery_type: packageItem.delivery_type,
+      package_description: packageItem.package_description?.substring(0, 50),
+      shop_name: packageItem.shop_name,
+      items_to_collect: packageItem.items_to_collect,
+      has_coordinates: !!(packageItem.pickup_latitude && packageItem.pickup_longitude)
+    });
+
+    // Priority 1: Explicit delivery type matching
+    if (packageItem.delivery_type === 'fragile') {
+      console.log('➡️ Explicit fragile delivery type - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+    
+    if (packageItem.delivery_type === 'collection') {
+      console.log('➡️ Explicit collection delivery type - routing to CollectDeliverModal');
+      return 'collection';
+    }
+
+    // Priority 2: Collection service field detection
+    if (packageItem.shop_name || 
+        packageItem.shop_contact || 
+        packageItem.items_to_collect ||
+        packageItem.collection_address ||
+        packageItem.item_value ||
+        packageItem.item_description) {
+      console.log('➡️ Collection fields detected - routing to CollectDeliverModal');
+      return 'collection';
+    }
+    
+    // Priority 3: Fragile service field detection
+    if ((packageItem.pickup_latitude && packageItem.pickup_longitude) ||
+        packageItem.package_description?.toLowerCase().includes('fragile')) {
+      console.log('➡️ Fragile indicators detected - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+
+    // Priority 4: Package description analysis
+    const description = packageItem.package_description?.toLowerCase() || '';
+    if (description.includes('collection') || description.includes('collect')) {
+      console.log('➡️ Collection keywords in description - routing to CollectDeliverModal');
+      return 'collection';
+    }
+
+    if (description.includes('fragile') || description.includes('delicate') || description.includes('careful')) {
+      console.log('➡️ Fragile keywords in description - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+    
+    // Priority 5: Standard delivery types
+    if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type) ||
+        !packageItem.delivery_type) {
+      console.log('➡️ Standard delivery type - routing to PackageCreationModal');
+      return 'package';
+    }
+
+    // Default fallback
+    console.log('➡️ No specific indicators found - defaulting to PackageCreationModal');
+    return 'package';
+  }, []);
+
+  // ENHANCED: Edit package handler with comprehensive modal routing and logging
+  const handleEditPackage = useCallback((packageItem: Package) => {
+    console.log('🔧 ==================== EDIT PACKAGE ====================');
+    console.log('📦 Package details:', {
+      code: packageItem.code,
+      delivery_type: packageItem.delivery_type,
+      state: packageItem.state,
+      has_origin_area_id: !!packageItem.origin_area_id,
+      has_destination_area_id: !!packageItem.destination_area_id,
+      has_origin_agent_id: !!packageItem.origin_agent_id,
+      has_destination_agent_id: !!packageItem.destination_agent_id,
+      collection_fields: {
+        shop_name: packageItem.shop_name,
+        items_to_collect: packageItem.items_to_collect
+      },
+      fragile_fields: {
+        pickup_coords: !!(packageItem.pickup_latitude && packageItem.pickup_longitude),
+        package_description: packageItem.package_description?.substring(0, 50)
+      }
+    });
+    
+    const modalType = determineModalType(packageItem);
+    
+    console.log('🎯 Modal routing decision:', {
+      selectedModalType: modalType,
+      reasoning: 'Based on package analysis above'
+    });
+
+    setModalState({
+      type: modalType,
+      action: 'edit',
+      package: packageItem,
+      isVisible: true
+    });
+    
+    console.log('✅ Edit modal state configured successfully');
+    console.log('🔧 ====================================================');
+  }, [determineModalType]);
+
+  // Modal management handlers
+  const handleCloseModal = useCallback(() => {
+    console.log('❌ Closing modal');
+    setModalState({
+      type: null,
+      action: 'create',
+      package: undefined,
+      isVisible: false
+    });
+  }, []);
+
+  // ENHANCED: Package submission handler with comprehensive success tracking
+  const handlePackageSubmitted = useCallback(async (packageData?: any) => {
+    console.log('✅ ================ PACKAGE SUBMISSION SUCCESS ================');
+    console.log('📦 Submission details:', {
+      action: modalState.action,
+      modalType: modalState.type,
+      originalPackageCode: modalState.package?.code,
+      dataProvided: !!packageData
+    });
+    
+    // Close modal
+    handleCloseModal();
+    
+    // Refresh packages list
+    console.log('🔄 Refreshing packages list...');
+    loadUnpaidPackages(true);
+    
+    // Show success message based on action
+    const actionText = modalState.action === 'edit' ? 'updated' : 
+                      modalState.action === 'resubmit' ? 'resubmitted' : 'created';
+    
+    const modalTypeText = modalState.type === 'fragile' ? 'fragile package' :
+                         modalState.type === 'collection' ? 'collection package' :
+                         'package';
+    
+    Toast.show({
+      type: 'success',
+      text1: `${modalTypeText.charAt(0).toUpperCase() + modalTypeText.slice(1)} ${actionText} successfully!`,
+      text2: modalState.action === 'resubmit' ? 'Your package has been resubmitted for review' : 
+             modalState.action === 'edit' ? 'Changes have been saved and applied' : 
+             'Your package has been created and is being processed',
+      position: 'top',
+      visibilityTime: 4000,
+    });
+    
+    console.log('✅ Success notification displayed');
+    console.log('✅ =======================================================');
+  }, [modalState, handleCloseModal]);
+
+  // ENHANCED: Package data transformation with comprehensive field mapping
+  const transformPackageData = useCallback((pkg: any): Package => {
+    // CRITICAL: Extract and normalize area/agent IDs for auto-population
+    const extractAreaId = (area: any): string | undefined => {
+      if (typeof area === 'string') return area;
+      if (area && typeof area === 'object') return area.id || area.area_id;
+      return undefined;
+    };
+
+    const extractAgentId = (agent: any): string | undefined => {
+      if (typeof agent === 'string') return agent;
+      if (agent && typeof agent === 'object') return agent.id || agent.agent_id;
+      return undefined;
+    };
+
+    return {
+      id: String(pkg.id || ''),
+      code: pkg.code || '',
+      state: pkg.state || 'pending_unpaid',
+      state_display: pkg.state_display || 'Pending Payment',
+      sender_name: pkg.sender_name || 'Unknown Sender',
+      receiver_name: pkg.receiver_name || 'Unknown Receiver',
+      receiver_phone: pkg.receiver_phone || '',
+      route_description: pkg.route_description || 'Route information unavailable',
+      cost: Number(pkg.cost) || 0,
+      delivery_type: pkg.delivery_type || 'agent',
+      created_at: pkg.created_at || new Date().toISOString(),
+      updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
+      
+      // CRITICAL: Area and agent IDs for modal auto-population
+      origin_area_id: pkg.origin_area_id || extractAreaId(pkg.origin_area) || extractAreaId(pkg.origin_agent?.area),
+      destination_area_id: pkg.destination_area_id || extractAreaId(pkg.destination_area) || extractAreaId(pkg.destination_agent?.area),
+      origin_agent_id: pkg.origin_agent_id || extractAgentId(pkg.origin_agent),
+      destination_agent_id: pkg.destination_agent_id || extractAgentId(pkg.destination_agent),
+      
+      // Area and agent relationship objects
+      origin_area: pkg.origin_area,
+      destination_area: pkg.destination_area,
+      origin_agent: pkg.origin_agent,
+      destination_agent: pkg.destination_agent,
+      
+      // Location and delivery details
+      delivery_location: pkg.delivery_location,
+      pickup_location: pkg.pickup_location,
+      sender_phone: pkg.sender_phone,
+      sender_email: pkg.sender_email,
+      receiver_email: pkg.receiver_email,
+      
+      // Business information
+      business_name: pkg.business_name,
+      business_phone: pkg.business_phone,
+      business_id: pkg.business_id,
+      
+      // Receiver name variations (for compatibility)
+      recipient_name: pkg.recipient_name || pkg.receiver_name,
+      receiver: pkg.receiver || { name: pkg.receiver_name },
+      recipient: pkg.recipient || { name: pkg.receiver_name },
+      to_name: pkg.to_name || pkg.receiver_name,
+      from_location: pkg.from_location || pkg.origin_area?.name,
+      to_location: pkg.to_location || pkg.destination_area?.name,
+      
+      // Package details
+      package_description: pkg.package_description,
+      package_size: pkg.package_size,
+      special_instructions: pkg.special_instructions,
+      
+      // Collection service specific fields
+      shop_name: pkg.shop_name,
+      shop_contact: pkg.shop_contact,
+      collection_address: pkg.collection_address,
+      items_to_collect: pkg.items_to_collect,
+      item_value: pkg.item_value,
+      item_description: pkg.item_description,
+      
+      // Fragile service specific fields
+      pickup_latitude: pkg.pickup_latitude,
+      pickup_longitude: pkg.pickup_longitude,
+      delivery_latitude: pkg.delivery_latitude,
+      delivery_longitude: pkg.delivery_longitude,
+    };
+  }, []);
+
+  // ENHANCED: Load ALL unpaid packages with comprehensive data transformation
   const loadUnpaidPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -91,19 +434,8 @@ export default function CartPage() {
       });
       
       if (response.data.success) {
-        const unpaidPackages = response.data.data.map((pkg: any) => ({
-          id: String(pkg.id || ''),
-          code: pkg.code || '',
-          state: pkg.state || 'pending_unpaid',
-          state_display: pkg.state_display || 'Pending Payment',
-          sender_name: pkg.sender_name || 'Unknown Sender',
-          receiver_name: pkg.receiver_name || 'Unknown Receiver',
-          receiver_phone: pkg.receiver_phone || '',
-          route_description: pkg.route_description || 'Route information unavailable',
-          cost: Number(pkg.cost) || 0,
-          delivery_type: pkg.delivery_type || 'agent',
-          created_at: pkg.created_at || new Date().toISOString(),
-        }));
+        // ENHANCED: Transform packages with comprehensive field mapping
+        const unpaidPackages = response.data.data.map((pkg: any) => transformPackageData(pkg));
         
         setPackages(unpaidPackages);
         console.log(`Loaded ${unpaidPackages.length} unpaid packages`);
@@ -124,7 +456,7 @@ export default function CartPage() {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [transformPackageData]);
 
   useEffect(() => {
     loadUnpaidPackages();
@@ -205,7 +537,7 @@ export default function CartPage() {
     }
   };
 
-  // Render package item
+  // ENHANCED: Render package item with edit button
   const renderPackageItem = (pkg: Package) => {
     const isSelected = selectedPackages.has(pkg.id);
     
@@ -261,6 +593,21 @@ export default function CartPage() {
           {/* Cost */}
           <View style={styles.costSection}>
             <Text style={styles.costValue}>KES {pkg.cost.toLocaleString()}</Text>
+          </View>
+
+          {/* ENHANCED: Action buttons section with Edit button */}
+          <View style={styles.actionButtonsSection}>
+            <TouchableOpacity 
+              style={styles.editButton}
+              onPress={(e) => {
+                e.stopPropagation(); // Prevent triggering package selection
+                handleEditPackage(pkg);
+              }}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+              <Feather name="edit-3" size={16} color="#8b5cf6" />
+              <Text style={styles.editButtonText}>Edit</Text>
+            </TouchableOpacity>
           </View>
         </LinearGradient>
       </TouchableOpacity>
@@ -416,6 +763,36 @@ export default function CartPage() {
         visible={showPackageTypeModal}
         onClose={() => setShowPackageTypeModal(false)}
       />
+
+      {/* ENHANCED: Modal rendering with comprehensive auto-population support */}
+      <PackageCreationModal
+        visible={modalState.isVisible && modalState.type === 'package'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
+      />
+
+      <FragileDeliveryModal
+        visible={modalState.isVisible && modalState.type === 'fragile'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        currentLocation={null}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
+      />
+
+      <CollectDeliverModal
+        visible={modalState.isVisible && modalState.type === 'collection'}
+        onClose={handleCloseModal}
+        onSubmit={handlePackageSubmitted}
+        currentLocation={null}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
+      />
     </View>
   );
 }
@@ -562,11 +939,33 @@ const styles = StyleSheet.create({
   },
   costSection: {
     alignItems: 'flex-start',
+    marginBottom: 12,
   },
   costValue: {
     fontSize: 18,
     color: colors.primary,
     fontWeight: '700',
+  },
+  
+  // ENHANCED: Action buttons section with Edit button
+  actionButtonsSection: {
+    alignItems: 'flex-end',
+  },
+  editButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 8,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    borderWidth: 1,
+    borderColor: '#8b5cf6',
+    gap: 6,
+  },
+  editButtonText: {
+    fontSize: 12,
+    color: '#8b5cf6',
+    fontWeight: '500',
   },
   
   // Add Package Button
