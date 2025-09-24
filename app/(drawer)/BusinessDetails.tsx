@@ -833,7 +833,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
   <View
     style={[
       styles.joinedSectionContainer,
-      staffData?.staff?.length === 1 && styles.singleMemberContainer
+      staffData?.staff?.length === 1 && styles.singleMemberContainer,
     ]}
   >
     <View style={styles.joinedVerticalSection}>
@@ -843,7 +843,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
     <View
       style={[
         styles.joinedMembersSection,
-        staffData?.staff?.length === 1 && styles.singleMemberMembersSection
+        staffData?.staff?.length === 1 && styles.singleMemberMembersSection,
       ]}
     >
       {loadingStaff ? (
@@ -855,17 +855,14 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         <View
           style={[
             styles.joinedMembers,
-            staffData?.staff?.length === 1 && styles.singleMemberMembers
+            staffData?.staff?.length === 1 && styles.singleMemberMembers,
           ]}
         >
           {/* Show only staff members (excluding owner) */}
           {staffData.staff.slice(0, 4).map((staff) => (
             <TouchableOpacity
               key={staff.id}
-              style={[
-                styles.joinedMember,
-                staffData?.staff?.length === 1 && styles.singleMember
-              ]}
+              style={styles.joinedMember}
               onPress={() => handleStaffClick(staff)}
             >
               <View style={styles.memberInitial}>
@@ -1410,20 +1407,16 @@ const styles = StyleSheet.create({
   
   // New Joined Section Styles
 singleMemberContainer: {
-  minHeight: 80, // reduce height when only one member
-  alignItems: 'center',
+  minHeight: 80,          // smaller height than the default 120
+  alignItems: 'center',   // vertically center content
 },
 
 singleMemberMembersSection: {
-  justifyContent: 'center',
+  justifyContent: 'center', 
 },
 
 singleMemberMembers: {
-  justifyContent: 'center',
-},
-
-singleMember: {
-  width: 70,  // slightly larger to emphasize single member
+  justifyContent: 'center', // center the single member horizontally
 },
   joinedSectionContainer: {
     backgroundColor: 'rgba(255,255,255,0.05)',
