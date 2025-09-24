@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - ENHANCED: Improved location system with user details
+// components/CollectDeliverModal.tsx - ENHANCED: Fixed auto-population and resubmit flow
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -24,7 +24,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
-import { useUser } from '../context/UserContext'; // User context integration
+import { useUser } from '../context/UserContext';
 import { 
   type PackageData, 
   type Area, 
@@ -58,7 +58,8 @@ interface CollectDeliverModalProps {
   
   // NEW: Mode and package data props
   mode?: 'create' | 'edit' | 'resubmit';
-  existingPackage?: any; // Package data when editing/resubmitting
+  editPackage?: any; // Package data when editing
+  resubmitPackage?: any; // Package data when resubmitting
   packageId?: string;
 }
 
@@ -347,7 +348,8 @@ export default function CollectDeliverModal({
   onUpdate,
   currentLocation: initialLocation,
   mode = 'create',
-  existingPackage,
+  editPackage,
+  resubmitPackage,
   packageId
 }: CollectDeliverModalProps) {
   // User context integration
@@ -359,6 +361,12 @@ export default function CollectDeliverModal({
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
+  
+  // CRITICAL: Add areas and agents state for auto-population
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
   
   // Location states with enhanced error handling
   const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
@@ -431,42 +439,126 @@ export default function CollectDeliverModal({
     }
   }, [mode]);
 
-  // ENHANCED: Pre-populate form when editing or resubmitting
-  const populateFormFromExistingPackage = useCallback(() => {
-    if (!existingPackage || mode === 'create') return;
+  // CRITICAL: Load areas and agents data for auto-population
+  const loadModalData = useCallback(async () => {
+    try {
+      setIsDataLoading(true);
+      setDataError(null);
+      
+      console.log('🔄 Loading areas and agents data...');
+      
+      const [areasData, agentsData] = await Promise.allSettled([
+        getAreas(),
+        getAgents()
+      ]);
+      
+      if (areasData.status === 'fulfilled') {
+        setAreas(areasData.value || []);
+        console.log('✅ Areas loaded:', areasData.value?.length);
+      } else {
+        console.error('❌ Failed to load areas:', areasData.reason);
+        setDataError('Failed to load areas');
+      }
+      
+      if (agentsData.status === 'fulfilled') {
+        setAgents(agentsData.value || []);
+        console.log('✅ Agents loaded:', agentsData.value?.length);
+      } else {
+        console.error('❌ Failed to load agents:', agentsData.reason);
+        // Agents are optional, so don't set error
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load modal data:', error);
+      setDataError(`Failed to load data: ${error.message}`);
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, []);
 
-    console.log('Populating form with existing package data:', existingPackage);
+  // CRITICAL: Enhanced auto-population with proper timing
+  const populateFormFromExistingPackage = useCallback(async () => {
+    const packageData = editPackage || resubmitPackage;
+    if (!packageData || mode === 'create') return;
+
+    console.log('🔧 Populating form with existing package data:', packageData.code);
+
+    // Ensure areas and agents are loaded before auto-populating
+    if (areas.length === 0 || agents.length === 0) {
+      console.log('⏳ Waiting for areas/agents to load before populating form...');
+      return; // Will be called again after data loads
+    }
 
     // Basic form fields
-    setShopName(existingPackage.shop_name || '');
-    setShopContact(existingPackage.shop_contact || '');
-    setCollectionAddress(existingPackage.collection_address || '');
-    setItemsToCollect(existingPackage.items_to_collect || '');
-    setItemValue(existingPackage.item_value?.toString() || '');
-    setItemDescription(existingPackage.item_description || '');
-    setDeliveryAddress(existingPackage.delivery_location || '');
-    setSpecialInstructions(existingPackage.special_instructions || '');
-    setPaymentMethod(existingPackage.payment_method || 'mpesa');
+    setShopName(packageData.shop_name || '');
+    setShopContact(packageData.shop_contact || '');
+    setCollectionAddress(packageData.collection_address || '');
+    setItemsToCollect(packageData.items_to_collect || '');
+    setItemValue(packageData.item_value?.toString() || '');
+    setItemDescription(packageData.item_description || '');
+    setDeliveryAddress(packageData.delivery_location || '');
+    setSpecialInstructions(packageData.special_instructions || '');
+    setPaymentMethod(packageData.payment_method || 'mpesa');
+
+    // CRITICAL: Auto-select collection area if it exists
+    if (packageData.origin_area_id) {
+      const collectionArea = areas.find(area => area.id === packageData.origin_area_id);
+      if (collectionArea) {
+        console.log('✅ Auto-selected collection area:', collectionArea.name);
+        setSelectedCollectionArea(collectionArea);
+      } else {
+        console.warn('⚠️ Collection area not found:', packageData.origin_area_id);
+      }
+    }
+
+    // CRITICAL: Auto-select delivery area or agent
+    if (packageData.destination_agent_id) {
+      const deliveryAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
+      if (deliveryAgent) {
+        console.log('✅ Auto-selected delivery agent:', deliveryAgent.name);
+        setSelectedDeliveryAgent(deliveryAgent);
+        setSelectedDeliveryArea(deliveryAgent.area || null);
+      } else {
+        console.warn('⚠️ Delivery agent not found:', packageData.destination_agent_id);
+      }
+    } else if (packageData.destination_area_id) {
+      const deliveryArea = areas.find(area => area.id === packageData.destination_area_id);
+      if (deliveryArea) {
+        console.log('✅ Auto-selected delivery area:', deliveryArea.name);
+        setSelectedDeliveryArea(deliveryArea);
+      } else {
+        console.warn('⚠️ Delivery area not found:', packageData.destination_area_id);
+      }
+    }
 
     // Location data
-    if (existingPackage.pickup_latitude && existingPackage.pickup_longitude) {
+    if (packageData.pickup_latitude && packageData.pickup_longitude) {
       setCollectionLocation({
-        latitude: existingPackage.pickup_latitude,
-        longitude: existingPackage.pickup_longitude,
-        address: existingPackage.collection_address || 'Collection Location'
+        latitude: packageData.pickup_latitude,
+        longitude: packageData.pickup_longitude,
+        address: packageData.collection_address || 'Collection Location'
       });
     }
 
-    if (existingPackage.delivery_latitude && existingPackage.delivery_longitude) {
+    if (packageData.delivery_latitude && packageData.delivery_longitude) {
       setDeliveryLocation({
-        latitude: existingPackage.delivery_latitude,
-        longitude: existingPackage.delivery_longitude,
-        address: existingPackage.delivery_location || 'Delivery Location'
+        latitude: packageData.delivery_latitude,
+        longitude: packageData.delivery_longitude,
+        address: packageData.delivery_location || 'Delivery Location'
       });
     }
 
-    setCurrentStep(0);
-  }, [existingPackage, mode]);
+    // CRITICAL: Handle step navigation for resubmit mode
+    if (mode === 'resubmit') {
+      console.log('🔄 Resubmit mode: navigating to confirmation step');
+      setCurrentStep(STEP_TITLES.length - 1); // Skip to confirmation
+    } else {
+      console.log('✏️ Edit mode: starting from first step');
+      setCurrentStep(0);
+    }
+
+    console.log('✅ Form populated successfully');
+  }, [editPackage, resubmitPackage, mode, areas, agents, STEP_TITLES.length]);
 
   // Load pending collections from AsyncStorage (only for create mode)
   const loadPendingCollections = async () => {
@@ -528,23 +620,31 @@ export default function CollectDeliverModal({
     }
   };
 
-  // Load form data and setup
+  // CRITICAL: Enhanced initialization with proper sequencing
   useEffect(() => {
     if (!visible) return;
     
     const initializeModal = async () => {
       try {
-        // Request location permission and get current location
+        console.log('🚀 Initializing modal in mode:', mode);
+        
+        // Step 1: Load areas and agents data FIRST
+        await loadModalData();
+        
+        // Step 2: Request location permission and get current location
         await requestLocationPermission();
         
-        // Load pending collections only for create mode
+        // Step 3: Load pending collections only for create mode
         if (mode === 'create') {
           await loadPendingCollections();
         }
 
-        // Populate form for edit/resubmit modes
-        if ((mode === 'edit' || mode === 'resubmit') && existingPackage) {
-          populateFormFromExistingPackage();
+        // Step 4: Populate form for edit/resubmit modes AFTER data is loaded
+        if ((mode === 'edit' || mode === 'resubmit') && (editPackage || resubmitPackage)) {
+          // Small delay to ensure state is updated
+          setTimeout(() => {
+            populateFormFromExistingPackage();
+          }, 100);
         }
       } catch (error) {
         console.error('Failed to initialize modal:', error);
@@ -552,7 +652,17 @@ export default function CollectDeliverModal({
     };
 
     initializeModal();
-  }, [visible, mode, existingPackage, populateFormFromExistingPackage]);
+  }, [visible, mode, editPackage, resubmitPackage]);
+
+  // CRITICAL: Re-populate form when areas/agents are loaded
+  useEffect(() => {
+    if (areas.length > 0 && agents.length > 0 && (mode === 'edit' || mode === 'resubmit')) {
+      if ((editPackage || resubmitPackage) && !selectedCollectionArea && !selectedDeliveryArea && !selectedDeliveryAgent) {
+        console.log('🔄 Areas/agents loaded, re-attempting form population...');
+        populateFormFromExistingPackage();
+      }
+    }
+  }, [areas, agents, mode, editPackage, resubmitPackage, populateFormFromExistingPackage, selectedCollectionArea, selectedDeliveryArea, selectedDeliveryAgent]);
 
   // ENHANCED: Keyboard handling with better offset calculation
   useEffect(() => {
@@ -637,6 +747,9 @@ export default function CollectDeliverModal({
     setSelectedDeliveryArea(null);
     setSelectedDeliveryAgent(null);
     setLocationError(null);
+    setDataError(null);
+    setAreas([]);
+    setAgents([]);
     
     if (mode === 'create') {
       setPendingCollections([]);
@@ -925,6 +1038,7 @@ export default function CollectDeliverModal({
     </View>
   ), [closeModal, currentStep]);
 
+  // ENHANCED: Collection details step with data loading state
   const renderCollectionDetails = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>
@@ -945,6 +1059,25 @@ export default function CollectDeliverModal({
           <Text style={[styles.modeNoticeText, { color: mode === 'edit' ? '#8b5cf6' : '#10b981' }]}>
             {mode === 'edit' ? 'You are editing an existing collection request' : 'You are resubmitting a collection request'}
           </Text>
+        </View>
+      )}
+
+      {/* Data loading notice */}
+      {isDataLoading && (
+        <View style={styles.loadingBanner}>
+          <ActivityIndicator size="small" color="#10b981" />
+          <Text style={styles.loadingText}>Loading location data...</Text>
+        </View>
+      )}
+
+      {/* Data error banner */}
+      {dataError && (
+        <View style={styles.errorBanner}>
+          <Feather name="alert-circle" size={16} color="#ef4444" />
+          <Text style={styles.errorText}>{dataError}</Text>
+          <TouchableOpacity onPress={loadModalData}>
+            <Text style={styles.retryText}>Retry</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1007,14 +1140,20 @@ export default function CollectDeliverModal({
         <TouchableOpacity 
           style={[styles.locationInput, selectedCollectionArea && styles.locationInputSelected]}
           onPress={() => setShowCollectionMapModal(true)}
+          disabled={isDataLoading}
         >
           <Text style={[styles.locationText, selectedCollectionArea && styles.locationTextSelected]}>
-            {selectedCollectionArea ? 
+            {isDataLoading ? 'Loading areas...' :
+             selectedCollectionArea ? 
               `${selectedCollectionArea.name} • ${selectedCollectionArea.location?.name}` :
               'Tap to select collection area (optional)'
             }
           </Text>
-          <Feather name="map" size={20} color={selectedCollectionArea ? "#10b981" : "#666"} />
+          <Feather 
+            name={isDataLoading ? "loader" : "map"} 
+            size={20} 
+            color={selectedCollectionArea ? "#10b981" : "#666"} 
+          />
         </TouchableOpacity>
       </View>
 
@@ -1124,16 +1263,22 @@ export default function CollectDeliverModal({
         <TouchableOpacity 
           style={[styles.locationInput, (selectedDeliveryArea || selectedDeliveryAgent) && styles.locationInputSelected]}
           onPress={() => setShowDeliveryMapModal(true)}
+          disabled={isDataLoading}
         >
           <Text style={[styles.locationText, (selectedDeliveryArea || selectedDeliveryAgent) && styles.locationTextSelected]}>
-            {selectedDeliveryAgent ? 
+            {isDataLoading ? 'Loading areas and agents...' :
+             selectedDeliveryAgent ? 
               `Agent: ${selectedDeliveryAgent.name} • ${selectedDeliveryAgent.area?.name}` :
               selectedDeliveryArea ? 
                 `${selectedDeliveryArea.name} • ${selectedDeliveryArea.location?.name}` :
                 'Tap to select delivery area (optional)'
             }
           </Text>
-          <Feather name="map-pin" size={20} color={(selectedDeliveryArea || selectedDeliveryAgent) ? "#10b981" : "#666"} />
+          <Feather 
+            name={isDataLoading ? "loader" : "map-pin"} 
+            size={20} 
+            color={(selectedDeliveryArea || selectedDeliveryAgent) ? "#10b981" : "#666"} 
+          />
         </TouchableOpacity>
       </View>
 
