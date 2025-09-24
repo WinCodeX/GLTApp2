@@ -613,7 +613,7 @@ export default function MpesaPaymentModal({
               styles.modalContainer,
               {
                 transform: [{ translateY: slideAnim }],
-                maxHeight: keyboardVisible ? SCREEN_HEIGHT * 0.75 : SCREEN_HEIGHT * 0.85,
+                maxHeight: keyboardVisible ? SCREEN_HEIGHT * 0.85 : SCREEN_HEIGHT * 0.95,
               },
             ]}
             {...panResponder.panHandlers}
