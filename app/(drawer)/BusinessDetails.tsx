@@ -831,18 +831,18 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         {/* Joined Section (Redesigned Staff Section) */}
         <View style={styles.section}>
           <View style={styles.joinedSectionContainer}>
-            <View style={styles.joinedHeader}>
-              <Text style={styles.joinedTitle}>Joined</Text>
+            <View style={styles.joinedVerticalSection}>
+              <Text style={styles.joinedVerticalText}>Joined</Text>
             </View>
             
-            <View style={styles.joinedMembers}>
+            <View style={styles.joinedMembersSection}>
               {loadingStaff ? (
                 <View style={styles.loadingContainer}>
                   <ActivityIndicator color="#7c3aed" size="small" />
                   <Text style={styles.loadingText}>Loading members...</Text>
                 </View>
               ) : staffData ? (
-                <>
+                <View style={styles.joinedMembers}>
                   {/* Show only staff members (excluding owner) */}
                   {staffData.staff.slice(0, 4).map((staff) => (
                     <TouchableOpacity 
@@ -875,7 +875,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
                       <Text style={styles.emptyMembersText}>No staff members yet</Text>
                     </View>
                   )}
-                </>
+                </View>
               ) : (
                 <View style={styles.errorContainer}>
                   <Text style={styles.errorText}>Unable to load members</Text>
@@ -1394,25 +1394,31 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    overflow: 'hidden',
+    flexDirection: 'row',
+    minHeight: 120,
   },
-  joinedHeader: {
+  joinedVerticalSection: {
+    width: 60,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(124, 58, 237, 0.3)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopLeftRadius: 11,
+    borderBottomLeftRadius: 11,
   },
-  joinedTitle: {
+  joinedVerticalText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    textAlign: 'center',
+    transform: [{ rotate: '90deg' }],
+    letterSpacing: 2,
+  },
+  joinedMembersSection: {
+    flex: 1,
+    padding: 16,
   },
   joinedMembers: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    padding: 16,
     gap: 12,
   },
   joinedMember: {
@@ -1473,25 +1479,26 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(124, 58, 237, 0.3)',
-    padding: 16,
+    padding: 20,
     marginBottom: 8,
   },
   graphTitle: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    marginBottom: 16,
+    marginBottom: 20,
     textAlign: 'center',
   },
   horizontalGraphWrapper: {
     flexDirection: 'row',
     alignItems: 'center',
     height: 120,
+    paddingHorizontal: 16,
   },
   verticalAxis: {
     justifyContent: 'space-around',
     height: '100%',
-    marginRight: 16,
+    marginRight: 20,
     width: 60,
   },
   gameLabel: {
@@ -1503,6 +1510,7 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'space-around',
     height: '100%',
+    paddingRight: 16,
   },
   barRow: {
     flexDirection: 'row',
