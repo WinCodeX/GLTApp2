@@ -1,4 +1,4 @@
-// components/MpesaPaymentModal.tsx - Fixed modal sizing to show package details properly
+// components/MpesaPaymentModal.tsx - Fixed keyboard issues and added manual verification option
 import React, { useState, useEffect, useRef } from 'react';
 import {
   StyleSheet,
@@ -12,6 +12,9 @@ import {
   ActivityIndicator,
   PanResponder,
   ScrollView,
+  KeyboardAvoidingView,
+  Platform,
+  Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -61,6 +64,7 @@ export default function MpesaPaymentModal({
   const [checkoutRequestId, setCheckoutRequestId] = useState<string | null>(null);
   const [errorMessage, setErrorMessage] = useState('');
   const [isPolling, setIsPolling] = useState(false);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
   const pollingIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Convert packageData to array format
@@ -76,6 +80,21 @@ export default function MpesaPaymentModal({
 
   // Determine if single or multiple packages
   const isSinglePackage = packages.length === 1;
+
+  // Handle keyboard visibility
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener('keyboardDidShow', () => {
+      setKeyboardVisible(true);
+    });
+    const keyboardDidHideListener = Keyboard.addListener('keyboardDidHide', () => {
+      setKeyboardVisible(false);
+    });
+
+    return () => {
+      keyboardDidHideListener?.remove();
+      keyboardDidShowListener?.remove();
+    };
+  }, []);
 
   // Debug logging
   useEffect(() => {
@@ -499,6 +518,13 @@ export default function MpesaPaymentModal({
     }
   };
 
+  // Navigate to manual verification from confirm step
+  const goToManualVerify = () => {
+    setPaymentStep('manual_verify');
+    setErrorMessage('');
+    setTransactionCode('');
+  };
+
   // Retry payment (unchanged from original)
   const retryPayment = () => {
     console.log('🔄 Retrying payment');
@@ -577,230 +603,253 @@ export default function MpesaPaymentModal({
           onPress={handleClose}
         />
         
-        <Animated.View
-          style={[
-            styles.modalContainer,
-            {
-              transform: [{ translateY: slideAnim }],
-            },
-          ]}
-          {...panResponder.panHandlers}
+        <KeyboardAvoidingView
+          style={{ flex: 1 }}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
         >
-          <LinearGradient
-            colors={['rgba(26, 26, 46, 0.98)', 'rgba(22, 33, 62, 0.98)']}
-            style={styles.modal}
+          <Animated.View
+            style={[
+              styles.modalContainer,
+              {
+                transform: [{ translateY: slideAnim }],
+                maxHeight: keyboardVisible ? SCREEN_HEIGHT * 0.75 : SCREEN_HEIGHT * 0.85,
+              },
+            ]}
+            {...panResponder.panHandlers}
           >
-            {/* Modal Header */}
-            <View style={styles.modalHeader}>
-              <View style={styles.dragIndicator} />
-              <View style={styles.headerContent}>
-                <View style={styles.headerIcon}>
-                  <Feather name="smartphone" size={24} color={colors.primary} />
-                </View>
-                <View style={styles.headerText}>
-                  <Text style={styles.modalTitle}>M-Pesa Payment</Text>
-                  <Text style={styles.modalSubtitle}>
-                    {isSinglePackage 
-                      ? `Pay for package ${packages[0].code}`
-                      : `Pay for ${packages.length} packages`
-                    }
-                  </Text>
-                </View>
-                <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
-                  <Feather name="x" size={20} color="#888" />
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            {/* Package Info - Show single package like original, or list for multiple */}
-            {isSinglePackage ? (
-              /* Single Package Display (Original Style) */
-              <View style={styles.packageInfo}>
-                <LinearGradient
-                  colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
-                  style={styles.packageCard}
-                >
-                  <View style={styles.packageHeader}>
-                    <Text style={styles.packageCode}>{packages[0].code}</Text>
-                    <Text style={styles.packageAmount}>KES {packages[0].cost.toLocaleString()}</Text>
+            <LinearGradient
+              colors={['rgba(26, 26, 46, 0.98)', 'rgba(22, 33, 62, 0.98)']}
+              style={styles.modal}
+            >
+              {/* Modal Header */}
+              <View style={styles.modalHeader}>
+                <View style={styles.dragIndicator} />
+                <View style={styles.headerContent}>
+                  <View style={styles.headerIcon}>
+                    <Feather name="smartphone" size={24} color={colors.primary} />
                   </View>
-                  <Text style={styles.packageDescription}>{packages[0].route_description}</Text>
-                  <Text style={styles.packageReceiver}>To: {packages[0].receiver_name}</Text>
-                </LinearGradient>
+                  <View style={styles.headerText}>
+                    <Text style={styles.modalTitle}>M-Pesa Payment</Text>
+                    <Text style={styles.modalSubtitle}>
+                      {isSinglePackage 
+                        ? `Pay for package ${packages[0].code}`
+                        : `Pay for ${packages.length} packages`
+                      }
+                    </Text>
+                  </View>
+                  <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+                    <Feather name="x" size={20} color="#888" />
+                  </TouchableOpacity>
+                </View>
               </View>
-            ) : (
-              /* Multiple Packages Display */
-              <View style={styles.packagesInfo}>
-                <ScrollView 
-                  style={styles.packagesScrollView}
-                  showsVerticalScrollIndicator={false}
-                  bounces={false}
-                >
-                  {packages.map((pkg, index) => (
+
+              <ScrollView
+                style={styles.scrollContainer}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+              >
+                {/* Package Info - Show single package like original, or list for multiple */}
+                {isSinglePackage ? (
+                  /* Single Package Display (Original Style) */
+                  <View style={styles.packageInfo}>
                     <LinearGradient
-                      key={pkg.id}
                       colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
-                      style={[styles.multiPackageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
+                      style={styles.packageCard}
                     >
                       <View style={styles.packageHeader}>
-                        <View style={styles.packageLeftSection}>
-                          <Text style={styles.packageCode}>{pkg.code}</Text>
-                          <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
-                        </View>
-                        <View style={styles.packageRight}>
-                          {pkg.delivery_type && (
-                            <View style={[
-                              styles.deliveryTypeBadge,
-                              { borderColor: getDeliveryTypeColor(pkg.delivery_type) }
-                            ]}>
-                              <Text style={[
-                                styles.badgeText,
-                                { color: getDeliveryTypeColor(pkg.delivery_type) }
-                              ]}>
-                                {getDeliveryTypeDisplay(pkg.delivery_type)}
-                              </Text>
-                            </View>
-                          )}
-                          <Text style={styles.packageAmount}>KES {pkg.cost.toLocaleString()}</Text>
-                        </View>
+                        <Text style={styles.packageCode}>{packages[0].code}</Text>
+                        <Text style={styles.packageAmount}>KES {packages[0].cost.toLocaleString()}</Text>
                       </View>
-                      <Text style={styles.packageDescription}>{pkg.route_description}</Text>
+                      <Text style={styles.packageDescription}>{packages[0].route_description}</Text>
+                      <Text style={styles.packageReceiver}>To: {packages[0].receiver_name}</Text>
                     </LinearGradient>
-                  ))}
-                </ScrollView>
-                
-                {/* Total Cost for Multiple Packages */}
-                <View style={styles.totalSection}>
-                  <LinearGradient
-                    colors={['rgba(124, 58, 237, 0.2)', 'rgba(124, 58, 237, 0.1)']}
-                    style={styles.totalCard}
-                  >
-                    <Text style={styles.totalLabel}>Total Amount</Text>
-                    <Text style={styles.totalAmount}>KES {totalCost.toLocaleString()}</Text>
-                  </LinearGradient>
-                </View>
-              </View>
-            )}
-
-            {/* Payment Steps - Same as original */}
-            <View style={styles.paymentContent}>
-              {paymentStep === 'confirm' && (
-                <View style={styles.confirmStep}>
-                  <Text style={styles.stepTitle}>Confirm Payment Details</Text>
-                  
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>Phone Number</Text>
-                    <View style={styles.phoneInputContainer}>
-                      <Text style={styles.phonePrefix}>+254</Text>
-                      <TextInput
-                        style={styles.phoneInput}
-                        value={phoneNumber}
-                        onChangeText={setPhoneNumber}
-                        placeholder="712345678"
-                        placeholderTextColor="#666"
-                        keyboardType="numeric"
-                        maxLength={9}
-                      />
+                  </View>
+                ) : (
+                  /* Multiple Packages Display */
+                  <View style={styles.packagesInfo}>
+                    <ScrollView 
+                      style={styles.packagesScrollView}
+                      nestedScrollEnabled={true}
+                      showsVerticalScrollIndicator={false}
+                      bounces={false}
+                    >
+                      {packages.map((pkg, index) => (
+                        <LinearGradient
+                          key={pkg.id}
+                          colors={['rgba(124, 58, 237, 0.1)', 'rgba(124, 58, 237, 0.05)']}
+                          style={[styles.multiPackageCard, { marginBottom: index === packages.length - 1 ? 0 : 8 }]}
+                        >
+                          <View style={styles.packageHeader}>
+                            <View style={styles.packageLeftSection}>
+                              <Text style={styles.packageCode}>{pkg.code}</Text>
+                              <Text style={styles.packageReceiver}>To: {pkg.receiver_name}</Text>
+                            </View>
+                            <View style={styles.packageRight}>
+                              {pkg.delivery_type && (
+                                <View style={[
+                                  styles.deliveryTypeBadge,
+                                  { borderColor: getDeliveryTypeColor(pkg.delivery_type) }
+                                ]}>
+                                  <Text style={[
+                                    styles.badgeText,
+                                    { color: getDeliveryTypeColor(pkg.delivery_type) }
+                                  ]}>
+                                    {getDeliveryTypeDisplay(pkg.delivery_type)}
+                                  </Text>
+                                </View>
+                              )}
+                              <Text style={styles.packageAmount}>KES {pkg.cost.toLocaleString()}</Text>
+                            </View>
+                          </View>
+                          <Text style={styles.packageDescription}>{pkg.route_description}</Text>
+                        </LinearGradient>
+                      ))}
+                    </ScrollView>
+                    
+                    {/* Total Cost for Multiple Packages */}
+                    <View style={styles.totalSection}>
+                      <LinearGradient
+                        colors={['rgba(124, 58, 237, 0.2)', 'rgba(124, 58, 237, 0.1)']}
+                        style={styles.totalCard}
+                      >
+                        <Text style={styles.totalLabel}>Total Amount</Text>
+                        <Text style={styles.totalAmount}>KES {totalCost.toLocaleString()}</Text>
+                      </LinearGradient>
                     </View>
                   </View>
+                )}
 
-                  <Animated.View style={{ transform: [{ scale: buttonScaleAnim }] }}>
-                    <TouchableOpacity style={styles.primaryButton} onPress={initiatePayment}>
-                      <Feather name="smartphone" size={20} color="#fff" />
-                      <Text style={styles.primaryButtonText}>Send M-Pesa Prompt</Text>
-                    </TouchableOpacity>
-                  </Animated.View>
+                {/* Payment Steps */}
+                <View style={styles.paymentContent}>
+                  {paymentStep === 'confirm' && (
+                    <View style={styles.confirmStep}>
+                      <Text style={styles.stepTitle}>Confirm Payment Details</Text>
+                      
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>Phone Number</Text>
+                        <View style={styles.phoneInputContainer}>
+                          <Text style={styles.phonePrefix}>+254</Text>
+                          <TextInput
+                            style={styles.phoneInput}
+                            value={phoneNumber}
+                            onChangeText={setPhoneNumber}
+                            placeholder="712345678"
+                            placeholderTextColor="#666"
+                            keyboardType="numeric"
+                            maxLength={9}
+                          />
+                        </View>
+                      </View>
+
+                      <View style={styles.buttonGroup}>
+                        <Animated.View style={{ transform: [{ scale: buttonScaleAnim }] }}>
+                          <TouchableOpacity style={styles.primaryButton} onPress={initiatePayment}>
+                            <Feather name="smartphone" size={20} color="#fff" />
+                            <Text style={styles.primaryButtonText}>Send M-Pesa Prompt</Text>
+                          </TouchableOpacity>
+                        </Animated.View>
+
+                        <TouchableOpacity style={styles.secondaryButton} onPress={goToManualVerify}>
+                          <Feather name="edit-3" size={16} color={colors.primary} />
+                          <Text style={styles.secondaryButtonText}>Verify Manually</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {paymentStep === 'processing' && (
+                    <View style={styles.processingStep}>
+                      <Animated.View style={[styles.loadingIcon, { transform: [{ rotate: spin }] }]}>
+                        <Feather name="loader" size={48} color={colors.primary} />
+                      </Animated.View>
+                      <Text style={styles.stepTitle}>Processing Payment</Text>
+                      <Text style={styles.stepDescription}>
+                        Please check your phone for the M-Pesa prompt and enter your PIN to complete the payment.
+                      </Text>
+                      <View style={styles.processingInfo}>
+                        <Text style={styles.processingText}>Waiting for confirmation...</Text>
+                      </View>
+                    </View>
+                  )}
+
+                  {paymentStep === 'success' && (
+                    <View style={styles.successStep}>
+                      <View style={styles.successIcon}>
+                        <Feather name="check-circle" size={48} color="#10b981" />
+                      </View>
+                      <Text style={styles.stepTitle}>Payment Successful!</Text>
+                      <Text style={styles.stepDescription}>
+                        Your payment has been processed successfully. The package status will be updated shortly.
+                      </Text>
+                    </View>
+                  )}
+
+                  {paymentStep === 'failed' && (
+                    <View style={styles.failedStep}>
+                      <View style={styles.errorIcon}>
+                        <Feather name="x-circle" size={48} color="#ef4444" />
+                      </View>
+                      <Text style={styles.stepTitle}>Payment Failed</Text>
+                      <Text style={styles.stepDescription}>
+                        {errorMessage || 'The payment could not be processed.'}
+                      </Text>
+                      
+                      <View style={styles.failedActions}>
+                        <TouchableOpacity style={styles.primaryButton} onPress={retryPayment}>
+                          <Feather name="refresh-cw" size={16} color="#fff" />
+                          <Text style={styles.primaryButtonText}>Try Again</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity 
+                          style={styles.secondaryButton} 
+                          onPress={() => setPaymentStep('manual_verify')}
+                        >
+                          <Feather name="edit-3" size={16} color={colors.primary} />
+                          <Text style={styles.secondaryButtonText}>Enter Transaction Code</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
+
+                  {paymentStep === 'manual_verify' && (
+                    <View style={styles.manualStep}>
+                      <Text style={styles.stepTitle}>Manual Verification</Text>
+                      <Text style={styles.stepDescription}>
+                        If you completed the payment, please enter the M-Pesa transaction code for verification.
+                      </Text>
+                      
+                      <View style={styles.inputGroup}>
+                        <Text style={styles.inputLabel}>M-Pesa Transaction Code</Text>
+                        <TextInput
+                          style={styles.textInput}
+                          value={transactionCode}
+                          onChangeText={setTransactionCode}
+                          placeholder="e.g. QH47XJ9K2M"
+                          placeholderTextColor="#666"
+                          autoCapitalize="characters"
+                        />
+                      </View>
+
+                      <View style={styles.manualActions}>
+                        <TouchableOpacity style={styles.primaryButton} onPress={verifyManualTransaction}>
+                          <Feather name="check" size={20} color="#fff" />
+                          <Text style={styles.primaryButtonText}>Verify Payment</Text>
+                        </TouchableOpacity>
+                        
+                        <TouchableOpacity style={styles.secondaryButton} onPress={retryPayment}>
+                          <Text style={styles.secondaryButtonText}>Try Payment Again</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  )}
                 </View>
-              )}
-
-              {paymentStep === 'processing' && (
-                <View style={styles.processingStep}>
-                  <Animated.View style={[styles.loadingIcon, { transform: [{ rotate: spin }] }]}>
-                    <Feather name="loader" size={48} color={colors.primary} />
-                  </Animated.View>
-                  <Text style={styles.stepTitle}>Processing Payment</Text>
-                  <Text style={styles.stepDescription}>
-                    Please check your phone for the M-Pesa prompt and enter your PIN to complete the payment.
-                  </Text>
-                  <View style={styles.processingInfo}>
-                    <Text style={styles.processingText}>Waiting for confirmation...</Text>
-                  </View>
-                </View>
-              )}
-
-              {paymentStep === 'success' && (
-                <View style={styles.successStep}>
-                  <View style={styles.successIcon}>
-                    <Feather name="check-circle" size={48} color="#10b981" />
-                  </View>
-                  <Text style={styles.stepTitle}>Payment Successful!</Text>
-                  <Text style={styles.stepDescription}>
-                    Your payment has been processed successfully. The package status will be updated shortly.
-                  </Text>
-                </View>
-              )}
-
-              {paymentStep === 'failed' && (
-                <View style={styles.failedStep}>
-                  <View style={styles.errorIcon}>
-                    <Feather name="x-circle" size={48} color="#ef4444" />
-                  </View>
-                  <Text style={styles.stepTitle}>Payment Failed</Text>
-                  <Text style={styles.stepDescription}>
-                    {errorMessage || 'The payment could not be processed.'}
-                  </Text>
-                  
-                  <View style={styles.failedActions}>
-                    <TouchableOpacity style={styles.primaryButton} onPress={retryPayment}>
-                      <Feather name="refresh-cw" size={16} color="#fff" />
-                      <Text style={styles.primaryButtonText}>Try Again</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity 
-                      style={styles.secondaryButton} 
-                      onPress={() => setPaymentStep('manual_verify')}
-                    >
-                      <Feather name="edit-3" size={16} color={colors.primary} />
-                      <Text style={styles.secondaryButtonText}>Enter Transaction Code</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-
-              {paymentStep === 'manual_verify' && (
-                <View style={styles.manualStep}>
-                  <Text style={styles.stepTitle}>Manual Verification</Text>
-                  <Text style={styles.stepDescription}>
-                    If you completed the payment, please enter the M-Pesa transaction code for verification.
-                  </Text>
-                  
-                  <View style={styles.inputGroup}>
-                    <Text style={styles.inputLabel}>M-Pesa Transaction Code</Text>
-                    <TextInput
-                      style={styles.textInput}
-                      value={transactionCode}
-                      onChangeText={setTransactionCode}
-                      placeholder="e.g. QH47XJ9K2M"
-                      placeholderTextColor="#666"
-                      autoCapitalize="characters"
-                    />
-                  </View>
-
-                  <View style={styles.manualActions}>
-                    <TouchableOpacity style={styles.primaryButton} onPress={verifyManualTransaction}>
-                      <Feather name="check" size={20} color="#fff" />
-                      <Text style={styles.primaryButtonText}>Verify Payment</Text>
-                    </TouchableOpacity>
-                    
-                    <TouchableOpacity style={styles.secondaryButton} onPress={retryPayment}>
-                      <Text style={styles.secondaryButtonText}>Try Payment Again</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              )}
-            </View>
-          </LinearGradient>
-        </Animated.View>
+              </ScrollView>
+            </LinearGradient>
+          </Animated.View>
+        </KeyboardAvoidingView>
       </Animated.View>
     </Modal>
   );
@@ -815,13 +864,21 @@ const styles = StyleSheet.create({
   overlayTouchable: {
     flex: 1,
   },
-  // FIXED: Increased modal height to show package details properly
   modalContainer: {
-    maxHeight: SCREEN_HEIGHT * 0.85, // Increased from 0.9 to show more content
+    flex: 1,
+    justifyContent: 'flex-end',
   },
   modal: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    flex: 1,
+  },
+  
+  // Scroll Container
+  scrollContainer: {
+    flex: 1,
+  },
+  scrollContent: {
     paddingBottom: 32,
   },
   
@@ -914,13 +971,13 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Multiple Packages Info - FIXED: Increased height significantly
+  // Multiple Packages Info
   packagesInfo: {
     paddingHorizontal: 20,
     paddingVertical: 16,
-    maxHeight: 320, // FIXED: Increased from 200 to 320 to show more packages
   },
   packagesScrollView: {
+    maxHeight: 200,
     flexGrow: 0,
   },
   multiPackageCard: {
@@ -1038,6 +1095,12 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
     fontSize: 16,
     color: '#fff',
+  },
+  
+  // Button Group
+  buttonGroup: {
+    width: '100%',
+    gap: 12,
   },
   
   // Processing Step
