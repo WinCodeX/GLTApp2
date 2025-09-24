@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - Enhanced with edit/resubmit functionality
+// components/PackageCreationModal.tsx - Enhanced with auto-population fix for edit/resubmit
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -32,7 +32,9 @@ import {
   type Location, 
   type Area, 
   type Agent,
-  type PackageData 
+  type PackageData,
+  getAreas,
+  getAgents
 } from '../lib/helpers/packageHelpers';
 import { useUser } from '../context/UserContext';
 
@@ -194,12 +196,13 @@ export default function PackageCreationModal({
   // Access user context for business information
   const { selectedBusiness, getDisplayName, getUserPhone } = useUser();
 
-  // Data states
+  // ENHANCED: Dependency management states
   const [locations, setLocations] = useState<Location[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
 
   // Multi-package states
   const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
@@ -277,31 +280,251 @@ export default function PackageCreationModal({
     }
   }, [mode, pendingPackages.length]);
 
-  // NEW: Load package data for editing/resubmitting
-  const loadPackageForEditing = useCallback((pkg: Package) => {
+  // ENHANCED: Load reference data with dependency management
+  const loadReferenceData = useCallback(async (retryCount = 0): Promise<void> => {
+    console.log(`🔄 Loading package modal reference data (attempt ${retryCount + 1})`);
+    
+    try {
+      setIsDataLoading(true);
+      setDataError(null);
+
+      // Check cache first
+      const cacheValid = await isCacheValid();
+      console.log('🔍 Cache valid:', cacheValid);
+      
+      if (cacheValid) {
+        const cachedData = await loadFromCache();
+        if (cachedData) {
+          console.log('📋 Loading from cache...');
+          setLocations(cachedData.locations);
+          setAreas(cachedData.areas);
+          setAgents(cachedData.agents);
+          
+          console.log('✅ Cached data loaded:', {
+            locations: cachedData.locations.length,
+            areas: cachedData.areas.length,
+            agents: cachedData.agents.length
+          });
+          
+          const validation = validatePackageFormData(cachedData);
+          if (!validation.isValid) {
+            console.warn('⚠️ Cached data validation failed:', validation.issues);
+            await clearCache();
+            throw new Error('Cached data is invalid, fetching fresh data...');
+          }
+          
+          return Promise.resolve();
+        }
+      }
+      
+      console.log('🌐 Fetching fresh data from API...');
+      
+      // Load data using individual functions for better reliability
+      const [areasData, agentsData, locationsData] = await Promise.all([
+        getAreas(),
+        getAgents(),
+        getPackageFormData().then(data => data.locations).catch(() => [])
+      ]);
+      
+      console.log('📦 Fresh data loaded:', {
+        locations: locationsData.length,
+        areas: areasData.length,
+        agents: agentsData.length
+      });
+      
+      setLocations(locationsData);
+      setAreas(areasData);
+      setAgents(agentsData);
+      
+      // Save to cache
+      await saveToCache({
+        locations: locationsData,
+        areas: areasData,
+        agents: agentsData
+      });
+      
+      console.log('✅ Fresh data loaded and cached successfully');
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load reference data:', error);
+      
+      if (retryCount < 2) {
+        console.log('🔄 Retrying reference data load...');
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+        return loadReferenceData(retryCount + 1);
+      }
+      
+      // Try to use cached data as fallback
+      const cachedData = await loadFromCache();
+      if (cachedData) {
+        console.log('📋 Using expired cache as fallback...');
+        setLocations(cachedData.locations);
+        setAreas(cachedData.areas);
+        setAgents(cachedData.agents);
+        setDataError(null);
+        return Promise.resolve();
+      }
+      
+      setDataError(error.message || 'Failed to load reference data');
+      throw error;
+    } finally {
+      setIsDataLoading(false);
+    }
+  }, [isCacheValid, loadFromCache, clearCache, saveToCache]);
+
+  // ENHANCED: Load package data for editing/resubmitting with proper dependency management
+  const loadPackageForEditing = useCallback(async (pkg: Package) => {
     console.log('🔧 Loading package for editing:', pkg.code);
     
-    setPackageData({
-      sender_name: pkg.sender_name || '',
-      sender_phone: pkg.sender_phone || '',
-      receiver_name: pkg.receiver_name || '',
-      receiver_phone: pkg.receiver_phone || '',
-      origin_area_id: pkg.origin_area_id || '',
-      destination_area_id: pkg.destination_area_id || '',
-      origin_agent_id: pkg.origin_agent_id || '',
-      destination_agent_id: pkg.destination_agent_id || '',
-      delivery_type: (pkg.delivery_type as DeliveryType) || 'doorstep',
-      package_size: (pkg.package_size as PackageSize) || 'medium',
-      special_instructions: pkg.special_instructions || '',
-      business_name: pkg.business_name || selectedBusiness?.name || '',
-      business_phone: pkg.business_phone || selectedBusiness?.phone_number || '',
-      receiver_notes: '',
-      rider_notes: ''
-    });
-    
-    setDeliveryLocation(pkg.delivery_location || '');
-    setLargePackageInstructions(pkg.special_instructions || '');
-  }, [selectedBusiness]);
+    // Wait for reference data to be available
+    if (areas.length === 0 || agents.length === 0) {
+      console.log('⏳ Waiting for reference data before auto-populating...');
+      return;
+    }
+
+    try {
+      // Set basic form data
+      setPackageData(prev => ({
+        ...prev,
+        sender_name: pkg.sender_name || '',
+        sender_phone: pkg.sender_phone || '',
+        receiver_name: pkg.receiver_name || '',
+        receiver_phone: pkg.receiver_phone || '',
+        delivery_type: (pkg.delivery_type as DeliveryType) || 'doorstep',
+        package_size: (pkg.package_size as PackageSize) || 'medium',
+        special_instructions: pkg.special_instructions || '',
+        business_name: pkg.business_name || selectedBusiness?.name || '',
+        business_phone: pkg.business_phone || selectedBusiness?.phone_number || '',
+        receiver_notes: '',
+        rider_notes: ''
+      }));
+      
+      setDeliveryLocation(pkg.delivery_location || '');
+      setLargePackageInstructions(pkg.special_instructions || '');
+
+      // ENHANCED: Map and select areas/agents with proper matching
+      if (pkg.origin_area_id) {
+        const originArea = areas.find(area => 
+          area.id === pkg.origin_area_id || 
+          area.id == pkg.origin_area_id ||
+          String(area.id) === String(pkg.origin_area_id)
+        );
+        
+        if (originArea) {
+          setPackageData(prev => ({ ...prev, origin_area_id: originArea.id }));
+          console.log('✅ Mapped origin area:', originArea.name);
+        } else {
+          console.warn('⚠️ Origin area not found:', pkg.origin_area_id);
+        }
+      }
+
+      if (pkg.origin_agent_id) {
+        const originAgent = agents.find(agent => 
+          agent.id === pkg.origin_agent_id || 
+          agent.id == pkg.origin_agent_id ||
+          String(agent.id) === String(pkg.origin_agent_id)
+        );
+        
+        if (originAgent) {
+          setPackageData(prev => ({ 
+            ...prev, 
+            origin_agent_id: originAgent.id,
+            origin_area_id: originAgent.area?.id || prev.origin_area_id
+          }));
+          console.log('✅ Mapped origin agent:', originAgent.name);
+        } else {
+          console.warn('⚠️ Origin agent not found:', pkg.origin_agent_id);
+        }
+      }
+
+      if (pkg.destination_area_id) {
+        const destArea = areas.find(area => 
+          area.id === pkg.destination_area_id || 
+          area.id == pkg.destination_area_id ||
+          String(area.id) === String(pkg.destination_area_id)
+        );
+        
+        if (destArea) {
+          setPackageData(prev => ({ ...prev, destination_area_id: destArea.id }));
+          console.log('✅ Mapped destination area:', destArea.name);
+        } else {
+          console.warn('⚠️ Destination area not found:', pkg.destination_area_id);
+        }
+      }
+
+      if (pkg.destination_agent_id) {
+        const destAgent = agents.find(agent => 
+          agent.id === pkg.destination_agent_id || 
+          agent.id == pkg.destination_agent_id ||
+          String(agent.id) === String(pkg.destination_agent_id)
+        );
+        
+        if (destAgent) {
+          setPackageData(prev => ({ 
+            ...prev, 
+            destination_agent_id: destAgent.id,
+            destination_area_id: destAgent.area?.id || prev.destination_area_id
+          }));
+          console.log('✅ Mapped destination agent:', destAgent.name);
+        } else {
+          console.warn('⚠️ Destination agent not found:', pkg.destination_agent_id);
+        }
+      }
+
+      // ENHANCED: Handle step navigation for resubmit mode
+      if (mode === 'resubmit') {
+        console.log('🔄 Resubmit mode - navigating to confirmation step');
+        setCurrentStep(STEP_TITLES.length - 1);
+      }
+
+      console.log('✅ Package data loaded and auto-populated successfully');
+
+    } catch (error) {
+      console.error('❌ Error auto-populating package data:', error);
+    }
+  }, [areas, agents, selectedBusiness, mode, STEP_TITLES.length]);
+
+  // ENHANCED: Dependency-aware initialization
+  useEffect(() => {
+    if (visible && !isInitialized) {
+      console.log('🚀 Initializing package modal with dependency management');
+      
+      const initializeModal = async () => {
+        try {
+          // Step 1: Load reference data first
+          await loadReferenceData();
+          
+          // Step 2: Load package data for editing/resubmitting (if applicable)
+          const packageToLoad = editPackage || resubmitPackage;
+          if (packageToLoad && (mode === 'edit' || mode === 'resubmit')) {
+            // Small delay to ensure state updates are processed
+            setTimeout(() => {
+              loadPackageForEditing(packageToLoad);
+            }, 100);
+          }
+          
+          setIsInitialized(true);
+          console.log('✅ Package modal initialization complete');
+          
+        } catch (error) {
+          console.error('❌ Failed to initialize package modal:', error);
+        }
+      };
+
+      initializeModal();
+    }
+  }, [visible, isInitialized, loadReferenceData, loadPackageForEditing, editPackage, resubmitPackage, mode]);
+
+  // Effect to handle package data loading when reference data becomes available
+  useEffect(() => {
+    if (areas.length > 0 && agents.length > 0) {
+      const packageToLoad = editPackage || resubmitPackage;
+      if (packageToLoad && (mode === 'edit' || mode === 'resubmit') && isInitialized) {
+        console.log('🔄 Reference data available, loading package data...');
+        loadPackageForEditing(packageToLoad);
+      }
+    }
+  }, [areas, agents, editPackage, resubmitPackage, mode, isInitialized, loadPackageForEditing]);
 
   // Keyboard handling
   useEffect(() => {
@@ -359,15 +582,8 @@ export default function PackageCreationModal({
 
   useEffect(() => {
     if (visible) {
-      console.log('📦 Modal opened, loading data...');
-      resetForm();
-      loadModalData();
-      
-      // NEW: Load package data for editing/resubmitting
-      if (mode === 'edit' && editPackage) {
-        loadPackageForEditing(editPackage);
-      } else if (mode === 'resubmit' && resubmitPackage) {
-        loadPackageForEditing(resubmitPackage);
+      if (!isCreatingMultiple && mode === 'create') {
+        resetForm();
       }
       
       Animated.timing(slideAnim, {
@@ -375,97 +591,11 @@ export default function PackageCreationModal({
         duration: 300,
         useNativeDriver: true,
       }).start();
+    } else {
+      // Reset initialization state when modal closes
+      setIsInitialized(false);
     }
-  }, [visible, mode, editPackage, resubmitPackage]);
-
-  const loadModalData = useCallback(async () => {
-    try {
-      setIsDataLoading(true);
-      setDataError(null);
-      
-      // Check cache first
-      const cacheValid = await isCacheValid();
-      console.log('🔍 Cache valid:', cacheValid);
-      
-      if (cacheValid) {
-        const cachedData = await loadFromCache();
-        if (cachedData) {
-          console.log('📋 Loading from cache...');
-          setLocations(cachedData.locations);
-          setAreas(cachedData.areas);
-          setAgents(cachedData.agents);
-          
-          console.log('✅ Cached data loaded:', {
-            locations: cachedData.locations.length,
-            areas: cachedData.areas.length,
-            agents: cachedData.agents.length
-          });
-          
-          const validation = validatePackageFormData(cachedData);
-          if (!validation.isValid) {
-            console.warn('⚠️ Cached data validation failed:', validation.issues);
-            await clearCache();
-            throw new Error('Cached data is invalid, fetching fresh data...');
-          }
-          
-          setIsDataLoading(false);
-          return;
-        }
-      }
-      
-      console.log('🌐 Fetching fresh data from API using helper...');
-      console.log('🔗 API Call: getPackageFormData()');
-      
-      const formData = await getPackageFormData();
-      
-      console.log('📦 Helper Response Structure:', {
-        hasLocations: !!formData.locations,
-        hasAreas: !!formData.areas,
-        hasAgents: !!formData.agents,
-        locationsLength: formData.locations?.length || 0,
-        areasLength: formData.areas?.length || 0,
-        agentsLength: formData.agents?.length || 0
-      });
-      
-      const validation = validatePackageFormData(formData);
-      if (!validation.isValid) {
-        console.error('❌ Fresh data validation failed:', validation.issues);
-        setDataError(`Data validation failed: ${validation.issues.join(', ')}`);
-        return;
-      }
-      
-      setLocations(formData.locations);
-      setAreas(formData.areas);
-      setAgents(formData.agents);
-      
-      await saveToCache({
-        locations: formData.locations,
-        areas: formData.areas,
-        agents: formData.agents
-      });
-      
-      console.log('✅ Fresh data loaded and cached successfully:', {
-        locations: formData.locations.length,
-        areas: formData.areas.length,
-        agents: formData.agents.length
-      });
-      
-    } catch (error: any) {
-      console.error('❌ Failed to load modal data:', error);
-      setDataError(error.message || 'Failed to load data');
-      
-      const cachedData = await loadFromCache();
-      if (cachedData) {
-        console.log('📋 Using expired cache as fallback...');
-        setLocations(cachedData.locations);
-        setAreas(cachedData.areas);
-        setAgents(cachedData.agents);
-        setDataError(null);
-      }
-    } finally {
-      setIsDataLoading(false);
-    }
-  }, [isCacheValid, loadFromCache, saveToCache, clearCache]);
+  }, [visible, isCreatingMultiple, mode]);
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
@@ -495,6 +625,11 @@ export default function PackageCreationModal({
     setLargePackageInstructions('');
     setPendingPackages([]);
     setIsCreatingMultiple(false);
+    setDataError(null);
+    setLocations([]);
+    setAreas([]);
+    setAgents([]);
+    setIsInitialized(false);
   }, []);
 
   // Reset only for new package (keep pending packages)
@@ -946,9 +1081,31 @@ export default function PackageCreationModal({
     }
   }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, mode, editPackage, resubmitPackage, onSubmit, getDisplayName, getUserPhone, selectedBusiness]);
 
+  // ENHANCED: Retry data loading with proper state management
   const retryDataLoad = useCallback(() => {
-    loadModalData();
-  }, [loadModalData]);
+    console.log('🔄 Retrying data load...');
+    setIsInitialized(false);
+    setDataError(null);
+    setAreas([]);
+    setAgents([]);
+    setLocations([]);
+    
+    // Reinitialize after small delay
+    setTimeout(() => {
+      if (visible) {
+        const initializeModal = async () => {
+          try {
+            await loadReferenceData();
+            setIsInitialized(true);
+          } catch (error) {
+            console.error('❌ Retry failed:', error);
+          }
+        };
+        
+        initializeModal();
+      }
+    }, 500);
+  }, [visible, loadReferenceData]);
 
   const handleClearCache = useCallback(async () => {
     try {
@@ -959,7 +1116,7 @@ export default function PackageCreationModal({
         position: 'top',
         visibilityTime: 2000,
       });
-      await loadModalData();
+      await loadReferenceData();
     } catch (error) {
       Toast.show({
         type: 'error',
@@ -968,7 +1125,7 @@ export default function PackageCreationModal({
         visibilityTime: 3000,
       });
     }
-  }, [clearCache, loadModalData]);
+  }, [clearCache, loadReferenceData]);
 
   // Save large package instructions and close modal
   const handleSaveLargePackageInstructions = useCallback(() => {
@@ -1046,7 +1203,7 @@ export default function PackageCreationModal({
       </View>
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
-        {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length > 1 ? 's' : ''} pending`}
+        {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length !== 1 ? 's' : ''} pending`}
         {mode !== 'create' && ` • ${mode === 'edit' ? 'Editing' : 'Resubmitting'} Package`}
       </Text>
     </View>
@@ -1061,6 +1218,45 @@ export default function PackageCreationModal({
       <View style={styles.placeholder} />
     </View>
   ), [closeModal, getModalTitle]);
+
+  // ENHANCED: Loading state with proper messaging
+  const renderLoadingState = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#7c3aed" />
+      <Text style={styles.loadingTitle}>
+        {isDataLoading ? 'Loading Reference Data' : 'Initializing Modal'}
+      </Text>
+      <Text style={styles.loadingSubtitle}>
+        {isDataLoading 
+          ? 'Fetching locations, areas, and offices...' 
+          : 'Preparing package creation form...'
+        }
+      </Text>
+    </View>
+  );
+
+  // ENHANCED: Error state with retry functionality
+  const renderErrorState = () => (
+    <View style={styles.errorContainer}>
+      <Feather name="alert-circle" size={64} color="#ef4444" />
+      <Text style={styles.errorTitle}>Failed to Load Data</Text>
+      <Text style={styles.errorMessage}>
+        {dataError}
+        {'\n\n'}Unable to load required reference data. Please check your connection and try again.
+      </Text>
+      
+      <View style={styles.errorButtons}>
+        <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
+          <Feather name="refresh-cw" size={20} color="#fff" />
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
+          <Feather name="x" size={20} color="#fff" />
+          <Text style={styles.cancelButtonText}>Close</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   // Large Package Notes Modal with separate state
   const renderLargePackageModal = useCallback(() => (
@@ -1117,6 +1313,20 @@ export default function PackageCreationModal({
       <Text style={styles.stepTitle}>What are you sending?</Text>
       <Text style={styles.stepSubtitle}>Choose the size of your package</Text>
       
+      {/* Show editing/resubmit notice */}
+      {(mode === 'edit' || mode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={mode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={mode === 'edit' ? '#8b5cf6' : '#f97316'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: mode === 'edit' ? '#8b5cf6' : '#f97316' }]}>
+            {mode === 'edit' ? 'You are editing an existing package' : 'You are resubmitting a rejected package'}
+          </Text>
+        </View>
+      )}
+      
       <View style={styles.packageSizeOptions}>
         <TouchableOpacity
           style={[
@@ -1170,7 +1380,7 @@ export default function PackageCreationModal({
         </Text>
       </View>
     </View>
-  ), [packageData.package_size, handlePackageSizeChange]);
+  ), [packageData.package_size, handlePackageSizeChange, mode]);
 
   // Step 1: Sender Office Selection - UPDATED: Using package size option styling
   const renderOriginAgentSelection = useCallback(() => {
@@ -1761,42 +1971,12 @@ export default function PackageCreationModal({
   ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, getActionButtonText, mode]);
 
   const renderMainContent = useCallback(() => {
-    if (isDataLoading) {
-      return (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#7c3aed" />
-          <Text style={styles.loadingTitle}>Loading Package Data</Text>
-          <Text style={styles.loadingSubtitle}>
-            Fetching locations, areas, and offices...
-          </Text>
-        </View>
-      );
+    if (isDataLoading || !isInitialized) {
+      return renderLoadingState();
     }
 
     if (dataError) {
-      return (
-        <View style={styles.errorContainer}>
-          <TouchableOpacity onPress={closeModal} style={styles.closeButtonAbsolute}>
-            <Feather name="x" size={24} color="#fff" />
-          </TouchableOpacity>
-          
-          <Feather name="alert-circle" size={64} color="#ef4444" />
-          <Text style={styles.errorTitle}>Failed to Load Data</Text>
-          <Text style={styles.errorMessage}>
-            {dataError}
-            {'\n\n'}Check your internet connection and make sure your API is running.
-          </Text>
-          
-          <View style={styles.errorButtons}>
-            <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
-              <Text style={styles.cancelButtonText}>Cancel</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
+      return renderErrorState();
     }
 
     return (
@@ -1816,7 +1996,7 @@ export default function PackageCreationModal({
         {renderNavigationButtons()}
       </>
     );
-  }, [isDataLoading, dataError, closeModal, retryDataLoad, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
+  }, [isDataLoading, isInitialized, dataError, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
 
   return (
     <Modal visible={visible} transparent animationType="none">
@@ -1894,18 +2074,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  closeButtonAbsolute: {
-    position: 'absolute',
-    top: Platform.OS === 'ios' ? 10 : 15,
-    right: 20,
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    zIndex: 10,
-  },
   headerTitle: {
     fontSize: 18,
     fontWeight: '600',
@@ -1964,6 +2132,82 @@ const styles = StyleSheet.create({
     color: '#888',
     marginBottom: 20,
     lineHeight: 20,
+  },
+  
+  // ENHANCED: Loading state styles
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  
+  // ENHANCED: Error state styles
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#7c3aed',
+    gap: 8,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
   },
   
   // NEW: Mode notice section for edit/resubmit
@@ -2602,72 +2846,5 @@ const styles = StyleSheet.create({
   },
   disabledButtonText: {
     color: '#666',
-  },
-  
-  loadingContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  loadingTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  loadingSubtitle: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 40,
-  },
-  errorTitle: {
-    fontSize: 20,
-    fontWeight: '600',
-    color: '#ef4444',
-    marginTop: 20,
-    marginBottom: 16,
-    textAlign: 'center',
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#888',
-    textAlign: 'center',
-    lineHeight: 20,
-    marginBottom: 30,
-  },
-  errorButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: '#7c3aed',
-  },
-  retryButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '600',
-  },
-  cancelButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  cancelButtonText: {
-    fontSize: 16,
-    color: '#fff',
-    fontWeight: '500',
   },
 });
