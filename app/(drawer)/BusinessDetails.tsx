@@ -1409,7 +1409,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-    transform: [{ rotate: '90deg' }],
+    transform: [{ rotate: '-90deg' }],
     letterSpacing: 2,
   },
   joinedMembersSection: {
