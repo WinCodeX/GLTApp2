@@ -1,4 +1,4 @@
-// components/FragileDeliveryModal.tsx - Enhanced with business integration and edit/resubmit functionality
+// components/FragileDeliveryModal.tsx - Enhanced with auto-population fix for edit/resubmit
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -368,6 +368,13 @@ export default function FragileDeliveryModal({
   // Access user context for business information and user data
   const { selectedBusiness, getDisplayName, getUserPhone } = useUser();
   
+  // ENHANCED: Dependency management states
+  const [areas, setAreas] = useState<Area[]>([]);
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [isDataLoading, setIsDataLoading] = useState(false);
+  const [dataError, setDataError] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  
   // Location states
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
   const [deliveryLocation, setDeliveryLocation] = useState<LocationData | null>(null);
@@ -433,33 +440,179 @@ export default function FragileDeliveryModal({
     }
   }, [mode, savedPackages.length]);
 
-  // Load package data for editing/resubmitting
-  const loadPackageForEditing = useCallback((pkg: Package) => {
-    console.log('🔧 Loading fragile package for editing:', pkg.code);
+  // ENHANCED: Load reference data with dependency management
+  const loadReferenceData = useCallback(async (retryCount = 0): Promise<void> => {
+    console.log(`🔄 Loading fragile modal reference data (attempt ${retryCount + 1})`);
     
-    setReceiverName(pkg.receiver_name || '');
-    setReceiverPhone(pkg.receiver_phone || '');
-    setDeliveryAddress(pkg.delivery_location || '');
-    setItemDescription(pkg.package_description?.replace('FRAGILE DELIVERY: ', '') || '');
-    setSpecialInstructions(pkg.special_instructions || '');
-    
-    // Set locations if available
-    if (pkg.pickup_latitude && pkg.pickup_longitude) {
-      setPickupLocation({
-        latitude: pkg.pickup_latitude,
-        longitude: pkg.pickup_longitude,
-        address: pkg.pickup_location || 'Pickup Location'
+    try {
+      setIsDataLoading(true);
+      setDataError(null);
+
+      const [areasData, agentsData] = await Promise.all([
+        getAreas(),
+        getAgents()
+      ]);
+
+      console.log('✅ Reference data loaded:', {
+        areas: areasData.length,
+        agents: agentsData.length
       });
-    }
-    
-    if (pkg.delivery_latitude && pkg.delivery_longitude) {
-      setDeliveryLocation({
-        latitude: pkg.delivery_latitude,
-        longitude: pkg.delivery_longitude,
-        address: pkg.delivery_location || 'Delivery Location'
-      });
+
+      setAreas(areasData);
+      setAgents(agentsData);
+      
+      return Promise.resolve();
+    } catch (error: any) {
+      console.error('❌ Failed to load reference data:', error);
+      
+      if (retryCount < 2) {
+        console.log('🔄 Retrying reference data load...');
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+        return loadReferenceData(retryCount + 1);
+      }
+      
+      setDataError(error.message || 'Failed to load reference data');
+      throw error;
+    } finally {
+      setIsDataLoading(false);
     }
   }, []);
+
+  // ENHANCED: Load package data for editing/resubmitting with proper dependency management
+  const loadPackageForEditing = useCallback(async (pkg: Package) => {
+    console.log('🔧 Loading fragile package for editing:', pkg.code);
+    
+    // Wait for reference data to be available
+    if (areas.length === 0 || agents.length === 0) {
+      console.log('⏳ Waiting for reference data before auto-populating...');
+      return;
+    }
+
+    try {
+      // Set basic form data
+      setReceiverName(pkg.receiver_name || '');
+      setReceiverPhone(pkg.receiver_phone || '');
+      setDeliveryAddress(pkg.delivery_location || '');
+      setItemDescription(pkg.package_description?.replace('FRAGILE DELIVERY: ', '') || '');
+      setSpecialInstructions(pkg.special_instructions || '');
+      
+      // Set locations if available
+      if (pkg.pickup_latitude && pkg.pickup_longitude) {
+        setPickupLocation({
+          latitude: pkg.pickup_latitude,
+          longitude: pkg.pickup_longitude,
+          address: pkg.pickup_location || 'Pickup Location'
+        });
+      }
+      
+      if (pkg.delivery_latitude && pkg.delivery_longitude) {
+        setDeliveryLocation({
+          latitude: pkg.delivery_latitude,
+          longitude: pkg.delivery_longitude,
+          address: pkg.delivery_location || 'Delivery Location'
+        });
+      }
+
+      // ENHANCED: Map and select areas/agents with proper matching
+      if (pkg.origin_area_id) {
+        const originArea = areas.find(area => 
+          area.id === pkg.origin_area_id || 
+          area.id == pkg.origin_area_id ||
+          String(area.id) === String(pkg.origin_area_id)
+        );
+        
+        if (originArea) {
+          setSelectedPickupArea(originArea);
+          console.log('✅ Mapped origin area:', originArea.name);
+        } else {
+          console.warn('⚠️ Origin area not found:', pkg.origin_area_id);
+        }
+      }
+
+      if (pkg.destination_area_id) {
+        const destArea = areas.find(area => 
+          area.id === pkg.destination_area_id || 
+          area.id == pkg.destination_area_id ||
+          String(area.id) === String(pkg.destination_area_id)
+        );
+        
+        if (destArea) {
+          setSelectedDeliveryArea(destArea);
+          console.log('✅ Mapped destination area:', destArea.name);
+        } else {
+          console.warn('⚠️ Destination area not found:', pkg.destination_area_id);
+        }
+      }
+
+      if (pkg.destination_agent_id) {
+        const destAgent = agents.find(agent => 
+          agent.id === pkg.destination_agent_id || 
+          agent.id == pkg.destination_agent_id ||
+          String(agent.id) === String(pkg.destination_agent_id)
+        );
+        
+        if (destAgent) {
+          setSelectedDeliveryAgent(destAgent);
+          console.log('✅ Mapped destination agent:', destAgent.name);
+        } else {
+          console.warn('⚠️ Destination agent not found:', pkg.destination_agent_id);
+        }
+      }
+
+      // ENHANCED: Handle step navigation for resubmit mode
+      if (mode === 'resubmit') {
+        console.log('🔄 Resubmit mode - navigating to confirmation step');
+        setCurrentStep(STEP_TITLES.length - 1);
+      }
+
+      console.log('✅ Package data loaded and auto-populated successfully');
+
+    } catch (error) {
+      console.error('❌ Error auto-populating package data:', error);
+    }
+  }, [areas, agents, mode, STEP_TITLES.length]);
+
+  // ENHANCED: Dependency-aware initialization
+  useEffect(() => {
+    if (visible && !isInitialized) {
+      console.log('🚀 Initializing fragile modal with dependency management');
+      
+      const initializeModal = async () => {
+        try {
+          // Step 1: Load reference data first
+          await loadReferenceData();
+          
+          // Step 2: Load package data for editing/resubmitting (if applicable)
+          const packageToLoad = editPackage || resubmitPackage;
+          if (packageToLoad && (mode === 'edit' || mode === 'resubmit')) {
+            // Small delay to ensure state updates are processed
+            setTimeout(() => {
+              loadPackageForEditing(packageToLoad);
+            }, 100);
+          }
+          
+          setIsInitialized(true);
+          console.log('✅ Fragile modal initialization complete');
+          
+        } catch (error) {
+          console.error('❌ Failed to initialize fragile modal:', error);
+        }
+      };
+
+      initializeModal();
+    }
+  }, [visible, isInitialized, loadReferenceData, loadPackageForEditing, editPackage, resubmitPackage, mode]);
+
+  // Effect to handle package data loading when reference data becomes available
+  useEffect(() => {
+    if (areas.length > 0 && agents.length > 0) {
+      const packageToLoad = editPackage || resubmitPackage;
+      if (packageToLoad && (mode === 'edit' || mode === 'resubmit') && isInitialized) {
+        console.log('🔄 Reference data available, loading package data...');
+        loadPackageForEditing(packageToLoad);
+      }
+    }
+  }, [areas, agents, editPackage, resubmitPackage, mode, isInitialized, loadPackageForEditing]);
 
   // AsyncStorage functions
   const savePendingPackages = async (packages: SavedFragilePackage[]) => {
@@ -495,15 +648,8 @@ export default function FragileDeliveryModal({
       if (mode === 'create') {
         loadPendingPackages().then(setSavedPackages);
       }
-      
-      // Load package data for editing/resubmitting
-      if (mode === 'edit' && editPackage) {
-        loadPackageForEditing(editPackage);
-      } else if (mode === 'resubmit' && resubmitPackage) {
-        loadPackageForEditing(resubmitPackage);
-      }
     }
-  }, [visible, mode, editPackage, resubmitPackage]);
+  }, [visible, mode]);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -549,6 +695,9 @@ export default function FragileDeliveryModal({
         duration: 300,
         useNativeDriver: true,
       }).start();
+    } else {
+      // Reset initialization state when modal closes
+      setIsInitialized(false);
     }
   }, [visible, isCreatingMultiple, mode]);
 
@@ -566,6 +715,10 @@ export default function FragileDeliveryModal({
     setSpecialInstructions('');
     setIsSubmitting(false);
     setLocationError(null);
+    setDataError(null);
+    setAreas([]);
+    setAgents([]);
+    setIsInitialized(false);
   };
 
   const closeModal = useCallback(() => {
@@ -826,6 +979,31 @@ export default function FragileDeliveryModal({
     }
   };
 
+  // ENHANCED: Retry data loading with proper state management
+  const retryDataLoad = useCallback(() => {
+    console.log('🔄 Retrying data load...');
+    setIsInitialized(false);
+    setDataError(null);
+    setAreas([]);
+    setAgents([]);
+    
+    // Reinitialize after small delay
+    setTimeout(() => {
+      if (visible) {
+        const initializeModal = async () => {
+          try {
+            await loadReferenceData();
+            setIsInitialized(true);
+          } catch (error) {
+            console.error('❌ Retry failed:', error);
+          }
+        };
+        
+        initializeModal();
+      }
+    }, 500);
+  }, [visible, loadReferenceData]);
+
   const renderProgressBar = () => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -850,6 +1028,45 @@ export default function FragileDeliveryModal({
       </TouchableOpacity>
       <Text style={styles.headerTitle}>{getModalTitle()}</Text>
       <View style={styles.placeholder} />
+    </View>
+  );
+
+  // ENHANCED: Loading state with proper messaging
+  const renderLoadingState = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#f97316" />
+      <Text style={styles.loadingTitle}>
+        {isDataLoading ? 'Loading Reference Data' : 'Initializing Modal'}
+      </Text>
+      <Text style={styles.loadingSubtitle}>
+        {isDataLoading 
+          ? 'Fetching areas and agents...' 
+          : 'Preparing fragile delivery form...'
+        }
+      </Text>
+    </View>
+  );
+
+  // ENHANCED: Error state with retry functionality
+  const renderErrorState = () => (
+    <View style={styles.errorContainer}>
+      <Feather name="alert-circle" size={64} color="#ef4444" />
+      <Text style={styles.errorTitle}>Failed to Load Data</Text>
+      <Text style={styles.errorMessage}>
+        {dataError}
+        {'\n\n'}Unable to load required reference data. Please check your connection and try again.
+      </Text>
+      
+      <View style={styles.errorButtons}>
+        <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
+          <Feather name="refresh-cw" size={20} color="#fff" />
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
+          <Feather name="x" size={20} color="#fff" />
+          <Text style={styles.cancelButtonText}>Close</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 
@@ -1258,6 +1475,40 @@ export default function FragileDeliveryModal({
     </View>
   );
 
+  const renderMainContent = () => {
+    if (isDataLoading || !isInitialized) {
+      return renderLoadingState();
+    }
+
+    if (dataError) {
+      return renderErrorState();
+    }
+
+    return (
+      <>
+        {renderHeader()}
+        {renderProgressBar()}
+        
+        <View style={styles.contentWrapper}>
+          <ScrollView 
+            style={styles.contentContainer}
+            contentContainerStyle={[
+              styles.scrollContentContainer,
+              isKeyboardVisible && styles.keyboardVisiblePadding
+            ]}
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator={false}
+            keyboardDismissMode="interactive"
+          >
+            {renderCurrentStep()}
+          </ScrollView>
+        </View>
+        
+        {renderNavigationButtons()}
+      </>
+    );
+  };
+
   return (
     <>
       <Modal visible={visible} transparent animationType="none">
@@ -1282,25 +1533,7 @@ export default function FragileDeliveryModal({
                   colors={['#1a1a2e', '#16213e', '#0f1419']}
                   style={styles.modalContent}
                 >
-                  {renderHeader()}
-                  {renderProgressBar()}
-                  
-                  <View style={styles.contentWrapper}>
-                    <ScrollView 
-                      style={styles.contentContainer}
-                      contentContainerStyle={[
-                        styles.scrollContentContainer,
-                        isKeyboardVisible && styles.keyboardVisiblePadding
-                      ]}
-                      keyboardShouldPersistTaps="handled"
-                      showsVerticalScrollIndicator={false}
-                      keyboardDismissMode="interactive"
-                    >
-                      {renderCurrentStep()}
-                    </ScrollView>
-                  </View>
-                  
-                  {renderNavigationButtons()}
+                  {renderMainContent()}
                 </LinearGradient>
               </Animated.View>
             </View>
@@ -1426,6 +1659,82 @@ const styles = StyleSheet.create({
     color: '#888',
     marginBottom: 20,
     lineHeight: 20,
+  },
+  
+  // ENHANCED: Loading state styles
+  loadingContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  loadingTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  loadingSubtitle: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  
+  // ENHANCED: Error state styles
+  errorContainer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+  },
+  errorTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#ef4444',
+    marginTop: 16,
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  errorButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: '#f97316',
+    gap: 8,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '600',
+  },
+  cancelButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  cancelButtonText: {
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
   },
   
   // Mode notice section for edit/resubmit
@@ -1922,10 +2231,5 @@ const styles = StyleSheet.create({
   locationDescription: {
     fontSize: 12,
     color: '#666',
-  },
-  loadingContainer: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 40,
   },
 });
