@@ -910,7 +910,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
 
         {/* Recent Section (Updated Activities Section) */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent</Text>
+          <Text style={styles.sectionTitle}>Recent Activities</Text>
           
           {/* Activity Filter Buttons */}
           <View style={styles.activityFilters}>
