@@ -832,7 +832,7 @@ export default function BusinessDetails({ navigation }: BusinessDetailsProps) {
         <View style={styles.section}>
           <View style={styles.joinedSectionContainer}>
             <View style={styles.joinedVerticalSection}>
-              <Text style={styles.joinedVerticalText}>Joined</Text>
+              <Text style={styles.joinedVerticalText}>JOINED</Text>
             </View>
             
             <View style={styles.joinedMembersSection}>
