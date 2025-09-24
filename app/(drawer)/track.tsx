@@ -1,4 +1,5 @@
-// app/(drawer)/track.tsx - Enhanced with modal routing for edit/resubmit functionality
+// app/(drawer)/track.tsx - Enhanced with comprehensive modal auto-population support
+
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   StyleSheet,
@@ -28,7 +29,7 @@ import MpesaPaymentModal from '@/components/MpesaPaymentModal';
 // Import NavigationHelper
 import { NavigationHelper } from '@/lib/helpers/navigation';
 
-// Types
+// ENHANCED: Comprehensive Package interface with complete field mapping for auto-population
 interface Package {
   id: string;
   code: string;
@@ -42,33 +43,83 @@ interface Package {
   delivery_type: string;
   created_at: string;
   updated_at: string;
-  origin_area?: any;
-  destination_area?: any;
-  origin_agent?: any;
-  destination_agent?: any;
+  
+  // CRITICAL: Area and agent IDs for proper auto-population
+  origin_area_id?: string;
+  destination_area_id?: string;
+  origin_agent_id?: string;
+  destination_agent_id?: string;
+  
+  // Area and agent relationship objects (may contain nested IDs)
+  origin_area?: {
+    id: string;
+    name: string;
+    initials?: string;
+    location?: { id: string; name: string };
+  };
+  destination_area?: {
+    id: string;
+    name: string;
+    initials?: string;
+    location?: { id: string; name: string };
+  };
+  origin_agent?: {
+    id: string;
+    name: string;
+    phone?: string;
+    area_id?: string;
+    area?: {
+      id: string;
+      name: string;
+      location?: { id: string; name: string };
+    };
+  };
+  destination_agent?: {
+    id: string;
+    name: string;
+    phone?: string;
+    area_id?: string;
+    area?: {
+      id: string;
+      name: string;
+      location?: { id: string; name: string };
+    };
+  };
+  
+  // Location and delivery details
   delivery_location?: string;
+  pickup_location?: string;
   sender_phone?: string;
   sender_email?: string;
   receiver_email?: string;
+  
+  // Business information
   business_name?: string;
+  business_phone?: string;
+  business_id?: string;
+  
+  // Receiver name variations (for compatibility)
   recipient_name?: string;
   receiver?: { name: string };
   recipient?: { name: string };
   to_name?: string;
   from_location?: string;
   to_location?: string;
+  
+  // Package details
   package_description?: string;
   package_size?: string;
   special_instructions?: string;
-  pickup_location?: string;
-  // Collection specific fields
+  
+  // Collection service specific fields
   shop_name?: string;
   shop_contact?: string;
   collection_address?: string;
   items_to_collect?: string;
   item_value?: number;
   item_description?: string;
-  // Fragile specific fields
+  
+  // Fragile service specific fields  
   pickup_latitude?: number;
   pickup_longitude?: number;
   delivery_latitude?: number;
@@ -97,8 +148,17 @@ type DrawerState =
   | 'collected' 
   | 'rejected';
 
+// ENHANCED: Modal management with comprehensive type support
 type ModalType = 'package' | 'fragile' | 'collection';
 type ModalAction = 'create' | 'edit' | 'resubmit';
+
+// Enhanced modal state interface
+interface ModalState {
+  type: ModalType | null;
+  action: ModalAction;
+  package?: Package;
+  isVisible: boolean;
+}
 
 const STATE_MAPPING: Record<DrawerState, string | null> = {
   'all': null,          
@@ -127,15 +187,12 @@ export default function Track() {
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAnimation] = useState(new Animated.Value(0));
   
-  // Modal states - UPDATED: Enhanced modal management
-  const [activeModal, setActiveModal] = useState<{
-    type: ModalType | null;
-    action: ModalAction;
-    package?: Package;
-  }>({
+  // ENHANCED: Modal state management with comprehensive support
+  const [modalState, setModalState] = useState<ModalState>({
     type: null,
     action: 'create',
-    package: undefined
+    package: undefined,
+    isVisible: false
   });
 
   const [showPaymentModal, setShowPaymentModal] = useState(false);
@@ -164,49 +221,142 @@ export default function Track() {
     });
   }, []);
 
-  // UPDATED: Enhanced edit package handler with modal routing
-  const handleEditPackage = useCallback((packageItem: Package) => {
-    console.log('🔧 Editing package:', packageItem.code, 'Type:', packageItem.delivery_type);
-    
-    // Determine which modal to open based on delivery type
-    let modalType: ModalType = 'package';
+  // ENHANCED: Intelligent modal routing with comprehensive package type detection
+  const determineModalType = useCallback((packageItem: Package): ModalType => {
+    console.log('🎯 Determining modal type for package:', {
+      code: packageItem.code,
+      delivery_type: packageItem.delivery_type,
+      package_description: packageItem.package_description?.substring(0, 50),
+      shop_name: packageItem.shop_name,
+      items_to_collect: packageItem.items_to_collect,
+      has_coordinates: !!(packageItem.pickup_latitude && packageItem.pickup_longitude)
+    });
+
+    // Priority 1: Explicit delivery type matching
     if (packageItem.delivery_type === 'fragile') {
-      modalType = 'fragile';
-    } else if (packageItem.delivery_type === 'collection') {
-      modalType = 'collection';
-    } else if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type)) {
-      modalType = 'package';
+      console.log('➡️ Explicit fragile delivery type - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+    
+    if (packageItem.delivery_type === 'collection') {
+      console.log('➡️ Explicit collection delivery type - routing to CollectDeliverModal');
+      return 'collection';
     }
 
-    setActiveModal({
+    // Priority 2: Collection service field detection
+    if (packageItem.shop_name || 
+        packageItem.shop_contact || 
+        packageItem.items_to_collect ||
+        packageItem.collection_address ||
+        packageItem.item_value ||
+        packageItem.item_description) {
+      console.log('➡️ Collection fields detected - routing to CollectDeliverModal');
+      return 'collection';
+    }
+    
+    // Priority 3: Fragile service field detection
+    if ((packageItem.pickup_latitude && packageItem.pickup_longitude) ||
+        packageItem.package_description?.toLowerCase().includes('fragile')) {
+      console.log('➡️ Fragile indicators detected - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+
+    // Priority 4: Package description analysis
+    const description = packageItem.package_description?.toLowerCase() || '';
+    if (description.includes('collection') || description.includes('collect')) {
+      console.log('➡️ Collection keywords in description - routing to CollectDeliverModal');
+      return 'collection';
+    }
+
+    if (description.includes('fragile') || description.includes('delicate') || description.includes('careful')) {
+      console.log('➡️ Fragile keywords in description - routing to FragileDeliveryModal');
+      return 'fragile';
+    }
+    
+    // Priority 5: Standard delivery types
+    if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type) ||
+        !packageItem.delivery_type) {
+      console.log('➡️ Standard delivery type - routing to PackageCreationModal');
+      return 'package';
+    }
+
+    // Default fallback
+    console.log('➡️ No specific indicators found - defaulting to PackageCreationModal');
+    return 'package';
+  }, []);
+
+  // ENHANCED: Edit package handler with comprehensive modal routing and logging
+  const handleEditPackage = useCallback((packageItem: Package) => {
+    console.log('🔧 ==================== EDIT PACKAGE ====================');
+    console.log('📦 Package details:', {
+      code: packageItem.code,
+      delivery_type: packageItem.delivery_type,
+      state: packageItem.state,
+      has_origin_area_id: !!packageItem.origin_area_id,
+      has_destination_area_id: !!packageItem.destination_area_id,
+      has_origin_agent_id: !!packageItem.origin_agent_id,
+      has_destination_agent_id: !!packageItem.destination_agent_id,
+      collection_fields: {
+        shop_name: packageItem.shop_name,
+        items_to_collect: packageItem.items_to_collect
+      },
+      fragile_fields: {
+        pickup_coords: !!(packageItem.pickup_latitude && packageItem.pickup_longitude),
+        package_description: packageItem.package_description?.substring(0, 50)
+      }
+    });
+    
+    const modalType = determineModalType(packageItem);
+    
+    console.log('🎯 Modal routing decision:', {
+      selectedModalType: modalType,
+      reasoning: 'Based on package analysis above'
+    });
+
+    setModalState({
       type: modalType,
       action: 'edit',
-      package: packageItem
+      package: packageItem,
+      isVisible: true
     });
-  }, []);
-
-  // UPDATED: Enhanced resubmit package handler with modal routing
-  const handleResubmitPackage = useCallback((packageItem: Package) => {
-    console.log('🔄 Resubmitting package:', packageItem.code, 'Type:', packageItem.delivery_type);
     
-    // Determine which modal to open based on delivery type
-    let modalType: ModalType = 'package';
-    if (packageItem.delivery_type === 'fragile') {
-      modalType = 'fragile';
-    } else if (packageItem.delivery_type === 'collection') {
-      modalType = 'collection';
-    } else if (['doorstep', 'agent', 'home', 'office'].includes(packageItem.delivery_type)) {
-      modalType = 'package';
-    }
+    console.log('✅ Edit modal state configured successfully');
+    console.log('🔧 ====================================================');
+  }, [determineModalType]);
 
-    setActiveModal({
+  // ENHANCED: Resubmit package handler with comprehensive modal routing and logging
+  const handleResubmitPackage = useCallback((packageItem: Package) => {
+    console.log('🔄 =================== RESUBMIT PACKAGE ===================');
+    console.log('📦 Package details:', {
+      code: packageItem.code,
+      delivery_type: packageItem.delivery_type,
+      state: packageItem.state,
+      rejection_reason: 'Package was rejected and needs resubmission',
+      has_origin_area_id: !!packageItem.origin_area_id,
+      has_destination_area_id: !!packageItem.destination_area_id,
+      has_origin_agent_id: !!packageItem.origin_agent_id,
+      has_destination_agent_id: !!packageItem.destination_agent_id
+    });
+    
+    const modalType = determineModalType(packageItem);
+    
+    console.log('🎯 Modal routing decision:', {
+      selectedModalType: modalType,
+      reasoning: 'Resubmission will use same modal type as original package'
+    });
+
+    setModalState({
       type: modalType,
       action: 'resubmit',
-      package: packageItem
+      package: packageItem,
+      isVisible: true
     });
-  }, []);
+    
+    console.log('✅ Resubmit modal state configured successfully');
+    console.log('🔄 =======================================================');
+  }, [determineModalType]);
 
-  // NEW: Handle report package
+  // Handle report package
   const handleReportPackage = useCallback((packageItem: Package) => {
     console.log('📋 Reporting package:', packageItem.code);
     
@@ -219,45 +369,149 @@ export default function Track() {
     });
   }, []);
 
-  // NEW: Modal management handlers
+  // Modal management handlers
   const handleOpenCreateModal = useCallback((type: ModalType = 'package') => {
-    setActiveModal({
+    console.log('➕ Opening create modal:', type);
+    setModalState({
       type,
       action: 'create',
-      package: undefined
+      package: undefined,
+      isVisible: true
     });
   }, []);
 
   const handleCloseModal = useCallback(() => {
-    setActiveModal({
+    console.log('❌ Closing modal');
+    setModalState({
       type: null,
       action: 'create',
-      package: undefined
+      package: undefined,
+      isVisible: false
     });
   }, []);
 
-  // UPDATED: Enhanced package submission handler
-  const handlePackageSubmitted = useCallback(async () => {
-    console.log('✅ Package submitted/updated successfully');
+  // ENHANCED: Package submission handler with comprehensive success tracking
+  const handlePackageSubmitted = useCallback(async (packageData?: any) => {
+    console.log('✅ ================ PACKAGE SUBMISSION SUCCESS ================');
+    console.log('📦 Submission details:', {
+      action: modalState.action,
+      modalType: modalState.type,
+      originalPackageCode: modalState.package?.code,
+      dataProvided: !!packageData
+    });
+    
+    // Close modal
     handleCloseModal();
     
     // Refresh packages list
+    console.log('🔄 Refreshing packages list...');
     loadPackages(true);
     
     // Show success message based on action
-    const actionText = activeModal.action === 'edit' ? 'updated' : 
-                      activeModal.action === 'resubmit' ? 'resubmitted' : 'created';
+    const actionText = modalState.action === 'edit' ? 'updated' : 
+                      modalState.action === 'resubmit' ? 'resubmitted' : 'created';
+    
+    const modalTypeText = modalState.type === 'fragile' ? 'fragile package' :
+                         modalState.type === 'collection' ? 'collection package' :
+                         'package';
     
     Toast.show({
       type: 'success',
-      text1: `Package ${actionText} successfully!`,
-      text2: activeModal.action === 'resubmit' ? 'Your package has been resubmitted for review' : undefined,
+      text1: `${modalTypeText.charAt(0).toUpperCase() + modalTypeText.slice(1)} ${actionText} successfully!`,
+      text2: modalState.action === 'resubmit' ? 'Your package has been resubmitted for review' : 
+             modalState.action === 'edit' ? 'Changes have been saved and applied' : 
+             'Your package has been created and is being processed',
       position: 'top',
       visibilityTime: 4000,
     });
-  }, [activeModal.action, handleCloseModal]);
+    
+    console.log('✅ Success notification displayed');
+    console.log('✅ =======================================================');
+  }, [modalState, handleCloseModal]);
 
-  // Get packages with proper "all" handling
+  // ENHANCED: Package data transformation with comprehensive field mapping
+  const transformPackageData = useCallback((pkg: any): Package => {
+    // CRITICAL: Extract and normalize area/agent IDs for auto-population
+    const extractAreaId = (area: any): string | undefined => {
+      if (typeof area === 'string') return area;
+      if (area && typeof area === 'object') return area.id || area.area_id;
+      return undefined;
+    };
+
+    const extractAgentId = (agent: any): string | undefined => {
+      if (typeof agent === 'string') return agent;
+      if (agent && typeof agent === 'object') return agent.id || agent.agent_id;
+      return undefined;
+    };
+
+    return {
+      id: String(pkg.id || ''),
+      code: pkg.code || '',
+      state: pkg.state || 'unknown',
+      state_display: pkg.state_display || pkg.state?.charAt(0).toUpperCase() + pkg.state?.slice(1) || 'Unknown',
+      sender_name: pkg.sender_name || 'Unknown Sender',
+      receiver_name: pkg.receiver_name || 'Unknown Receiver',
+      receiver_phone: pkg.receiver_phone || '',
+      route_description: pkg.route_description || 'Route information unavailable',
+      cost: Number(pkg.cost) || 0,
+      delivery_type: pkg.delivery_type || 'agent',
+      created_at: pkg.created_at || new Date().toISOString(),
+      updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
+      
+      // CRITICAL: Area and agent IDs for modal auto-population
+      origin_area_id: pkg.origin_area_id || extractAreaId(pkg.origin_area) || extractAreaId(pkg.origin_agent?.area),
+      destination_area_id: pkg.destination_area_id || extractAreaId(pkg.destination_area) || extractAreaId(pkg.destination_agent?.area),
+      origin_agent_id: pkg.origin_agent_id || extractAgentId(pkg.origin_agent),
+      destination_agent_id: pkg.destination_agent_id || extractAgentId(pkg.destination_agent),
+      
+      // Area and agent relationship objects
+      origin_area: pkg.origin_area,
+      destination_area: pkg.destination_area,
+      origin_agent: pkg.origin_agent,
+      destination_agent: pkg.destination_agent,
+      
+      // Location and delivery details
+      delivery_location: pkg.delivery_location,
+      pickup_location: pkg.pickup_location,
+      sender_phone: pkg.sender_phone,
+      sender_email: pkg.sender_email,
+      receiver_email: pkg.receiver_email,
+      
+      // Business information
+      business_name: pkg.business_name,
+      business_phone: pkg.business_phone,
+      business_id: pkg.business_id,
+      
+      // Receiver name variations (for compatibility)
+      recipient_name: pkg.recipient_name || pkg.receiver_name,
+      receiver: pkg.receiver || { name: pkg.receiver_name },
+      recipient: pkg.recipient || { name: pkg.receiver_name },
+      to_name: pkg.to_name || pkg.receiver_name,
+      from_location: pkg.from_location || pkg.origin_area?.name,
+      to_location: pkg.to_location || pkg.destination_area?.name,
+      
+      // Package details
+      package_description: pkg.package_description,
+      package_size: pkg.package_size,
+      special_instructions: pkg.special_instructions,
+      
+      // Collection service specific fields
+      shop_name: pkg.shop_name,
+      shop_contact: pkg.shop_contact,
+      collection_address: pkg.collection_address,
+      items_to_collect: pkg.items_to_collect,
+      item_value: pkg.item_value,
+      item_description: pkg.item_description,
+      
+      // Fragile service specific fields
+      pickup_latitude: pkg.pickup_latitude,
+      pickup_longitude: pkg.pickup_longitude,
+      delivery_latitude: pkg.delivery_latitude,
+      delivery_longitude: pkg.delivery_longitude,
+    };
+  }, []);
+
+  // Get packages with comprehensive data transformation
   const getPackages = useCallback(async (filters?: { state?: string | null; search?: string }): Promise<PackageResponse> => {
     try {
       console.log('📦 getPackages called with filters:', filters);
@@ -298,51 +552,8 @@ export default function Track() {
         throw new Error(response.data.message || 'Failed to fetch packages');
       }
       
-      const transformedPackages = response.data.data.map((pkg: any) => ({
-        id: String(pkg.id || ''),
-        code: pkg.code || '',
-        state: pkg.state || 'unknown',
-        state_display: pkg.state_display || pkg.state?.charAt(0).toUpperCase() + pkg.state?.slice(1) || 'Unknown',
-        sender_name: pkg.sender_name || 'Unknown Sender',
-        receiver_name: pkg.receiver_name || 'Unknown Receiver',
-        receiver_phone: pkg.receiver_phone || '',
-        route_description: pkg.route_description || 'Route information unavailable',
-        cost: Number(pkg.cost) || 0,
-        delivery_type: pkg.delivery_type || 'agent',
-        created_at: pkg.created_at || new Date().toISOString(),
-        updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
-        origin_area: pkg.origin_area,
-        destination_area: pkg.destination_area,
-        origin_agent: pkg.origin_agent,
-        destination_agent: pkg.destination_agent,
-        delivery_location: pkg.delivery_location,
-        sender_phone: pkg.sender_phone,
-        sender_email: pkg.sender_email,
-        receiver_email: pkg.receiver_email,
-        business_name: pkg.business_name,
-        recipient_name: pkg.recipient_name || pkg.receiver_name,
-        receiver: pkg.receiver || { name: pkg.receiver_name },
-        recipient: pkg.recipient || { name: pkg.receiver_name },
-        to_name: pkg.to_name || pkg.receiver_name,
-        from_location: pkg.from_location || pkg.origin_area?.name,
-        to_location: pkg.to_location || pkg.destination_area?.name,
-        package_description: pkg.package_description,
-        package_size: pkg.package_size,
-        special_instructions: pkg.special_instructions,
-        pickup_location: pkg.pickup_location,
-        // Collection specific fields
-        shop_name: pkg.shop_name,
-        shop_contact: pkg.shop_contact,
-        collection_address: pkg.collection_address,
-        items_to_collect: pkg.items_to_collect,
-        item_value: pkg.item_value,
-        item_description: pkg.item_description,
-        // Fragile specific fields
-        pickup_latitude: pkg.pickup_latitude,
-        pickup_longitude: pkg.pickup_longitude,
-        delivery_latitude: pkg.delivery_latitude,
-        delivery_longitude: pkg.delivery_longitude,
-      }));
+      // ENHANCED: Transform packages with comprehensive field mapping
+      const transformedPackages = response.data.data.map((pkg: any) => transformPackageData(pkg));
       
       const result: PackageResponse = {
         data: transformedPackages,
@@ -357,6 +568,17 @@ export default function Track() {
       };
       
       console.log('✅ Transformed packages:', result.data.length);
+      console.log('🔍 Sample package fields for first item:', result.data[0] ? {
+        code: result.data[0].code,
+        delivery_type: result.data[0].delivery_type,
+        origin_area_id: result.data[0].origin_area_id,
+        destination_area_id: result.data[0].destination_area_id,
+        origin_agent_id: result.data[0].origin_agent_id,
+        destination_agent_id: result.data[0].destination_agent_id,
+        has_collection_fields: !!(result.data[0].shop_name || result.data[0].items_to_collect),
+        has_fragile_fields: !!(result.data[0].pickup_latitude || result.data[0].package_description?.includes('fragile'))
+      } : 'No packages');
+      
       return result;
       
     } catch (error: any) {
@@ -368,7 +590,7 @@ export default function Track() {
       });
       throw error;
     }
-  }, []);
+  }, [transformPackageData]);
 
   // Enhanced state display info to handle "all" case
   const stateDisplayInfo = useMemo(() => {
@@ -1024,34 +1246,34 @@ export default function Track() {
         </ScrollView>
       )}
       
-      {/* UPDATED: Enhanced modal rendering with proper routing */}
+      {/* ENHANCED: Modal rendering with comprehensive auto-population support */}
       <PackageCreationModal
-        visible={activeModal.type === 'package'}
+        visible={modalState.isVisible && modalState.type === 'package'}
         onClose={handleCloseModal}
         onSubmit={handlePackageSubmitted}
-        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
-        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
-        mode={activeModal.action}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
       />
 
       <FragileDeliveryModal
-        visible={activeModal.type === 'fragile'}
+        visible={modalState.isVisible && modalState.type === 'fragile'}
         onClose={handleCloseModal}
         onSubmit={handlePackageSubmitted}
         currentLocation={null}
-        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
-        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
-        mode={activeModal.action}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
       />
 
       <CollectDeliverModal
-        visible={activeModal.type === 'collection'}
+        visible={modalState.isVisible && modalState.type === 'collection'}
         onClose={handleCloseModal}
         onSubmit={handlePackageSubmitted}
         currentLocation={null}
-        editPackage={activeModal.action === 'edit' ? activeModal.package : undefined}
-        resubmitPackage={activeModal.action === 'resubmit' ? activeModal.package : undefined}
-        mode={activeModal.action}
+        editPackage={modalState.action === 'edit' ? modalState.package : undefined}
+        resubmitPackage={modalState.action === 'resubmit' ? modalState.package : undefined}
+        mode={modalState.action}
       />
 
       <MpesaPaymentModal
