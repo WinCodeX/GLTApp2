@@ -644,7 +644,13 @@ export default function MpesaPaymentModal({
                 </View>
               </View>
 
-              <View style={styles.modalContent}>
+              <ScrollView
+                style={styles.scrollContainer}
+                contentContainerStyle={styles.scrollContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                bounces={false}
+              >
                 {/* Package Info - Show single package like original, or list for multiple */}
                 {isSinglePackage ? (
                   /* Single Package Display (Original Style) */
@@ -717,13 +723,7 @@ export default function MpesaPaymentModal({
                 )}
 
                 {/* Payment Steps */}
-                <ScrollView
-                  style={styles.paymentScrollContainer}
-                  contentContainerStyle={styles.paymentContent}
-                  showsVerticalScrollIndicator={false}
-                  keyboardShouldPersistTaps="handled"
-                  bounces={false}
-                >
+                <View style={styles.paymentContent}>
                   {paymentStep === 'confirm' && (
                     <View style={styles.confirmStep}>
                       <Text style={styles.stepTitle}>Confirm Payment Details</Text>
@@ -845,8 +845,8 @@ export default function MpesaPaymentModal({
                       </View>
                     </View>
                   )}
-                </ScrollView>
-              </View>
+                </View>
+              </ScrollView>
             </LinearGradient>
           </Animated.View>
         </KeyboardAvoidingView>
@@ -874,14 +874,12 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   
-  // Modal Content
-  modalContent: {
+  // Scroll Container
+  scrollContainer: {
     flex: 1,
   },
-  
-  // Payment Scroll Container
-  paymentScrollContainer: {
-    flex: 1,
+  scrollContent: {
+    paddingBottom: 32,
   },
   
   // Modal Header
