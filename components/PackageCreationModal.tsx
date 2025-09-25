@@ -1,42 +1,41 @@
 // components/PackageCreationModal.tsx - FIXED: Enhanced with proper auto-population and mode handling
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import api from '@/lib/api';
+import { Feather } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  Alert,
+  Animated,
+  Dimensions,
+  Keyboard,
+  KeyboardAvoidingView,
   Modal,
-  View,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
-  ScrollView,
-  Animated,
-  Dimensions,
-  Platform,
-  ActivityIndicator,
-  StyleSheet,
-  KeyboardAvoidingView,
-  SafeAreaView,
-  StatusBar,
-  Keyboard,
-  Alert,
+  View,
 } from 'react-native';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import api from '@/lib/api';
-import { 
-  getPackageFormData,
-  getPackagePricing, 
-  validatePackageFormData,
-  createPackage,
-  type Location, 
-  type Area, 
-  type Agent,
-  type PackageData,
-  getAreas,
-  getAgents
-} from '../lib/helpers/packageHelpers';
 import { useUser } from '../context/UserContext';
+import {
+  createPackage,
+  getAgents,
+  getAreas,
+  getPackageFormData,
+  validatePackageFormData,
+  type Agent,
+  type Area,
+  type Location,
+  type PackageData
+} from '../lib/helpers/packageHelpers';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -1055,7 +1054,7 @@ export default function PackageCreationModal({
 
   // UPDATED: Handle submission for different modes
   const handleSubmit = useCallback(async () => {
-    if (!isCurrentStepValid()) return;
+    if (!isCurrentStepValid() || isSubmitting) return;
 
     setIsSubmitting(true);
     try {
