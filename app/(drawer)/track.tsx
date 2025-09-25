@@ -727,6 +727,80 @@ export default function Track() {
     loadPackages(true);
   }, []);
 
+  // FIXED: Group packages by date with proper chronological ordering
+  const groupPackagesByDate = useCallback((packages: Package[]) => {
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    // Create temporary groups object
+    const tempGroups: { [key: string]: Package[] } = {};
+    const dateKeys: { key: string; date: Date; sortOrder: number }[] = [];
+
+    packages.forEach(pkg => {
+      const pkgDate = new Date(pkg.created_at);
+      const pkgDateStr = pkgDate.toDateString();
+      const todayStr = today.toDateString();
+      const yesterdayStr = yesterday.toDateString();
+
+      let groupKey: string;
+      let sortOrder: number;
+      let groupDate: Date;
+
+      if (pkgDateStr === todayStr) {
+        groupKey = 'Today';
+        sortOrder = 0; // Highest priority
+        groupDate = today;
+      } else if (pkgDateStr === yesterdayStr) {
+        groupKey = 'Yesterday';
+        sortOrder = 1; // Second priority
+        groupDate = yesterday;
+      } else {
+        groupKey = pkgDate.toLocaleDateString('en-US', {
+          weekday: 'long',
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        });
+        sortOrder = 2; // Lower priority, will be sorted by actual date
+        groupDate = pkgDate;
+      }
+
+      if (!tempGroups[groupKey]) {
+        tempGroups[groupKey] = [];
+        dateKeys.push({ key: groupKey, date: groupDate, sortOrder });
+      }
+      
+      tempGroups[groupKey].push(pkg);
+    });
+
+    // Sort each group's packages by creation time (newest first)
+    Object.keys(tempGroups).forEach(key => {
+      tempGroups[key].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+    });
+
+    // Sort date keys to get proper chronological order
+    dateKeys.sort((a, b) => {
+      // First by sort order (Today, Yesterday, then other dates)
+      if (a.sortOrder !== b.sortOrder) {
+        return a.sortOrder - b.sortOrder;
+      }
+      // Then by date (newest first for regular dates)
+      if (a.sortOrder === 2) {
+        return b.date.getTime() - a.date.getTime();
+      }
+      return 0;
+    });
+
+    // Convert to array format with proper ordering
+    return dateKeys
+      .filter(({ key }) => tempGroups[key] && tempGroups[key].length > 0)
+      .map(({ key }) => ({
+        dateGroup: key,
+        packages: tempGroups[key]
+      }));
+  }, []);
+
   // Load packages with proper "all" handling
   const loadPackages = useCallback(async (isRefresh = false) => {
     try {
@@ -857,51 +931,6 @@ export default function Track() {
       case 'mixed': return '#10b981';
       default: return '#8b5cf6';
     }
-  }, []);
-
-  const groupPackagesByDate = useCallback((packages: Package[]) => {
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    const groups: { [key: string]: Package[] } = {
-      'Today': [],
-      'Yesterday': [],
-    };
-
-    packages.forEach(pkg => {
-      const pkgDate = new Date(pkg.created_at);
-      const pkgDateStr = pkgDate.toDateString();
-      const todayStr = today.toDateString();
-      const yesterdayStr = yesterday.toDateString();
-
-      if (pkgDateStr === todayStr) {
-        groups['Today'].push(pkg);
-      } else if (pkgDateStr === yesterdayStr) {
-        groups['Yesterday'].push(pkg);
-      } else {
-        const dateKey = pkgDate.toLocaleDateString('en-US', {
-          weekday: 'long',
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        });
-        if (!groups[dateKey]) {
-          groups[dateKey] = [];
-        }
-        groups[dateKey].push(pkg);
-      }
-    });
-
-    Object.keys(groups).forEach(key => {
-      if (groups[key].length === 0) {
-        delete groups[key];
-      } else {
-        groups[key].sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-      }
-    });
-
-    return groups;
   }, []);
   
   const getStateBadgeColor = useCallback((state: string) => {
@@ -1222,7 +1251,7 @@ export default function Track() {
           
           {(() => {
             const groupedPackages = groupPackagesByDate(displayPackages);
-            return Object.entries(groupedPackages).map(([dateGroup, packages]) => (
+            return groupedPackages.map(({ dateGroup, packages }) => (
               <View key={dateGroup} style={styles.dateGroup}>
                 <View style={styles.dateGroupHeader}>
                   <Text style={styles.dateGroupTitle}>{dateGroup}</Text>
