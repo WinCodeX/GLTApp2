@@ -1,41 +1,42 @@
-// components/PackageCreationModal.tsx - FIXED: Enhanced with proper auto-population and mode handling
+// components/PackageCreationModal.tsx - FIXED: Mode detection and auto-selection
 
-import api from '@/lib/api';
-import { Feather } from '@expo/vector-icons';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { LinearGradient } from 'expo-linear-gradient';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
-  ActivityIndicator,
-  Alert,
-  Animated,
-  Dimensions,
-  Keyboard,
-  KeyboardAvoidingView,
   Modal,
-  Platform,
-  SafeAreaView,
-  ScrollView,
-  StatusBar,
-  StyleSheet,
+  View,
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  ScrollView,
+  Animated,
+  Dimensions,
+  Platform,
+  ActivityIndicator,
+  StyleSheet,
+  KeyboardAvoidingView,
+  SafeAreaView,
+  StatusBar,
+  Keyboard,
+  Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';
-import { useUser } from '../context/UserContext';
-import {
-  createPackage,
-  getAgents,
-  getAreas,
+import api from '@/lib/api';
+import { 
   getPackageFormData,
+  getPackagePricing, 
   validatePackageFormData,
+  createPackage,
+  type Location, 
+  type Area, 
   type Agent,
-  type Area,
-  type Location,
-  type PackageData
+  type PackageData,
+  getAreas,
+  getAgents
 } from '../lib/helpers/packageHelpers';
+import { useUser } from '../context/UserContext';
 
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -68,10 +69,9 @@ interface PackageCreationModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
   editPackage?: Package;
   resubmitPackage?: Package;
-  mode?: 'create' | 'edit' | 'resubmit';
+  mode?: 'create' | 'edit' | 'resubmit'; // FIXED: Made optional with proper default
 }
 
-// UPDATED: New step titles with package size as first step
 const STEP_TITLES = [
   'Package Size',
   'Sender Office',
@@ -96,7 +96,7 @@ const STORAGE_KEYS = {
 
 const CACHE_DURATION = 24 * 60 * 60 * 1000;
 
-// Extended PackageData interface with size and notes (business info auto-populated)
+// Extended PackageData interface with size and notes
 interface ExtendedPackageData extends PackageData {
   delivery_type: DeliveryType;
   package_size?: PackageSize;
@@ -182,7 +182,7 @@ export default function PackageCreationModal({
   onSubmit,
   editPackage,
   resubmitPackage,
-  mode = 'create'
+  mode = 'create' // FIXED: Proper default value
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -195,14 +195,20 @@ export default function PackageCreationModal({
   // Access user context for business information
   const { selectedBusiness, getDisplayName, getUserPhone } = useUser();
 
-  // CRITICAL: Enhanced dependency management states
+  // FIXED: Determine actual mode based on props
+  const actualMode = useMemo(() => {
+    if (editPackage) return 'edit';
+    if (resubmitPackage) return 'resubmit';
+    return mode || 'create';
+  }, [editPackage, resubmitPackage, mode]);
+
+  // Dependency management states
   const [locations, setLocations] = useState<Location[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
-  const [isFormPopulated, setIsFormPopulated] = useState(false);
 
   // Multi-package states
   const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
@@ -212,7 +218,7 @@ export default function PackageCreationModal({
   const [showLargePackageModal, setShowLargePackageModal] = useState(false);
   const [largePackageInstructions, setLargePackageInstructions] = useState('');
 
-  // Form data with extended properties (business info auto-populated)
+  // Form data with extended properties
   const [packageData, setPackageData] = useState<ExtendedPackageData>({
     sender_name: '',
     sender_phone: '',
@@ -223,7 +229,7 @@ export default function PackageCreationModal({
     origin_agent_id: '',
     destination_agent_id: '',
     delivery_type: 'doorstep' as DeliveryType,
-    package_size: 'medium' as PackageSize, // Default to medium
+    package_size: 'medium' as PackageSize,
     receiver_notes: '',
     rider_notes: ''
   });
@@ -246,11 +252,11 @@ export default function PackageCreationModal({
     direction: 'asc'
   });
 
-  // NEW: Get modal title based on mode and package type
+  // FIXED: Get modal title based on actual mode
   const getModalTitle = useCallback(() => {
     const currentStepTitle = STEP_TITLES[currentStep];
     
-    switch (mode) {
+    switch (actualMode) {
       case 'edit':
         return `Edit Package - ${currentStepTitle}`;
       case 'resubmit':
@@ -258,13 +264,13 @@ export default function PackageCreationModal({
       default:
         return currentStepTitle;
     }
-  }, [mode, currentStep]);
+  }, [actualMode, currentStep]);
 
-  // NEW: Get action button text based on mode
+  // FIXED: Get action button text based on actual mode
   const getActionButtonText = useCallback(() => {
     const packageCount = pendingPackages.length + 1;
     
-    switch (mode) {
+    switch (actualMode) {
       case 'edit':
         return pendingPackages.length > 0 
           ? `Update ${packageCount} Package${packageCount > 1 ? 's' : ''}`
@@ -278,9 +284,9 @@ export default function PackageCreationModal({
           ? `Submit ${packageCount} Package${packageCount > 1 ? 's' : ''}`
           : 'Create Package';
     }
-  }, [mode, pendingPackages.length]);
+  }, [actualMode, pendingPackages.length]);
 
-  // CRITICAL: Load reference data with proper sequencing
+  // FIXED: Load reference data with proper error handling
   const loadReferenceData = useCallback(async (retryCount = 0): Promise<void> => {
     console.log(`🔄 Loading package modal reference data (attempt ${retryCount + 1})`);
     
@@ -372,28 +378,21 @@ export default function PackageCreationModal({
     }
   }, [isCacheValid, loadFromCache, clearCache, saveToCache]);
 
-  // CRITICAL: Fixed auto-population with proper dependency management
+  // FIXED: Enhanced auto-population with proper ID matching and timing
   const loadPackageForEditing = useCallback(async (pkg: Package) => {
-    if (isFormPopulated) return; // Prevent multiple population attempts
-    
     console.log('🔧 Loading package for editing:', pkg.code);
-    console.log('📊 Available data:', {
-      areas: areas.length,
-      agents: agents.length,
-      mode,
-      isFormPopulated
-    });
-
-    // CRITICAL: Wait for reference data to be available
+    console.log('📦 Package data:', pkg);
+    console.log('🏢 Available areas:', areas.length);
+    console.log('👤 Available agents:', agents.length);
+    
+    // Wait for reference data to be available
     if (areas.length === 0 || agents.length === 0) {
       console.log('⏳ Waiting for reference data before auto-populating...');
       return;
     }
 
     try {
-      console.log('🔄 Starting form auto-population...');
-      
-      // Set basic form data first
+      // Set basic form data
       setPackageData(prev => ({
         ...prev,
         sender_name: pkg.sender_name || '',
@@ -412,38 +411,53 @@ export default function PackageCreationModal({
       setDeliveryLocation(pkg.delivery_location || '');
       setLargePackageInstructions(pkg.special_instructions || '');
 
-      // CRITICAL: Enhanced area/agent mapping with better error handling
-      let originAreaMapped = false;
-      let destinationMapped = false;
+      // FIXED: Enhanced area/agent matching with multiple ID comparison methods
+      let originAreaFound = false;
+      let originAgentFound = false;
+      let destinationAreaFound = false;
+      let destinationAgentFound = false;
 
-      // Map origin area
+      // FIXED: Match origin area with comprehensive ID checking
       if (pkg.origin_area_id) {
-        console.log('🔍 Looking for origin area ID:', pkg.origin_area_id);
+        console.log('🔍 Looking for origin area ID:', pkg.origin_area_id, typeof pkg.origin_area_id);
+        
         const originArea = areas.find(area => {
-          const match = area.id === pkg.origin_area_id || 
-                       area.id == pkg.origin_area_id ||
-                       String(area.id) === String(pkg.origin_area_id);
-          if (match) console.log('✅ Found matching origin area:', area.name, area.id);
+          const areaIdStr = String(area.id);
+          const pkgAreaIdStr = String(pkg.origin_area_id);
+          const match = areaIdStr === pkgAreaIdStr || 
+                       area.id === pkg.origin_area_id ||
+                       Number(area.id) === Number(pkg.origin_area_id);
+          
+          if (match) {
+            console.log('✅ Found matching origin area:', area.name, 'Area ID:', area.id);
+          }
           return match;
         });
         
         if (originArea) {
           setPackageData(prev => ({ ...prev, origin_area_id: originArea.id }));
-          originAreaMapped = true;
-          console.log('✅ Mapped origin area:', originArea.name);
+          originAreaFound = true;
+          console.log('✅ Auto-selected origin area:', originArea.name);
         } else {
-          console.warn('⚠️ Origin area not found. Available areas:', areas.map(a => ({ id: a.id, name: a.name })));
+          console.warn('⚠️ Origin area not found for ID:', pkg.origin_area_id);
+          console.log('🔍 Available area IDs:', areas.map(a => `${a.id} (${typeof a.id})`));
         }
       }
 
-      // Map origin agent
+      // FIXED: Match origin agent with comprehensive ID checking
       if (pkg.origin_agent_id) {
-        console.log('🔍 Looking for origin agent ID:', pkg.origin_agent_id);
+        console.log('🔍 Looking for origin agent ID:', pkg.origin_agent_id, typeof pkg.origin_agent_id);
+        
         const originAgent = agents.find(agent => {
-          const match = agent.id === pkg.origin_agent_id || 
-                       agent.id == pkg.origin_agent_id ||
-                       String(agent.id) === String(pkg.origin_agent_id);
-          if (match) console.log('✅ Found matching origin agent:', agent.name, agent.id);
+          const agentIdStr = String(agent.id);
+          const pkgAgentIdStr = String(pkg.origin_agent_id);
+          const match = agentIdStr === pkgAgentIdStr || 
+                       agent.id === pkg.origin_agent_id ||
+                       Number(agent.id) === Number(pkg.origin_agent_id);
+          
+          if (match) {
+            console.log('✅ Found matching origin agent:', agent.name, 'Agent ID:', agent.id);
+          }
           return match;
         });
         
@@ -453,41 +467,54 @@ export default function PackageCreationModal({
             origin_agent_id: originAgent.id,
             origin_area_id: originAgent.area?.id || prev.origin_area_id
           }));
-          originAreaMapped = true;
-          console.log('✅ Mapped origin agent:', originAgent.name);
+          originAgentFound = true;
+          console.log('✅ Auto-selected origin agent:', originAgent.name);
         } else {
-          console.warn('⚠️ Origin agent not found. Available agents:', agents.map(a => ({ id: a.id, name: a.name })));
+          console.warn('⚠️ Origin agent not found for ID:', pkg.origin_agent_id);
+          console.log('🔍 Available agent IDs:', agents.map(a => `${a.id} (${typeof a.id})`));
         }
       }
 
-      // Map destination area
+      // FIXED: Match destination area with comprehensive ID checking
       if (pkg.destination_area_id) {
-        console.log('🔍 Looking for destination area ID:', pkg.destination_area_id);
+        console.log('🔍 Looking for destination area ID:', pkg.destination_area_id, typeof pkg.destination_area_id);
+        
         const destArea = areas.find(area => {
-          const match = area.id === pkg.destination_area_id || 
-                       area.id == pkg.destination_area_id ||
-                       String(area.id) === String(pkg.destination_area_id);
-          if (match) console.log('✅ Found matching destination area:', area.name, area.id);
+          const areaIdStr = String(area.id);
+          const pkgAreaIdStr = String(pkg.destination_area_id);
+          const match = areaIdStr === pkgAreaIdStr || 
+                       area.id === pkg.destination_area_id ||
+                       Number(area.id) === Number(pkg.destination_area_id);
+          
+          if (match) {
+            console.log('✅ Found matching destination area:', area.name, 'Area ID:', area.id);
+          }
           return match;
         });
         
         if (destArea) {
           setPackageData(prev => ({ ...prev, destination_area_id: destArea.id }));
-          destinationMapped = true;
-          console.log('✅ Mapped destination area:', destArea.name);
+          destinationAreaFound = true;
+          console.log('✅ Auto-selected destination area:', destArea.name);
         } else {
-          console.warn('⚠️ Destination area not found. Available areas:', areas.map(a => ({ id: a.id, name: a.name })));
+          console.warn('⚠️ Destination area not found for ID:', pkg.destination_area_id);
         }
       }
 
-      // Map destination agent
+      // FIXED: Match destination agent with comprehensive ID checking
       if (pkg.destination_agent_id) {
-        console.log('🔍 Looking for destination agent ID:', pkg.destination_agent_id);
+        console.log('🔍 Looking for destination agent ID:', pkg.destination_agent_id, typeof pkg.destination_agent_id);
+        
         const destAgent = agents.find(agent => {
-          const match = agent.id === pkg.destination_agent_id || 
-                       agent.id == pkg.destination_agent_id ||
-                       String(agent.id) === String(pkg.destination_agent_id);
-          if (match) console.log('✅ Found matching destination agent:', agent.name, agent.id);
+          const agentIdStr = String(agent.id);
+          const pkgAgentIdStr = String(pkg.destination_agent_id);
+          const match = agentIdStr === pkgAgentIdStr || 
+                       agent.id === pkg.destination_agent_id ||
+                       Number(agent.id) === Number(pkg.destination_agent_id);
+          
+          if (match) {
+            console.log('✅ Found matching destination agent:', agent.name, 'Agent ID:', agent.id);
+          }
           return match;
         });
         
@@ -497,100 +524,66 @@ export default function PackageCreationModal({
             destination_agent_id: destAgent.id,
             destination_area_id: destAgent.area?.id || prev.destination_area_id
           }));
-          destinationMapped = true;
-          console.log('✅ Mapped destination agent:', destAgent.name);
+          destinationAgentFound = true;
+          console.log('✅ Auto-selected destination agent:', destAgent.name);
         } else {
-          console.warn('⚠️ Destination agent not found. Available agents:', agents.map(a => ({ id: a.id, name: a.name })));
+          console.warn('⚠️ Destination agent not found for ID:', pkg.destination_agent_id);
         }
       }
 
-      // Handle step navigation for resubmit mode
-      if (mode === 'resubmit') {
+      // FIXED: Handle step navigation for resubmit mode
+      if (actualMode === 'resubmit') {
         console.log('🔄 Resubmit mode - navigating to confirmation step');
         setCurrentStep(STEP_TITLES.length - 1);
-      } else {
-        console.log('✏️ Edit mode - starting from first step');
-        setCurrentStep(0);
       }
 
-      setIsFormPopulated(true);
       console.log('✅ Package data loaded and auto-populated successfully', {
-        originAreaMapped,
-        destinationMapped,
-        mode,
-        currentStep: mode === 'resubmit' ? STEP_TITLES.length - 1 : 0
+        originAreaFound,
+        originAgentFound,
+        destinationAreaFound,
+        destinationAgentFound
       });
 
     } catch (error) {
       console.error('❌ Error auto-populating package data:', error);
     }
-  }, [areas, agents, selectedBusiness, mode, STEP_TITLES.length, isFormPopulated]);
+  }, [areas, agents, selectedBusiness, actualMode, STEP_TITLES.length]);
 
-  // CRITICAL: Proper initialization sequence 
+  // FIXED: Dependency-aware initialization
   useEffect(() => {
     if (visible && !isInitialized) {
-      console.log('🚀 Initializing package modal with proper sequencing');
-      console.log('📊 Current state:', { 
-        mode, 
-        hasEditPackage: !!editPackage,
-        hasResubmitPackage: !!resubmitPackage,
-        isInitialized,
-        isFormPopulated
-      });
+      console.log('🚀 Initializing package modal with dependency management, mode:', actualMode);
       
       const initializeModal = async () => {
         try {
-          // Reset form population flag
-          setIsFormPopulated(false);
-          
-          // Step 1: Load reference data FIRST
-          console.log('📡 Step 1: Loading reference data...');
+          // Step 1: Load reference data first
           await loadReferenceData();
           
           setIsInitialized(true);
-          console.log('✅ Package modal initialization complete - reference data loaded');
+          console.log('✅ Package modal initialization complete');
           
         } catch (error) {
           console.error('❌ Failed to initialize package modal:', error);
-          setIsInitialized(true); // Set to true to prevent infinite loops
         }
       };
 
       initializeModal();
     }
-  }, [visible, isInitialized, loadReferenceData, mode, editPackage, resubmitPackage]);
+  }, [visible, isInitialized, loadReferenceData, actualMode]);
 
-  // CRITICAL: Auto-populate form when both conditions are met
+  // FIXED: Auto-populate after data loads with better timing
   useEffect(() => {
-    const shouldPopulate = (
-      isInitialized && 
-      !isFormPopulated &&
-      areas.length > 0 && 
-      agents.length > 0 && 
-      (mode === 'edit' || mode === 'resubmit') &&
-      (editPackage || resubmitPackage)
-    );
-
-    if (shouldPopulate) {
-      console.log('🔄 All conditions met - triggering form population');
+    if (isInitialized && areas.length > 0 && agents.length > 0) {
       const packageToLoad = editPackage || resubmitPackage;
-      if (packageToLoad) {
-        // Small delay to ensure all state updates are processed
+      if (packageToLoad && (actualMode === 'edit' || actualMode === 'resubmit')) {
+        console.log('🔄 Reference data available, loading package data for mode:', actualMode);
+        // Use setTimeout to ensure state updates are processed
         setTimeout(() => {
           loadPackageForEditing(packageToLoad);
-        }, 100);
+        }, 200);
       }
-    } else {
-      console.log('⏳ Waiting for conditions:', {
-        isInitialized,
-        isFormPopulated,
-        areasCount: areas.length,
-        agentsCount: agents.length,
-        mode,
-        hasPackage: !!(editPackage || resubmitPackage)
-      });
     }
-  }, [isInitialized, isFormPopulated, areas, agents, mode, editPackage, resubmitPackage, loadPackageForEditing]);
+  }, [isInitialized, areas, agents, editPackage, resubmitPackage, actualMode, loadPackageForEditing]);
 
   // Keyboard handling
   useEffect(() => {
@@ -648,7 +641,7 @@ export default function PackageCreationModal({
 
   useEffect(() => {
     if (visible) {
-      if (!isCreatingMultiple && mode === 'create') {
+      if (!isCreatingMultiple && actualMode === 'create') {
         resetForm();
       }
       
@@ -660,9 +653,8 @@ export default function PackageCreationModal({
     } else {
       // Reset initialization state when modal closes
       setIsInitialized(false);
-      setIsFormPopulated(false);
     }
-  }, [visible, isCreatingMultiple, mode]);
+  }, [visible, isCreatingMultiple, actualMode]);
 
   const resetForm = useCallback(() => {
     setCurrentStep(0);
@@ -697,7 +689,6 @@ export default function PackageCreationModal({
     setAreas([]);
     setAgents([]);
     setIsInitialized(false);
-    setIsFormPopulated(false);
   }, []);
 
   // Reset only for new package (keep pending packages)
@@ -984,7 +975,7 @@ export default function PackageCreationModal({
     }));
   }, []);
 
-  // UPDATED: Step validation with new step order
+  // Step validation with new step order
   const isCurrentStepValid = useCallback(() => {
     switch (currentStep) {
       case 0: return packageData.package_size && packageData.package_size.length > 0;
@@ -1007,7 +998,7 @@ export default function PackageCreationModal({
     }
   }, [currentStep, packageData, deliveryLocation]);
 
-  // UPDATED: Navigation with new step order
+  // Navigation with new step order
   const nextStep = useCallback(() => {
     if (currentStep < STEP_TITLES.length - 1 && isCurrentStepValid()) {
       if (currentStep === 4 && packageData.delivery_type === 'agent') {
@@ -1052,9 +1043,9 @@ export default function PackageCreationModal({
     setPendingPackages(prev => prev.filter(pkg => pkg.id !== packageId));
   }, []);
 
-  // UPDATED: Handle submission for different modes
+  // FIXED: Handle submission for different modes
   const handleSubmit = useCallback(async () => {
-    if (!isCurrentStepValid() || isSubmitting) return;
+    if (!isCurrentStepValid()) return;
 
     setIsSubmitting(true);
     try {
@@ -1091,7 +1082,7 @@ export default function PackageCreationModal({
 
       console.log(`📦 Submitting ${packagesToSubmit.length} packages...`);
 
-      if (mode === 'edit' && editPackage) {
+      if (actualMode === 'edit' && editPackage) {
         // Update existing package
         console.log('✏️ Updating package:', editPackage.code);
         
@@ -1104,7 +1095,7 @@ export default function PackageCreationModal({
         } else {
           throw new Error(response.data.message || 'Failed to update package');
         }
-      } else if (mode === 'resubmit' && resubmitPackage) {
+      } else if (actualMode === 'resubmit' && resubmitPackage) {
         // Resubmit existing package
         console.log('🔄 Resubmitting package:', resubmitPackage.code);
         
@@ -1139,7 +1130,7 @@ export default function PackageCreationModal({
       
       Toast.show({
         type: 'error',
-        text1: `Failed to ${mode === 'edit' ? 'Update' : mode === 'resubmit' ? 'Resubmit' : 'Create'} Package`,
+        text1: `Failed to ${actualMode === 'edit' ? 'Update' : actualMode === 'resubmit' ? 'Resubmit' : 'Create'} Package`,
         text2: error.message,
         position: 'top',
         visibilityTime: 4000,
@@ -1147,13 +1138,12 @@ export default function PackageCreationModal({
     } finally {
       setIsSubmitting(false);
     }
-  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, mode, editPackage, resubmitPackage, onSubmit, getDisplayName, getUserPhone, selectedBusiness]);
+  }, [isCurrentStepValid, packageData, deliveryLocation, selectedOriginAgent, pendingPackages, actualMode, editPackage, resubmitPackage, onSubmit, getDisplayName, getUserPhone, selectedBusiness]);
 
-  // ENHANCED: Retry data loading with proper state management
+  // Retry data loading with proper state management
   const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
     setIsInitialized(false);
-    setIsFormPopulated(false);
     setDataError(null);
     setAreas([]);
     setAgents([]);
@@ -1273,10 +1263,10 @@ export default function PackageCreationModal({
       <Text style={styles.progressText}>
         Step {currentStep + 1} of {STEP_TITLES.length}
         {pendingPackages.length > 0 && ` • ${pendingPackages.length} package${pendingPackages.length !== 1 ? 's' : ''} pending`}
-        {mode !== 'create' && ` • ${mode === 'edit' ? 'Editing' : 'Resubmitting'} Package`}
+        {actualMode !== 'create' && ` • ${actualMode === 'edit' ? 'Editing' : 'Resubmitting'} Package`}
       </Text>
     </View>
-  ), [currentStep, pendingPackages.length, mode]);
+  ), [currentStep, pendingPackages.length, actualMode]);
 
   const renderHeader = useCallback(() => (
     <View style={styles.header}>
@@ -1288,7 +1278,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, getModalTitle]);
 
-  // ENHANCED: Loading state with proper messaging
+  // Loading state with proper messaging
   const renderLoadingState = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color="#7c3aed" />
@@ -1304,7 +1294,7 @@ export default function PackageCreationModal({
     </View>
   );
 
-  // ENHANCED: Error state with retry functionality
+  // Error state with retry functionality
   const renderErrorState = () => (
     <View style={styles.errorContainer}>
       <Feather name="alert-circle" size={64} color="#ef4444" />
@@ -1376,8 +1366,668 @@ export default function PackageCreationModal({
     </Modal>
   ), [showLargePackageModal, largePackageInstructions, handleSaveLargePackageInstructions]);
 
-  // Component render methods would continue here...
-  // Due to length constraints, I'll provide the key structural parts
+  // Step 0 - Package Size Selection
+  const renderPackageSizeSelection = useCallback(() => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>What are you sending?</Text>
+      <Text style={styles.stepSubtitle}>Choose the size of your package</Text>
+      
+      {/* Show editing/resubmit notice */}
+      {(actualMode === 'edit' || actualMode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={actualMode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={actualMode === 'edit' ? '#8b5cf6' : '#f97316'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: actualMode === 'edit' ? '#8b5cf6' : '#f97316' }]}>
+            {actualMode === 'edit' ? 'You are editing an existing package' : 'You are resubmitting a rejected package'}
+          </Text>
+        </View>
+      )}
+      
+      <View style={styles.packageSizeOptions}>
+        <TouchableOpacity
+          style={[
+            styles.packageSizeOption,
+            packageData.package_size === 'small' && styles.selectedPackageSizeOption
+          ]}
+          onPress={() => handlePackageSizeChange('small')}
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabel}>Small Package</Text>
+            <Text style={styles.packageSizeDescription}>Perfect for documents and small items</Text>
+          </View>
+          {packageData.package_size === 'small' && (
+            <Feather name="check-circle" size={20} color="#10b981" />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.packageSizeOption,
+            packageData.package_size === 'medium' && styles.selectedPackageSizeOption
+          ]}
+          onPress={() => handlePackageSizeChange('medium')}
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabel}>Medium</Text>
+            <Text style={styles.packageSizeDescription}>For electronics, clothing, and medium-sized items</Text>
+          </View>
+          {packageData.package_size === 'medium' && (
+            <Feather name="check-circle" size={20} color="#10b981" />
+          )}
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.packageSizeOption, styles.disabledPackageSize]}
+          onPress={() => {}}
+          disabled
+        >
+          <View style={styles.packageSizeContent}>
+            <Text style={styles.packageSizeLabelDisabled}>Large</Text>
+            <Text style={styles.packageSizeDescriptionDisabled}>Coming Soon</Text>
+          </View>
+          <Feather name="lock" size={20} color="#666" />
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.packageSizeNote}>
+        <Feather name="info" size={16} color="#7c3aed" />
+        <Text style={styles.packageSizeNoteText}>
+          Pricing is calculated automatically based on your selection and delivery options
+        </Text>
+      </View>
+    </View>
+  ), [packageData.package_size, handlePackageSizeChange, actualMode]);
+
+  // Step 1: Sender Office Selection
+  const renderOriginAgentSelection = useCallback(() => {
+    const groupedAgents = getGroupedItems(agents, searchQueries.originAgent, 'agent');
+    
+    return (
+      <View style={styles.stepContent}>
+        <Text style={styles.stepTitle}>Select Sender Office</Text>
+        <Text style={styles.stepSubtitle}>Which office will collect the package?</Text>
+        
+        <View style={styles.dataInfoContainer}>
+          <Text style={styles.dataInfoText}>
+            {agents.length} offices available
+          </Text>
+          {searchQueries.originAgent && (
+            <Text style={styles.dataInfoText}>
+              Search: "{searchQueries.originAgent}"
+            </Text>
+          )}
+        </View>
+        
+        {renderSearchAndSortHeader(
+          searchQueries.originAgent,
+          (value) => updateSearchQuery('originAgent', value),
+          'Search offices by name, area, or location...'
+        )}
+        
+        <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+          {groupedAgents.length > 0 ? (
+            groupedAgents.map((group, groupIndex) => (
+              <View key={groupIndex}>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
+                
+                {group.items.map((agent) => {
+                  const agentData = agent as Agent;
+                  const agentName = agentData.name || 'Unknown Office';
+                  const agentId = agentData.id || '';
+                  
+                  const areaName = agentData.area?.name || 'Unknown Area';
+                  const locationName = agentData.area?.location?.name || group.locationName || 'Unknown Location';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={agentId}
+                      style={[
+                        styles.packageSizeOption,
+                        packageData.origin_agent_id === agentId && styles.selectedPackageSizeOption
+                      ]}
+                      onPress={() => updatePackageData('origin_agent_id', agentId)}
+                    >
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{agentName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {areaName} • {locationName}
+                        </Text>
+                      </View>
+                      {packageData.origin_agent_id === agentId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))
+          ) : (
+            <View style={styles.noResultsContainer}>
+              <Feather name="search" size={48} color="#666" />
+              <Text style={styles.noResultsTitle}>
+                {searchQueries.originAgent ? 'No offices found' : 'No offices available'}
+              </Text>
+              <Text style={styles.noResultsText}>
+                {searchQueries.originAgent 
+                  ? 'Try a different search term or clear the search' 
+                  : 'Check your data connection and try refreshing'
+                }
+              </Text>
+              {searchQueries.originAgent && (
+                <TouchableOpacity
+                  style={styles.clearSearchButton}
+                  onPress={() => updateSearchQuery('originAgent', '')}
+                >
+                  <Text style={styles.clearSearchButtonText}>Clear Search</Text>
+                </TouchableOpacity>
+              )}
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
+  }, [agents, searchQueries.originAgent, packageData.origin_agent_id, renderSearchAndSortHeader, getGroupedItems, updatePackageData, updateSearchQuery, sortConfig.field]);
+
+  // Step 2: Receiver Details
+  const renderReceiverDetails = useCallback(() => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Receiver Details</Text>
+      <Text style={styles.stepSubtitle}>Who will receive this package?</Text>
+      
+      <View style={styles.formContainer}>
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Full Name"
+          placeholderTextColor="#888"
+          value={packageData.receiver_name}
+          onChangeText={(value) => updatePackageData('receiver_name', value)}
+          autoCapitalize="words"
+        />
+        
+        <TextInput
+          style={styles.input}
+          placeholder="Receiver's Phone (+254...)"
+          placeholderTextColor="#888"
+          value={packageData.receiver_phone}
+          onChangeText={(value) => updatePackageData('receiver_phone', value)}
+          keyboardType="phone-pad"
+        />
+      </View>
+
+      {/* Show selected business info (read-only) */}
+      {selectedBusiness && (
+        <View style={styles.businessPreviewSection}>
+          <Text style={styles.businessPreviewTitle}>Package for Business</Text>
+          <Text style={styles.businessPreviewText}>{selectedBusiness.name}</Text>
+        </View>
+      )}
+    </View>
+  ), [packageData.receiver_name, packageData.receiver_phone, selectedBusiness, updatePackageData]);
+
+  // Step 3: Delivery method selection
+  const renderDeliveryMethodSelection = useCallback(() => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Delivery Method</Text>
+      <Text style={styles.stepSubtitle}>How should the package be delivered?</Text>
+      
+      <View style={styles.deliveryOptions}>
+        <TouchableOpacity
+          style={[
+            styles.deliveryOption,
+            packageData.delivery_type === 'doorstep' && styles.selectedDeliveryOption
+          ]}
+          onPress={() => updatePackageData('delivery_type', 'doorstep')}
+        >
+          <View style={styles.deliveryOptionContent}>
+            <Feather name="home" size={24} color="#fff" />
+            <View style={styles.deliveryOptionText}>
+              <Text style={styles.deliveryOptionTitle}>Home Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Direct delivery to address</Text>
+            </View>
+            {packageData.delivery_type === 'doorstep' && (
+              <Feather name="check-circle" size={20} color="#10b981" />
+            )}
+          </View>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.deliveryOption,
+            packageData.delivery_type === 'agent' && styles.selectedDeliveryOption
+          ]}
+          onPress={() => updatePackageData('delivery_type', 'agent')}
+        >
+          <View style={styles.deliveryOptionContent}>
+            <Feather name="briefcase" size={24} color="#fff" />
+            <View style={styles.deliveryOptionText}>
+              <Text style={styles.deliveryOptionTitle}>Office Delivery</Text>
+              <Text style={styles.deliveryOptionSubtitle}>Collect from destination office</Text>
+            </View>
+            {packageData.delivery_type === 'agent' && (
+              <Feather name="check-circle" size={20} color="#10b981" />
+            )}
+          </View>
+        </TouchableOpacity>
+      </View>
+
+      <View style={styles.deliveryNote}>
+        <Feather name="info" size={16} color="#7c3aed" />
+        <Text style={styles.deliveryNoteText}>
+          For fragile items requiring special handling, use the "Fragile Delivery" option from the main menu
+        </Text>
+      </View>
+    </View>
+  ), [packageData.delivery_type, updatePackageData]);
+
+  // Step 4: Destination selection
+  const renderDestinationSelection = useCallback(() => {
+    if (packageData.delivery_type === 'agent') {
+      return (
+        <View style={styles.stepContent}>
+          <Text style={styles.stepTitle}>Select Receiving Office</Text>
+          <Text style={styles.stepSubtitle}>Which office will handle final delivery?</Text>
+          
+          {renderSearchAndSortHeader(
+            searchQueries.destinationAgent,
+            (value) => updateSearchQuery('destinationAgent', value),
+            'Search receiving offices...'
+          )}
+          
+          <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+            {getGroupedItems(agents, searchQueries.destinationAgent, 'agent').map((group, groupIndex) => (
+              <View key={groupIndex}>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
+                
+                {group.items.map((agent) => {
+                  const agentData = agent as Agent;
+                  const agentName = agentData.name || 'Unknown Office';
+                  const agentId = agentData.id || '';
+                  
+                  const areaName = agentData.area?.name || 'Unknown Area';
+                  const locationName = agentData.area?.location?.name || group.locationName || 'Unknown Location';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={agentId}
+                      style={[
+                        styles.packageSizeOption,
+                        packageData.destination_agent_id === agentId && styles.selectedPackageSizeOption
+                      ]}
+                      onPress={() => updatePackageData('destination_agent_id', agentId)}
+                    >
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{agentName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {areaName} • {locationName}
+                        </Text>
+                      </View>
+                      {packageData.destination_agent_id === agentId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      );
+    } else {
+      return (
+        <View style={styles.stepContent}>
+          <Text style={styles.stepTitle}>Select Destination Area</Text>
+          <Text style={styles.stepSubtitle}>Which area should we deliver to?</Text>
+          
+          {renderSearchAndSortHeader(
+            searchQueries.destinationArea,
+            (value) => updateSearchQuery('destinationArea', value),
+            'Search destination areas...'
+          )}
+          
+          <ScrollView style={styles.selectionList} showsVerticalScrollIndicator={false}>
+            {getGroupedItems(areas, searchQueries.destinationArea, 'area').map((group, groupIndex) => (
+              <View key={groupIndex}>
+                {/* Only show location header when sorting by location */}
+                {sortConfig.field === 'location' && group.locationName !== 'All Items' && (
+                  <View style={styles.locationHeader}>
+                    <Text style={styles.locationHeaderText}>{group.locationName}</Text>
+                    <Text style={styles.locationHeaderCount}>({group.items.length})</Text>
+                  </View>
+                )}
+                
+                {group.items.map((area) => {
+                  const areaData = area as Area;
+                  const areaName = areaData.name || 'Unknown Area';
+                  const areaId = areaData.id || '';
+                  const locationName = areaData.location?.name || group.locationName || 'Unknown Location';
+                  
+                  return (
+                    <TouchableOpacity
+                      key={areaId}
+                      style={[
+                        styles.packageSizeOption,
+                        packageData.destination_area_id === areaId && styles.selectedPackageSizeOption
+                      ]}
+                      onPress={() => updatePackageData('destination_area_id', areaId)}
+                    >
+                      <View style={styles.packageSizeContent}>
+                        <Text style={styles.packageSizeLabel}>{areaName}</Text>
+                        <Text style={styles.packageSizeDescription}>
+                          {locationName}
+                        </Text>
+                      </View>
+                      {packageData.destination_area_id === areaId && (
+                        <Feather name="check-circle" size={20} color="#10b981" />
+                      )}
+                    </TouchableOpacity>
+                  );
+                })}
+              </View>
+            ))}
+          </ScrollView>
+        </View>
+      );
+    }
+  }, [packageData.delivery_type, packageData.destination_agent_id, packageData.destination_area_id, agents, areas, searchQueries.destinationAgent, searchQueries.destinationArea, renderSearchAndSortHeader, getGroupedItems, updatePackageData, sortConfig.field]);
+
+  // Step 5: Delivery Location
+  const renderDeliveryLocation = useCallback(() => (
+    <View style={styles.stepContent}>
+      <Text style={styles.stepTitle}>Delivery Location</Text>
+      <Text style={styles.stepSubtitle}>
+        Provide the exact delivery address
+      </Text>
+      
+      <View style={styles.formContainer}>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          placeholder="Enter specific address, building name, floor, etc."
+          placeholderTextColor="#888"
+          value={deliveryLocation}
+          onChangeText={setDeliveryLocation}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+        />
+      </View>
+    </View>
+  ), [deliveryLocation]);
+
+  // Step 6: Enhanced confirmation
+  const renderConfirmation = useCallback(() => (
+    <View style={[styles.stepContent, styles.stepContentConfirmation]}>
+      <Text style={styles.stepTitle}>
+        {actualMode === 'edit' ? 'Confirm Package Updates' : 
+         actualMode === 'resubmit' ? 'Confirm Package Resubmission' : 
+         'Confirm Package Details'}
+      </Text>
+      <Text style={styles.stepSubtitle}>
+        {pendingPackages.length > 0 
+          ? `Review all ${totalPackages} package${totalPackages > 1 ? 's' : ''} before ${actualMode === 'edit' ? 'updating' : actualMode === 'resubmit' ? 'resubmitting' : 'submitting'}`
+          : `Review all information before ${actualMode === 'edit' ? 'updating' : actualMode === 'resubmit' ? 'resubmitting' : 'submitting'}`
+        }
+      </Text>
+      
+      {/* Show editing/resubmit notice */}
+      {(actualMode === 'edit' || actualMode === 'resubmit') && (
+        <View style={styles.modeNoticeSection}>
+          <Feather 
+            name={actualMode === 'edit' ? 'edit-3' : 'refresh-cw'} 
+            size={16} 
+            color={actualMode === 'edit' ? '#8b5cf6' : '#f97316'} 
+          />
+          <Text style={[styles.modeNoticeText, { color: actualMode === 'edit' ? '#8b5cf6' : '#f97316' }]}>
+            {actualMode === 'edit' ? 'You are editing an existing package' : 'You are resubmitting a rejected package'}
+          </Text>
+        </View>
+      )}
+      
+      {/* Show pending packages if any */}
+      {pendingPackages.length > 0 && (
+        <View style={styles.pendingPackagesContainer}>
+          <Text style={styles.pendingPackagesTitle}>Pending Packages ({pendingPackages.length})</Text>
+          {pendingPackages.map((pkg, index) => (
+            <View key={pkg.id} style={styles.pendingPackageItem}>
+              <View style={styles.pendingPackageHeader}>
+                <Text style={styles.pendingPackageNumber}>Package {index + 1}</Text>
+                <TouchableOpacity 
+                  onPress={() => removePendingPackage(pkg.id)}
+                  style={styles.removePendingPackageButton}
+                >
+                  <Feather name="trash-2" size={16} color="#ef4444" />
+                </TouchableOpacity>
+              </View>
+              <Text style={styles.pendingPackageSummary}>
+                {pkg.receiver_name} • {pkg.delivery_type === 'doorstep' ? 'Home' : 'Office'} Delivery
+                {pkg.package_size && ` • ${pkg.package_size.charAt(0).toUpperCase() + pkg.package_size.slice(1)}`}
+              </Text>
+            </View>
+          ))}
+        </View>
+      )}
+      
+      {/* Current package confirmation */}
+      <View style={styles.confirmationContainer}>
+        <Text style={styles.currentPackageTitle}>
+          {pendingPackages.length > 0 ? `Package ${pendingPackages.length + 1}` : 
+           actualMode === 'edit' ? 'Package Updates' :
+           actualMode === 'resubmit' ? 'Package Resubmission' :
+           'Current Package'}
+        </Text>
+        
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Package Size</Text>
+          <Text style={styles.confirmationDetail}>
+            {packageData.package_size?.charAt(0).toUpperCase() + packageData.package_size?.slice(1)} Package
+          </Text>
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Route</Text>
+          <View style={styles.routeDisplay}>
+            <View style={styles.routePoint}>
+              <Text style={styles.routeAreaInitials}>
+                {selectedOriginAgent?.name?.substring(0, 2).toUpperCase() || '--'}
+              </Text>
+              <Text style={styles.routeAreaName}>{selectedOriginAgent?.name || 'Unknown'}</Text>
+              <Text style={styles.routeLocationName}>
+                {selectedOriginAgent?.area?.name} • {selectedOriginAgent?.area?.location?.name}
+              </Text>
+            </View>
+            <Feather name="arrow-right" size={20} color="#7c3aed" />
+            <View style={styles.routePoint}>
+              {packageData.delivery_type === 'agent' ? (
+                <>
+                  <Text style={styles.routeAreaInitials}>
+                    {selectedDestinationAgent?.name?.substring(0, 2).toUpperCase() || '--'}
+                  </Text>
+                  <Text style={styles.routeAreaName}>{selectedDestinationAgent?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeLocationName}>
+                    {selectedDestinationAgent?.area?.name} • {selectedDestinationAgent?.area?.location?.name}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.routeAreaInitials}>{selectedDestinationArea?.initials || '--'}</Text>
+                  <Text style={styles.routeAreaName}>{selectedDestinationArea?.name || 'Unknown'}</Text>
+                  <Text style={styles.routeLocationName}>{selectedDestinationArea?.location?.name || 'Unknown'}</Text>
+                </>
+              )}
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Receiver</Text>
+          <Text style={styles.confirmationDetail}>{packageData.receiver_name}</Text>
+          <Text style={styles.confirmationDetail}>{packageData.receiver_phone}</Text>
+          
+          {/* Show business information if available */}
+          {selectedBusiness && (
+            <View style={styles.businessInfoSection}>
+              <Text style={styles.confirmationSubDetail}>Business Information:</Text>
+              <Text style={styles.confirmationDetail}>{selectedBusiness.name}</Text>
+              {selectedBusiness.phone_number && (
+                <Text style={styles.confirmationDetail}>{selectedBusiness.phone_number}</Text>
+              )}
+            </View>
+          )}
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Delivery Method</Text>
+          <Text style={styles.confirmationDetail}>
+            {packageData.delivery_type === 'doorstep' ? 'Home Delivery' : 'Office Delivery'}
+          </Text>
+          
+          {packageData.delivery_type === 'agent' && selectedDestinationAgent && (
+            <View style={styles.agentInfo}>
+              <Text style={styles.confirmationDetail}>Receiving Office: {selectedDestinationAgent?.name}</Text>
+            </View>
+          )}
+
+          {packageData.delivery_type === 'doorstep' && deliveryLocation && (
+            <View style={styles.deliveryLocationInfo}>
+              <Text style={styles.confirmationSubDetail}>Delivery Address:</Text>
+              <Text style={styles.confirmationDetail}>{deliveryLocation}</Text>
+            </View>
+          )}
+
+          {/* Show large package instructions */}
+          {packageData.package_size === 'large' && packageData.special_instructions && (
+            <View style={styles.largePackageNotesInfo}>
+              <Text style={styles.confirmationSubDetail}>Special Handling Instructions:</Text>
+              <Text style={styles.confirmationDetail}>{packageData.special_instructions}</Text>
+            </View>
+          )}
+        </View>
+
+        <View style={styles.confirmationSection}>
+          <Text style={styles.confirmationSectionTitle}>Estimated Cost</Text>
+          {estimatedCost ? (
+            <View style={styles.costDisplay}>
+              <Text style={styles.estimatedCost}>KES {estimatedCost.toLocaleString()}</Text>
+            </View>
+          ) : (
+            <Text style={styles.pricingError}>Unable to calculate cost</Text>
+          )}
+        </View>
+      </View>
+
+      {/* Add Another Package Button - Only for create mode */}
+      {actualMode === 'create' && currentStep === STEP_TITLES.length - 1 && (
+        <View style={styles.addAnotherContainer}>
+          <TouchableOpacity 
+            onPress={addAnotherPackage}
+            style={styles.addAnotherButton}
+          >
+            <Feather name="plus" size={20} color="#7c3aed" />
+            <Text style={styles.addAnotherButtonText}>Add Another Package</Text>
+          </TouchableOpacity>
+          <Text style={styles.addAnotherNote}>
+            Note: If you close before submitting, all progress will be lost. Submit your packages first.
+          </Text>
+        </View>
+      )}
+    </View>
+  ), [
+    actualMode, selectedOriginAgent, selectedDestinationAgent, selectedDestinationArea, packageData, 
+    deliveryLocation, estimatedCost, pendingPackages, totalPackages, removePendingPackage, addAnotherPackage, currentStep, selectedBusiness
+  ]);
+
+  // Step routing with new order
+  const renderCurrentStep = useCallback(() => {
+    switch (currentStep) {
+      case 0: return renderPackageSizeSelection();
+      case 1: return renderOriginAgentSelection();
+      case 2: return renderReceiverDetails();
+      case 3: return renderDeliveryMethodSelection();
+      case 4: return renderDestinationSelection();
+      case 5: return renderDeliveryLocation();
+      case 6: return renderConfirmation();
+      default: return renderPackageSizeSelection();
+    }
+  }, [currentStep, renderPackageSizeSelection, renderOriginAgentSelection, renderReceiverDetails, renderDeliveryMethodSelection, renderDestinationSelection, renderDeliveryLocation, renderConfirmation]);
+
+  const renderNavigationButtons = useCallback(() => (
+    <View style={styles.navigationContainer}>
+      {currentStep > 0 && (
+        <TouchableOpacity onPress={prevStep} style={styles.backButton}>
+          <Feather name="arrow-left" size={20} color="#fff" />
+          <Text style={styles.backButtonText}>Back</Text>
+        </TouchableOpacity>
+      )}
+      
+      <View style={styles.spacer} />
+      
+      {__DEV__ && currentStep === 1 && (
+        <TouchableOpacity onPress={handleClearCache} style={styles.debugButton}>
+          <Text style={styles.debugButtonText}>Clear Cache</Text>
+        </TouchableOpacity>
+      )}
+      
+      {currentStep < STEP_TITLES.length - 1 ? (
+        <TouchableOpacity 
+          onPress={nextStep} 
+          style={[
+            styles.nextButton,
+            !isCurrentStepValid() && styles.disabledButton
+          ]}
+          disabled={!isCurrentStepValid()}
+        >
+          <Text style={[
+            styles.nextButtonText,
+            !isCurrentStepValid() && styles.disabledButtonText
+          ]}>
+            Next
+          </Text>
+          <Feather name="arrow-right" size={20} color={isCurrentStepValid() ? "#fff" : "#666"} />
+        </TouchableOpacity>
+      ) : (
+        <TouchableOpacity 
+          onPress={handleSubmit} 
+          style={[
+            styles.submitButton,
+            (!isCurrentStepValid() || isSubmitting) && styles.disabledButton
+          ]}
+          disabled={!isCurrentStepValid() || isSubmitting}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#fff" />
+          ) : (
+            <>
+              <Text style={[
+                styles.submitButtonText,
+                (!isCurrentStepValid() || isSubmitting) && styles.disabledButtonText
+              ]}>
+                {getActionButtonText()}
+              </Text>
+              <Feather 
+                name={actualMode === 'edit' ? 'save' : actualMode === 'resubmit' ? 'refresh-cw' : 'check'} 
+                size={20} 
+                color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} 
+              />
+            </>
+          )}
+        </TouchableOpacity>
+      )}
+    </View>
+  ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, getActionButtonText, actualMode]);
 
   const renderMainContent = useCallback(() => {
     if (isDataLoading || !isInitialized) {
@@ -1399,73 +2049,13 @@ export default function PackageCreationModal({
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
         >
-          {/* Step content would be rendered here based on currentStep */}
-          <View style={styles.stepContent}>
-            <Text style={styles.stepTitle}>Step Content</Text>
-            <Text style={styles.stepSubtitle}>Content for current step would go here</Text>
-          </View>
+          {renderCurrentStep()}
         </ScrollView>
         
-        {/* Navigation buttons */}
-        <View style={styles.navigationContainer}>
-          {currentStep > 0 && (
-            <TouchableOpacity onPress={prevStep} style={styles.backButton}>
-              <Feather name="arrow-left" size={20} color="#fff" />
-              <Text style={styles.backButtonText}>Back</Text>
-            </TouchableOpacity>
-          )}
-          
-          <View style={styles.spacer} />
-          
-          {currentStep < STEP_TITLES.length - 1 ? (
-            <TouchableOpacity 
-              onPress={nextStep} 
-              style={[
-                styles.nextButton,
-                !isCurrentStepValid() && styles.disabledButton
-              ]}
-              disabled={!isCurrentStepValid()}
-            >
-              <Text style={[
-                styles.nextButtonText,
-                !isCurrentStepValid() && styles.disabledButtonText
-              ]}>
-                Next
-              </Text>
-              <Feather name="arrow-right" size={20} color={isCurrentStepValid() ? "#fff" : "#666"} />
-            </TouchableOpacity>
-          ) : (
-            <TouchableOpacity 
-              onPress={handleSubmit} 
-              style={[
-                styles.submitButton,
-                (!isCurrentStepValid() || isSubmitting) && styles.disabledButton
-              ]}
-              disabled={!isCurrentStepValid() || isSubmitting}
-            >
-              {isSubmitting ? (
-                <ActivityIndicator size="small" color="#fff" />
-              ) : (
-                <>
-                  <Text style={[
-                    styles.submitButtonText,
-                    (!isCurrentStepValid() || isSubmitting) && styles.disabledButtonText
-                  ]}>
-                    {getActionButtonText()}
-                  </Text>
-                  <Feather 
-                    name={mode === 'edit' ? 'save' : mode === 'resubmit' ? 'refresh-cw' : 'check'} 
-                    size={20} 
-                    color={isCurrentStepValid() && !isSubmitting ? "#fff" : "#666"} 
-                  />
-                </>
-              )}
-            </TouchableOpacity>
-          )}
-        </View>
+        {renderNavigationButtons()}
       </>
     );
-  }, [isDataLoading, isInitialized, dataError, renderHeader, renderProgressBar, currentStep, prevStep, nextStep, isCurrentStepValid, handleSubmit, isSubmitting, getActionButtonText, mode]);
+  }, [isDataLoading, isInitialized, dataError, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
 
   return (
     <Modal visible={visible} transparent animationType="none">
@@ -1503,6 +2093,7 @@ export default function PackageCreationModal({
   );
 }
 
+// Enhanced styles with mode notice section
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
@@ -1585,6 +2176,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 300,
   },
+  stepContentConfirmation: {
+    flex: 1,
+    minHeight: 450,
+  },
   stepTitle: {
     fontSize: 22,
     fontWeight: '700',
@@ -1598,7 +2193,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // ENHANCED: Loading state styles
+  // Loading state styles
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1619,7 +2214,7 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   
-  // ENHANCED: Error state styles
+  // Error state styles
   errorContainer: {
     flex: 1,
     alignItems: 'center',
@@ -1673,71 +2268,135 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '500',
   },
-
-  // Add other styles as needed...
-  searchAndSortContainer: {
-    marginBottom: 15,
-  },
-  searchInputContainer: {
+  
+  // Mode notice section for edit/resubmit
+  modeNoticeSection: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(26, 26, 46, 0.8)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(124, 58, 237, 0.3)',
-    paddingHorizontal: 16,
-    minHeight: 44,
-    gap: 12,
-    marginBottom: 10,
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 20,
+    gap: 8,
   },
-  searchInput: {
+  modeNoticeText: {
     flex: 1,
-    fontSize: 16,
-    color: '#fff',
-    paddingVertical: 10,
+    fontSize: 14,
+    fontWeight: '500',
+    lineHeight: 18,
   },
   
-  sortContainer: {
+  // Package Size Selection Styles
+  packageSizeOptions: {
+    gap: 12,
+    marginBottom: 20,
+  },
+  packageSizeOption: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 4,
-  },
-  sortLabel: {
-    fontSize: 14,
-    color: '#888',
-    fontWeight: '500',
-  },
-  sortButtons: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  sortButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
     backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'rgba(255, 255, 255, 0.1)',
-    gap: 4,
+    padding: 16,
+    marginBottom: 8,
   },
-  activeSortButton: {
+  selectedPackageSizeOption: {
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     borderColor: '#7c3aed',
   },
-  sortButtonText: {
+  disabledPackageSize: {
+    backgroundColor: 'rgba(255, 255, 255, 0.02)',
+    borderColor: 'rgba(255, 255, 255, 0.05)',
+    opacity: 0.6,
+  },
+  packageSizeContent: {
+    flex: 1,
+  },
+  packageSizeLabel: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  packageSizeLabelDisabled: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginBottom: 4,
+  },
+  packageSizeDescription: {
+    fontSize: 14,
+    color: '#888',
+    lineHeight: 18,
+  },
+  packageSizeDescriptionDisabled: {
+    fontSize: 14,
+    color: '#666',
+    lineHeight: 18,
+  },
+  packageSizeNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 8,
+    padding: 12,
+    gap: 8,
+  },
+  packageSizeNoteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#7c3aed',
+    lineHeight: 18,
+  },
+  
+  dataInfoContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 4,
+    marginBottom: 10,
+  },
+  dataInfoText: {
     fontSize: 12,
     color: '#888',
     fontWeight: '500',
   },
-  activeSortButtonText: {
+  
+  clearSearchButton: {
+    marginTop: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+  },
+  clearSearchButtonText: {
+    fontSize: 14,
     color: '#7c3aed',
     fontWeight: '600',
+    textAlign: 'center',
   },
-
-  // Large Package Modal
+  
+  deliveryNote: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderRadius: 8,
+    padding: 10,
+    marginTop: 16,
+    gap: 8,
+  },
+  deliveryNoteText: {
+    flex: 1,
+    fontSize: 14,
+    color: '#7c3aed',
+    lineHeight: 18,
+  },
+  
+  // Large Package Modal Styles
   largePackageModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -1809,7 +2468,193 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#fff',
   },
-
+  
+  // Pending Packages Styles
+  pendingPackagesContainer: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+  },
+  pendingPackagesTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 12,
+  },
+  pendingPackageItem: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 8,
+  },
+  pendingPackageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  pendingPackageNumber: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  removePendingPackageButton: {
+    padding: 4,
+  },
+  pendingPackageSummary: {
+    fontSize: 13,
+    color: '#888',
+  },
+  currentPackageTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 16,
+  },
+  
+  // Add Another Package Styles
+  addAnotherContainer: {
+    marginTop: 20,
+    alignItems: 'center',
+  },
+  addAnotherButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderWidth: 1,
+    borderColor: '#7c3aed',
+    gap: 8,
+  },
+  addAnotherButtonText: {
+    fontSize: 16,
+    color: '#7c3aed',
+    fontWeight: '600',
+  },
+  addAnotherNote: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+    marginTop: 10,
+    lineHeight: 16,
+    paddingHorizontal: 20,
+  },
+  
+  searchAndSortContainer: {
+    marginBottom: 15,
+  },
+  searchInputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(26, 26, 46, 0.8)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.3)',
+    paddingHorizontal: 16,
+    minHeight: 44,
+    gap: 12,
+    marginBottom: 10,
+  },
+  searchInput: {
+    flex: 1,
+    fontSize: 16,
+    color: '#fff',
+    paddingVertical: 10,
+  },
+  
+  sortContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+  },
+  sortLabel: {
+    fontSize: 14,
+    color: '#888',
+    fontWeight: '500',
+  },
+  sortButtons: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  sortButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 4,
+  },
+  activeSortButton: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  sortButtonText: {
+    fontSize: 12,
+    color: '#888',
+    fontWeight: '500',
+  },
+  activeSortButtonText: {
+    color: '#7c3aed',
+    fontWeight: '600',
+  },
+  
+  locationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    marginTop: 8,
+    marginBottom: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  locationHeaderText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+  },
+  locationHeaderCount: {
+    fontSize: 12,
+    color: '#888',
+  },
+  
+  selectionList: {
+    flex: 1,
+  },
+  
+  noResultsContainer: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 40,
+  },
+  noResultsTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#666',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  noResultsText: {
+    fontSize: 14,
+    color: '#888',
+    textAlign: 'center',
+    lineHeight: 20,
+  },
+  
+  formContainer: {
+    gap: 16,
+    paddingVertical: 8,
+  },
   input: {
     backgroundColor: 'rgba(26, 26, 46, 0.8)',
     borderRadius: 12,
@@ -1826,7 +2671,182 @@ const styles = StyleSheet.create({
     textAlignVertical: 'top',
     paddingTop: 14,
   },
-
+  
+  // Business Preview Styles
+  businessPreviewSection: {
+    marginTop: 20,
+    padding: 12,
+    borderRadius: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.1)',
+    borderWidth: 1,
+    borderColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  businessPreviewTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 4,
+  },
+  businessPreviewText: {
+    fontSize: 15,
+    color: '#fff',
+    fontWeight: '500',
+  },
+  
+  // Business Information Confirmation Styles
+  businessInfoSection: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  
+  deliveryOptions: {
+    gap: 12,
+  },
+  deliveryOption: {
+    borderRadius: 12,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
+    overflow: 'hidden',
+  },
+  selectedDeliveryOption: {
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderColor: '#7c3aed',
+  },
+  deliveryOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  deliveryOptionText: {
+    flex: 1,
+    marginLeft: 16,
+  },
+  deliveryOptionTitle: {
+    fontSize: 17,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 3,
+  },
+  deliveryOptionSubtitle: {
+    fontSize: 14,
+    color: '#888',
+  },
+  
+  confirmationContainer: {
+    gap: 16,
+  },
+  confirmationSection: {
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    borderRadius: 12,
+    padding: 14,
+  },
+  confirmationSectionTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#7c3aed',
+    marginBottom: 10,
+  },
+  confirmationDetail: {
+    fontSize: 16,
+    color: '#fff',
+    marginBottom: 3,
+  },
+  confirmationSubDetail: {
+    fontSize: 14,
+    color: '#888',
+    marginBottom: 6,
+  },
+  routeDisplay: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  routePoint: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  routeAreaInitials: {
+    fontSize: 18,
+    fontWeight: '700',
+    color: '#7c3aed',
+    marginBottom: 4,
+  },
+  routeAreaName: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 2,
+  },
+  routeLocationName: {
+    fontSize: 12,
+    color: '#888',
+    textAlign: 'center',
+  },
+  agentInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  deliveryLocationInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  largePackageNotesInfo: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+    gap: 8,
+  },
+  costDisplay: {
+    alignItems: 'flex-start',
+  },
+  estimatedCost: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: '#10b981',
+  },
+  costBreakdown: {
+    fontSize: 12,
+    color: '#888',
+    marginTop: 2,
+  },
+  pricingError: {
+    fontSize: 14,
+    color: '#ef4444',
+  },
+  
+  debugInfo: {
+    marginTop: 12,
+    padding: 8,
+    backgroundColor: 'rgba(255, 255, 0, 0.1)',
+    borderRadius: 8,
+  },
+  debugText: {
+    fontSize: 12,
+    color: '#ffeb3b',
+    marginBottom: 2,
+  },
+  debugButton: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 6,
+    backgroundColor: 'rgba(255, 193, 7, 0.2)',
+    marginRight: 8,
+  },
+  debugButtonText: {
+    fontSize: 12,
+    color: '#ffc107',
+    fontWeight: '600',
+  },
+  
   navigationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
