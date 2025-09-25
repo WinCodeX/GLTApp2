@@ -1,4 +1,5 @@
-// app/(drawer)/index.tsx - Fixed HomeScreen with proper navigation system integration
+// app/(drawer)/index.tsx - FIXED: HomeScreen with proper mode parameter passing
+
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   SafeAreaView,
@@ -34,7 +35,6 @@ import UpdateModal from '../../components/UpdateModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 import UpdateService from '../../lib/services/updateService';
-// FIXED: Import navigation system
 import { NavigationHelper, useNavigation } from '../../lib/helpers/navigation';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -685,7 +685,7 @@ export default function HomeScreen() {
       },
       onPanResponderRelease: (_, gestureState) => {
         // Calculate final position with controlled momentum
-        const locationTagWidth = 100; // Updated to match new pill size
+        const locationTagWidth = 120; // Updated to match new pill size
         const singleSetWidth = locations.length * locationTagWidth;
         const momentum = Math.min(Math.max(gestureState.vx * 0.2, -200), 200); // Clamped momentum
         const finalDx = gestureState.dx + momentum;
@@ -1158,6 +1158,7 @@ export default function HomeScreen() {
     });
   };
 
+  // FIXED: FAB handlers with proper mode parameter passing
   const handleFragileDelivery = () => {
     if (!validateUserForPackageCreation()) return;
     closeFabMenu();
@@ -1823,25 +1824,30 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Package Creation Modal */}
+      {/* FIXED: Package Creation Modal with proper mode parameter */}
       <PackageCreationModal
         visible={showPackageModal}
         onClose={() => setShowPackageModal(false)}
         onSubmit={handlePackageSubmit}
+        mode="create"
       />
 
-      {/* Fragile Delivery Modal */}
+      {/* FIXED: Fragile Delivery Modal with proper mode parameter */}
       <FragileDeliveryModal
         visible={showFragileModal}
         onClose={() => setShowFragileModal(false)}
         onSubmit={handleFragileSubmit}
+        currentLocation={null}
+        mode="create"
       />
 
-      {/* Collect & Deliver Modal */}
+      {/* FIXED: Collect & Deliver Modal with proper mode parameter */}
       <CollectDeliverModal
         visible={showCollectModal}
         onClose={() => setShowCollectModal(false)}
         onSubmit={handleCollectSubmit}
+        currentLocation={null}
+        mode="create"
       />
     </SafeAreaView>
   );
