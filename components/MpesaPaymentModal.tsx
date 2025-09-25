@@ -869,10 +869,11 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modal: {
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    flex: 1,
-  },
+  borderTopLeftRadius: 24,
+  borderTopRightRadius: 24,
+  minHeight: SCREEN_HEIGHT * 0.3,
+  maxHeight: SCREEN_HEIGHT * 0.95,
+},
   
   // Scroll Container
   scrollContainer: {
