@@ -1,4 +1,4 @@
-// components/FragileDeliveryModal.tsx - Enhanced with auto-population fix for edit/resubmit
+// components/FragileDeliveryModal.tsx - FIXED: Auto-population timing and dependencies
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -368,12 +368,13 @@ export default function FragileDeliveryModal({
   // Access user context for business information and user data
   const { selectedBusiness, getDisplayName, getUserPhone } = useUser();
   
-  // ENHANCED: Dependency management states
+  // FIXED: Enhanced dependency management states
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [hasTriedAutoPopulation, setHasTriedAutoPopulation] = useState(false);
   
   // Location states
   const [pickupLocation, setPickupLocation] = useState<LocationData | null>(initialLocation);
@@ -440,7 +441,7 @@ export default function FragileDeliveryModal({
     }
   }, [mode, savedPackages.length]);
 
-  // ENHANCED: Load reference data with dependency management
+  // FIXED: Enhanced load reference data with proper error handling and retry
   const loadReferenceData = useCallback(async (retryCount = 0): Promise<void> => {
     console.log(`🔄 Loading fragile modal reference data (attempt ${retryCount + 1})`);
     
@@ -478,11 +479,14 @@ export default function FragileDeliveryModal({
     }
   }, []);
 
-  // ENHANCED: Load package data for editing/resubmitting with proper dependency management
+  // FIXED: Enhanced auto-population with comprehensive ID matching and validation
   const loadPackageForEditing = useCallback(async (pkg: Package) => {
     console.log('🔧 Loading fragile package for editing:', pkg.code);
+    console.log('📦 Package data:', pkg);
+    console.log('🏢 Available areas:', areas.length);
+    console.log('👤 Available agents:', agents.length);
     
-    // Wait for reference data to be available
+    // CRITICAL: Wait for reference data to be available
     if (areas.length === 0 || agents.length === 0) {
       console.log('⏳ Waiting for reference data before auto-populating...');
       return;
@@ -513,83 +517,129 @@ export default function FragileDeliveryModal({
         });
       }
 
-      // ENHANCED: Map and select areas/agents with proper matching
+      // FIXED: Enhanced area/agent matching with comprehensive ID comparison
+      let originAreaFound = false;
+      let destinationAreaFound = false;
+      let destinationAgentFound = false;
+
+      // FIXED: Match origin area with multiple ID formats
       if (pkg.origin_area_id) {
-        const originArea = areas.find(area => 
-          area.id === pkg.origin_area_id || 
-          area.id == pkg.origin_area_id ||
-          String(area.id) === String(pkg.origin_area_id)
-        );
+        console.log('🔍 Looking for origin area ID:', pkg.origin_area_id, typeof pkg.origin_area_id);
+        
+        const originArea = areas.find(area => {
+          const areaIdStr = String(area.id);
+          const pkgAreaIdStr = String(pkg.origin_area_id);
+          const match = areaIdStr === pkgAreaIdStr || 
+                       area.id === pkg.origin_area_id ||
+                       Number(area.id) === Number(pkg.origin_area_id);
+          
+          if (match) {
+            console.log('✅ Found matching origin area:', area.name, 'Area ID:', area.id);
+          }
+          return match;
+        });
         
         if (originArea) {
           setSelectedPickupArea(originArea);
-          console.log('✅ Mapped origin area:', originArea.name);
+          originAreaFound = true;
+          console.log('✅ Auto-selected origin area:', originArea.name);
         } else {
-          console.warn('⚠️ Origin area not found:', pkg.origin_area_id);
+          console.warn('⚠️ Origin area not found for ID:', pkg.origin_area_id);
+          console.log('🔍 Available area IDs:', areas.map(a => `${a.id} (${typeof a.id})`));
         }
       }
 
+      // FIXED: Match destination area with multiple ID formats
       if (pkg.destination_area_id) {
-        const destArea = areas.find(area => 
-          area.id === pkg.destination_area_id || 
-          area.id == pkg.destination_area_id ||
-          String(area.id) === String(pkg.destination_area_id)
-        );
+        console.log('🔍 Looking for destination area ID:', pkg.destination_area_id, typeof pkg.destination_area_id);
+        
+        const destArea = areas.find(area => {
+          const areaIdStr = String(area.id);
+          const pkgAreaIdStr = String(pkg.destination_area_id);
+          const match = areaIdStr === pkgAreaIdStr || 
+                       area.id === pkg.destination_area_id ||
+                       Number(area.id) === Number(pkg.destination_area_id);
+          
+          if (match) {
+            console.log('✅ Found matching destination area:', area.name, 'Area ID:', area.id);
+          }
+          return match;
+        });
         
         if (destArea) {
           setSelectedDeliveryArea(destArea);
-          console.log('✅ Mapped destination area:', destArea.name);
+          destinationAreaFound = true;
+          console.log('✅ Auto-selected destination area:', destArea.name);
         } else {
-          console.warn('⚠️ Destination area not found:', pkg.destination_area_id);
+          console.warn('⚠️ Destination area not found for ID:', pkg.destination_area_id);
+          console.log('🔍 Available area IDs:', areas.map(a => `${a.id} (${typeof a.id})`));
         }
       }
 
+      // FIXED: Match destination agent with multiple ID formats
       if (pkg.destination_agent_id) {
-        const destAgent = agents.find(agent => 
-          agent.id === pkg.destination_agent_id || 
-          agent.id == pkg.destination_agent_id ||
-          String(agent.id) === String(pkg.destination_agent_id)
-        );
+        console.log('🔍 Looking for destination agent ID:', pkg.destination_agent_id, typeof pkg.destination_agent_id);
+        
+        const destAgent = agents.find(agent => {
+          const agentIdStr = String(agent.id);
+          const pkgAgentIdStr = String(pkg.destination_agent_id);
+          const match = agentIdStr === pkgAgentIdStr || 
+                       agent.id === pkg.destination_agent_id ||
+                       Number(agent.id) === Number(pkg.destination_agent_id);
+          
+          if (match) {
+            console.log('✅ Found matching destination agent:', agent.name, 'Agent ID:', agent.id);
+          }
+          return match;
+        });
         
         if (destAgent) {
           setSelectedDeliveryAgent(destAgent);
-          console.log('✅ Mapped destination agent:', destAgent.name);
+          // Also set the delivery area from the agent
+          if (destAgent.area) {
+            setSelectedDeliveryArea(destAgent.area);
+          }
+          destinationAgentFound = true;
+          console.log('✅ Auto-selected destination agent:', destAgent.name);
         } else {
-          console.warn('⚠️ Destination agent not found:', pkg.destination_agent_id);
+          console.warn('⚠️ Destination agent not found for ID:', pkg.destination_agent_id);
+          console.log('🔍 Available agent IDs:', agents.map(a => `${a.id} (${typeof a.id})`));
         }
       }
 
-      // ENHANCED: Handle step navigation for resubmit mode
+      // FIXED: Handle step navigation for resubmit mode
       if (mode === 'resubmit') {
         console.log('🔄 Resubmit mode - navigating to confirmation step');
         setCurrentStep(STEP_TITLES.length - 1);
       }
 
-      console.log('✅ Package data loaded and auto-populated successfully');
+      // Mark auto-population as completed
+      setHasTriedAutoPopulation(true);
+
+      console.log('✅ Package data loaded and auto-populated successfully', {
+        originAreaFound,
+        destinationAreaFound,
+        destinationAgentFound
+      });
 
     } catch (error) {
       console.error('❌ Error auto-populating package data:', error);
     }
   }, [areas, agents, mode, STEP_TITLES.length]);
 
-  // ENHANCED: Dependency-aware initialization
+  // FIXED: Proper initialization sequence with dependency management
   useEffect(() => {
     if (visible && !isInitialized) {
       console.log('🚀 Initializing fragile modal with dependency management');
       
       const initializeModal = async () => {
         try {
+          // Reset states
+          setHasTriedAutoPopulation(false);
+          setDataError(null);
+          
           // Step 1: Load reference data first
           await loadReferenceData();
-          
-          // Step 2: Load package data for editing/resubmitting (if applicable)
-          const packageToLoad = editPackage || resubmitPackage;
-          if (packageToLoad && (mode === 'edit' || mode === 'resubmit')) {
-            // Small delay to ensure state updates are processed
-            setTimeout(() => {
-              loadPackageForEditing(packageToLoad);
-            }, 100);
-          }
           
           setIsInitialized(true);
           console.log('✅ Fragile modal initialization complete');
@@ -601,18 +651,35 @@ export default function FragileDeliveryModal({
 
       initializeModal();
     }
-  }, [visible, isInitialized, loadReferenceData, loadPackageForEditing, editPackage, resubmitPackage, mode]);
+  }, [visible, isInitialized, loadReferenceData]);
 
-  // Effect to handle package data loading when reference data becomes available
+  // FIXED: Auto-populate when data becomes available
   useEffect(() => {
-    if (areas.length > 0 && agents.length > 0) {
+    if (isInitialized && areas.length > 0 && agents.length > 0 && !hasTriedAutoPopulation) {
       const packageToLoad = editPackage || resubmitPackage;
-      if (packageToLoad && (mode === 'edit' || mode === 'resubmit') && isInitialized) {
+      if (packageToLoad && (mode === 'edit' || mode === 'resubmit')) {
         console.log('🔄 Reference data available, loading package data...');
-        loadPackageForEditing(packageToLoad);
+        // Small delay to ensure state updates are processed
+        setTimeout(() => {
+          loadPackageForEditing(packageToLoad);
+        }, 100);
+      } else {
+        // Mark as tried even if no package to load
+        setHasTriedAutoPopulation(true);
       }
     }
-  }, [areas, agents, editPackage, resubmitPackage, mode, isInitialized, loadPackageForEditing]);
+  }, [isInitialized, areas.length, agents.length, hasTriedAutoPopulation, editPackage, resubmitPackage, mode, loadPackageForEditing]);
+
+  // FIXED: Reset states when modal closes
+  useEffect(() => {
+    if (!visible) {
+      setIsInitialized(false);
+      setHasTriedAutoPopulation(false);
+      setAreas([]);
+      setAgents([]);
+      setDataError(null);
+    }
+  }, [visible]);
 
   // AsyncStorage functions
   const savePendingPackages = async (packages: SavedFragilePackage[]) => {
@@ -695,9 +762,6 @@ export default function FragileDeliveryModal({
         duration: 300,
         useNativeDriver: true,
       }).start();
-    } else {
-      // Reset initialization state when modal closes
-      setIsInitialized(false);
     }
   }, [visible, isCreatingMultiple, mode]);
 
@@ -715,10 +779,6 @@ export default function FragileDeliveryModal({
     setSpecialInstructions('');
     setIsSubmitting(false);
     setLocationError(null);
-    setDataError(null);
-    setAreas([]);
-    setAgents([]);
-    setIsInitialized(false);
   };
 
   const closeModal = useCallback(() => {
@@ -979,10 +1039,11 @@ export default function FragileDeliveryModal({
     }
   };
 
-  // ENHANCED: Retry data loading with proper state management
+  // FIXED: Retry data loading with proper state management
   const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
     setIsInitialized(false);
+    setHasTriedAutoPopulation(false);
     setDataError(null);
     setAreas([]);
     setAgents([]);
@@ -1031,7 +1092,7 @@ export default function FragileDeliveryModal({
     </View>
   );
 
-  // ENHANCED: Loading state with proper messaging
+  // FIXED: Loading state with proper messaging
   const renderLoadingState = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color="#f97316" />
@@ -1047,7 +1108,7 @@ export default function FragileDeliveryModal({
     </View>
   );
 
-  // ENHANCED: Error state with retry functionality
+  // FIXED: Error state with retry functionality
   const renderErrorState = () => (
     <View style={styles.errorContainer}>
       <Feather name="alert-circle" size={64} color="#ef4444" />
@@ -1561,6 +1622,7 @@ export default function FragileDeliveryModal({
     </>
   );
 }
+
 
 const styles = StyleSheet.create({
   modalWrapper: {
