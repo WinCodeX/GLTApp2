@@ -1,4 +1,4 @@
-// components/PackageCreationModal.tsx - FIXED: Mode detection and auto-selection
+// components/PackageCreationModal.tsx - FIXED: Auto-population timing and dependencies
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -69,7 +69,7 @@ interface PackageCreationModalProps {
   onSubmit: (packageData: PackageData) => Promise<void>;
   editPackage?: Package;
   resubmitPackage?: Package;
-  mode?: 'create' | 'edit' | 'resubmit'; // FIXED: Made optional with proper default
+  mode?: 'create' | 'edit' | 'resubmit';
 }
 
 const STEP_TITLES = [
@@ -182,7 +182,7 @@ export default function PackageCreationModal({
   onSubmit,
   editPackage,
   resubmitPackage,
-  mode = 'create' // FIXED: Proper default value
+  mode = 'create'
 }: PackageCreationModalProps) {
   const [currentStep, setCurrentStep] = useState(0);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -202,13 +202,15 @@ export default function PackageCreationModal({
     return mode || 'create';
   }, [editPackage, resubmitPackage, mode]);
 
-  // Dependency management states
+  // FIXED: Enhanced dependency management states with proper tracking
   const [locations, setLocations] = useState<Location[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
   const [isInitialized, setIsInitialized] = useState(false);
+  const [hasLoadedReferenceData, setHasLoadedReferenceData] = useState(false);
+  const [hasTriedAutoPopulation, setHasTriedAutoPopulation] = useState(false);
 
   // Multi-package states
   const [pendingPackages, setPendingPackages] = useState<PendingPackage[]>([]);
@@ -272,21 +274,21 @@ export default function PackageCreationModal({
     
     switch (actualMode) {
       case 'edit':
-        return pendingPackages.length > 0 
+        return packageCount > 1 
           ? `Update ${packageCount} Package${packageCount > 1 ? 's' : ''}`
           : 'Update Package';
       case 'resubmit':
-        return pendingPackages.length > 0 
+        return packageCount > 1 
           ? `Resubmit ${packageCount} Package${packageCount > 1 ? 's' : ''}`
           : 'Resubmit Package';
       default:
-        return pendingPackages.length > 0 
+        return packageCount > 1 
           ? `Submit ${packageCount} Package${packageCount > 1 ? 's' : ''}`
           : 'Create Package';
     }
   }, [actualMode, pendingPackages.length]);
 
-  // FIXED: Load reference data with proper error handling
+  // FIXED: Load reference data with proper error handling and completion tracking
   const loadReferenceData = useCallback(async (retryCount = 0): Promise<void> => {
     console.log(`🔄 Loading package modal reference data (attempt ${retryCount + 1})`);
     
@@ -319,6 +321,8 @@ export default function PackageCreationModal({
             throw new Error('Cached data is invalid, fetching fresh data...');
           }
           
+          // CRITICAL: Mark reference data as loaded
+          setHasLoadedReferenceData(true);
           return Promise.resolve();
         }
       }
@@ -349,6 +353,8 @@ export default function PackageCreationModal({
         agents: agentsData
       });
       
+      // CRITICAL: Mark reference data as loaded
+      setHasLoadedReferenceData(true);
       console.log('✅ Fresh data loaded and cached successfully');
       
     } catch (error: any) {
@@ -367,6 +373,7 @@ export default function PackageCreationModal({
         setLocations(cachedData.locations);
         setAreas(cachedData.areas);
         setAgents(cachedData.agents);
+        setHasLoadedReferenceData(true);
         setDataError(null);
         return Promise.resolve();
       }
@@ -378,20 +385,36 @@ export default function PackageCreationModal({
     }
   }, [isCacheValid, loadFromCache, clearCache, saveToCache]);
 
-  // FIXED: Enhanced auto-population with proper ID matching and timing
+  // FIXED: Enhanced auto-population with comprehensive dependency validation
   const loadPackageForEditing = useCallback(async (pkg: Package) => {
     console.log('🔧 Loading package for editing:', pkg.code);
     console.log('📦 Package data:', pkg);
-    console.log('🏢 Available areas:', areas.length);
-    console.log('👤 Available agents:', agents.length);
+    console.log('🔍 Dependency check:', {
+      hasLoadedReferenceData,
+      areasCount: areas.length,
+      agentsCount: agents.length,
+      hasTriedAutoPopulation
+    });
     
-    // Wait for reference data to be available
-    if (areas.length === 0 || agents.length === 0) {
-      console.log('⏳ Waiting for reference data before auto-populating...');
+    // CRITICAL: Validate ALL dependencies before proceeding
+    if (!hasLoadedReferenceData || areas.length === 0 || agents.length === 0) {
+      console.log('⏳ Dependencies not ready for auto-population:', {
+        hasLoadedReferenceData,
+        areasCount: areas.length,
+        agentsCount: agents.length
+      });
+      return;
+    }
+
+    // Prevent duplicate auto-population attempts
+    if (hasTriedAutoPopulation) {
+      console.log('⚠️ Auto-population already attempted, skipping');
       return;
     }
 
     try {
+      console.log('🚀 Starting auto-population with validated dependencies');
+      
       // Set basic form data
       setPackageData(prev => ({
         ...prev,
@@ -411,7 +434,7 @@ export default function PackageCreationModal({
       setDeliveryLocation(pkg.delivery_location || '');
       setLargePackageInstructions(pkg.special_instructions || '');
 
-      // FIXED: Enhanced area/agent matching with multiple ID comparison methods
+      // FIXED: Enhanced area/agent matching with comprehensive ID comparison
       let originAreaFound = false;
       let originAgentFound = false;
       let destinationAreaFound = false;
@@ -537,6 +560,9 @@ export default function PackageCreationModal({
         setCurrentStep(STEP_TITLES.length - 1);
       }
 
+      // CRITICAL: Mark auto-population as completed
+      setHasTriedAutoPopulation(true);
+
       console.log('✅ Package data loaded and auto-populated successfully', {
         originAreaFound,
         originAgentFound,
@@ -546,16 +572,22 @@ export default function PackageCreationModal({
 
     } catch (error) {
       console.error('❌ Error auto-populating package data:', error);
+      setHasTriedAutoPopulation(true); // Mark as tried even on error
     }
-  }, [areas, agents, selectedBusiness, actualMode, STEP_TITLES.length]);
+  }, [areas, agents, selectedBusiness, actualMode, STEP_TITLES.length, hasLoadedReferenceData, hasTriedAutoPopulation]);
 
-  // FIXED: Dependency-aware initialization
+  // FIXED: Proper initialization sequence with clear dependency tracking
   useEffect(() => {
     if (visible && !isInitialized) {
       console.log('🚀 Initializing package modal with dependency management, mode:', actualMode);
       
       const initializeModal = async () => {
         try {
+          // Reset all tracking states
+          setHasLoadedReferenceData(false);
+          setHasTriedAutoPopulation(false);
+          setDataError(null);
+          
           // Step 1: Load reference data first
           await loadReferenceData();
           
@@ -571,19 +603,54 @@ export default function PackageCreationModal({
     }
   }, [visible, isInitialized, loadReferenceData, actualMode]);
 
-  // FIXED: Auto-populate after data loads with better timing
+  // FIXED: Auto-populate only after ALL dependencies are satisfied
   useEffect(() => {
-    if (isInitialized && areas.length > 0 && agents.length > 0) {
+    // Only proceed if all conditions are met
+    if (
+      isInitialized && 
+      hasLoadedReferenceData && 
+      areas.length > 0 && 
+      agents.length > 0 && 
+      !hasTriedAutoPopulation
+    ) {
       const packageToLoad = editPackage || resubmitPackage;
       if (packageToLoad && (actualMode === 'edit' || actualMode === 'resubmit')) {
-        console.log('🔄 Reference data available, loading package data for mode:', actualMode);
-        // Use setTimeout to ensure state updates are processed
+        console.log('🔄 All dependencies satisfied, triggering auto-population for mode:', actualMode);
+        
+        // Small delay to ensure all state updates are processed
         setTimeout(() => {
           loadPackageForEditing(packageToLoad);
-        }, 200);
+        }, 100);
+      } else {
+        // Mark as tried even if no package to load
+        setHasTriedAutoPopulation(true);
+        console.log('✅ No package to auto-populate, marking as completed');
       }
     }
-  }, [isInitialized, areas, agents, editPackage, resubmitPackage, actualMode, loadPackageForEditing]);
+  }, [
+    isInitialized, 
+    hasLoadedReferenceData, 
+    areas.length, 
+    agents.length, 
+    hasTriedAutoPopulation, 
+    editPackage, 
+    resubmitPackage, 
+    actualMode, 
+    loadPackageForEditing
+  ]);
+
+  // FIXED: Reset states when modal closes
+  useEffect(() => {
+    if (!visible) {
+      setIsInitialized(false);
+      setHasLoadedReferenceData(false);
+      setHasTriedAutoPopulation(false);
+      setAreas([]);
+      setAgents([]);
+      setLocations([]);
+      setDataError(null);
+    }
+  }, [visible]);
 
   // Keyboard handling
   useEffect(() => {
@@ -650,9 +717,6 @@ export default function PackageCreationModal({
         duration: 300,
         useNativeDriver: true,
       }).start();
-    } else {
-      // Reset initialization state when modal closes
-      setIsInitialized(false);
     }
   }, [visible, isCreatingMultiple, actualMode]);
 
@@ -684,6 +748,8 @@ export default function PackageCreationModal({
     setLargePackageInstructions('');
     setPendingPackages([]);
     setIsCreatingMultiple(false);
+    setHasLoadedReferenceData(false);
+    setHasTriedAutoPopulation(false);
     setDataError(null);
     setLocations([]);
     setAreas([]);
@@ -1144,6 +1210,8 @@ export default function PackageCreationModal({
   const retryDataLoad = useCallback(() => {
     console.log('🔄 Retrying data load...');
     setIsInitialized(false);
+    setHasLoadedReferenceData(false);
+    setHasTriedAutoPopulation(false);
     setDataError(null);
     setAreas([]);
     setAgents([]);
@@ -1278,7 +1346,7 @@ export default function PackageCreationModal({
     </View>
   ), [closeModal, getModalTitle]);
 
-  // Loading state with proper messaging
+  // FIXED: Loading state with proper messaging and dependency tracking
   const renderLoadingState = () => (
     <View style={styles.loadingContainer}>
       <ActivityIndicator size="large" color="#7c3aed" />
@@ -1291,6 +1359,14 @@ export default function PackageCreationModal({
           : 'Preparing package creation form...'
         }
       </Text>
+      {__DEV__ && (
+        <View style={styles.debugInfo}>
+          <Text style={styles.debugText}>Debug: hasLoadedReferenceData={String(hasLoadedReferenceData)}</Text>
+          <Text style={styles.debugText}>Debug: hasTriedAutoPopulation={String(hasTriedAutoPopulation)}</Text>
+          <Text style={styles.debugText}>Debug: areas.length={areas.length}</Text>
+          <Text style={styles.debugText}>Debug: agents.length={agents.length}</Text>
+        </View>
+      )}
     </View>
   );
 
@@ -2030,7 +2106,7 @@ export default function PackageCreationModal({
   ), [currentStep, prevStep, nextStep, handleSubmit, isCurrentStepValid, isSubmitting, handleClearCache, getActionButtonText, actualMode]);
 
   const renderMainContent = useCallback(() => {
-    if (isDataLoading || !isInitialized) {
+    if (isDataLoading || !isInitialized || !hasLoadedReferenceData) {
       return renderLoadingState();
     }
 
@@ -2055,7 +2131,7 @@ export default function PackageCreationModal({
         {renderNavigationButtons()}
       </>
     );
-  }, [isDataLoading, isInitialized, dataError, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
+  }, [isDataLoading, isInitialized, hasLoadedReferenceData, dataError, renderHeader, renderProgressBar, renderCurrentStep, renderNavigationButtons]);
 
   return (
     <Modal visible={visible} transparent animationType="none">
@@ -2092,6 +2168,7 @@ export default function PackageCreationModal({
     </Modal>
   );
 }
+
 
 // Enhanced styles with mode notice section
 const styles = StyleSheet.create({
