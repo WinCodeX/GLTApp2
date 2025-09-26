@@ -1002,8 +1002,8 @@ export default function SupportScreen() {
           />
         </View>
 
-        {/* Show inquiry type tabs only if there's an active conversation */}
-        {hasActiveTicket && (
+        {/* Show inquiry type tabs when not showing modals */}
+        {!showTicketModal && !showInquiryModal && !showPackageModal && (
           <View style={styles.inquirySection}>
             {/* Inquiry Type Tabs */}
             <View style={styles.inquiryTabs}>
