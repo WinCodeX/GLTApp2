@@ -1,4 +1,4 @@
-// components/CollectDeliverModal.tsx - ENHANCED: Fixed auto-population and resubmit flow
+// components/CollectDeliverModal.tsx - FIXED: Auto-population timing and dependencies
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -48,7 +48,7 @@ interface LocationData {
   description?: string;
 }
 
-// ENHANCED: Interface to support different modes
+// FIXED: Interface to support different modes
 interface CollectDeliverModalProps {
   visible: boolean;
   onClose: () => void;
@@ -77,7 +77,7 @@ interface PendingCollection {
   createdAt: number;
 }
 
-// ENHANCED: Improved Location/Area Selection Modal with better error handling
+// FIXED: Improved Location/Area Selection Modal with better error handling
 const LocationAreaSelectorModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -362,11 +362,13 @@ export default function CollectDeliverModal({
   
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
   
-  // CRITICAL: Add areas and agents state for auto-population
+  // FIXED: Add areas and agents state for auto-population with dependency tracking
   const [areas, setAreas] = useState<Area[]>([]);
   const [agents, setAgents] = useState<Agent[]>([]);
   const [isDataLoading, setIsDataLoading] = useState(false);
   const [dataError, setDataError] = useState<string | null>(null);
+  const [isInitialized, setIsInitialized] = useState(false);
+  const [hasTriedAutoPopulation, setHasTriedAutoPopulation] = useState(false);
   
   // Location states with enhanced error handling
   const [collectionLocation, setCollectionLocation] = useState<LocationData | null>(null);
@@ -401,7 +403,7 @@ export default function CollectDeliverModal({
   const [showCollectionMapModal, setShowCollectionMapModal] = useState(false);
   const [showDeliveryMapModal, setShowDeliveryMapModal] = useState(false);
   
-  // ENHANCED: Dynamic step titles based on mode
+  // FIXED: Dynamic step titles based on mode
   const STEP_TITLES = useMemo(() => {
     const baseSteps = [
       'Collection Details',
@@ -412,7 +414,7 @@ export default function CollectDeliverModal({
     return baseSteps;
   }, [mode]);
 
-  // ENHANCED: Mode-specific UI text
+  // FIXED: Mode-specific UI text
   const getModeText = useCallback(() => {
     switch (mode) {
       case 'edit':
@@ -439,13 +441,13 @@ export default function CollectDeliverModal({
     }
   }, [mode]);
 
-  // CRITICAL: Load areas and agents data for auto-population
-  const loadModalData = useCallback(async () => {
+  // FIXED: Load areas and agents data for auto-population with retry mechanism
+  const loadModalData = useCallback(async (retryCount = 0): Promise<void> => {
+    console.log(`🔄 Loading collection modal reference data (attempt ${retryCount + 1})`);
+    
     try {
       setIsDataLoading(true);
       setDataError(null);
-      
-      console.log('🔄 Loading areas and agents data...');
       
       const [areasData, agentsData] = await Promise.allSettled([
         getAreas(),
@@ -470,20 +472,31 @@ export default function CollectDeliverModal({
       
     } catch (error: any) {
       console.error('❌ Failed to load modal data:', error);
+      
+      if (retryCount < 2) {
+        console.log('🔄 Retrying modal data load...');
+        await new Promise(resolve => setTimeout(resolve, 1000 * (retryCount + 1)));
+        return loadModalData(retryCount + 1);
+      }
+      
       setDataError(`Failed to load data: ${error.message}`);
+      throw error;
     } finally {
       setIsDataLoading(false);
     }
   }, []);
 
-  // CRITICAL: Enhanced auto-population with proper timing
+  // FIXED: Enhanced auto-population with comprehensive ID matching and proper timing
   const populateFormFromExistingPackage = useCallback(async () => {
     const packageData = editPackage || resubmitPackage;
     if (!packageData || mode === 'create') return;
 
     console.log('🔧 Populating form with existing package data:', packageData.code);
+    console.log('📦 Package data:', packageData);
+    console.log('🏢 Available areas:', areas.length);
+    console.log('👤 Available agents:', agents.length);
 
-    // Ensure areas and agents are loaded before auto-populating
+    // CRITICAL: Ensure areas and agents are loaded before auto-populating
     if (areas.length === 0 || agents.length === 0) {
       console.log('⏳ Waiting for areas/agents to load before populating form...');
       return; // Will be called again after data loads
@@ -500,34 +513,87 @@ export default function CollectDeliverModal({
     setSpecialInstructions(packageData.special_instructions || '');
     setPaymentMethod(packageData.payment_method || 'mpesa');
 
-    // CRITICAL: Auto-select collection area if it exists
+    // FIXED: Enhanced area/agent matching with comprehensive ID comparison
+    let collectionAreaFound = false;
+    let deliveryAreaFound = false;
+    let deliveryAgentFound = false;
+
+    // FIXED: Auto-select collection area with multiple ID formats
     if (packageData.origin_area_id) {
-      const collectionArea = areas.find(area => area.id === packageData.origin_area_id);
+      console.log('🔍 Looking for collection area ID:', packageData.origin_area_id, typeof packageData.origin_area_id);
+      
+      const collectionArea = areas.find(area => {
+        const areaIdStr = String(area.id);
+        const pkgAreaIdStr = String(packageData.origin_area_id);
+        const match = areaIdStr === pkgAreaIdStr || 
+                     area.id === packageData.origin_area_id ||
+                     Number(area.id) === Number(packageData.origin_area_id);
+        
+        if (match) {
+          console.log('✅ Found matching collection area:', area.name, 'Area ID:', area.id);
+        }
+        return match;
+      });
+      
       if (collectionArea) {
         console.log('✅ Auto-selected collection area:', collectionArea.name);
         setSelectedCollectionArea(collectionArea);
+        collectionAreaFound = true;
       } else {
-        console.warn('⚠️ Collection area not found:', packageData.origin_area_id);
+        console.warn('⚠️ Collection area not found for ID:', packageData.origin_area_id);
+        console.log('🔍 Available area IDs:', areas.map(a => `${a.id} (${typeof a.id})`));
       }
     }
 
-    // CRITICAL: Auto-select delivery area or agent
+    // FIXED: Auto-select delivery area or agent with comprehensive ID matching
     if (packageData.destination_agent_id) {
-      const deliveryAgent = agents.find(agent => agent.id === packageData.destination_agent_id);
+      console.log('🔍 Looking for delivery agent ID:', packageData.destination_agent_id, typeof packageData.destination_agent_id);
+      
+      const deliveryAgent = agents.find(agent => {
+        const agentIdStr = String(agent.id);
+        const pkgAgentIdStr = String(packageData.destination_agent_id);
+        const match = agentIdStr === pkgAgentIdStr || 
+                     agent.id === packageData.destination_agent_id ||
+                     Number(agent.id) === Number(packageData.destination_agent_id);
+        
+        if (match) {
+          console.log('✅ Found matching delivery agent:', agent.name, 'Agent ID:', agent.id);
+        }
+        return match;
+      });
+      
       if (deliveryAgent) {
         console.log('✅ Auto-selected delivery agent:', deliveryAgent.name);
         setSelectedDeliveryAgent(deliveryAgent);
         setSelectedDeliveryArea(deliveryAgent.area || null);
+        deliveryAgentFound = true;
       } else {
-        console.warn('⚠️ Delivery agent not found:', packageData.destination_agent_id);
+        console.warn('⚠️ Delivery agent not found for ID:', packageData.destination_agent_id);
+        console.log('🔍 Available agent IDs:', agents.map(a => `${a.id} (${typeof a.id})`));
       }
     } else if (packageData.destination_area_id) {
-      const deliveryArea = areas.find(area => area.id === packageData.destination_area_id);
+      console.log('🔍 Looking for delivery area ID:', packageData.destination_area_id, typeof packageData.destination_area_id);
+      
+      const deliveryArea = areas.find(area => {
+        const areaIdStr = String(area.id);
+        const pkgAreaIdStr = String(packageData.destination_area_id);
+        const match = areaIdStr === pkgAreaIdStr || 
+                     area.id === packageData.destination_area_id ||
+                     Number(area.id) === Number(packageData.destination_area_id);
+        
+        if (match) {
+          console.log('✅ Found matching delivery area:', area.name, 'Area ID:', area.id);
+        }
+        return match;
+      });
+      
       if (deliveryArea) {
         console.log('✅ Auto-selected delivery area:', deliveryArea.name);
         setSelectedDeliveryArea(deliveryArea);
+        deliveryAreaFound = true;
       } else {
-        console.warn('⚠️ Delivery area not found:', packageData.destination_area_id);
+        console.warn('⚠️ Delivery area not found for ID:', packageData.destination_area_id);
+        console.log('🔍 Available area IDs:', areas.map(a => `${a.id} (${typeof a.id})`));
       }
     }
 
@@ -548,7 +614,7 @@ export default function CollectDeliverModal({
       });
     }
 
-    // CRITICAL: Handle step navigation for resubmit mode
+    // FIXED: Handle step navigation for resubmit mode
     if (mode === 'resubmit') {
       console.log('🔄 Resubmit mode: navigating to confirmation step');
       setCurrentStep(STEP_TITLES.length - 1); // Skip to confirmation
@@ -557,7 +623,14 @@ export default function CollectDeliverModal({
       setCurrentStep(0);
     }
 
-    console.log('✅ Form populated successfully');
+    // Mark auto-population as completed
+    setHasTriedAutoPopulation(true);
+
+    console.log('✅ Form populated successfully', {
+      collectionAreaFound,
+      deliveryAreaFound,
+      deliveryAgentFound
+    });
   }, [editPackage, resubmitPackage, mode, areas, agents, STEP_TITLES.length]);
 
   // Load pending collections from AsyncStorage (only for create mode)
@@ -588,7 +661,7 @@ export default function CollectDeliverModal({
     }
   };
 
-  // ENHANCED: Location permission handling with better error states
+  // FIXED: Location permission handling with better error states
   const requestLocationPermission = async () => {
     try {
       setIsLocationLoading(true);
@@ -620,13 +693,17 @@ export default function CollectDeliverModal({
     }
   };
 
-  // CRITICAL: Enhanced initialization with proper sequencing
+  // FIXED: Proper initialization sequence with dependency management
   useEffect(() => {
     if (!visible) return;
     
     const initializeModal = async () => {
       try {
         console.log('🚀 Initializing modal in mode:', mode);
+        
+        // Reset states
+        setHasTriedAutoPopulation(false);
+        setDataError(null);
         
         // Step 1: Load areas and agents data FIRST
         await loadModalData();
@@ -639,32 +716,44 @@ export default function CollectDeliverModal({
           await loadPendingCollections();
         }
 
-        // Step 4: Populate form for edit/resubmit modes AFTER data is loaded
-        if ((mode === 'edit' || mode === 'resubmit') && (editPackage || resubmitPackage)) {
-          // Small delay to ensure state is updated
-          setTimeout(() => {
-            populateFormFromExistingPackage();
-          }, 100);
-        }
+        setIsInitialized(true);
+        console.log('✅ Modal initialization complete');
       } catch (error) {
         console.error('Failed to initialize modal:', error);
       }
     };
 
     initializeModal();
-  }, [visible, mode, editPackage, resubmitPackage]);
+  }, [visible, mode]);
 
-  // CRITICAL: Re-populate form when areas/agents are loaded
+  // FIXED: Auto-populate when data becomes available
   useEffect(() => {
-    if (areas.length > 0 && agents.length > 0 && (mode === 'edit' || mode === 'resubmit')) {
-      if ((editPackage || resubmitPackage) && !selectedCollectionArea && !selectedDeliveryArea && !selectedDeliveryAgent) {
-        console.log('🔄 Areas/agents loaded, re-attempting form population...');
-        populateFormFromExistingPackage();
+    if (isInitialized && areas.length > 0 && agents.length > 0 && !hasTriedAutoPopulation) {
+      if ((mode === 'edit' || mode === 'resubmit') && (editPackage || resubmitPackage)) {
+        console.log('🔄 Reference data available, attempting auto-population...');
+        // Small delay to ensure state is updated
+        setTimeout(() => {
+          populateFormFromExistingPackage();
+        }, 100);
+      } else {
+        // Mark as tried even if no package to load
+        setHasTriedAutoPopulation(true);
       }
     }
-  }, [areas, agents, mode, editPackage, resubmitPackage, populateFormFromExistingPackage, selectedCollectionArea, selectedDeliveryArea, selectedDeliveryAgent]);
+  }, [isInitialized, areas.length, agents.length, hasTriedAutoPopulation, mode, editPackage, resubmitPackage, populateFormFromExistingPackage]);
 
-  // ENHANCED: Keyboard handling with better offset calculation
+  // FIXED: Reset states when modal closes
+  useEffect(() => {
+    if (!visible) {
+      setIsInitialized(false);
+      setHasTriedAutoPopulation(false);
+      setAreas([]);
+      setAgents([]);
+      setDataError(null);
+    }
+  }, [visible]);
+
+  // FIXED: Keyboard handling with better offset calculation
   useEffect(() => {
     let keyboardWillShowListener: any;
     let keyboardWillHideListener: any;
@@ -720,7 +809,7 @@ export default function CollectDeliverModal({
     }
   }, [visible, slideAnim]);
 
-  // ENHANCED: Modal height calculation with improved keyboard handling
+  // FIXED: Modal height calculation with improved keyboard handling
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
       const availableHeight = SCREEN_HEIGHT - keyboardHeight;
@@ -748,8 +837,6 @@ export default function CollectDeliverModal({
     setSelectedDeliveryAgent(null);
     setLocationError(null);
     setDataError(null);
-    setAreas([]);
-    setAgents([]);
     
     if (mode === 'create') {
       setPendingCollections([]);
@@ -902,7 +989,7 @@ export default function CollectDeliverModal({
     };
   };
 
-  // ENHANCED: Handle submission based on mode with user details
+  // FIXED: Handle submission based on mode with user details
   const handleSubmit = async () => {
     if (!isStepValid(currentStep) || isSubmitting) return;
 
@@ -1009,6 +1096,32 @@ export default function CollectDeliverModal({
     }
   };
 
+  // FIXED: Retry data loading with proper state management
+  const retryDataLoad = useCallback(() => {
+    console.log('🔄 Retrying data load...');
+    setIsInitialized(false);
+    setHasTriedAutoPopulation(false);
+    setDataError(null);
+    setAreas([]);
+    setAgents([]);
+    
+    // Reinitialize after small delay
+    setTimeout(() => {
+      if (visible) {
+        const initializeModal = async () => {
+          try {
+            await loadModalData();
+            setIsInitialized(true);
+          } catch (error) {
+            console.error('❌ Retry failed:', error);
+          }
+        };
+        
+        initializeModal();
+      }
+    }, 500);
+  }, [visible, loadModalData]);
+
   const renderProgressBar = useCallback(() => (
     <View style={styles.progressContainer}>
       <View style={styles.progressBackground}>
@@ -1038,7 +1151,46 @@ export default function CollectDeliverModal({
     </View>
   ), [closeModal, currentStep]);
 
-  // ENHANCED: Collection details step with data loading state
+  // FIXED: Loading state with proper messaging
+  const renderLoadingState = () => (
+    <View style={styles.loadingContainer}>
+      <ActivityIndicator size="large" color="#10b981" />
+      <Text style={styles.loadingTitle}>
+        {isDataLoading ? 'Loading Reference Data' : 'Initializing Modal'}
+      </Text>
+      <Text style={styles.loadingSubtitle}>
+        {isDataLoading 
+          ? 'Fetching areas and agents...' 
+          : 'Preparing collection form...'
+        }
+      </Text>
+    </View>
+  );
+
+  // FIXED: Error state with retry functionality
+  const renderErrorState = () => (
+    <View style={styles.errorContainer}>
+      <Feather name="alert-circle" size={64} color="#ef4444" />
+      <Text style={styles.errorTitle}>Failed to Load Data</Text>
+      <Text style={styles.errorMessage}>
+        {dataError}
+        {'\n\n'}Unable to load required reference data. Please check your connection and try again.
+      </Text>
+      
+      <View style={styles.errorButtons}>
+        <TouchableOpacity onPress={retryDataLoad} style={styles.retryButton}>
+          <Feather name="refresh-cw" size={20} color="#fff" />
+          <Text style={styles.retryButtonText}>Retry</Text>
+        </TouchableOpacity>
+        <TouchableOpacity onPress={closeModal} style={styles.cancelButton}>
+          <Feather name="x" size={20} color="#fff" />
+          <Text style={styles.cancelButtonText}>Close</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
+
+  // FIXED: Collection details step with data loading state
   const renderCollectionDetails = () => (
     <View style={styles.stepContent}>
       <Text style={styles.stepTitle}>
@@ -1075,7 +1227,7 @@ export default function CollectDeliverModal({
         <View style={styles.errorBanner}>
           <Feather name="alert-circle" size={16} color="#ef4444" />
           <Text style={styles.errorText}>{dataError}</Text>
-          <TouchableOpacity onPress={loadModalData}>
+          <TouchableOpacity onPress={retryDataLoad}>
             <Text style={styles.retryText}>Retry</Text>
           </TouchableOpacity>
         </View>
@@ -1587,6 +1739,40 @@ export default function CollectDeliverModal({
     );
   };
 
+  const renderMainContent = () => {
+    if (isDataLoading || !isInitialized) {
+      return renderLoadingState();
+    }
+
+    if (dataError) {
+      return renderErrorState();
+    }
+
+    return (
+      <>
+        {renderHeader()}
+        {renderProgressBar()}
+        
+        <View style={styles.contentWrapper}>
+          <ScrollView 
+            style={styles.contentContainer}
+            contentContainerStyle={[
+              styles.scrollContentContainer,
+              isKeyboardVisible && styles.keyboardVisiblePadding
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="interactive"
+          >
+            {renderStepContent()}
+          </ScrollView>
+        </View>
+        
+        {renderNavigationButtons()}
+      </>
+    );
+  };
+
   if (!visible) return null;
 
   return (
@@ -1620,25 +1806,7 @@ export default function CollectDeliverModal({
                   colors={['#0a0a23', '#1a1a2e', '#16213e']}
                   style={styles.modalContent}
                 >
-                  {renderHeader()}
-                  {renderProgressBar()}
-                  
-                  <View style={styles.contentWrapper}>
-                    <ScrollView 
-                      style={styles.contentContainer}
-                      contentContainerStyle={[
-                        styles.scrollContentContainer,
-                        isKeyboardVisible && styles.keyboardVisiblePadding
-                      ]}
-                      showsVerticalScrollIndicator={false}
-                      keyboardShouldPersistTaps="handled"
-                      keyboardDismissMode="interactive"
-                    >
-                      {renderStepContent()}
-                    </ScrollView>
-                  </View>
-                  
-                  {renderNavigationButtons()}
+                  {renderMainContent()}
                 </LinearGradient>
               </Animated.View>
             </View>
@@ -1667,6 +1835,8 @@ export default function CollectDeliverModal({
     </>
   );
 }
+
+
 
 const styles = StyleSheet.create({
   modalWrapper: {
