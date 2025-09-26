@@ -80,47 +80,40 @@ export default function PackageTracking() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Get delivery type badge color
+  // UPDATED: Get delivery type badge color (matching track.tsx exactly)
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
-      case 'collection': return '#f59e0b';
-      case 'fragile': return '#ef4444';
-      case 'doorstep': return '#10b981';
-      case 'office': return '#3b82f6';
+      case 'doorstep': return '#8b5cf6';
       case 'agent': return '#3b82f6';
-      case 'mixed': return '#8b5cf6';
-      default: return colors.primary;
+      case 'fragile': return '#f97316';
+      case 'collection': return '#10b981';
+      case 'mixed': return '#10b981';
+      default: return '#8b5cf6';
     }
   }, []);
 
-  // Get delivery type display name
+  // UPDATED: Get delivery type display name (matching track.tsx exactly)
   const getDeliveryTypeDisplay = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
-      case 'collection': return 'Collection';
-      case 'fragile': return 'Fragile';
       case 'doorstep': return 'Home';
-      case 'office': return 'Office';
       case 'agent': return 'Office';
+      case 'fragile': return 'Fragile';
+      case 'collection': return 'Collection';
       case 'mixed': return 'Mixed';
-      default: return deliveryType.charAt(0).toUpperCase() + deliveryType.slice(1);
+      default: return 'Office';
     }
   }, []);
 
-  // Get state badge color
+  // UPDATED: Get state badge color (matching track.tsx exactly)
   const getStateBadgeColor = useCallback((state: string): string => {
     switch (state) {
-      case 'pending_unpaid': return '#f59e0b';
-      case 'pending': return '#10b981';
-      case 'submitted': return '#3b82f6';
+      case 'pending_unpaid': return '#ef4444';
+      case 'pending': return '#f97316';
+      case 'submitted': return '#eab308';
       case 'in_transit': return '#8b5cf6';
-      case 'out_for_delivery': return '#0ea5e9';
-      case 'delivered': return '#059669';
-      case 'collected': return '#0d9488';
-      case 'collection_scheduled': return '#f97316';
-      case 'collection_in_progress': return '#eab308';
-      case 'collection_completed': return '#22c55e';
+      case 'delivered': return '#10b981';
+      case 'collected': return '#2563eb';
       case 'rejected': return '#ef4444';
-      case 'returned': return '#6b7280';
       default: return colors.primary;
     }
   }, []);
@@ -783,10 +776,7 @@ export default function PackageTracking() {
                 <View style={styles.summaryBadges}>
                   <View style={[
                     styles.deliveryTypeBadge, 
-                    { 
-                      backgroundColor: getDeliveryTypeBadgeColor(package_.delivery_type) + '30',
-                      borderColor: getDeliveryTypeBadgeColor(package_.delivery_type)
-                    }
+                    { borderColor: getDeliveryTypeBadgeColor(package_.delivery_type) }
                   ]}>
                     <Feather 
                       name={getPackageTypeIcon(package_.delivery_type) as any} 
@@ -801,7 +791,7 @@ export default function PackageTracking() {
                     styles.stateBadge, 
                     { backgroundColor: getStateBadgeColor(package_.state) }
                   ]}>
-                    <Text style={styles.badgeText}>{package_.state_display}</Text>
+                    <Text style={styles.badgeText}>{package_.state_display?.toUpperCase()}</Text>
                   </View>
                 </View>
               </View>
@@ -1142,6 +1132,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
+    backgroundColor: 'transparent',
     borderWidth: 1,
     gap: 4,
   },
