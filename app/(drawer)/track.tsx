@@ -183,6 +183,9 @@ export default function Track() {
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   
+  // NEW: Loading state for individual package details
+  const [loadingPackageDetails, setLoadingPackageDetails] = useState<string | null>(null);
+  
   const [searchVisible, setSearchVisible] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [searchAnimation] = useState(new Animated.Value(0));
@@ -285,74 +288,189 @@ export default function Track() {
     return 'package';
   }, []);
 
-  // ENHANCED: Edit package handler with comprehensive modal routing and logging
-  const handleEditPackage = useCallback((packageItem: Package) => {
+  // FIXED: Edit package handler with proper data fetching before modal opening
+  const handleEditPackage = useCallback(async (packageItem: Package) => {
     console.log('🔧 ==================== EDIT PACKAGE ====================');
-    console.log('📦 Package details:', {
-      code: packageItem.code,
-      delivery_type: packageItem.delivery_type,
-      state: packageItem.state,
-      has_origin_area_id: !!packageItem.origin_area_id,
-      has_destination_area_id: !!packageItem.destination_area_id,
-      has_origin_agent_id: !!packageItem.origin_agent_id,
-      has_destination_agent_id: !!packageItem.destination_agent_id,
-      collection_fields: {
-        shop_name: packageItem.shop_name,
-        items_to_collect: packageItem.items_to_collect
-      },
-      fragile_fields: {
-        pickup_coords: !!(packageItem.pickup_latitude && packageItem.pickup_longitude),
-        package_description: packageItem.package_description?.substring(0, 50)
-      }
-    });
+    console.log('📦 Starting edit process for package:', packageItem.code);
     
-    const modalType = determineModalType(packageItem);
-    
-    console.log('🎯 Modal routing decision:', {
-      selectedModalType: modalType,
-      reasoning: 'Based on package analysis above'
-    });
+    try {
+      // 1. Show loading state for this specific package
+      setLoadingPackageDetails(packageItem.code);
+      
+      // 2. Fetch complete package details from backend
+      console.log('📡 Fetching comprehensive package details from backend...');
+      const response = await api.get(`/api/v1/packages/${packageItem.code}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+      
+      console.log('📡 Package details response received:', {
+        success: response.data?.success,
+        hasData: !!response.data?.data,
+        packageCode: response.data?.data?.code
+      });
+      
+      if (response.data.success && response.data.data) {
+        // 3. Use fresh, complete data from backend
+        const fullPackageData = response.data.data;
+        
+        // 4. Perform comprehensive logging of received data
+        console.log('📦 Complete package data received:', {
+          code: fullPackageData.code,
+          delivery_type: fullPackageData.delivery_type,
+          state: fullPackageData.state,
+          has_sender_name: !!fullPackageData.sender_name,
+          has_receiver_name: !!fullPackageData.receiver_name,
+          has_origin_area_id: !!fullPackageData.origin_area_id,
+          has_destination_area_id: !!fullPackageData.destination_area_id,
+          has_origin_agent_id: !!fullPackageData.origin_agent_id,
+          has_destination_agent_id: !!fullPackageData.destination_agent_id,
+          collection_fields: {
+            shop_name: fullPackageData.shop_name,
+            items_to_collect: fullPackageData.items_to_collect,
+            collection_address: fullPackageData.collection_address
+          },
+          fragile_fields: {
+            pickup_coords: !!(fullPackageData.pickup_latitude && fullPackageData.pickup_longitude),
+            package_description: fullPackageData.package_description?.substring(0, 50)
+          }
+        });
+        
+        // 5. Determine correct modal type based on complete data
+        const modalType = determineModalType(fullPackageData);
+        
+        console.log('🎯 Modal routing decision:', {
+          selectedModalType: modalType,
+          reasoning: 'Based on complete backend data analysis'
+        });
 
-    setModalState({
-      type: modalType,
-      action: 'edit',
-      package: packageItem,
-      isVisible: true
-    });
+        // 6. Open modal with complete, fresh data
+        setModalState({
+          type: modalType,
+          action: 'edit',
+          package: fullPackageData, // Fresh, complete data from backend
+          isVisible: true
+        });
+        
+        console.log('✅ Edit modal opened with complete package data');
+        
+      } else {
+        throw new Error(response.data?.message || 'Failed to load complete package details');
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load package details for editing:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Loading Failed',
+        text2: 'Could not load complete package details for editing',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+      
+    } finally {
+      // 7. Clear loading state
+      setLoadingPackageDetails(null);
+    }
     
-    console.log('✅ Edit modal state configured successfully');
     console.log('🔧 ====================================================');
   }, [determineModalType]);
 
-  // ENHANCED: Resubmit package handler with comprehensive modal routing and logging
-  const handleResubmitPackage = useCallback((packageItem: Package) => {
+  // FIXED: Resubmit package handler with proper data fetching before modal opening
+  const handleResubmitPackage = useCallback(async (packageItem: Package) => {
     console.log('🔄 =================== RESUBMIT PACKAGE ===================');
-    console.log('📦 Package details:', {
-      code: packageItem.code,
-      delivery_type: packageItem.delivery_type,
-      state: packageItem.state,
-      rejection_reason: 'Package was rejected and needs resubmission',
-      has_origin_area_id: !!packageItem.origin_area_id,
-      has_destination_area_id: !!packageItem.destination_area_id,
-      has_origin_agent_id: !!packageItem.origin_agent_id,
-      has_destination_agent_id: !!packageItem.destination_agent_id
-    });
+    console.log('📦 Starting resubmit process for package:', packageItem.code);
     
-    const modalType = determineModalType(packageItem);
-    
-    console.log('🎯 Modal routing decision:', {
-      selectedModalType: modalType,
-      reasoning: 'Resubmission will use same modal type as original package'
-    });
+    try {
+      // 1. Show loading state for this specific package
+      setLoadingPackageDetails(packageItem.code);
+      
+      // 2. Fetch complete package details from backend
+      console.log('📡 Fetching comprehensive package details for resubmission...');
+      const response = await api.get(`/api/v1/packages/${packageItem.code}`, {
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      });
+      
+      console.log('📡 Package details response received:', {
+        success: response.data?.success,
+        hasData: !!response.data?.data,
+        packageCode: response.data?.data?.code
+      });
+      
+      if (response.data.success && response.data.data) {
+        // 3. Use fresh, complete data from backend
+        const fullPackageData = response.data.data;
+        
+        // 4. Perform comprehensive logging of received data
+        console.log('📦 Complete package data for resubmission:', {
+          code: fullPackageData.code,
+          delivery_type: fullPackageData.delivery_type,
+          state: fullPackageData.state,
+          rejection_reason: 'Package was rejected and needs resubmission',
+          has_sender_name: !!fullPackageData.sender_name,
+          has_receiver_name: !!fullPackageData.receiver_name,
+          has_origin_area_id: !!fullPackageData.origin_area_id,
+          has_destination_area_id: !!fullPackageData.destination_area_id,
+          has_origin_agent_id: !!fullPackageData.origin_agent_id,
+          has_destination_agent_id: !!fullPackageData.destination_agent_id
+        });
+        
+        // 5. Determine correct modal type based on complete data
+        const modalType = determineModalType(fullPackageData);
+        
+        console.log('🎯 Modal routing decision:', {
+          selectedModalType: modalType,
+          reasoning: 'Resubmission will use same modal type as original package'
+        });
 
-    setModalState({
-      type: modalType,
-      action: 'resubmit',
-      package: packageItem,
-      isVisible: true
-    });
+        // 6. Open modal with complete, fresh data
+        setModalState({
+          type: modalType,
+          action: 'resubmit',
+          package: fullPackageData, // Fresh, complete data from backend
+          isVisible: true
+        });
+        
+        console.log('✅ Resubmit modal opened with complete package data');
+        
+      } else {
+        throw new Error(response.data?.message || 'Failed to load complete package details for resubmission');
+      }
+      
+    } catch (error: any) {
+      console.error('❌ Failed to load package details for resubmission:', error);
+      console.error('❌ Error details:', {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data
+      });
+      
+      Toast.show({
+        type: 'error',
+        text1: 'Loading Failed',
+        text2: 'Could not load complete package details for resubmission',
+        position: 'top',
+        visibilityTime: 4000,
+      });
+      
+    } finally {
+      // 7. Clear loading state
+      setLoadingPackageDetails(null);
+    }
     
-    console.log('✅ Resubmit modal state configured successfully');
     console.log('🔄 =======================================================');
   }, [determineModalType]);
 
@@ -977,6 +1095,7 @@ export default function Track() {
     const canResubmit = canResubmitPackage(item.state);
     const showPayButton = needsPayment(item.state);
     const receiverName = getReceiverName(item);
+    const isLoadingDetails = loadingPackageDetails === item.code;
     
     const actionButtons = [];
     
@@ -988,19 +1107,29 @@ export default function Track() {
       onPress: () => handleViewTracking(item),
       style: [styles.actionButton, styles.trackButton],
       textStyle: [styles.actionButtonText, styles.trackButtonText],
-      iconColor: '#64748b'
+      iconColor: '#64748b',
+      disabled: false
     });
     
     // Edit button (for pending packages)
     if (canEdit) {
       actionButtons.push({
         key: 'edit',
-        icon: 'edit-3',
-        text: 'Edit',
+        icon: isLoadingDetails ? 'loader' : 'edit-3',
+        text: isLoadingDetails ? 'Loading...' : 'Edit',
         onPress: () => handleEditPackage(item),
-        style: [styles.actionButton, styles.editButton],
-        textStyle: [styles.actionButtonText, styles.editButtonText],
-        iconColor: '#8b5cf6'
+        style: [
+          styles.actionButton, 
+          styles.editButton,
+          isLoadingDetails && styles.disabledButton
+        ],
+        textStyle: [
+          styles.actionButtonText, 
+          styles.editButtonText,
+          isLoadingDetails && styles.disabledButtonText
+        ],
+        iconColor: isLoadingDetails ? '#888' : '#8b5cf6',
+        disabled: isLoadingDetails
       });
     }
 
@@ -1008,12 +1137,21 @@ export default function Track() {
     if (canResubmit) {
       actionButtons.push({
         key: 'resubmit',
-        icon: 'refresh-cw',
-        text: 'Resubmit',
+        icon: isLoadingDetails ? 'loader' : 'refresh-cw',
+        text: isLoadingDetails ? 'Loading...' : 'Resubmit',
         onPress: () => handleResubmitPackage(item),
-        style: [styles.actionButton, styles.resubmitButton],
-        textStyle: [styles.actionButtonText, styles.resubmitButtonText],
-        iconColor: '#f97316'
+        style: [
+          styles.actionButton, 
+          styles.resubmitButton,
+          isLoadingDetails && styles.disabledButton
+        ],
+        textStyle: [
+          styles.actionButtonText, 
+          styles.resubmitButtonText,
+          isLoadingDetails && styles.disabledButtonText
+        ],
+        iconColor: isLoadingDetails ? '#888' : '#f97316',
+        disabled: isLoadingDetails
       });
     }
     
@@ -1026,7 +1164,8 @@ export default function Track() {
         onPress: () => handlePayPackage(item),
         style: [styles.actionButton, styles.payButton],
         textStyle: [styles.actionButtonText, styles.payButtonText],
-        iconColor: '#fff'
+        iconColor: '#fff',
+        disabled: false
       });
     }
 
@@ -1038,7 +1177,8 @@ export default function Track() {
       onPress: () => handleReportPackage(item),
       style: [styles.actionButton, styles.reportButton],
       textStyle: [styles.actionButtonText, styles.reportButtonText],
-      iconColor: '#f97316'
+      iconColor: '#f97316',
+      disabled: false
     });
     
     return (
@@ -1085,6 +1225,7 @@ export default function Track() {
                 key={button.key}
                 style={button.style}
                 onPress={button.onPress}
+                disabled={button.disabled}
               >
                 <Feather name={button.icon as any} size={14} color={button.iconColor} />
                 <Text style={button.textStyle}>{button.text}</Text>
@@ -1094,7 +1235,21 @@ export default function Track() {
         </LinearGradient>
       </View>
     );
-  }, [getStateBadgeColor, getDeliveryTypeDisplay, getDeliveryTypeBadgeColor, canEditPackage, canResubmitPackage, needsPayment, handleEditPackage, handleResubmitPackage, handlePayPackage, handleViewTracking, handleReportPackage, getReceiverName]);
+  }, [
+    getStateBadgeColor, 
+    getDeliveryTypeDisplay, 
+    getDeliveryTypeBadgeColor, 
+    canEditPackage, 
+    canResubmitPackage, 
+    needsPayment, 
+    handleEditPackage, 
+    handleResubmitPackage, 
+    handlePayPackage, 
+    handleViewTracking, 
+    handleReportPackage, 
+    getReceiverName,
+    loadingPackageDetails
+  ]);
 
   const renderEmptyState = useCallback(() => (
     <View style={styles.emptyStateContainer}>
@@ -1707,7 +1862,7 @@ const styles = StyleSheet.create({
   },
 
   resubmitButton: {
-    borderColor: '#8b5cf6',
+    borderColor: '#f97316',
     backgroundColor: 'transparent',
   },
   resubmitButtonText: {
@@ -1729,6 +1884,15 @@ const styles = StyleSheet.create({
   },
   reportButtonText: {
     color: '#f97316',
+  },
+  
+  // NEW: Loading states for buttons
+  disabledButton: {
+    opacity: 0.6,
+    borderColor: '#888',
+  },
+  disabledButtonText: {
+    color: '#888',
   },
   
   listFooter: {
