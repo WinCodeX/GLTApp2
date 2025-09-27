@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - Support Dashboard using Support API
+// app/(support)/index.tsx - Fixed Support Dashboard
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -113,7 +113,7 @@ export default function SupportDashboard() {
       else setLoading(true);
 
       // Use support-specific endpoint
-      const endpoint = activeFilter === 'all' ? '/api/v1/support/tickets' : '/api/v1/support/tickets';
+      const endpoint = '/api/v1/support/tickets';
       const params: any = {
         limit: 50,
         page: 1,
@@ -332,12 +332,12 @@ export default function SupportDashboard() {
       {/* Stats Overview */}
       {renderStatsOverview()}
 
-      {/* Current Chat Indicator */}
+      {/* Current Chat Indicator - FIXED */}
       {currentChat && (
         <View style={styles.currentChatIndicator}>
           <Feather name="message-circle" size={16} color="#E1BEE7" />
           <Text style={styles.currentChatText}>
-            Currently in chat #{currentChat.slice(-8)}
+            Currently in chat #{currentChat.substring(currentChat.length - 8)}
           </Text>
           <TouchableOpacity onPress={() => setCurrentChat(null)}>
             <Feather name="x" size={16} color="#8E8E93" />
