@@ -1,0 +1,128 @@
+// components/support/SupportBottomTabs.tsx - Bottom Navigation
+import React from 'react';
+import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { router, usePathname } from 'expo-router';
+
+interface SupportBottomTabsProps {
+  currentTab: 'chats' | 'updates' | 'calls' | 'account';
+}
+
+export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab }) => {
+  const pathname = usePathname();
+
+  const tabs = [
+    {
+      key: 'chats',
+      label: 'Chats',
+      icon: 'message-square',
+      route: '/(support)',
+      badgeCount: 5, // Dynamic count would come from context
+    },
+    {
+      key: 'updates',
+      label: 'Updates',
+      icon: 'layers',
+      route: '/(support)/updates',
+      badgeCount: 0,
+    },
+    {
+      key: 'calls',
+      label: 'Calls',
+      icon: 'phone',
+      route: '/(support)/calls',
+      badgeCount: 0,
+    },
+    {
+      key: 'account',
+      label: 'Account',
+      icon: 'user',
+      route: '/(support)/account',
+      badgeCount: 0,
+    },
+  ];
+
+  const handleTabPress = (route: string) => {
+    if (pathname !== route) {
+      router.push(route);
+    }
+  };
+
+  return (
+    <View style={styles.container}>
+      {tabs.map((tab) => {
+        const isActive = currentTab === tab.key;
+        return (
+          <TouchableOpacity
+            key={tab.key}
+            style={styles.tab}
+            onPress={() => handleTabPress(tab.route)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.tabContent}>
+              <Feather
+                name={tab.icon as any}
+                size={24}
+                color={isActive ? '#7B3F98' : '#8E8E93'}
+              />
+              {tab.badgeCount > 0 && (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>
+                    {tab.badgeCount > 99 ? '99+' : tab.badgeCount}
+                  </Text>
+                </View>
+              )}
+            </View>
+            <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+              {tab.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
+    </View>
+  );
+};
+
+const styles = StyleSheet.create({
+  container: {
+    flexDirection: 'row',
+    backgroundColor: '#1F2C34',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(123, 63, 152, 0.2)',
+    paddingBottom: 8,
+    paddingTop: 8,
+  },
+  tab: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 4,
+  },
+  tabContent: {
+    position: 'relative',
+    marginBottom: 4,
+  },
+  badge: {
+    position: 'absolute',
+    top: -6,
+    right: -8,
+    backgroundColor: '#7B3F98',
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    minWidth: 18,
+    alignItems: 'center',
+  },
+  badgeText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  tabLabel: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  tabLabelActive: {
+    color: '#7B3F98',
+  },
+});
