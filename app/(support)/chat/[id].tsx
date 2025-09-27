@@ -346,19 +346,19 @@ export default function SupportChatScreen() {
         <View style={styles.headerInfo}>
           <Image
             source={
-              conversation.customer.avatar_url
+              conversation?.customer?.avatar_url
                 ? { uri: conversation.customer.avatar_url }
                 : require('../../../assets/images/avatar_placeholder.png')
             }
             style={styles.headerAvatar}
           />
           <View style={styles.headerText}>
-            <Text style={styles.headerTitle}>{conversation.customer.name}</Text>
+            <Text style={styles.headerTitle}>{conversation?.customer?.name || 'Unknown Customer'}</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
-                #{conversation.ticket_id} • {conversation.status.replace('_', ' ')}
+                #{conversation?.ticket_id || 'Unknown'} • {conversation?.status?.replace('_', ' ') || 'Unknown Status'}
               </Text>
-              {conversation.escalated && (
+              {conversation?.escalated && (
                 <View style={styles.escalatedBadge}>
                   <Feather name="alert-triangle" size={10} color="#f97316" />
                   <Text style={styles.escalatedText}>Escalated</Text>
@@ -385,24 +385,26 @@ export default function SupportChatScreen() {
       </LinearGradient>
 
       {/* Ticket Info Bar */}
-      <View style={styles.ticketInfoBar}>
-        <View style={styles.ticketInfoItem}>
-          <Text style={styles.ticketInfoLabel}>Priority:</Text>
-          <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(conversation.priority) }]}>
-            <Text style={styles.priorityText}>{conversation.priority.toUpperCase()}</Text>
-          </View>
-        </View>
-        <View style={styles.ticketInfoItem}>
-          <Text style={styles.ticketInfoLabel}>Category:</Text>
-          <Text style={styles.ticketInfoValue}>{conversation.category}</Text>
-        </View>
-        {conversation.assigned_agent && (
+      {conversation && (
+        <View style={styles.ticketInfoBar}>
           <View style={styles.ticketInfoItem}>
-            <Text style={styles.ticketInfoLabel}>Agent:</Text>
-            <Text style={styles.ticketInfoValue}>{conversation.assigned_agent.name}</Text>
+            <Text style={styles.ticketInfoLabel}>Priority:</Text>
+            <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(conversation.priority || 'normal') }]}>
+              <Text style={styles.priorityText}>{(conversation.priority || 'normal').toUpperCase()}</Text>
+            </View>
           </View>
-        )}
-      </View>
+          <View style={styles.ticketInfoItem}>
+            <Text style={styles.ticketInfoLabel}>Category:</Text>
+            <Text style={styles.ticketInfoValue}>{conversation.category || 'General'}</Text>
+          </View>
+          {conversation.assigned_agent && (
+            <View style={styles.ticketInfoItem}>
+              <Text style={styles.ticketInfoLabel}>Agent:</Text>
+              <Text style={styles.ticketInfoValue}>{conversation.assigned_agent.name}</Text>
+            </View>
+          )}
+        </View>
+      )}
 
       {/* Messages */}
       <KeyboardAvoidingView
