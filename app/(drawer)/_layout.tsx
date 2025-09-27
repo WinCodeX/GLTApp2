@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Session-first authentication with proper role detection
+// app/(drawer)/_layout.tsx - Fixed session validation with proper role persistence
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -58,6 +58,13 @@ const getEffectiveRole = (userData: any): string => {
   return userData.role || 'client';
 };
 
+// Helper function to get stored role safely (for AccountManager data)
+const getStoredRole = (accountData: any): string => {
+  // AccountManager stores the effective role in the 'role' field
+  // This should be the already-computed role from login
+  return accountData.role || 'client';
+};
+
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [authState, setAuthState] = useState<AuthState>('loading');
@@ -97,7 +104,7 @@ export default function DrawerLayout() {
       console.log('Session check:', { 
         hasCurrentAccount: !!currentAccount,
         totalAccounts: accountManager.getAllAccounts().length,
-        accountRole: currentAccount?.role,
+        storedRole: currentAccount?.role,
         userId: currentAccount?.id
       });
 
@@ -106,6 +113,10 @@ export default function DrawerLayout() {
         setAuthState('redirect_login');
         return;
       }
+
+      // Get stored role first for fallback
+      const storedRole = getStoredRole(currentAccount);
+      console.log('🔐 Stored role from account:', storedRole);
 
       // CRITICAL: Verify token with server before proceeding
       console.log('🔐 Verifying session token with server...');
@@ -120,15 +131,21 @@ export default function DrawerLayout() {
         
         // Get the effective role from server response
         const effectiveRole = getEffectiveRole(response.data);
-        console.log('🔐 Effective role determined:', effectiveRole);
+        console.log('🔐 Effective role determined from server:', effectiveRole);
         
         // Update account with correct role if different
-        if (currentAccount.role !== effectiveRole) {
-          console.log('🔐 Updating stored account role from', currentAccount.role, 'to', effectiveRole);
-          await accountManager.updateAccountRole(currentAccount.id, effectiveRole);
+        if (storedRole !== effectiveRole) {
+          console.log('🔐 Updating stored account role from', storedRole, 'to', effectiveRole);
+          try {
+            await accountManager.updateAccountRole(currentAccount.id, effectiveRole);
+            console.log('🔐 Account role updated successfully');
+          } catch (updateError) {
+            console.error('🔐 Failed to update account role:', updateError);
+            // Continue with server role anyway
+          }
         }
         
-        // Route based on effective role
+        // Route based on effective role (use server response)
         if (effectiveRole === 'admin') {
           console.log('🔐 Admin role detected - redirecting to admin panel');
           setAuthState('redirect_admin');
@@ -171,19 +188,20 @@ export default function DrawerLayout() {
           setAuthState('redirect_login');
           
         } else {
-          // Network or other error - allow temporary access but log issue
-          console.warn('🔐 Network error during token verification - allowing temporary access');
+          // Network or other error - use stored role as fallback
+          console.warn('🔐 Network error during token verification - using stored role as fallback');
           console.warn('Error details:', tokenError.message);
+          console.log('🔐 Using stored role for fallback routing:', storedRole);
           
-          // Use stored account role as fallback
-          const fallbackRole = getEffectiveRole(currentAccount);
-          console.log('🔐 Using fallback role:', fallbackRole);
-          
-          if (fallbackRole === 'admin') {
+          // Route based on stored role
+          if (storedRole === 'admin') {
+            console.log('🔐 Using stored admin role - redirecting to admin panel');
             setAuthState('redirect_admin');
-          } else if (fallbackRole === 'support') {
+          } else if (storedRole === 'support') {
+            console.log('🔐 Using stored support role - redirecting to support panel');
             setAuthState('redirect_support');
           } else {
+            console.log('🔐 Using stored client role - entering drawer layout');
             setAuthState('authenticated');
           }
         }
@@ -192,8 +210,34 @@ export default function DrawerLayout() {
     } catch (error) {
       console.error('🔐 Critical session validation error:', error);
       
-      // Critical error - redirect to login for safety
-      console.log('🔐 Critical error - redirecting to login for security');
+      // Critical error - check if we can still use stored account as last resort
+      try {
+        const currentAccount = accountManager.getCurrentAccount();
+        if (currentAccount) {
+          const storedRole = getStoredRole(currentAccount);
+          console.log('🔐 Critical error but found stored account with role:', storedRole);
+          
+          // Use stored role as emergency fallback
+          if (storedRole === 'admin') {
+            console.log('🔐 Emergency fallback to admin panel');
+            setAuthState('redirect_admin');
+            return;
+          } else if (storedRole === 'support') {
+            console.log('🔐 Emergency fallback to support panel');
+            setAuthState('redirect_support');
+            return;
+          } else {
+            console.log('🔐 Emergency fallback to client drawer');
+            setAuthState('authenticated');
+            return;
+          }
+        }
+      } catch (fallbackError) {
+        console.error('🔐 Fallback also failed:', fallbackError);
+      }
+      
+      // Final fallback - redirect to login for safety
+      console.log('🔐 All fallbacks failed - redirecting to login for security');
       setAuthState('redirect_login');
     }
   }, []);
