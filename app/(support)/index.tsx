@@ -321,7 +321,7 @@ const getStatusColor = (status: string) => {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B141B',
+    backgroundColor: '#111B21',
   },
   header: {
     paddingTop: 28,
