@@ -1,4 +1,4 @@
-// lib/AccountManager.ts - Fixed Centralized account data management with robust persistence
+// lib/AccountManager.ts - Fixed with updateAccountRole method and support role
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -8,7 +8,7 @@ export interface AccountData {
   display_name: string;
   avatar_url?: string | null;
   token: string;
-  role: 'admin' | 'client';
+  role: 'admin' | 'client' | 'support'; // FIXED: Added support role
   userData: any; // Full user object from server
   lastUsed: number;
   createdAt: number;
@@ -47,15 +47,15 @@ export class AccountManager {
     return AccountManager.instance;
   }
 
-  // FIXED: Robust initialization with data validation and recovery
+  // Robust initialization with data validation and recovery
   async initialize(): Promise<void> {
     if (this.initialized) {
-      console.log('🔧 AccountManager: Already initialized');
+      console.log('AccountManager: Already initialized');
       return;
     }
 
     try {
-      console.log('🔧 AccountManager: Starting initialization...');
+      console.log('AccountManager: Starting initialization...');
       
       // Try to load main data
       const mainData = await this.loadStoredData(STORAGE_KEY);
@@ -69,13 +69,13 @@ export class AccountManager {
           version: mainData.version || CURRENT_VERSION
         };
         
-        console.log('✅ AccountManager: Loaded from main storage', {
+        console.log('AccountManager: Loaded from main storage', {
           accounts: this.accountGroup.accounts.length,
           current: this.accountGroup.currentAccountId
         });
       } else if (mainData && !this.validateAccountGroup(mainData)) {
         // Data exists but is invalid - try backup
-        console.warn('⚠️ AccountManager: Main data invalid, trying backup...');
+        console.warn('AccountManager: Main data invalid, trying backup...');
         const backupData = await this.loadStoredData(BACKUP_KEY);
         
         if (backupData && this.validateAccountGroup(backupData)) {
@@ -87,15 +87,15 @@ export class AccountManager {
           
           // Restore main storage from backup
           await this.persist();
-          console.log('✅ AccountManager: Restored from backup');
+          console.log('AccountManager: Restored from backup');
         } else {
           // Both main and backup failed
-          console.error('❌ AccountManager: Both main and backup data invalid, starting fresh');
+          console.error('AccountManager: Both main and backup data invalid, starting fresh');
           await this.resetToDefaults();
         }
       } else {
         // No data found - fresh start
-        console.log('🔄 AccountManager: No stored data, starting fresh');
+        console.log('AccountManager: No stored data, starting fresh');
         await this.resetToDefaults();
       }
 
@@ -106,16 +106,16 @@ export class AccountManager {
       await this.syncWithSecureStore();
       
       this.initialized = true;
-      console.log('✅ AccountManager: Initialization complete');
+      console.log('AccountManager: Initialization complete');
       
     } catch (error) {
-      console.error('❌ AccountManager: Critical initialization error:', error);
+      console.error('AccountManager: Critical initialization error:', error);
       await this.resetToDefaults();
       this.initialized = true;
     }
   }
 
-  // FIXED: Robust data loading with proper type conversion
+  // Robust data loading with proper type conversion
   private async loadStoredData(key: string): Promise<AccountGroup | null> {
     try {
       const storedData = await AsyncStorage.getItem(key);
@@ -131,9 +131,8 @@ export class AccountManager {
           display_name: String(account.display_name || account.email || ''),
           avatar_url: account.avatar_url || null,
           token: String(account.token || ''),
-          role: (account.role === 'admin' ? 'admin' : 'client') as 'admin' | 'client',
+          role: this.validateRole(account.role), // FIXED: Proper role validation
           userData: account.userData || {},
-          // FIXED: Convert string timestamps back to numbers
           lastUsed: this.parseTimestamp(account.lastUsed),
           createdAt: this.parseTimestamp(account.createdAt)
         })).filter((account: AccountData) => 
@@ -146,9 +145,18 @@ export class AccountManager {
       
       return accountGroup;
     } catch (error) {
-      console.error(`❌ AccountManager: Failed to load from ${key}:`, error);
+      console.error(`AccountManager: Failed to load from ${key}:`, error);
       return null;
     }
+  }
+
+  // FIXED: Validate and sanitize role values
+  private validateRole(role: any): 'admin' | 'client' | 'support' {
+    if (role === 'admin' || role === 'support' || role === 'client') {
+      return role;
+    }
+    console.warn('AccountManager: Invalid role found, defaulting to client:', role);
+    return 'client';
   }
 
   // Helper to safely parse timestamps
@@ -167,32 +175,32 @@ export class AccountManager {
       const stored = await AsyncStorage.getItem(CURRENT_ACCOUNT_KEY);
       return stored ? String(stored) : null;
     } catch (error) {
-      console.error('❌ AccountManager: Failed to load current account ID:', error);
+      console.error('AccountManager: Failed to load current account ID:', error);
       return null;
     }
   }
 
-  // FIXED: Comprehensive data validation
+  // Comprehensive data validation
   private validateAccountGroup(data: any): boolean {
     if (!data || typeof data !== 'object') {
-      console.warn('⚠️ AccountManager: Data is not an object');
+      console.warn('AccountManager: Data is not an object');
       return false;
     }
     
     if (!Array.isArray(data.accounts)) {
-      console.warn('⚠️ AccountManager: Accounts is not an array');
+      console.warn('AccountManager: Accounts is not an array');
       return false;
     }
     
     // Validate each account
     for (const account of data.accounts) {
       if (!this.validateAccount(account)) {
-        console.warn('⚠️ AccountManager: Invalid account found:', account?.email || 'unknown');
+        console.warn('AccountManager: Invalid account found:', account?.email || 'unknown');
         return false;
       }
     }
     
-    console.log('✅ AccountManager: Data validation passed');
+    console.log('AccountManager: Data validation passed');
     return true;
   }
 
@@ -204,7 +212,7 @@ export class AccountManager {
       account.email &&
       account.token &&
       account.display_name &&
-      (account.role === 'admin' || account.role === 'client') &&
+      (account.role === 'admin' || account.role === 'client' || account.role === 'support') &&
       account.lastUsed &&
       account.createdAt
     );
@@ -220,7 +228,7 @@ export class AccountManager {
     await this.clearAllStorage();
   }
 
-  // FIXED: Robust persistence with backup and error recovery
+  // Robust persistence with backup and error recovery
   private async persist(): Promise<void> {
     // Clear any existing timeout
     if (this.persistenceTimeout) {
@@ -230,7 +238,7 @@ export class AccountManager {
     // Debounce persistence calls
     this.persistenceTimeout = setTimeout(async () => {
       try {
-        console.log('💾 AccountManager: Starting persistence...');
+        console.log('AccountManager: Starting persistence...');
         
         // Create backup of current data first
         await this.createBackup();
@@ -245,13 +253,12 @@ export class AccountManager {
             token: String(account.token),
             role: String(account.role),
             userData: account.userData,
-            // Store as strings but ensure they're valid numbers first
             lastUsed: String(account.lastUsed),
             createdAt: String(account.createdAt)
           })),
           currentAccountId: this.accountGroup.currentAccountId ? String(this.accountGroup.currentAccountId) : null,
           version: String(CURRENT_VERSION),
-          persistedAt: String(Date.now()) // Timestamp when data was saved
+          persistedAt: String(Date.now())
         };
 
         // Store main data
@@ -267,25 +274,25 @@ export class AccountManager {
         // Update SecureStore
         await this.syncWithSecureStore();
         
-        console.log('✅ AccountManager: Persistence successful', {
+        console.log('AccountManager: Persistence successful', {
           accounts: this.accountGroup.accounts.length,
           currentId: this.accountGroup.currentAccountId
         });
         
       } catch (error) {
-        console.error('❌ AccountManager: Persistence failed:', error);
+        console.error('AccountManager: Persistence failed:', error);
         
         // Try to restore from backup if persistence fails
         try {
           await this.restoreFromBackup();
-          console.log('🔄 AccountManager: Restored from backup after persistence failure');
+          console.log('AccountManager: Restored from backup after persistence failure');
         } catch (backupError) {
-          console.error('❌ AccountManager: Backup restoration also failed:', backupError);
+          console.error('AccountManager: Backup restoration also failed:', backupError);
         }
         
         throw error;
       }
-    }, 100); // Small delay to debounce rapid calls
+    }, 100);
   }
 
   // Create backup of current data
@@ -296,7 +303,7 @@ export class AccountManager {
         await AsyncStorage.setItem(BACKUP_KEY, currentData);
       }
     } catch (error) {
-      console.warn('⚠️ AccountManager: Failed to create backup:', error);
+      console.warn('AccountManager: Failed to create backup:', error);
     }
   }
 
@@ -309,14 +316,14 @@ export class AccountManager {
     }
   }
 
-  // FIXED: Enhanced account addition with better validation
+  // Enhanced account addition with better validation
   async addAccount(userData: any, token: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
     }
 
     try {
-      console.log('➕ AccountManager: Adding account:', userData?.email || 'unknown email');
+      console.log('AccountManager: Adding account:', userData?.email || 'unknown email');
       
       // Validate input data
       if (!userData || !userData.id || !userData.email || !token) {
@@ -326,8 +333,17 @@ export class AccountManager {
       // Check if account already exists
       const existingIndex = this.accountGroup.accounts.findIndex(acc => acc.id === String(userData.id));
       
+      // FIXED: Proper role determination that handles support role
       const roles = userData.roles || [];
-      const role = roles.includes('admin') ? 'admin' : 'client';
+      let role: 'admin' | 'client' | 'support' = 'client';
+      
+      if (userData.primary_role && userData.primary_role !== 'client') {
+        role = this.validateRole(userData.primary_role);
+      } else if (roles.includes('admin')) {
+        role = 'admin';
+      } else if (roles.includes('support')) {
+        role = 'support';
+      }
       
       const accountData: AccountData = {
         id: String(userData.id),
@@ -344,26 +360,62 @@ export class AccountManager {
       if (existingIndex !== -1) {
         // Update existing account
         this.accountGroup.accounts[existingIndex] = accountData;
-        console.log('🔄 AccountManager: Updated existing account');
+        console.log('AccountManager: Updated existing account');
       } else {
         // Add new account
         if (this.accountGroup.accounts.length >= 3) {
           throw new Error('Maximum of 3 accounts allowed');
         }
         this.accountGroup.accounts.push(accountData);
-        console.log('✅ AccountManager: Added new account');
+        console.log('AccountManager: Added new account');
       }
 
       // Set as current account
       await this.setCurrentAccount(String(userData.id));
       
     } catch (error) {
-      console.error('❌ AccountManager: Failed to add account:', error);
+      console.error('AccountManager: Failed to add account:', error);
       throw error;
     }
   }
 
-  // FIXED: Enhanced current account setting with validation
+  // FIXED: Add the missing updateAccountRole method
+  async updateAccountRole(accountId: string, newRole: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    try {
+      console.log('AccountManager: Updating account role:', { accountId, newRole });
+      
+      const accountIndex = this.accountGroup.accounts.findIndex(acc => acc.id === accountId);
+      if (accountIndex === -1) {
+        throw new Error(`Account not found: ${accountId}`);
+      }
+
+      const validatedRole = this.validateRole(newRole);
+      const account = this.accountGroup.accounts[accountIndex];
+      
+      // Update the role
+      account.role = validatedRole;
+      account.lastUsed = Date.now();
+      
+      // Persist changes
+      await this.persist();
+      
+      console.log('AccountManager: Account role updated successfully:', {
+        email: account.email,
+        oldRole: account.role,
+        newRole: validatedRole
+      });
+      
+    } catch (error) {
+      console.error('AccountManager: Failed to update account role:', error);
+      throw error;
+    }
+  }
+
+  // Enhanced current account setting with validation
   async setCurrentAccount(accountId: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
@@ -374,7 +426,7 @@ export class AccountManager {
       throw new Error(`Account not found: ${accountId}`);
     }
 
-    console.log('🔄 AccountManager: Setting current account:', account.email);
+    console.log('AccountManager: Setting current account:', account.email);
     
     try {
       // Update last used timestamp
@@ -384,15 +436,15 @@ export class AccountManager {
       // Persist changes
       await this.persist();
       
-      console.log('✅ AccountManager: Current account set successfully');
+      console.log('AccountManager: Current account set successfully');
       
     } catch (error) {
-      console.error('❌ AccountManager: Failed to set current account:', error);
+      console.error('AccountManager: Failed to set current account:', error);
       throw error;
     }
   }
 
-  // FIXED: Secure sync with SecureStore
+  // Secure sync with SecureStore
   private async syncWithSecureStore(): Promise<void> {
     try {
       const currentAccount = this.getCurrentAccount();
@@ -402,29 +454,30 @@ export class AccountManager {
         await SecureStore.setItemAsync('auth_token', String(currentAccount.token));
         await SecureStore.setItemAsync('user_id', String(currentAccount.id));
         await SecureStore.setItemAsync('user_role', String(currentAccount.role));
-        console.log('🔐 AccountManager: SecureStore synced with current account');
+        console.log('AccountManager: SecureStore synced with current account');
       } else {
         // Clear SecureStore if no current account
         await SecureStore.deleteItemAsync('auth_token').catch(() => {});
         await SecureStore.deleteItemAsync('user_id').catch(() => {});
         await SecureStore.deleteItemAsync('user_role').catch(() => {});
-        console.log('🧹 AccountManager: SecureStore cleared');
+        console.log('AccountManager: SecureStore cleared');
       }
     } catch (error) {
-      console.error('❌ AccountManager: SecureStore sync failed:', error);
+      console.error('AccountManager: SecureStore sync failed:', error);
     }
   }
 
   // Data migration for version updates
   private async migrateIfNeeded(): Promise<void> {
     if (this.accountGroup.version < CURRENT_VERSION) {
-      console.log(`🔄 AccountManager: Migrating from v${this.accountGroup.version} to v${CURRENT_VERSION}`);
+      console.log(`AccountManager: Migrating from v${this.accountGroup.version} to v${CURRENT_VERSION}`);
       
       // Add migration logic here as needed
       if (this.accountGroup.version === 1) {
-        // Example migration: ensure all timestamps are numbers
+        // Example migration: ensure all timestamps are numbers and validate roles
         this.accountGroup.accounts = this.accountGroup.accounts.map(account => ({
           ...account,
+          role: this.validateRole(account.role), // Ensure valid role
           lastUsed: this.parseTimestamp(account.lastUsed),
           createdAt: this.parseTimestamp(account.createdAt)
         }));
@@ -432,7 +485,7 @@ export class AccountManager {
       
       this.accountGroup.version = CURRENT_VERSION;
       await this.persist();
-      console.log('✅ AccountManager: Migration completed');
+      console.log('AccountManager: Migration completed');
     }
   }
 
@@ -451,7 +504,7 @@ export class AccountManager {
     
     // Current account is invalid, clear it
     if (account) {
-      console.warn('⚠️ AccountManager: Current account is invalid, clearing');
+      console.warn('AccountManager: Current account is invalid, clearing');
       this.accountGroup.currentAccountId = null;
       this.persist().catch(() => {}); // Don't await to avoid blocking
     }
@@ -464,13 +517,13 @@ export class AccountManager {
     return this.accountGroup.accounts.filter(account => this.validateAccount(account));
   }
 
-  // FIXED: Enhanced account removal with cleanup
+  // Enhanced account removal with cleanup
   async removeAccount(accountId: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
     }
 
-    console.log('🗑️ AccountManager: Removing account:', accountId);
+    console.log('AccountManager: Removing account:', accountId);
     
     const accountIndex = this.accountGroup.accounts.findIndex(acc => acc.id === accountId);
     if (accountIndex === -1) {
@@ -496,7 +549,7 @@ export class AccountManager {
     }
 
     await this.persist();
-    console.log('✅ AccountManager: Account removed:', removedAccount.email);
+    console.log('AccountManager: Account removed:', removedAccount.email);
   }
 
   // Update account data (e.g., after API refresh)
@@ -515,12 +568,12 @@ export class AccountManager {
     account.lastUsed = Date.now();
 
     await this.persist();
-    console.log('✅ AccountManager: Account updated:', account.email);
+    console.log('AccountManager: Account updated:', account.email);
   }
 
-  // FIXED: Complete cleanup with error handling
+  // Complete cleanup with error handling
   async clearAllAccounts(): Promise<void> {
-    console.log('🧹 AccountManager: Clearing all accounts');
+    console.log('AccountManager: Clearing all accounts');
     
     this.accountGroup = { 
       accounts: [], 
@@ -529,7 +582,7 @@ export class AccountManager {
     };
     
     await this.clearAllStorage();
-    console.log('✅ AccountManager: All accounts cleared');
+    console.log('AccountManager: All accounts cleared');
   }
 
   // Clear all storage locations
@@ -550,11 +603,11 @@ export class AccountManager {
       ]);
       
     } catch (error) {
-      console.error('❌ AccountManager: Failed to clear storage:', error);
+      console.error('AccountManager: Failed to clear storage:', error);
     }
   }
 
-  // FIXED: Robust token retrieval with validation
+  // Robust token retrieval with validation
   getCurrentToken(): string | null {
     const current = this.getCurrentAccount();
     const token = current?.token;
@@ -563,7 +616,7 @@ export class AccountManager {
       return token;
     }
     
-    console.warn('⚠️ AccountManager: No valid token available');
+    console.warn('AccountManager: No valid token available');
     return null;
   }
 
@@ -576,7 +629,7 @@ export class AccountManager {
       return userId;
     }
     
-    console.warn('⚠️ AccountManager: No valid user ID available');
+    console.warn('AccountManager: No valid user ID available');
     return null;
   }
 
@@ -602,7 +655,7 @@ export class AccountManager {
     return this.accountGroup.accounts.some(acc => acc.id === accountId);
   }
 
-  // FIXED: Debug method to check account manager state
+  // Debug method to check account manager state
   getDebugInfo(): any {
     return {
       initialized: this.initialized,
