@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Fixed Support Screen with initial modal and proper API calls
+// app/(drawer)/support.tsx - Fixed Support Screen with message loading
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -69,7 +69,7 @@ export default function SupportScreen() {
   const preFilledPackageId = params.packageId as string;
 
   const handleGoBack = useCallback(() => {
-    console.log('🔙 Support screen: navigating back');
+    console.log('Support screen: navigating back');
     
     NavigationHelper.goBack({
       fallbackRoute: '/(tabs)',
@@ -77,19 +77,11 @@ export default function SupportScreen() {
     });
   }, []);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      text: 'Hello! Welcome to our customer support. How can I help you today?',
-      timestamp: '09:05',
-      isSupport: true,
-      type: 'text',
-    },
-  ]);
-
+  const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [ticketStatus, setTicketStatus] = useState<'none' | 'pending' | 'active' | 'closed'>('none');
   const [hasActiveTicket, setHasActiveTicket] = useState(false);
@@ -101,7 +93,7 @@ export default function SupportScreen() {
   const [inquiryText, setInquiryText] = useState('');
   const [packageInquiry, setPackageInquiry] = useState('');
   
-  // NEW: Inquiry type management for integrated approach
+  // Inquiry type management for integrated approach
   const [inquiryType, setInquiryType] = useState<InquiryType>(autoSelectPackage ? 'package' : 'basic');
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [showPackageSearch, setShowPackageSearch] = useState(false);
@@ -115,29 +107,94 @@ export default function SupportScreen() {
 
   const flatListRef = useRef<FlatList>(null);
 
-  // Check for existing active ticket on mount
-  useEffect(() => {
-    checkActiveTicket();
+  // Load conversation messages from API
+  const loadConversationMessages = useCallback(async (conversationId: string) => {
+    try {
+      setLoadingMessages(true);
+      console.log('Loading messages for conversation:', conversationId);
+      
+      const response = await api.get(`/api/v1/conversations/${conversationId}`);
+      
+      if (response.data.success && response.data.messages) {
+        // Convert API messages to your local message format
+        const apiMessages = response.data.messages.map((msg: any) => ({
+          id: String(msg.id),
+          text: msg.content || '',
+          timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          isSupport: msg.from_support || msg.is_system,
+          type: msg.message_type || 'text',
+          packageCode: msg.metadata?.package_code,
+          isTagged: !!msg.metadata?.package_code,
+        }));
+        
+        // Set the loaded messages
+        setMessages(apiMessages);
+        
+        console.log('Loaded', apiMessages.length, 'messages');
+        
+        // Scroll to bottom after loading messages
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+      
+    } catch (error) {
+      console.error('Failed to load conversation messages:', error);
+      // Set default welcome message if loading fails
+      setMessages([{
+        id: '1',
+        text: 'Hello! Welcome to our customer support. How can I help you today?',
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: true,
+        type: 'text',
+      }]);
+    } finally {
+      setLoadingMessages(false);
+    }
   }, []);
 
-  const checkActiveTicket = async () => {
+  // Check for existing active ticket on mount
+  const checkActiveTicket = useCallback(async () => {
     try {
-      console.log('🔍 Checking for active support ticket...');
+      console.log('Checking for active support ticket...');
       
       const response = await api.get('/api/v1/conversations/active_support');
       
       if (response.data.success && response.data.conversation_id) {
-        console.log('✅ Found active ticket:', response.data.conversation_id);
+        console.log('Found active ticket:', response.data.conversation_id);
         setConversationId(response.data.conversation_id);
         setHasActiveTicket(true);
         setTicketStatus('active');
         
-        // Don't show modal if there's an active ticket
+        // Load existing messages from the conversation
+        await loadConversationMessages(response.data.conversation_id);
+        
         return;
       }
       
-      console.log('ℹ️ No active ticket found');
+      console.log('No active ticket found');
       setHasActiveTicket(false);
+      
+      // Set default welcome message
+      setMessages([{
+        id: '1',
+        text: 'Hello! Welcome to our customer support. How can I help you today?',
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: true,
+        type: 'text',
+      }]);
       
       // Show appropriate modal based on entry method
       if (autoSelectPackage) {
@@ -147,7 +204,20 @@ export default function SupportScreen() {
       }
       
     } catch (error) {
-      console.error('❌ Error checking active ticket:', error);
+      console.error('Error checking active ticket:', error);
+      
+      // Set default welcome message
+      setMessages([{
+        id: '1',
+        text: 'Hello! Welcome to our customer support. How can I help you today?',
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: true,
+        type: 'text',
+      }]);
       
       // If error, show modal anyway (better user experience)
       if (autoSelectPackage) {
@@ -156,14 +226,19 @@ export default function SupportScreen() {
         setShowTicketModal(true);
       }
     }
-  };
+  }, [autoSelectPackage, loadConversationMessages]);
+
+  // Check for existing active ticket on mount
+  useEffect(() => {
+    checkActiveTicket();
+  }, [checkActiveTicket]);
 
   // Load user packages for search
   const loadUserPackages = useCallback(async () => {
     try {
       setLoadingPackages(true);
       
-      console.log('📦 Loading user packages for search...');
+      console.log('Loading user packages for search...');
       
       const response = await api.get('/api/v1/packages', {
         params: {
@@ -188,7 +263,7 @@ export default function SupportScreen() {
         setUserPackages(packages);
         setFilteredPackages(packages);
         
-        console.log('✅ Loaded packages for search:', packages.length);
+        console.log('Loaded packages for search:', packages.length);
 
         // If we have a pre-filled package code, try to find and select it
         if (preFilledPackageCode) {
@@ -199,12 +274,12 @@ export default function SupportScreen() {
           if (preSelectedPackage) {
             setSelectedPackage(preSelectedPackage);
             setInquiryType('package');
-            console.log('✅ Pre-selected package:', preSelectedPackage.code);
+            console.log('Pre-selected package:', preSelectedPackage.code);
           }
         }
       }
     } catch (error) {
-      console.error('❌ Failed to load user packages:', error);
+      console.error('Failed to load user packages:', error);
     } finally {
       setLoadingPackages(false);
     }
@@ -268,7 +343,7 @@ export default function SupportScreen() {
     if (conversationId) return conversationId;
 
     try {
-      console.log('🎫 Creating support ticket...');
+      console.log('Creating support ticket...');
       
       const payload: any = {
         category: inquiryType === 'package' ? 'package_inquiry' : 'basic_inquiry'
@@ -281,22 +356,27 @@ export default function SupportScreen() {
       const response = await api.post('/api/v1/conversations/support_ticket', payload);
       
       if (response.data.success && response.data.conversation_id) {
-        setConversationId(response.data.conversation_id);
+        const newConversationId = response.data.conversation_id;
+        setConversationId(newConversationId);
         setTicketStatus('pending');
-        console.log('✅ Support ticket created:', response.data.conversation_id);
-        return response.data.conversation_id;
+        console.log('Support ticket created:', newConversationId);
+        
+        // Load any existing messages (like welcome messages created by the backend)
+        await loadConversationMessages(newConversationId);
+        
+        return newConversationId;
       }
       
       throw new Error(response.data.message || 'Failed to create support ticket');
     } catch (error: any) {
-      console.error('❌ Failed to create support ticket:', error);
+      console.error('Failed to create support ticket:', error);
       console.error('Error details:', {
         status: error.response?.status,
         message: error.response?.data?.message || error.message
       });
       throw error;
     }
-  }, [conversationId, inquiryType, selectedPackage?.code]);
+  }, [conversationId, inquiryType, selectedPackage?.code, loadConversationMessages]);
 
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
@@ -435,7 +515,7 @@ export default function SupportScreen() {
       }
       
     } catch (error) {
-      console.error('❌ Failed to create basic inquiry:', error);
+      console.error('Failed to create basic inquiry:', error);
       
       // Remove the message if sending failed
       setMessages(prev => prev.filter(msg => msg.id !== Date.now().toString()));
@@ -525,7 +605,7 @@ export default function SupportScreen() {
       }
       
     } catch (error) {
-      console.error('❌ Failed to create package inquiry:', error);
+      console.error('Failed to create package inquiry:', error);
       
       // Remove the message if sending failed
       setMessages(prev => prev.filter(msg => msg.id !== Date.now().toString()));
@@ -593,7 +673,7 @@ export default function SupportScreen() {
       }
       
     } catch (error) {
-      console.error('❌ Failed to send message:', error);
+      console.error('Failed to send message:', error);
       
       // Remove the message if sending failed
       setMessages(prev => prev.filter(msg => msg.id !== Date.now().toString()));
@@ -941,6 +1021,59 @@ export default function SupportScreen() {
     </Modal>
   );
 
+  // Show loading indicator when loading messages
+  if (loadingMessages) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
+        
+        <LinearGradient
+          colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.header}
+        >
+          <View style={styles.headerContent}>
+            <TouchableOpacity 
+              onPress={handleGoBack}
+              style={styles.backButton}
+              activeOpacity={0.7}
+            >
+              <Feather name="arrow-left" size={24} color="#fff" />
+            </TouchableOpacity>
+            
+            <Image
+              source={require('../../assets/images/avatar_placeholder.png')}
+              style={styles.avatar}
+            />
+            
+            <View style={styles.headerInfo}>
+              <Text style={styles.headerTitle}>Customer Support</Text>
+              <Text style={styles.headerSubtitle}>Loading...</Text>
+            </View>
+            
+            <View style={styles.headerActions}>
+              <TouchableOpacity style={styles.headerButton}>
+                <Feather name="video" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerButton}>
+                <Feather name="phone" size={22} color="#fff" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.headerButton}>
+                <Feather name="more-vertical" size={22} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </View>
+        </LinearGradient>
+
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#7B3F98" />
+          <Text style={styles.loadingText}>Loading conversation...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
@@ -1197,6 +1330,17 @@ const styles = StyleSheet.create({
   flex: {
     flex: 1,
   },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#0B141B',
+  },
+  loadingText: {
+    color: '#8E8E93',
+    fontSize: 16,
+    marginTop: 16,
+  },
   header: {
     paddingBottom: 12,
     elevation: 4,
@@ -1338,7 +1482,7 @@ const styles = StyleSheet.create({
     marginRight: 4,
   },
   
-  // NEW: Inquiry section styles
+  // Inquiry section styles
   inquirySection: {
     backgroundColor: 'rgba(11, 20, 27, 0.95)',
     borderTopWidth: 0.5,
