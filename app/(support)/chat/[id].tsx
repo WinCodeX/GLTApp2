@@ -84,13 +84,44 @@ export default function SupportChatScreen() {
       console.log('Loading conversation with ID:', id);
       setLoading(true);
       
+      // Try to load from support API first for better data structure
       const response = await api.get(`/api/v1/conversations/${id}`);
       console.log('Conversation response:', response.data);
       
       if (response.data.success) {
-        setConversation(response.data.conversation);
-        setMessages(response.data.messages || []);
-        console.log('Conversation loaded successfully:', response.data.conversation.ticket_id);
+        const conversationData = response.data.conversation;
+        const messagesData = response.data.messages || [];
+        
+        // If we don't have customer data, try to get it from the support tickets API
+        if (!conversationData.customer || !conversationData.customer.name) {
+          console.log('Customer data missing, attempting to fetch from support API...');
+          try {
+            const supportResponse = await api.get('/api/v1/support/tickets', {
+              params: { limit: 100 }
+            });
+            
+            if (supportResponse.data.success) {
+              const supportTickets = supportResponse.data.data.tickets || [];
+              const matchingTicket = supportTickets.find(ticket => ticket.id === id);
+              
+              if (matchingTicket && matchingTicket.customer) {
+                console.log('Found matching ticket with customer data:', matchingTicket.customer);
+                conversationData.customer = matchingTicket.customer;
+                conversationData.ticket_id = matchingTicket.ticket_id;
+                conversationData.priority = matchingTicket.priority;
+                conversationData.category = matchingTicket.category;
+                conversationData.assigned_agent = matchingTicket.assigned_agent;
+                conversationData.escalated = matchingTicket.escalated;
+              }
+            }
+          } catch (supportError) {
+            console.log('Failed to load support data, continuing with conversation data:', supportError);
+          }
+        }
+        
+        setConversation(conversationData);
+        setMessages(messagesData);
+        console.log('Conversation loaded successfully:', conversationData.ticket_id);
       } else {
         console.error('API returned error:', response.data.message);
         Alert.alert('Error', response.data.message || 'Failed to load conversation');
@@ -498,7 +529,7 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingTop: 28,
+    paddingTop: 8,
     paddingBottom: 12,
     paddingHorizontal: 12,
   },
