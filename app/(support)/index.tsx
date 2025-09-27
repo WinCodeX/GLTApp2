@@ -1,5 +1,4 @@
-
-// app/(support)/index.tsx - Main Support Dashboard
+// app/(support)/index.tsx - Support Dashboard using Support API
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   View,
@@ -12,6 +11,8 @@ import {
   RefreshControl,
   ActivityIndicator,
   Image,
+  Alert,
+  ScrollView,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,12 +25,19 @@ interface SupportTicket {
   id: string;
   ticket_id: string;
   title: string;
-  status: 'pending' | 'in_progress' | 'solved' | 'closed';
-  priority: 'low' | 'normal' | 'high';
+  status: 'pending' | 'assigned' | 'in_progress' | 'resolved' | 'closed';
+  priority: 'low' | 'normal' | 'high' | 'urgent';
+  category: string;
   customer: {
     id: string;
     name: string;
+    email: string;
     avatar_url?: string;
+  };
+  assigned_agent?: {
+    id: string;
+    name: string;
+    email: string;
   };
   last_message: {
     content: string;
@@ -37,25 +45,66 @@ interface SupportTicket {
     from_support: boolean;
   } | null;
   unread_count: number;
+  message_count: number;
   last_activity_at: string;
-  category: string;
+  created_at: string;
+  escalated: boolean;
+  package_id?: string;
+}
+
+interface DashboardStats {
+  total_tickets: number;
+  pending_tickets: number;
+  in_progress_tickets: number;
+  resolved_today: number;
+  avg_response_time: string;
+  satisfaction_score: number;
+  tickets_by_priority: {
+    high: number;
+    normal: number;
+    low: number;
+  };
+}
+
+interface AgentStats {
+  tickets_resolved_today: number;
+  avg_resolution_time: string;
+  active_tickets: number;
+  satisfaction_rating: number;
 }
 
 const STATUS_FILTERS = [
-  { key: 'pending', label: 'Pending', count: 0 },
-  { key: 'all', label: 'All', count: 0 },
-  { key: 'solved', label: 'Solved', count: 0 },
-  { key: 'gltchats', label: 'GLT Chats', count: 0 },
+  { key: 'pending', label: 'Pending', icon: 'clock' },
+  { key: 'assigned', label: 'Assigned', icon: 'user' },
+  { key: 'in_progress', label: 'Active', icon: 'activity' },
+  { key: 'all', label: 'All', icon: 'list' },
+  { key: 'resolved', label: 'Resolved', icon: 'check-circle' },
 ];
 
 export default function SupportDashboard() {
   const { user } = useUser();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
+  const [agentStats, setAgentStats] = useState<AgentStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('pending');
   const [currentChat, setCurrentChat] = useState<string | null>(null);
+  const [showStats, setShowStats] = useState(false);
+
+  // Load dashboard data
+  const loadDashboardData = useCallback(async () => {
+    try {
+      const response = await api.get('/api/v1/support/dashboard');
+      if (response.data.success) {
+        setDashboardStats(response.data.data.stats);
+        setAgentStats(response.data.data.agent_performance);
+      }
+    } catch (error) {
+      console.error('Failed to load dashboard stats:', error);
+    }
+  }, []);
 
   // Load support tickets
   const loadTickets = useCallback(async (refresh = false) => {
@@ -63,41 +112,102 @@ export default function SupportDashboard() {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      const response = await api.get('/api/v1/conversations', {
-        params: {
-          type: 'support',
-          status: activeFilter === 'all' ? undefined : activeFilter
-        }
-      });
+      // Use support-specific endpoint
+      const endpoint = activeFilter === 'all' ? '/api/v1/support/tickets' : '/api/v1/support/tickets';
+      const params: any = {
+        limit: 50,
+        page: 1,
+      };
+
+      if (activeFilter !== 'all') {
+        params.status = activeFilter;
+      }
+
+      if (searchQuery.trim()) {
+        params.search = searchQuery.trim();
+      }
+
+      const response = await api.get(endpoint, { params });
 
       if (response.data.success) {
-        setTickets(response.data.conversations || []);
+        setTickets(response.data.data.tickets || []);
       }
     } catch (error) {
       console.error('Failed to load support tickets:', error);
+      Alert.alert('Error', 'Failed to load support tickets');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeFilter]);
+  }, [activeFilter, searchQuery]);
+
+  // Load data on mount and filter change
+  useEffect(() => {
+    loadDashboardData();
+  }, [loadDashboardData]);
 
   useEffect(() => {
     loadTickets();
   }, [loadTickets]);
 
-  // Filter tickets based on search
-  const filteredTickets = tickets.filter(ticket =>
-    ticket.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    ticket.customer.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    ticket.ticket_id.toLowerCase().includes(searchQuery.toLowerCase())
-  );
+  // Quick assign ticket to current user
+  const handleQuickAssign = async (ticketId: string) => {
+    try {
+      const response = await api.post(`/api/v1/support/tickets/${ticketId}/assign`, {
+        agent_id: user?.id
+      });
+      
+      if (response.data.success) {
+        // Refresh tickets to show updated assignment
+        loadTickets();
+        Alert.alert('Success', 'Ticket assigned to you');
+      }
+    } catch (error) {
+      console.error('Failed to assign ticket:', error);
+      Alert.alert('Error', 'Failed to assign ticket');
+    }
+  };
 
-  // Get status counts
+  // Get status counts from loaded tickets
   const statusCounts = {
     pending: tickets.filter(t => t.status === 'pending').length,
+    assigned: tickets.filter(t => t.status === 'assigned').length,
+    in_progress: tickets.filter(t => t.status === 'in_progress').length,
     all: tickets.length,
-    solved: tickets.filter(t => t.status === 'solved' || t.status === 'closed').length,
-    gltchats: tickets.filter(t => t.category === 'glt_internal').length,
+    resolved: tickets.filter(t => t.status === 'resolved').length,
+  };
+
+  const renderStatsOverview = () => {
+    if (!dashboardStats || !showStats) return null;
+
+    return (
+      <View style={styles.statsContainer}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{dashboardStats.total_tickets}</Text>
+            <Text style={styles.statLabel}>Total Tickets</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{dashboardStats.pending_tickets}</Text>
+            <Text style={styles.statLabel}>Pending</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{dashboardStats.resolved_today}</Text>
+            <Text style={styles.statLabel}>Resolved Today</Text>
+          </View>
+          <View style={styles.statCard}>
+            <Text style={styles.statNumber}>{dashboardStats.avg_response_time}</Text>
+            <Text style={styles.statLabel}>Avg Response</Text>
+          </View>
+          {agentStats && (
+            <View style={styles.statCard}>
+              <Text style={styles.statNumber}>{agentStats.active_tickets}</Text>
+              <Text style={styles.statLabel}>My Active</Text>
+            </View>
+          )}
+        </ScrollView>
+      </View>
+    );
   };
 
   const renderTicketItem = ({ item }: { item: SupportTicket }) => (
@@ -123,9 +233,14 @@ export default function SupportDashboard() {
               <Text style={styles.customerName} numberOfLines={1}>
                 {item.customer.name}
               </Text>
-              <Text style={styles.ticketTime}>
-                {formatTime(item.last_activity_at)}
-              </Text>
+              <View style={styles.ticketMeta}>
+                {item.escalated && (
+                  <Feather name="alert-triangle" size={12} color="#f97316" style={{ marginRight: 4 }} />
+                )}
+                <Text style={styles.ticketTime}>
+                  {formatTime(item.last_activity_at)}
+                </Text>
+              </View>
             </View>
             <View style={styles.ticketSubtitleRow}>
               <Text style={styles.ticketPreview} numberOfLines={1}>
@@ -138,11 +253,38 @@ export default function SupportDashboard() {
               )}
             </View>
             <View style={styles.ticketMetaRow}>
-              <Text style={styles.ticketId}>#{item.ticket_id}</Text>
-              <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
+              <View style={styles.ticketLeftMeta}>
+                <Text style={styles.ticketId}>#{item.ticket_id}</Text>
+                <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(item.priority) }]}>
+                  <Text style={styles.priorityText}>{item.priority.toUpperCase()}</Text>
+                </View>
+              </View>
+              <View style={styles.ticketRightMeta}>
+                {!item.assigned_agent && item.status === 'pending' && (
+                  <TouchableOpacity
+                    style={styles.quickAssignButton}
+                    onPress={(e) => {
+                      e.stopPropagation();
+                      handleQuickAssign(item.id);
+                    }}
+                  >
+                    <Feather name="user-plus" size={12} color="#7B3F98" />
+                    <Text style={styles.quickAssignText}>Assign</Text>
+                  </TouchableOpacity>
+                )}
+                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+                  <Text style={styles.statusText}>{item.status.replace('_', ' ').toUpperCase()}</Text>
+                </View>
               </View>
             </View>
+            {item.assigned_agent && (
+              <View style={styles.assignedAgentRow}>
+                <Feather name="user" size={12} color="#8E8E93" />
+                <Text style={styles.assignedAgentText}>
+                  Assigned to {item.assigned_agent.name}
+                </Text>
+              </View>
+            )}
           </View>
         </View>
       </View>
@@ -165,19 +307,30 @@ export default function SupportDashboard() {
               Welcome back, {user?.first_name || 'Agent'}
             </Text>
             <Text style={styles.headerDescription}>
-              These are your conversations for today
+              {dashboardStats ? `${dashboardStats.pending_tickets} pending • ${dashboardStats.total_tickets} total tickets` : 'Loading dashboard...'}
             </Text>
           </View>
-          <Image
-            source={
-              user?.avatar_url
-                ? { uri: user.avatar_url }
-                : require('../../assets/images/avatar_placeholder.png')
-            }
-            style={styles.headerAvatar}
-          />
+          <View style={styles.headerRight}>
+            <TouchableOpacity
+              style={styles.statsToggleButton}
+              onPress={() => setShowStats(!showStats)}
+            >
+              <Feather name={showStats ? 'eye-off' : 'eye'} size={20} color="#fff" />
+            </TouchableOpacity>
+            <Image
+              source={
+                user?.avatar_url
+                  ? { uri: user.avatar_url }
+                  : require('../../assets/images/avatar_placeholder.png')
+              }
+              style={styles.headerAvatar}
+            />
+          </View>
         </View>
       </LinearGradient>
+
+      {/* Stats Overview */}
+      {renderStatsOverview()}
 
       {/* Current Chat Indicator */}
       {currentChat && (
@@ -198,11 +351,18 @@ export default function SupportDashboard() {
           <Feather name="search" size={20} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search conversations..."
+            placeholder="Search tickets, customers, or ticket IDs..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
+            returnKeyType="search"
+            onSubmitEditing={() => loadTickets()}
           />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')}>
+              <Feather name="x" size={16} color="#8E8E93" />
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -221,6 +381,11 @@ export default function SupportDashboard() {
               ]}
               onPress={() => setActiveFilter(item.key)}
             >
+              <Feather 
+                name={item.icon as any} 
+                size={14} 
+                color={activeFilter === item.key ? '#fff' : '#8E8E93'} 
+              />
               <Text
                 style={[
                   styles.filterPillText,
@@ -246,33 +411,47 @@ export default function SupportDashboard() {
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7B3F98" />
-            <Text style={styles.loadingText}>Loading conversations...</Text>
+            <Text style={styles.loadingText}>Loading support tickets...</Text>
           </View>
         ) : (
           <FlatList
-            data={filteredTickets}
+            data={tickets}
             keyExtractor={(item) => item.id}
             renderItem={renderTicketItem}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
-                onRefresh={() => loadTickets(true)}
+                onRefresh={() => {
+                  loadTickets(true);
+                  loadDashboardData();
+                }}
                 colors={['#7B3F98']}
                 tintColor="#7B3F98"
               />
             }
             ListEmptyComponent={() => (
               <View style={styles.emptyContainer}>
-                <MaterialIcons name="chat-bubble-outline" size={64} color="#444" />
-                <Text style={styles.emptyText}>No conversations found</Text>
+                <MaterialIcons name="support-agent" size={64} color="#444" />
+                <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
                   {activeFilter === 'pending' 
                     ? 'No pending support tickets'
-                    : `No ${activeFilter} conversations`
+                    : searchQuery
+                    ? `No tickets match "${searchQuery}"`
+                    : `No ${activeFilter} tickets`
                   }
                 </Text>
+                {searchQuery && (
+                  <TouchableOpacity
+                    style={styles.clearSearchButton}
+                    onPress={() => setSearchQuery('')}
+                  >
+                    <Text style={styles.clearSearchText}>Clear search</Text>
+                  </TouchableOpacity>
+                )}
               </View>
             )}
+            contentContainerStyle={tickets.length === 0 ? { flex: 1 } : undefined}
           />
         )}
       </View>
@@ -311,10 +490,21 @@ const formatTime = (dateString: string) => {
 const getStatusColor = (status: string) => {
   switch (status) {
     case 'pending': return '#f97316';
+    case 'assigned': return '#3b82f6';
     case 'in_progress': return '#8b5cf6';
-    case 'solved': return '#10b981';
+    case 'resolved': return '#10b981';
     case 'closed': return '#6b7280';
     default: return '#8b5cf6';
+  }
+};
+
+const getPriorityColor = (priority: string) => {
+  switch (priority) {
+    case 'urgent': return '#dc2626';
+    case 'high': return '#f97316';
+    case 'normal': return '#6b7280';
+    case 'low': return '#10b981';
+    default: return '#6b7280';
   }
 };
 
@@ -336,6 +526,10 @@ const styles = StyleSheet.create({
   headerLeft: {
     flex: 1,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   headerTitle: {
     color: '#fff',
     fontSize: 28,
@@ -353,11 +547,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     opacity: 0.9,
   },
+  statsToggleButton: {
+    padding: 8,
+    marginRight: 8,
+  },
   headerAvatar: {
     width: 50,
     height: 50,
     borderRadius: 25,
-    marginLeft: 16,
+  },
+  statsContainer: {
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    paddingVertical: 12,
+  },
+  statCard: {
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    marginHorizontal: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+    minWidth: 80,
+  },
+  statNumber: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  statLabel: {
+    color: '#E1BEE7',
+    fontSize: 12,
+    marginTop: 4,
   },
   currentChatIndicator: {
     flexDirection: 'row',
@@ -411,6 +631,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 14,
     fontWeight: '500',
+    marginLeft: 6,
   },
   filterPillTextActive: {
     color: '#fff',
@@ -464,6 +685,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     flex: 1,
   },
+  ticketMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
   ticketTime: {
     color: '#8E8E93',
     fontSize: 12,
@@ -495,10 +720,46 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 4,
+  },
+  ticketLeftMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  ticketRightMeta: {
+    flexDirection: 'row',
+    alignItems: 'center',
   },
   ticketId: {
     color: '#8E8E93',
     fontSize: 12,
+    marginRight: 8,
+  },
+  priorityBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  priorityText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '600',
+  },
+  quickAssignButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(123, 63, 152, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginRight: 8,
+  },
+  quickAssignText: {
+    color: '#7B3F98',
+    fontSize: 10,
+    fontWeight: '600',
+    marginLeft: 4,
   },
   statusBadge: {
     paddingHorizontal: 6,
@@ -509,6 +770,16 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
+  },
+  assignedAgentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  assignedAgentText: {
+    color: '#8E8E93',
+    fontSize: 12,
+    marginLeft: 4,
   },
   loadingContainer: {
     flex: 1,
@@ -538,5 +809,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  clearSearchButton: {
+    backgroundColor: '#7B3F98',
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderRadius: 16,
+    marginTop: 16,
+  },
+  clearSearchText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
   },
 });
