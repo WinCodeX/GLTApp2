@@ -335,12 +335,12 @@ export default function SupportDashboard() {
       {/* Stats Overview */}
       {renderStatsOverview()}
 
-      {/* Current Chat Indicator - FIXED */}
-      {currentChat && (
+      {/* Current Chat Indicator - FIXED WITH PROPER STRING HANDLING */}
+      {currentChat && typeof currentChat === 'string' && currentChat.length > 0 && (
         <View style={styles.currentChatIndicator}>
           <Feather name="message-circle" size={16} color="#E1BEE7" />
           <Text style={styles.currentChatText}>
-            Currently in chat #{currentChat ? currentChat.substring(Math.max(0, currentChat.length - 8)) : 'Unknown'}
+            Currently in chat #{currentChat.length >= 8 ? currentChat.substring(currentChat.length - 8) : currentChat}
           </Text>
           <TouchableOpacity onPress={() => setCurrentChat(null)}>
             <Feather name="x" size={16} color="#8E8E93" />
