@@ -75,22 +75,29 @@ export default function SupportChatScreen() {
   // Load conversation and messages
   const loadConversation = useCallback(async () => {
     if (!id) {
+      console.log('No conversation ID provided');
       setLoading(false);
       return;
     }
 
     try {
+      console.log('Loading conversation with ID:', id);
       setLoading(true);
+      
       const response = await api.get(`/api/v1/conversations/${id}`);
+      console.log('Conversation response:', response.data);
+      
       if (response.data.success) {
         setConversation(response.data.conversation);
         setMessages(response.data.messages || []);
+        console.log('Conversation loaded successfully:', response.data.conversation.ticket_id);
       } else {
-        Alert.alert('Error', 'Failed to load conversation');
+        console.error('API returned error:', response.data.message);
+        Alert.alert('Error', response.data.message || 'Failed to load conversation');
       }
     } catch (error) {
       console.error('Failed to load conversation:', error);
-      Alert.alert('Error', 'Failed to load conversation');
+      Alert.alert('Error', 'Failed to load conversation. Please check your connection and try again.');
     } finally {
       setLoading(false);
     }
