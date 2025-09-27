@@ -340,7 +340,7 @@ export default function SupportDashboard() {
         <View style={styles.currentChatIndicator}>
           <Feather name="message-circle" size={16} color="#E1BEE7" />
           <Text style={styles.currentChatText}>
-            Currently in chat #{currentChat.substring(currentChat.length - 8)}
+            Currently in chat #{currentChat ? currentChat.substring(Math.max(0, currentChat.length - 8)) : 'Unknown'}
           </Text>
           <TouchableOpacity onPress={() => setCurrentChat(null)}>
             <Feather name="x" size={16} color="#8E8E93" />
