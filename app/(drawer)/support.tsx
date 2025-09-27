@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Fixed Support Screen with message loading
+// app/(drawer)/support.tsx - Fixed Support Screen with package data persistence
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -107,7 +107,7 @@ export default function SupportScreen() {
 
   const flatListRef = useRef<FlatList>(null);
 
-  // Load conversation messages from API
+  // Load conversation messages from API - FIXED: Proper package data mapping
   const loadConversationMessages = useCallback(async (conversationId: string) => {
     try {
       setLoadingMessages(true);
@@ -116,7 +116,7 @@ export default function SupportScreen() {
       const response = await api.get(`/api/v1/conversations/${conversationId}`);
       
       if (response.data.success && response.data.messages) {
-        // Convert API messages to your local message format
+        // Convert API messages to your local message format - FIXED
         const apiMessages = response.data.messages.map((msg: any) => ({
           id: String(msg.id),
           text: msg.content || '',
@@ -127,14 +127,33 @@ export default function SupportScreen() {
           }),
           isSupport: msg.from_support || msg.is_system,
           type: msg.message_type || 'text',
-          packageCode: msg.metadata?.package_code,
-          isTagged: !!msg.metadata?.package_code,
+          // FIXED: Properly extract package code from metadata
+          packageCode: msg.metadata?.package_code || null,
+          // FIXED: Set isTagged based on presence of package code
+          isTagged: !!(msg.metadata?.package_code),
         }));
         
         // Set the loaded messages
         setMessages(apiMessages);
         
         console.log('Loaded', apiMessages.length, 'messages');
+        
+        // FIXED: Extract conversation package info and set selectedPackage
+        if (response.data.conversation?.package) {
+          const conversationPackage = response.data.conversation.package;
+          setSelectedPackage({
+            id: String(conversationPackage.id),
+            code: conversationPackage.code,
+            state: conversationPackage.state,
+            state_display: conversationPackage.state_display,
+            receiver_name: conversationPackage.receiver_name,
+            route_description: conversationPackage.route_description,
+            cost: conversationPackage.cost,
+            delivery_type: conversationPackage.delivery_type || 'agent',
+            created_at: conversationPackage.created_at || new Date().toISOString(),
+          });
+          setInquiryType('package');
+        }
         
         // Scroll to bottom after loading messages
         setTimeout(() => {
@@ -437,7 +456,6 @@ export default function SupportScreen() {
     setInquiryText('');
     setPackageInquiry('');
     setPackageSearchQuery('');
-    setSelectedPackage(null);
   };
 
   const handleBasicInquiry = () => {
