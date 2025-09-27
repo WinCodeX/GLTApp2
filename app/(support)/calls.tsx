@@ -1,4 +1,3 @@
-
 // app/(support)/calls.tsx - Calls Screen
 import React, { useState } from 'react';
 import {
@@ -197,8 +196,7 @@ export default function CallsScreen() {
   );
 }
 
-// Shared styles for all screens
-const sharedStyles = StyleSheet.create({
+const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#0B141B',
@@ -262,5 +260,86 @@ const sharedStyles = StyleSheet.create({
     fontSize: 14,
     marginTop: 8,
     textAlign: 'center',
+  },
+  topSection: {
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  favoritesSection: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  favoriteIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  favoritesText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+  },
+  recentSection: {
+    flex: 1,
+    paddingHorizontal: 16,
+    paddingTop: 16,
+  },
+  callItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  callAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    marginRight: 12,
+  },
+  callInfo: {
+    flex: 1,
+  },
+  callName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
+    marginBottom: 2,
+  },
+  callDetails: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  callTimestamp: {
+    fontSize: 14,
+    marginLeft: 6,
+  },
+  callButton: {
+    padding: 8,
+  },
+  floatingButton: {
+    position: 'absolute',
+    bottom: 80,
+    right: 16,
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+  },
+  floatingButtonGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });
