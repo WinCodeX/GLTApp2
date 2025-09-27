@@ -5,7 +5,7 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.7.7';
+export const CHANGELOG_VERSION = '1.7.8';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const autoDismissDelay = 10000; // Increased from 7000 to 10000 to allow more time for update checks
 
@@ -15,6 +15,8 @@ const CHANGELOG_CONTENT = [
   'Auto reject feature added',
   'Polished UI in contact screen',
   'Push notifications and sounds added',
+'Talk to a representative implemented',
+'Support functionality implemented',
   'Other Bug fixes',
 ];
 
