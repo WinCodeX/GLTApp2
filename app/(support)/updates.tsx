@@ -187,13 +187,13 @@ export default function UpdatesScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#0B141B',
+    backgroundColor: '#111B21',
   },
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingTop: 8,
+    paddingTop: 28,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },
