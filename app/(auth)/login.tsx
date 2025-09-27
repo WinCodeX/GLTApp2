@@ -1,4 +1,4 @@
-// Updated Login Screen to use AccountManager with darkened background
+// Updated Login Screen with proper role detection for admin and support users
 import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -19,6 +19,40 @@ import { checkServerStatus } from '../../lib/netStatus';
 import LoadingSplashScreen from '../../components/LoadingSplashScreen';
 import { accountManager } from '../../lib/AccountManager';
 import { useUser } from '../../context/UserContext';
+
+// Helper function to determine effective role from user data
+const getEffectiveRole = (userData) => {
+  // First priority: use primary_role if available
+  if (userData.primary_role && userData.primary_role !== 'client') {
+    return userData.primary_role;
+  }
+  
+  // Second priority: check roles array for non-client roles
+  if (userData.roles && Array.isArray(userData.roles)) {
+    // Priority order: admin > support > client
+    if (userData.roles.includes('admin')) {
+      return 'admin';
+    }
+    if (userData.roles.includes('support')) {
+      return 'support';
+    }
+  }
+  
+  // Fallback: use role field or default to client
+  return userData.role || 'client';
+};
+
+// Helper function to get redirect route based on role
+const getRedirectRoute = (role) => {
+  switch (role) {
+    case 'admin':
+      return '/admin';
+    case 'support':
+      return '/(support)';
+    default:
+      return '/';
+  }
+};
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -46,6 +80,12 @@ export default function LoginScreen() {
     try {
       setIsGoogleLoading(true);
       console.log('Processing Rails OAuth login for:', railsUser.email);
+      console.log('User roles:', railsUser.roles);
+      console.log('User primary_role:', railsUser.primary_role);
+
+      // Get effective role using the same logic as drawer layout
+      const effectiveRole = getEffectiveRole(railsUser);
+      console.log('Effective role determined:', effectiveRole);
 
       // Add account through UserContext (which uses AccountManager)
       await addAccount(railsUser, railsUser.token || 'temp_token');
@@ -58,11 +98,11 @@ export default function LoginScreen() {
           : `Welcome back, ${railsUser.display_name}!`
       });
       
-      const role = railsUser.roles?.includes('admin') ? 'admin' : 'client';
-      console.log('Google login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
+      const redirectRoute = getRedirectRoute(effectiveRole);
+      console.log('Google login successful, redirecting to:', redirectRoute);
       
       setTimeout(() => {
-        router.push(role === 'admin' ? '/admin' : '/');
+        router.push(redirectRoute);
       }, 1500);
 
     } catch (err) {
@@ -94,8 +134,13 @@ export default function LoginScreen() {
         // Check if we have an active account
         const currentAccount = accountManager.getCurrentAccount();
         if (currentAccount) {
-          console.log('Found existing account, redirecting immediately');
-          router.replace(currentAccount.role === 'admin' ? '/admin' : '/');
+          console.log('Found existing account, checking role and redirecting...');
+          console.log('Account role:', currentAccount.role);
+          
+          const redirectRoute = getRedirectRoute(currentAccount.role);
+          console.log('Redirecting to:', redirectRoute);
+          
+          router.replace(redirectRoute);
           return;
         }
 
@@ -178,6 +223,13 @@ export default function LoginScreen() {
       const user = response?.data?.user;
 
       if (token && user) {
+        console.log('Login response user roles:', user?.roles);
+        console.log('Login response user primary_role:', user?.primary_role);
+
+        // Get effective role using the same logic as drawer layout
+        const effectiveRole = getEffectiveRole(user);
+        console.log('Effective role determined:', effectiveRole);
+
         // Add account through UserContext (which uses AccountManager)
         await addAccount(user, token);
 
@@ -187,13 +239,11 @@ export default function LoginScreen() {
           text2: 'Login successful' 
         });
         
-        const roles = user?.roles || [];
-        const role = roles.includes('admin') ? 'admin' : 'client';
-        
-        console.log('Login successful, redirecting to:', role === 'admin' ? '/admin' : '/');
+        const redirectRoute = getRedirectRoute(effectiveRole);
+        console.log('Login successful, redirecting to:', redirectRoute);
         
         setTimeout(() => {
-          router.push(role === 'admin' ? '/admin' : '/');
+          router.push(redirectRoute);
         }, 1500);
       } else {
         const message = 'Login failed: Server response incomplete';
