@@ -34,7 +34,7 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   cart: { name: 'shopping-cart', lib: Feather },
 };
 
-type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_login';
+type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_support' | 'redirect_login';
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
@@ -99,6 +99,9 @@ export default function DrawerLayout() {
         if (currentAccount.role === 'admin') {
           console.log('🔐 Admin role detected - redirecting to admin panel');
           setAuthState('redirect_admin');
+        } else if (currentAccount.role === 'support') {
+          console.log('🔐 Support role detected - redirecting to support panel');
+          setAuthState('redirect_support');
         } else {
           console.log('🔐 Client role - entering drawer layout');
           setAuthState('authenticated');
@@ -141,6 +144,8 @@ export default function DrawerLayout() {
           
           if (currentAccount.role === 'admin') {
             setAuthState('redirect_admin');
+          } else if (currentAccount.role === 'support') {
+            setAuthState('redirect_support');
           } else {
             setAuthState('authenticated');
           }
@@ -180,6 +185,17 @@ export default function DrawerLayout() {
           // Fallback to login on navigation error
           setAuthState('redirect_login');
         }
+      } else if (authState === 'redirect_support') {
+        try {
+          console.log('🧭 Redirecting to support panel...');
+          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
+          router.replace('/(support)');
+          console.log('✅ Successfully redirected to support panel');
+        } catch (error) {
+          console.error('❌ Support redirect failed:', error);
+          // Fallback to login on navigation error
+          setAuthState('redirect_login');
+        }
       } else if (authState === 'redirect_login') {
         try {
           console.log('🧭 Redirecting to login...');
@@ -198,7 +214,7 @@ export default function DrawerLayout() {
       }
     };
 
-    if (authState === 'redirect_admin' || authState === 'redirect_login') {
+    if (authState === 'redirect_admin' || authState === 'redirect_support' || authState === 'redirect_login') {
       handleRedirection();
     }
   }, [authState, router]);
@@ -224,7 +240,7 @@ export default function DrawerLayout() {
   );
 
   // Show loading screen during initial validation or redirects
-  if (authState === 'loading' || authState === 'redirect_admin' || authState === 'redirect_login') {
+  if (authState === 'loading' || authState === 'redirect_admin' || authState === 'redirect_support' || authState === 'redirect_login') {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
