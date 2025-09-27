@@ -74,11 +74,12 @@ interface AgentStats {
 }
 
 const STATUS_FILTERS = [
-  { key: 'pending', label: 'Pending', icon: 'clock' },
-  { key: 'assigned', label: 'Assigned', icon: 'user' },
   { key: 'in_progress', label: 'Active', icon: 'activity' },
+  { key: 'pending', label: 'Pending', icon: 'clock' },
   { key: 'all', label: 'All', icon: 'list' },
+  { key: 'assigned', label: 'Assigned', icon: 'user' },
   { key: 'resolved', label: 'Resolved', icon: 'check-circle' },
+  { key: 'closed', label: 'Closed', icon: 'x-circle' },
 ];
 
 export default function SupportDashboard() {
@@ -89,7 +90,7 @@ export default function SupportDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('pending');
+  const [activeFilter, setActiveFilter] = useState('in_progress');
   const [currentChat, setCurrentChat] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
 
@@ -170,11 +171,12 @@ export default function SupportDashboard() {
 
   // Get status counts from loaded tickets
   const statusCounts = {
-    pending: tickets.filter(t => t.status === 'pending').length,
-    assigned: tickets.filter(t => t.status === 'assigned').length,
     in_progress: tickets.filter(t => t.status === 'in_progress').length,
+    pending: tickets.filter(t => t.status === 'pending').length,
     all: tickets.length,
+    assigned: tickets.filter(t => t.status === 'assigned').length,
     resolved: tickets.filter(t => t.status === 'resolved').length,
+    closed: tickets.filter(t => t.status === 'closed').length,
   };
 
   const renderStatsOverview = () => {
@@ -214,6 +216,7 @@ export default function SupportDashboard() {
     <TouchableOpacity
       style={styles.ticketItem}
       onPress={() => {
+        console.log('Navigating to chat with ID:', item.id);
         setCurrentChat(item.id);
         router.push(`/(support)/chat/${item.id}`);
       }}
@@ -434,7 +437,9 @@ export default function SupportDashboard() {
                 <MaterialIcons name="support-agent" size={64} color="#444" />
                 <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
-                  {activeFilter === 'pending' 
+                  {activeFilter === 'in_progress' 
+                    ? 'No active support tickets'
+                    : activeFilter === 'pending'
                     ? 'No pending support tickets'
                     : searchQuery
                     ? `No tickets match "${searchQuery}"`
