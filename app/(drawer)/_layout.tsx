@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Session-first authentication with proper login redirects
+// app/(drawer)/_layout.tsx - Session-first authentication with proper role detection
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -35,6 +35,28 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 };
 
 type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_support' | 'redirect_login';
+
+// Helper function to determine effective role from user data
+const getEffectiveRole = (userData: any): string => {
+  // First priority: use primary_role if available
+  if (userData.primary_role && userData.primary_role !== 'client') {
+    return userData.primary_role;
+  }
+  
+  // Second priority: check roles array for non-client roles
+  if (userData.roles && Array.isArray(userData.roles)) {
+    // Priority order: admin > support > client
+    if (userData.roles.includes('admin')) {
+      return 'admin';
+    }
+    if (userData.roles.includes('support')) {
+      return 'support';
+    }
+  }
+  
+  // Fallback: use role field or default to client
+  return userData.role || 'client';
+};
 
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
@@ -75,7 +97,7 @@ export default function DrawerLayout() {
       console.log('Session check:', { 
         hasCurrentAccount: !!currentAccount,
         totalAccounts: accountManager.getAllAccounts().length,
-        role: currentAccount?.role,
+        accountRole: currentAccount?.role,
         userId: currentAccount?.id
       });
 
@@ -92,14 +114,25 @@ export default function DrawerLayout() {
         const response = await api.get('/api/v1/me');
         console.log('🔐 Session token verified successfully:', {
           userId: response.data?.id,
-          role: response.data?.role
+          serverRole: response.data?.primary_role,
+          allRoles: response.data?.roles
         });
         
-        // Token is valid - check role routing
-        if (currentAccount.role === 'admin') {
+        // Get the effective role from server response
+        const effectiveRole = getEffectiveRole(response.data);
+        console.log('🔐 Effective role determined:', effectiveRole);
+        
+        // Update account with correct role if different
+        if (currentAccount.role !== effectiveRole) {
+          console.log('🔐 Updating stored account role from', currentAccount.role, 'to', effectiveRole);
+          await accountManager.updateAccountRole(currentAccount.id, effectiveRole);
+        }
+        
+        // Route based on effective role
+        if (effectiveRole === 'admin') {
           console.log('🔐 Admin role detected - redirecting to admin panel');
           setAuthState('redirect_admin');
-        } else if (currentAccount.role === 'support') {
+        } else if (effectiveRole === 'support') {
           console.log('🔐 Support role detected - redirecting to support panel');
           setAuthState('redirect_support');
         } else {
@@ -142,9 +175,13 @@ export default function DrawerLayout() {
           console.warn('🔐 Network error during token verification - allowing temporary access');
           console.warn('Error details:', tokenError.message);
           
-          if (currentAccount.role === 'admin') {
+          // Use stored account role as fallback
+          const fallbackRole = getEffectiveRole(currentAccount);
+          console.log('🔐 Using fallback role:', fallbackRole);
+          
+          if (fallbackRole === 'admin') {
             setAuthState('redirect_admin');
-          } else if (currentAccount.role === 'support') {
+          } else if (fallbackRole === 'support') {
             setAuthState('redirect_support');
           } else {
             setAuthState('authenticated');
