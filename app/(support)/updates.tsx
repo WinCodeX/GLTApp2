@@ -183,3 +183,179 @@ export default function UpdatesScreen() {
     </SafeAreaView>
   );
 }
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#0B141B',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 16,
+    paddingHorizontal: 16,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 24,
+    fontWeight: 'bold',
+  },
+  headerActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  headerButton: {
+    padding: 8,
+  },
+  content: {
+    flex: 1,
+  },
+  section: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  sectionTitle: {
+    color: '#fff',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 12,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  exploreButton: {
+    backgroundColor: '#7B3F98',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  exploreButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  statusContainer: {
+    paddingVertical: 8,
+  },
+  addStatusButton: {
+    alignItems: 'center',
+    marginRight: 16,
+    width: 60,
+  },
+  addStatusGradient: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  statusItem: {
+    alignItems: 'center',
+    marginRight: 16,
+    width: 60,
+  },
+  statusImageContainer: {
+    position: 'relative',
+    marginBottom: 4,
+  },
+  statusImage: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+  },
+  statusBorder: {
+    position: 'absolute',
+    top: -2,
+    left: -2,
+    right: -2,
+    bottom: -2,
+    borderRadius: 30,
+    padding: 2,
+  },
+  statusLabel: {
+    color: '#fff',
+    fontSize: 12,
+    textAlign: 'center',
+    width: 60,
+  },
+  channelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  channelIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: '#1F2C34',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
+  },
+  channelEmoji: {
+    fontSize: 24,
+  },
+  channelInfo: {
+    flex: 1,
+  },
+  channelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 2,
+  },
+  channelName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  channelTime: {
+    color: '#8E8E93',
+    fontSize: 12,
+  },
+  channelDescription: {
+    color: '#B8B8B8',
+    fontSize: 14,
+  },
+  channelBadge: {
+    backgroundColor: '#7B3F98',
+    borderRadius: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    marginLeft: 8,
+  },
+  channelBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  findChannelItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  followerCount: {
+    color: '#8E8E93',
+    fontSize: 12,
+  },
+  followButton: {
+    backgroundColor: '#7B3F98',
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    borderRadius: 16,
+    marginLeft: 12,
+  },
+  followButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '500',
+  },
+});
