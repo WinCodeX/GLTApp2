@@ -153,6 +153,41 @@ export default function SupportScreen() {
             created_at: conversationPackage.created_at || new Date().toISOString(),
           });
           setInquiryType('package');
+          console.log('Restored selected package from conversation:', conversationPackage.code);
+        } else {
+          // FIXED: Try to extract package from any message metadata as fallback
+          const messageWithPackage = apiMessages.find(msg => msg.packageCode);
+          if (messageWithPackage && messageWithPackage.packageCode) {
+            console.log('Found package code in message metadata:', messageWithPackage.packageCode);
+            // Try to find this package in user's packages or load it
+            setInquiryType('package');
+            // We'll need to load user packages to get full package info
+            try {
+              const packagesResponse = await api.get('/api/v1/packages', {
+                params: { per_page: 100, page: 1 }
+              });
+              if (packagesResponse.data?.success) {
+                const packages = packagesResponse.data.data;
+                const foundPackage = packages.find((pkg: any) => pkg.code === messageWithPackage.packageCode);
+                if (foundPackage) {
+                  setSelectedPackage({
+                    id: String(foundPackage.id),
+                    code: foundPackage.code,
+                    state: foundPackage.state,
+                    state_display: foundPackage.state_display,
+                    receiver_name: foundPackage.receiver_name,
+                    route_description: foundPackage.route_description,
+                    cost: Number(foundPackage.cost),
+                    delivery_type: foundPackage.delivery_type || 'agent',
+                    created_at: foundPackage.created_at,
+                  });
+                  console.log('Restored package from message metadata and packages API:', foundPackage.code);
+                }
+              }
+            } catch (error) {
+              console.warn('Failed to load package from messages metadata:', error);
+            }
+          }
         }
         
         // Scroll to bottom after loading messages
