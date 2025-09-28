@@ -75,7 +75,7 @@ interface TypingUser {
 // Configuration constants
 const INITIAL_MESSAGE_LIMIT = 20; // Load only 20 messages initially
 const PAGINATION_LIMIT = 15; // Load 15 more when paginating
-const REQUEST_TIMEOUT = 10000; // 10 second timeout
+const REQUEST_TIMEOUT = 20000; // 20 second timeout
 const SCROLL_THRESHOLD = 0.1;
 
 export default function SupportChatScreen() {
