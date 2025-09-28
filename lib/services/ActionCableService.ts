@@ -1,5 +1,4 @@
-// lib/services/ActionCableService.ts - Enhanced comprehensive real-time service
-import { createConsumer } from '@rails/actioncable';
+// lib/services/ActionCableService.ts - React Native compatible WebSocket service
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
@@ -52,10 +51,15 @@ interface TypingIndicatorConfig {
   timeout?: number;
 }
 
+interface ActionCableCommand {
+  command: string;
+  identifier: string;
+  data?: any;
+}
+
 class ActionCableService {
   private static instance: ActionCableService;
-  private consumer: any;
-  private subscription: any;
+  private websocket: WebSocket | null = null;
   private callbacks: ActionCableCallbacks = {};
   private isConnected = false;
   private reconnectAttempts = 0;
@@ -66,6 +70,8 @@ class ActionCableService {
   private typingTimeouts: Map<string, NodeJS.Timeout> = new Map();
   private subscribedConversations: Set<string> = new Set();
   private subscribedBusinesses: Set<string> = new Set();
+  private subscriptionIdentifier: string | null = null;
+  private pingInterval: NodeJS.Timeout | null = null;
 
   static getInstance(): ActionCableService {
     if (!ActionCableService.instance) {
@@ -74,7 +80,7 @@ class ActionCableService {
     return ActionCableService.instance;
   }
 
-  // Enhanced connection with comprehensive configuration
+  // Enhanced connection with native WebSocket
   async connect(config: ConnectionConfig): Promise<boolean> {
     try {
       console.log('🔌 Connecting to ActionCable...', { 
@@ -95,59 +101,52 @@ class ActionCableService {
       
       console.log('🔗 WebSocket URL:', wsUrl);
 
-      // Create consumer with authentication
-      this.consumer = createConsumer(`${wsUrl}/cable?token=${config.token}&user_id=${config.userId}`);
-      
-      // Subscribe to user notifications channel with enhanced capabilities
-      this.subscription = this.consumer.subscriptions.create(
-        { 
-          channel: 'UserNotificationsChannel',
-          user_id: config.userId 
-        },
-        {
-          received: (data: ActionCableMessage) => {
-            console.log('📡 ActionCable message received:', data.type, data);
-            this.handleMessage(data);
-          },
-          
-          connected: () => {
-            console.log('✅ Connected to ActionCable');
-            this.isConnected = true;
-            this.reconnectAttempts = 0;
-            
-            // Request initial state (enhanced)
-            this.requestInitialState();
-            
-            // Start heartbeat
-            this.startHeartbeat();
-            
-            // Trigger connection callbacks
-            this.triggerCallbacks('connection_established', { connected: true });
-          },
-          
-          disconnected: () => {
-            console.log('❌ Disconnected from ActionCable');
-            this.isConnected = false;
-            this.stopHeartbeat();
-            
-            // Trigger disconnection callbacks
-            this.triggerCallbacks('connection_lost', { connected: false });
-            
-            // Handle reconnection
-            if (this.connectionConfig?.autoReconnect) {
-              this.handleDisconnection();
-            }
-          },
-          
-          rejected: () => {
-            console.error('❌ ActionCable connection rejected');
-            this.isConnected = false;
-            this.triggerCallbacks('connection_rejected', { error: 'Connection rejected' });
-          }
-        }
-      );
+      // Create WebSocket connection with authentication
+      const connectionUrl = `${wsUrl}/cable?token=${config.token}&user_id=${config.userId}`;
+      this.websocket = new WebSocket(connectionUrl);
 
-      return true;
+      // Set up WebSocket event handlers
+      this.setupWebSocketHandlers();
+
+      return new Promise((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          reject(new Error('Connection timeout'));
+        }, 10000);
+
+        const cleanup = () => {
+          clearTimeout(timeout);
+        };
+
+        this.websocket!.onopen = () => {
+          cleanup();
+          console.log('✅ Connected to ActionCable');
+          this.isConnected = true;
+          this.reconnectAttempts = 0;
+          
+          // Subscribe to user notifications channel
+          this.subscribeToChannel();
+          
+          // Request initial state
+          this.requestInitialState();
+          
+          // Start heartbeat
+          this.startHeartbeat();
+          this.startPing();
+          
+          // Trigger connection callbacks
+          this.triggerCallbacks('connection_established', { connected: true });
+          
+          resolve(true);
+        };
+
+        this.websocket!.onerror = (error) => {
+          cleanup();
+          console.error('❌ WebSocket connection error:', error);
+          this.triggerCallbacks('connection_error', { error: 'WebSocket connection failed' });
+          reject(error);
+        };
+      });
+
     } catch (error) {
       console.error('❌ Failed to connect to ActionCable:', error);
       this.triggerCallbacks('connection_error', { error: error.message });
@@ -160,6 +159,81 @@ class ActionCableService {
     }
   }
 
+  private setupWebSocketHandlers(): void {
+    if (!this.websocket) return;
+
+    this.websocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        if (data.type === 'ping') {
+          // Respond to ping with pong
+          this.sendMessage({ type: 'pong' });
+          return;
+        }
+
+        if (data.type === 'welcome') {
+          console.log('📡 ActionCable welcome received');
+          return;
+        }
+
+        if (data.type === 'confirm_subscription') {
+          console.log('📡 ActionCable subscription confirmed');
+          return;
+        }
+
+        if (data.message) {
+          console.log('📡 ActionCable message received:', data.message.type, data.message);
+          this.handleMessage(data.message);
+        }
+      } catch (error) {
+        console.error('❌ Error parsing ActionCable message:', error);
+      }
+    };
+
+    this.websocket.onclose = (event) => {
+      console.log('❌ WebSocket connection closed:', event.code, event.reason);
+      this.isConnected = false;
+      this.stopHeartbeat();
+      this.stopPing();
+      
+      // Trigger disconnection callbacks
+      this.triggerCallbacks('connection_lost', { connected: false });
+      
+      // Handle reconnection
+      if (this.connectionConfig?.autoReconnect) {
+        this.handleDisconnection();
+      }
+    };
+
+    this.websocket.onerror = (error) => {
+      console.error('❌ WebSocket error:', error);
+      this.triggerCallbacks('connection_error', { error: 'WebSocket error' });
+    };
+  }
+
+  private subscribeToChannel(): void {
+    if (!this.connectionConfig) return;
+
+    this.subscriptionIdentifier = JSON.stringify({
+      channel: 'UserNotificationsChannel',
+      user_id: this.connectionConfig.userId
+    });
+
+    const subscribeCommand: ActionCableCommand = {
+      command: 'subscribe',
+      identifier: this.subscriptionIdentifier
+    };
+
+    this.sendMessage(subscribeCommand);
+  }
+
+  private sendMessage(message: any): void {
+    if (this.websocket && this.websocket.readyState === WebSocket.OPEN) {
+      this.websocket.send(JSON.stringify(message));
+    }
+  }
+
   // Enhanced disconnect with cleanup
   disconnect(): void {
     try {
@@ -167,17 +241,13 @@ class ActionCableService {
       
       // Clear all timeouts
       this.stopHeartbeat();
+      this.stopPing();
       this.clearAllTypingTimeouts();
       
-      // Unsubscribe from all channels
-      if (this.subscription) {
-        this.subscription.unsubscribe();
-        this.subscription = null;
-      }
-      
-      if (this.consumer) {
-        this.consumer.disconnect();
-        this.consumer = null;
+      // Close WebSocket connection
+      if (this.websocket) {
+        this.websocket.close();
+        this.websocket = null;
       }
       
       // Clear state
@@ -185,6 +255,7 @@ class ActionCableService {
       this.subscribedConversations.clear();
       this.subscribedBusinesses.clear();
       this.connectionConfig = null;
+      this.subscriptionIdentifier = null;
       
       console.log('✅ Disconnected from ActionCable');
     } catch (error) {
@@ -224,14 +295,23 @@ class ActionCableService {
   // Enhanced perform with error handling and retry logic
   perform(action: string, data: any = {}): Promise<boolean> {
     return new Promise((resolve) => {
-      if (!this.subscription || !this.isConnected) {
+      if (!this.subscriptionIdentifier || !this.isConnected) {
         console.warn('⚠️ ActionCable not connected, cannot perform action:', action);
         resolve(false);
         return;
       }
       
       try {
-        this.subscription.perform(action, data);
+        const command: ActionCableCommand = {
+          command: 'message',
+          identifier: this.subscriptionIdentifier,
+          data: JSON.stringify({
+            action: action,
+            ...data
+          })
+        };
+
+        this.sendMessage(command);
         console.log(`📡 ActionCable action performed: ${action}`, data);
         resolve(true);
       } catch (error) {
@@ -353,16 +433,17 @@ class ActionCableService {
       connected: this.isConnected,
       reconnectAttempts: this.reconnectAttempts,
       maxReconnectAttempts: this.maxReconnectAttempts,
-      hasSubscription: !!this.subscription,
+      hasSubscription: !!this.subscriptionIdentifier,
       subscribedConversations: Array.from(this.subscribedConversations),
       subscribedBusinesses: Array.from(this.subscribedBusinesses),
-      config: this.connectionConfig
+      config: this.connectionConfig,
+      websocketState: this.websocket?.readyState
     };
   }
 
   // ENHANCED: Check if connected
   isConnectedToActionCable(): boolean {
-    return this.isConnected && !!this.subscription;
+    return this.isConnected && !!this.websocket && this.websocket.readyState === WebSocket.OPEN;
   }
 
   // ENHANCED: Get subscribed channels info
@@ -573,6 +654,23 @@ class ActionCableService {
     if (this.heartbeatInterval) {
       clearInterval(this.heartbeatInterval);
       this.heartbeatInterval = null;
+    }
+  }
+
+  private startPing(): void {
+    this.stopPing();
+    
+    this.pingInterval = setInterval(() => {
+      if (this.isConnected && this.websocket?.readyState === WebSocket.OPEN) {
+        this.sendMessage({ type: 'ping' });
+      }
+    }, 25000); // Every 25 seconds
+  }
+
+  private stopPing(): void {
+    if (this.pingInterval) {
+      clearInterval(this.pingInterval);
+      this.pingInterval = null;
     }
   }
 
