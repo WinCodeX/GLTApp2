@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - Enhanced Support Chat Screen with ActionCable and Lazy Loading
+// app/(support)/chat/[id].tsx - Enhanced Support Chat Screen with Proper Pagination and Timeouts
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -39,7 +39,7 @@ interface ChatMessage {
   };
   timestamp: string;
   metadata?: any;
-  optimistic?: boolean; // For optimistic updates
+  optimistic?: boolean;
 }
 
 interface ChatConversation {
@@ -71,6 +71,12 @@ interface TypingUser {
   name: string;
 }
 
+// Configuration constants
+const INITIAL_MESSAGE_LIMIT = 20; // Load only 20 messages initially
+const PAGINATION_LIMIT = 15; // Load 15 more when paginating
+const REQUEST_TIMEOUT = 10000; // 10 second timeout
+const SCROLL_THRESHOLD = 0.1;
+
 export default function SupportChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useUser();
@@ -83,15 +89,18 @@ export default function SupportChatScreen() {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   
-  // Lazy loading states
+  // Enhanced pagination states
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [currentPage, setCurrentPage] = useState(1);
+  const [oldestMessageId, setOldestMessageId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
+  const [connectionError, setConnectionError] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Initialize ActionCable connection
   useEffect(() => {
@@ -108,10 +117,8 @@ export default function SupportChatScreen() {
         });
 
         if (connected && id) {
-          // Join conversation channel
           await actionCableRef.current.joinConversation(id);
           
-          // Subscribe to real-time events
           actionCableRef.current.subscribe('new_message', handleNewMessage);
           actionCableRef.current.subscribe('conversation_read', handleMessageRead);
           actionCableRef.current.subscribe('typing_indicator', handleTypingIndicator);
@@ -132,6 +139,11 @@ export default function SupportChatScreen() {
         actionCableRef.current.unsubscribe('typing_indicator');
         actionCableRef.current.unsubscribe('ticket_status_changed');
       }
+      
+      // Cancel any pending requests
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
     };
   }, [user, id]);
 
@@ -144,12 +156,10 @@ export default function SupportChatScreen() {
       };
       
       setMessages(prev => {
-        // Remove optimistic message if it exists
         const filteredMessages = prev.filter(msg => !msg.optimistic || msg.id !== newMessage.id);
         return [...filteredMessages, newMessage];
       });
       
-      // Scroll to bottom if user sent the message
       if (data.message.user.id === user?.id) {
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
@@ -194,54 +204,113 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
-  // Load conversation with pagination support
-  const loadConversation = useCallback(async (page = 1, limit = 50) => {
+  // Enhanced conversation loading with timeout and proper pagination
+  const loadConversation = useCallback(async (isRefresh = false, olderThan?: string) => {
     if (!id) {
       setLoading(false);
       return;
     }
 
+    // Cancel previous request
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    // Create new abort controller
+    abortControllerRef.current = new AbortController();
+    const timeoutId = setTimeout(() => {
+      abortControllerRef.current?.abort();
+    }, REQUEST_TIMEOUT);
+
     try {
-      if (page === 1) {
-        setLoading(true);
-      } else {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else if (olderThan) {
         setLoadingOlder(true);
+      } else {
+        setLoading(true);
       }
-      
+
+      setConnectionError(false);
+
+      const params: any = {
+        limit: olderThan ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
+      };
+
+      if (olderThan) {
+        params.older_than = olderThan;
+      }
+
+      console.log('Loading conversation with params:', params);
+
       const response = await api.get(`/api/v1/conversations/${id}`, {
-        params: { page, limit }
+        params,
+        signal: abortControllerRef.current.signal,
+        timeout: REQUEST_TIMEOUT,
       });
-      
+
+      clearTimeout(timeoutId);
+
       if (response.data.success) {
         const conversationData = response.data.conversation;
         const messagesData = response.data.messages || [];
         const pagination = response.data.pagination || {};
-        
-        if (page === 1) {
+
+        if (isRefresh || !olderThan) {
+          // Initial load or refresh
           setConversation(conversationData);
           setMessages(messagesData);
-          setCurrentPage(1);
           setHasMoreMessages(pagination.has_more || false);
-          
+          setOldestMessageId(messagesData.length > 0 ? messagesData[0]?.id : null);
+          setIsInitialLoad(false);
+
           // Scroll to bottom for initial load
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
         } else {
-          // Prepend older messages for lazy loading
+          // Loading older messages
           setMessages(prev => [...messagesData, ...prev]);
-          setCurrentPage(page);
           setHasMoreMessages(pagination.has_more || false);
+          if (messagesData.length > 0) {
+            setOldestMessageId(messagesData[0]?.id);
+          }
         }
-        
-        console.log('Conversation loaded successfully:', conversationData.ticket_id);
+
+        console.log(`Loaded ${messagesData.length} messages, has_more: ${pagination.has_more}`);
       } else {
-        console.error('API returned error:', response.data.message);
-        Alert.alert('Error', response.data.message || 'Failed to load conversation');
+        throw new Error(response.data.message || 'Failed to load conversation');
       }
-    } catch (error) {
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      if (error.name === 'AbortError') {
+        console.log('Request was aborted');
+        return;
+      }
+
       console.error('Failed to load conversation:', error);
-      Alert.alert('Error', 'Failed to load conversation. Please check your connection and try again.');
+      setConnectionError(true);
+
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        Alert.alert(
+          'Connection Timeout', 
+          'The request took too long. Please check your connection and try again.',
+          [
+            { text: 'Retry', onPress: () => loadConversation(isRefresh, olderThan) },
+            { text: 'Cancel', style: 'cancel' }
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Error', 
+          'Failed to load conversation. Please check your connection and try again.',
+          [
+            { text: 'Retry', onPress: () => loadConversation(isRefresh, olderThan) },
+            { text: 'Cancel', style: 'cancel' }
+          ]
+        );
+      }
     } finally {
       setLoading(false);
       setLoadingOlder(false);
@@ -251,17 +320,20 @@ export default function SupportChatScreen() {
 
   // Load older messages when scrolling to top
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlder || !hasMoreMessages) return;
+    if (loadingOlder || !hasMoreMessages || !oldestMessageId) {
+      return;
+    }
     
-    await loadConversation(currentPage + 1);
-  }, [loadConversation, currentPage, hasMoreMessages, loadingOlder]);
+    console.log('Loading older messages before:', oldestMessageId);
+    await loadConversation(false, oldestMessageId);
+  }, [loadConversation, oldestMessageId, hasMoreMessages, loadingOlder]);
 
   // Refresh conversation
   const handleRefresh = useCallback(async () => {
-    setRefreshing(true);
-    await loadConversation(1);
+    await loadConversation(true);
   }, [loadConversation]);
 
+  // Initial load
   useEffect(() => {
     loadConversation();
   }, [loadConversation]);
@@ -275,12 +347,10 @@ export default function SupportChatScreen() {
       actionCableRef.current.startTyping({ conversationId: id });
     }
     
-    // Clear existing timeout
     if (typingTimeoutRef.current) {
       clearTimeout(typingTimeoutRef.current);
     }
     
-    // Set new timeout to stop typing
     typingTimeoutRef.current = setTimeout(() => {
       if (isTyping && actionCableRef.current && id) {
         setIsTyping(false);
@@ -289,7 +359,7 @@ export default function SupportChatScreen() {
     }, 2000);
   }, [isTyping, id]);
 
-  // Send message with optimistic updates
+  // Enhanced send message with timeout
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || sending || !id) return;
 
@@ -297,7 +367,6 @@ export default function SupportChatScreen() {
     const messageText = inputText.trim();
     setInputText('');
     
-    // Stop typing indicator
     if (isTyping && actionCableRef.current) {
       setIsTyping(false);
       actionCableRef.current.stopTyping(id);
@@ -327,38 +396,51 @@ export default function SupportChatScreen() {
 
     setMessages(prev => [...prev, optimisticMessage]);
     
-    // Scroll to bottom
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
+
+    // Create abort controller for send request
+    const sendAbortController = new AbortController();
+    const sendTimeoutId = setTimeout(() => {
+      sendAbortController.abort();
+    }, REQUEST_TIMEOUT);
 
     try {
       const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
         content: messageText,
         message_type: 'text',
+      }, {
+        signal: sendAbortController.signal,
+        timeout: REQUEST_TIMEOUT,
       });
 
+      clearTimeout(sendTimeoutId);
+
       if (response.data.success) {
-        // Remove optimistic message and add real message
         setMessages(prev => {
           const filteredMessages = prev.filter(msg => !msg.optimistic);
           return [...filteredMessages, response.data.message];
         });
         
-        // Update conversation object
         if (conversation && response.data.conversation) {
           setConversation(response.data.conversation);
         }
       } else {
         throw new Error(response.data.message || 'Failed to send message');
       }
-    } catch (error) {
-      console.error('Failed to send message:', error);
+    } catch (error: any) {
+      clearTimeout(sendTimeoutId);
       
-      // Remove optimistic message on error
+      if (error.name === 'AbortError') {
+        Alert.alert('Request Timeout', 'Message sending timed out. Please try again.');
+      } else {
+        console.error('Failed to send message:', error);
+        Alert.alert('Error', 'Failed to send message. Please try again.');
+      }
+      
       setMessages(prev => prev.filter(msg => !msg.optimistic));
-      setInputText(messageText); // Restore text
-      Alert.alert('Error', 'Failed to send message');
+      setInputText(messageText);
     } finally {
       setSending(false);
     }
@@ -375,7 +457,7 @@ export default function SupportChatScreen() {
             agent_id: user?.id
           });
           Alert.alert('Success', 'Ticket assigned to you');
-          loadConversation(); // Refresh to show assignment
+          loadConversation(true);
           break;
         
         case 'escalate':
@@ -385,7 +467,7 @@ export default function SupportChatScreen() {
         case 'close':
           await api.patch(`/api/v1/conversations/${id}/close`);
           Alert.alert('Success', 'Ticket closed');
-          loadConversation();
+          loadConversation(true);
           break;
         
         case 'priority_high':
@@ -393,7 +475,7 @@ export default function SupportChatScreen() {
             priority: 'high'
           });
           Alert.alert('Success', 'Priority set to high');
-          loadConversation();
+          loadConversation(true);
           break;
       }
     } catch (error) {
@@ -536,18 +618,26 @@ export default function SupportChatScreen() {
     </View>
   );
 
-  if (loading) {
+  if (loading && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#7B3F98" />
           <Text style={styles.loadingText}>Loading conversation...</Text>
+          {connectionError && (
+            <TouchableOpacity
+              style={styles.retryButton}
+              onPress={() => loadConversation()}
+            >
+              <Text style={styles.retryButtonText}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       </SafeAreaView>
     );
   }
 
-  if (!conversation) {
+  if (!conversation && !loading) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.errorContainer}>
@@ -659,7 +749,7 @@ export default function SupportChatScreen() {
           style={styles.messagesList}
           contentContainerStyle={{ paddingVertical: 8 }}
           onEndReached={loadOlderMessages}
-          onEndReachedThreshold={0.1}
+          onEndReachedThreshold={SCROLL_THRESHOLD}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1074,6 +1164,18 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 16,
     marginTop: 16,
+  },
+  retryButton: {
+    backgroundColor: '#7B3F98',
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 8,
+    marginTop: 16,
+  },
+  retryButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '500',
   },
   errorContainer: {
     flex: 1,
