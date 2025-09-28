@@ -1,6 +1,6 @@
-// components/GLTHeader.tsx - Pure Firebase implementation following amarjanica pattern
+// components/GLTHeader.tsx - Enhanced with ActionCable real-time integration
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking, Platform } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
@@ -17,6 +17,10 @@ import api from '../lib/api';
 
 // CRITICAL: Import Firebase using the amarjanica pattern
 import firebase from '../config/firebase';
+
+// ENHANCED: Import ActionCable service for real-time updates
+import ActionCableService from '../lib/services/ActionCableService';
+import { accountManager } from '../lib/AccountManager';
 
 // CRITICAL: Import NavigationHelper for proper navigation tracking
 import { NavigationHelper } from '../lib/helpers/navigation';
@@ -123,6 +127,7 @@ export default function GLTHeader({
   
   const [notificationCount, setNotificationCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
+  const [isActionCableConnected, setIsActionCableConnected] = useState(false);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({
     isDownloading: false,
     progress: 0,
@@ -147,6 +152,187 @@ export default function GLTHeader({
   const unsubscribeOnMessage = useRef<(() => void) | null>(null);
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
+
+  // ActionCable service instance
+  const actionCableService = ActionCableService.getInstance();
+
+  // ENHANCED: ActionCable integration with real-time updates
+  useEffect(() => {
+    setupActionCableConnection();
+    
+    return () => {
+      cleanupActionCableSubscriptions();
+    };
+  }, [user]);
+
+  const setupActionCableConnection = async () => {
+    try {
+      if (!user) {
+        console.log('📡 No user available for ActionCable connection');
+        return;
+      }
+
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount) {
+        console.log('📡 No account available for ActionCable connection');
+        return;
+      }
+
+      console.log('📡 Setting up ActionCable connection...');
+
+      // Connect to ActionCable
+      const connected = await actionCableService.connect({
+        token: currentAccount.token,
+        userId: currentAccount.id,
+        autoReconnect: true,
+        maxReconnectAttempts: 5,
+        reconnectInterval: 3000
+      });
+
+      if (connected) {
+        setupActionCableSubscriptions();
+      }
+    } catch (error) {
+      console.error('❌ Failed to setup ActionCable connection:', error);
+      // Fallback to API polling if ActionCable fails
+      startFallbackPolling();
+    }
+  };
+
+  const setupActionCableSubscriptions = () => {
+    console.log('📡 Setting up ActionCable subscriptions...');
+
+    // Subscribe to connection status updates
+    actionCableService.subscribe('connection_established', () => {
+      console.log('📡 ActionCable connected');
+      setIsActionCableConnected(true);
+    });
+
+    actionCableService.subscribe('connection_lost', () => {
+      console.log('📡 ActionCable disconnected');
+      setIsActionCableConnected(false);
+    });
+
+    // Subscribe to initial state and counts
+    actionCableService.subscribe('initial_state', (data) => {
+      console.log('📊 Received initial state via ActionCable:', data.counts);
+      if (data.counts) {
+        setNotificationCount(data.counts.notifications || 0);
+        setCartCount(data.counts.cart || 0);
+      }
+    });
+
+    actionCableService.subscribe('initial_counts', (data) => {
+      console.log('📊 Received initial counts via ActionCable:', {
+        notifications: data.notification_count,
+        cart: data.cart_count
+      });
+      setNotificationCount(data.notification_count || 0);
+      setCartCount(data.cart_count || 0);
+    });
+
+    // Subscribe to notification count updates
+    actionCableService.subscribe('notification_count_update', (data) => {
+      console.log('🔔 Notification count updated via ActionCable:', data.notification_count);
+      setNotificationCount(data.notification_count || 0);
+    });
+
+    // Subscribe to cart count updates
+    actionCableService.subscribe('cart_count_update', (data) => {
+      console.log('🛒 Cart count updated via ActionCable:', data.cart_count);
+      setCartCount(data.cart_count || 0);
+    });
+
+    // Subscribe to new notifications
+    actionCableService.subscribe('new_notification', (data) => {
+      console.log('🔔 New notification received via ActionCable');
+      // Increment count optimistically (server will send updated count)
+      setNotificationCount(prev => prev + 1);
+    });
+
+    // Subscribe to avatar updates for immediate UI refresh
+    actionCableService.subscribe('avatar_changed', (data) => {
+      if (data.user_id === user?.id) {
+        console.log('👤 Avatar changed for current user - triggering refresh');
+        // The UserContext will handle the actual update
+      }
+    });
+
+    // Subscribe to business updates
+    actionCableService.subscribe('business_updated', (data) => {
+      console.log('🏢 Business updated via ActionCable:', data.business?.id);
+      // The UserContext will handle business updates
+    });
+
+    console.log('✅ ActionCable subscriptions configured');
+  };
+
+  const cleanupActionCableSubscriptions = () => {
+    console.log('📡 Cleaning up ActionCable subscriptions...');
+    
+    // Unsubscribe from all our specific subscriptions
+    const subscriptionTypes = [
+      'connection_established',
+      'connection_lost', 
+      'initial_state',
+      'initial_counts',
+      'notification_count_update',
+      'cart_count_update',
+      'new_notification',
+      'avatar_changed',
+      'business_updated'
+    ];
+
+    subscriptionTypes.forEach(type => {
+      actionCableService.unsubscribe(type);
+    });
+  };
+
+  // Fallback polling if ActionCable is not available
+  const startFallbackPolling = useCallback(() => {
+    console.log('⏳ Starting fallback polling for counts...');
+    
+    const pollCounts = () => {
+      if (!isActionCableConnected) {
+        fetchNotificationCount();
+        fetchCartCount();
+      }
+    };
+
+    // Initial fetch
+    pollCounts();
+    
+    // Poll every 30 seconds as fallback (increased from 10s since ActionCable should handle most updates)
+    const interval = setInterval(pollCounts, 30000);
+    
+    return () => clearInterval(interval);
+  }, [isActionCableConnected]);
+
+  // Enhanced notification marking with ActionCable integration
+  const markNotificationAsRead = async (notificationId: string) => {
+    try {
+      // Try ActionCable first for instant feedback
+      if (isActionCableConnected) {
+        const success = await actionCableService.markNotificationRead(parseInt(notificationId));
+        if (success) {
+          console.log('✅ Notification marked as read via ActionCable');
+          return;
+        }
+      }
+
+      // Fallback to API
+      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
+      console.log('✅ Notification marked as read via API');
+      
+      // Refresh counts manually if ActionCable is not available
+      if (!isActionCableConnected) {
+        fetchNotificationCount();
+      }
+      
+    } catch (error) {
+      console.error('❌ Failed to mark notification as read:', error);
+    }
+  };
 
   // ============================================
   // FIREBASE SETUP - Following amarjanica pattern
@@ -322,8 +508,13 @@ export default function GLTHeader({
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
       console.log('🔥 FOREGROUND MESSAGE RECEIVED:', remoteMessage);
       
-      // Update notification count
-      setNotificationCount(prev => prev + 1);
+      // Update notification count immediately via ActionCable or fallback
+      if (isActionCableConnected) {
+        // ActionCable will handle the update
+        console.log('📡 ActionCable will handle notification count update');
+      } else {
+        setNotificationCount(prev => prev + 1);
+      }
       
       // Show local notification for foreground messages
       if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
@@ -411,44 +602,146 @@ export default function GLTHeader({
     }
   };
 
-  const markNotificationAsRead = async (notificationId: string) => {
+  // ============================================
+  // FALLBACK API METHODS (when ActionCable unavailable)
+  // ============================================
+  
+  // Enhanced notification count fetching with multiple fallbacks
+  const fetchNotificationCount = async () => {
     try {
-      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
-      console.log('✅ Notification marked as read');
+      console.log('🔔 Fetching notification count from API...');
       
-      // Refresh notification count
-      fetchNotificationCount();
+      // Method 1: Try the dedicated unread_count endpoint
+      try {
+        const response = await api.get('/api/v1/notifications/unread_count', {
+          timeout: 8000
+        });
+        console.log('🔔 Unread count endpoint response:', response.data);
+        
+        if (response.data && response.data.success) {
+          const count = response.data.unread_count || response.data.count || 0;
+          setNotificationCount(count);
+          console.log('🔔 Notification count updated from unread_count endpoint:', count);
+          return;
+        }
+      } catch (unreadCountError) {
+        console.log('🔔 Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
+      }
+      
+      // Method 2: Fallback to notifications index endpoint
+      try {
+        const response = await api.get('/api/v1/notifications', {
+          params: {
+            per_page: 1,
+            page: 1,
+            unread_only: 'true'
+          },
+          timeout: 8000
+        });
+        
+        console.log('🔔 Notifications index response:', response.data);
+        
+        if (response.data && response.data.success) {
+          const count = response.data.unread_count || response.data.pagination?.total_count || 0;
+          setNotificationCount(count);
+          console.log('🔔 Notification count updated from index endpoint:', count);
+          return;
+        }
+      } catch (indexError) {
+        console.log('🔔 Index endpoint also failed:', indexError.response?.status);
+      }
+      
+      // Method 3: Manual count fallback
+      try {
+        const response = await api.get('/api/v1/notifications', {
+          params: {
+            per_page: 50,
+            page: 1
+          },
+          timeout: 10000
+        });
+        
+        if (response.data && response.data.success && response.data.data) {
+          const unreadCount = response.data.data.filter((notification: any) => !notification.read).length;
+          setNotificationCount(unreadCount);
+          console.log('🔔 Notification count updated from manual count:', unreadCount);
+          return;
+        }
+      } catch (manualCountError) {
+        console.log('🔔 Manual count also failed:', manualCountError.response?.status);
+      }
+      
+      console.warn('🔔 All notification count methods failed, keeping previous count');
       
     } catch (error) {
-      console.error('❌ Failed to mark notification as read:', error);
+      console.error('🔔 Unexpected error in fetchNotificationCount:', error);
     }
   };
 
-  // ============================================
-  // REAL-TIME NOTIFICATION POLLING
-  // ============================================
-  useEffect(() => {
-    // Start aggressive polling for real-time feel
-    const startNotificationPolling = () => {
-      fetchNotificationCount();
-      fetchCartCount();
+  // Fetch cart count
+  const fetchCartCount = async () => {
+    try {
+      console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
       
-      // Poll every 10 seconds for immediate updates
-      const interval = setInterval(() => {
-        fetchNotificationCount();
-        fetchCartCount();
-      }, 10000);
+      const response = await api.get('/api/v1/packages', {
+        params: {
+          state: 'pending_unpaid',
+          per_page: 1000,
+          page: 1
+        },
+        timeout: 15000
+      });
       
-      return interval;
-    };
-    
-    const interval = startNotificationPolling();
-    
-    return () => clearInterval(interval);
-  }, []);
+      if (response.data.success) {
+        let totalCount = response.data.data?.length || 0;
+        
+        const pagination = response.data.pagination;
+        if (pagination && pagination.total_pages > 1) {
+          console.log(`🛒 Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
+          
+          const additionalPages = [];
+          for (let page = 2; page <= pagination.total_pages; page++) {
+            additionalPages.push(
+              api.get('/api/v1/packages', {
+                params: {
+                  state: 'pending_unpaid',
+                  per_page: 1000,
+                  page: page
+                },
+                timeout: 15000
+              })
+            );
+          }
 
+          const additionalResponses = await Promise.all(additionalPages);
+          const additionalCount = additionalResponses.reduce((acc, res) => {
+            return acc + (res.data.success ? (res.data.data?.length || 0) : 0);
+          }, 0);
+
+          totalCount += additionalCount;
+          console.log(`🛒 Total cart count with all pages: ${totalCount}`);
+        }
+        
+        setCartCount(totalCount);
+      }
+    } catch (error) {
+      console.error('Failed to fetch cart count:', error);
+    }
+  };
+
+  // Setup fallback polling when ActionCable is not connected
   useEffect(() => {
-    // Monitor download progress
+    let cleanup: (() => void) | undefined;
+    
+    if (!isActionCableConnected) {
+      cleanup = startFallbackPolling();
+    }
+    
+    return cleanup;
+  }, [isActionCableConnected, startFallbackPolling]);
+
+  // Monitor download progress (existing functionality)
+  useEffect(() => {
     const checkDownloadProgress = async () => {
       try {
         const progressData = await AsyncStorage.getItem('download_progress');
@@ -658,129 +951,6 @@ export default function GLTHeader({
     };
   }, []);
 
-  // Enhanced notification count fetching with multiple fallbacks
-  const fetchNotificationCount = async () => {
-    try {
-      console.log('🔔 Fetching notification count from API...');
-      
-      // Method 1: Try the dedicated unread_count endpoint
-      try {
-        const response = await api.get('/api/v1/notifications/unread_count', {
-          timeout: 8000
-        });
-        console.log('🔔 Unread count endpoint response:', response.data);
-        
-        if (response.data && response.data.success) {
-          const count = response.data.unread_count || response.data.count || 0;
-          setNotificationCount(count);
-          console.log('🔔 Notification count updated from unread_count endpoint:', count);
-          return;
-        }
-      } catch (unreadCountError) {
-        console.log('🔔 Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
-      }
-      
-      // Method 2: Fallback to notifications index endpoint
-      try {
-        const response = await api.get('/api/v1/notifications', {
-          params: {
-            per_page: 1,
-            page: 1,
-            unread_only: 'true'
-          },
-          timeout: 8000
-        });
-        
-        console.log('🔔 Notifications index response:', response.data);
-        
-        if (response.data && response.data.success) {
-          const count = response.data.unread_count || response.data.pagination?.total_count || 0;
-          setNotificationCount(count);
-          console.log('🔔 Notification count updated from index endpoint:', count);
-          return;
-        }
-      } catch (indexError) {
-        console.log('🔔 Index endpoint also failed:', indexError.response?.status);
-      }
-      
-      // Method 3: Manual count fallback
-      try {
-        const response = await api.get('/api/v1/notifications', {
-          params: {
-            per_page: 50,
-            page: 1
-          },
-          timeout: 10000
-        });
-        
-        if (response.data && response.data.success && response.data.data) {
-          const unreadCount = response.data.data.filter((notification: any) => !notification.read).length;
-          setNotificationCount(unreadCount);
-          console.log('🔔 Notification count updated from manual count:', unreadCount);
-          return;
-        }
-      } catch (manualCountError) {
-        console.log('🔔 Manual count also failed:', manualCountError.response?.status);
-      }
-      
-      console.warn('🔔 All notification count methods failed, keeping previous count');
-      
-    } catch (error) {
-      console.error('🔔 Unexpected error in fetchNotificationCount:', error);
-    }
-  };
-
-  // Fetch cart count
-  const fetchCartCount = async () => {
-    try {
-      console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
-      
-      const response = await api.get('/api/v1/packages', {
-        params: {
-          state: 'pending_unpaid',
-          per_page: 1000,
-          page: 1
-        },
-        timeout: 15000
-      });
-      
-      if (response.data.success) {
-        let totalCount = response.data.data?.length || 0;
-        
-        const pagination = response.data.pagination;
-        if (pagination && pagination.total_pages > 1) {
-          console.log(`🛒 Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
-          
-          const additionalPages = [];
-          for (let page = 2; page <= pagination.total_pages; page++) {
-            additionalPages.push(
-              api.get('/api/v1/packages', {
-                params: {
-                  state: 'pending_unpaid',
-                  per_page: 1000,
-                  page: page
-                },
-                timeout: 15000
-              })
-            );
-          }
-
-          const additionalResponses = await Promise.all(additionalPages);
-          const additionalCount = additionalResponses.reduce((acc, res) => {
-            return acc + (res.data.success ? (res.data.data?.length || 0) : 0);
-          }, 0);
-
-          totalCount += additionalCount;
-          console.log(`🛒 Total cart count with all pages: ${totalCount}`);
-        }
-        
-        setCartCount(totalCount);
-      }
-    } catch (error) {
-      console.error('Failed to fetch cart count:', error);
-    }
-  };
-
   const renderBadge = (count: number, color: string) => {
     if (count === 0) return null;
     
@@ -817,6 +987,20 @@ export default function GLTHeader({
             </TouchableOpacity>
           )}
           <Text style={styles.title}>{title}</Text>
+          
+          {/* ENHANCED: Connection indicator */}
+          {__DEV__ && (
+            <View style={[
+              styles.connectionIndicator,
+              { backgroundColor: isActionCableConnected ? '#10b981' : '#ef4444' }
+            ]}>
+              <Feather 
+                name={isActionCableConnected ? 'wifi' : 'wifi-off'} 
+                size={10} 
+                color="white" 
+              />
+            </View>
+          )}
         </View>
 
         {/* Right section: Notifications + Cart + Avatar */}
@@ -984,6 +1168,15 @@ const styles = StyleSheet.create({
     textShadowRadius: 4,
     fontFamily: 'System',
     flex: 1,
+  },
+  // ENHANCED: Connection indicator for development
+  connectionIndicator: {
+    width: 16,
+    height: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginLeft: 8,
   },
   iconButton: {
     padding: 4,
