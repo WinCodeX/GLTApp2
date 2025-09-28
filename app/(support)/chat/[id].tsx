@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - Enhanced Support Chat Screen with Proper Pagination and Timeouts
+// app/(support)/chat/[id].tsx - Fixed Support Chat Screen with proper message broadcasting
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -97,6 +97,9 @@ export default function SupportChatScreen() {
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   
+  // ActionCable connection state
+  const [isConnected, setIsConnected] = useState(false);
+  
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
@@ -129,15 +132,26 @@ export default function SupportChatScreen() {
         });
 
         if (connected && id) {
+          setIsConnected(true);
+          console.log('✅ ActionCable connected for support chat');
+          
           await actionCableRef.current.joinConversation(id);
           
+          // FIXED: Enhanced message subscription with proper structure handling
           actionCableRef.current.subscribe('new_message', handleNewMessage);
           actionCableRef.current.subscribe('conversation_read', handleMessageRead);
           actionCableRef.current.subscribe('typing_indicator', handleTypingIndicator);
           actionCableRef.current.subscribe('ticket_status_changed', handleTicketStatusChange);
+          actionCableRef.current.subscribe('conversation_updated', handleConversationUpdate);
+          
+          // FIXED: Connection status handlers
+          actionCableRef.current.subscribe('connection_established', handleConnectionEstablished);
+          actionCableRef.current.subscribe('connection_lost', handleConnectionLost);
+          actionCableRef.current.subscribe('connection_error', handleConnectionError);
         }
       } catch (error) {
         console.error('Failed to initialize ActionCable:', error);
+        setIsConnected(false);
       }
     };
 
@@ -150,6 +164,10 @@ export default function SupportChatScreen() {
         actionCableRef.current.unsubscribe('conversation_read');
         actionCableRef.current.unsubscribe('typing_indicator');
         actionCableRef.current.unsubscribe('ticket_status_changed');
+        actionCableRef.current.unsubscribe('conversation_updated');
+        actionCableRef.current.unsubscribe('connection_established');
+        actionCableRef.current.unsubscribe('connection_lost');
+        actionCableRef.current.unsubscribe('connection_error');
       }
       
       // Cancel any pending requests
@@ -164,28 +182,56 @@ export default function SupportChatScreen() {
     };
   }, [user, id]);
 
-  // ActionCable event handlers with cache integration
+  // FIXED: Enhanced ActionCable event handlers with proper error handling
   const handleNewMessage = useCallback((data: any) => {
+    console.log('📨 New message received:', data);
+    
     if (data.conversation_id === id && data.message) {
-      const newMessage: CachedMessage = {
-        ...data.message,
-        optimistic: false,
-      };
-      
-      // Update cache with new message
-      cacheManager.current.addMessageToCache(id, newMessage);
-      
-      if (data.message.user.id === user?.id) {
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
+      try {
+        // FIXED: Proper message structure handling
+        const messageData = data.message;
+        
+        const newMessage: CachedMessage = {
+          id: messageData.id || `msg-${Date.now()}`,
+          content: messageData.content || '',
+          created_at: messageData.created_at || new Date().toISOString(),
+          timestamp: messageData.timestamp || new Date().toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          is_system: messageData.is_system || false,
+          from_support: messageData.from_support || false,
+          message_type: messageData.message_type || 'text',
+          user: messageData.user || {
+            id: messageData.user?.id || '',
+            name: messageData.user?.name || 'Unknown',
+            role: messageData.user?.role || 'unknown'
+          },
+          metadata: messageData.metadata || {},
+          optimistic: false,
+        };
+
+        // Update cache with new message
+        cacheManager.current.addMessageToCache(id, newMessage);
+        
+        // FIXED: Auto-scroll for new messages (but not for own messages to avoid jarring)
+        if (messageData.user?.id !== user?.id) {
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        }
+        
+        console.log('✅ New message processed and cached');
+      } catch (error) {
+        console.error('❌ Error processing new message:', error);
       }
     }
   }, [id, user?.id]);
 
   const handleMessageRead = useCallback((data: any) => {
     if (data.conversation_id === id) {
-      console.log(`${data.reader_name} read the conversation`);
+      console.log(`📖 ${data.reader_name || 'Someone'} read the conversation`);
     }
   }, [id]);
 
@@ -207,18 +253,64 @@ export default function SupportChatScreen() {
 
   const handleTicketStatusChange = useCallback((data: any) => {
     if (data.conversation_id === id) {
+      console.log('🎫 Ticket status changed:', data.new_status);
+      
       // Update cache with conversation status change
       cacheManager.current.updateConversationMetadata(id, { status: data.new_status });
       
+      // FIXED: Add system message if provided
       if (data.system_message) {
-        const systemMessage: CachedMessage = {
-          ...data.system_message,
-          optimistic: false,
-        };
-        cacheManager.current.addMessageToCache(id, systemMessage);
+        try {
+          const systemMessage: CachedMessage = {
+            id: data.system_message.id,
+            content: data.system_message.content,
+            created_at: data.system_message.created_at,
+            timestamp: data.system_message.timestamp,
+            is_system: true,
+            from_support: true,
+            message_type: 'system',
+            user: data.system_message.user,
+            metadata: data.system_message.metadata || {},
+            optimistic: false,
+          };
+          cacheManager.current.addMessageToCache(id, systemMessage);
+        } catch (error) {
+          console.error('❌ Error processing system message:', error);
+        }
       }
     }
   }, [id]);
+
+  const handleConversationUpdate = useCallback((data: any) => {
+    if (data.conversation_id === id) {
+      console.log('🔄 Conversation updated:', data);
+      
+      // Update cache with conversation changes
+      const updates: any = {};
+      if (data.status) updates.status = data.status;
+      if (data.priority) updates.priority = data.priority;
+      if (data.assigned_agent) updates.assigned_agent = data.assigned_agent;
+      if (data.escalated !== undefined) updates.escalated = data.escalated;
+      
+      cacheManager.current.updateConversationMetadata(id, updates);
+    }
+  }, [id]);
+
+  // FIXED: Connection status handlers
+  const handleConnectionEstablished = useCallback(() => {
+    setIsConnected(true);
+    console.log('✅ ActionCable connection established');
+  }, []);
+
+  const handleConnectionLost = useCallback(() => {
+    setIsConnected(false);
+    console.log('❌ ActionCable connection lost');
+  }, []);
+
+  const handleConnectionError = useCallback(() => {
+    setIsConnected(false);
+    console.log('❌ ActionCable connection error');
+  }, []);
 
   // Enhanced conversation loading with cache integration
   const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
@@ -475,6 +567,8 @@ export default function SupportChatScreen() {
             status: response.data.conversation.status
           });
         }
+        
+        console.log('✅ Message sent successfully');
       } else {
         throw new Error(response.data.message || 'Failed to send message');
       }
@@ -668,6 +762,13 @@ export default function SupportChatScreen() {
     </View>
   );
 
+  // Show connection status in header subtitle
+  const getConnectionStatusText = () => {
+    if (!conversation) return 'Loading...';
+    if (!isConnected) return 'Connecting...';
+    return 'Online';
+  };
+
   if (loading && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
@@ -744,6 +845,11 @@ export default function SupportChatScreen() {
                   <Text style={styles.escalatedText}>Escalated</Text>
                 </View>
               )}
+              {isConnected && (
+                <View style={styles.connectionIndicator}>
+                  <View style={styles.onlineIndicator} />
+                </View>
+              )}
             </View>
           </View>
         </View>
@@ -781,6 +887,12 @@ export default function SupportChatScreen() {
             <View style={styles.ticketInfoItem}>
               <Text style={styles.ticketInfoLabel}>Agent:</Text>
               <Text style={styles.ticketInfoValue}>{conversation.assigned_agent.name}</Text>
+            </View>
+          )}
+          {!isConnected && (
+            <View style={styles.ticketInfoItem}>
+              <Feather name="wifi-off" size={12} color="#f97316" />
+              <Text style={styles.connectionWarning}>Offline</Text>
             </View>
           )}
         </View>
@@ -939,6 +1051,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 2,
   },
+  connectionIndicator: {
+    marginLeft: 6,
+  },
+  onlineIndicator: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+  },
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -979,6 +1100,11 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 10,
     fontWeight: '600',
+  },
+  connectionWarning: {
+    color: '#f97316',
+    fontSize: 12,
+    marginLeft: 4,
   },
   messagesContainer: {
     flex: 1,
