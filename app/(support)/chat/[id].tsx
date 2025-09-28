@@ -1,5 +1,5 @@
-// app/(support)/chat/[id].tsx - Fixed Support Chat Screen
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+// app/(support)/chat/[id].tsx - Enhanced Support Chat Screen with ActionCable and Lazy Loading
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -14,12 +14,15 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, router } from 'expo-router';
 import { useUser } from '../../../context/UserContext';
 import api from '../../../lib/api';
+import ActionCableService from '../../../lib/services/ActionCableService';
+import { accountManager } from '../../../lib/AccountManager';
 
 interface ChatMessage {
   id: string;
@@ -32,9 +35,11 @@ interface ChatMessage {
     id: string;
     name: string;
     role: string;
+    avatar_url?: string;
   };
   timestamp: string;
   metadata?: any;
+  optimistic?: boolean; // For optimistic updates
 }
 
 interface ChatConversation {
@@ -61,6 +66,11 @@ interface ChatConversation {
   last_activity_at: string;
 }
 
+interface TypingUser {
+  id: string;
+  name: string;
+}
+
 export default function SupportChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useUser();
@@ -70,57 +80,160 @@ export default function SupportChatScreen() {
   const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState('');
   const [showActions, setShowActions] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
+  const [isTyping, setIsTyping] = useState(false);
+  
+  // Lazy loading states
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [refreshing, setRefreshing] = useState(false);
+  
   const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const actionCableRef = useRef<ActionCableService | null>(null);
 
-  // Load conversation and messages
-  const loadConversation = useCallback(async () => {
+  // Initialize ActionCable connection
+  useEffect(() => {
+    const initActionCable = async () => {
+      try {
+        const currentAccount = accountManager.getCurrentAccount();
+        if (!currentAccount || !user) return;
+
+        actionCableRef.current = ActionCableService.getInstance();
+        
+        const connected = await actionCableRef.current.connect({
+          token: currentAccount.token,
+          userId: user.id.toString(),
+        });
+
+        if (connected && id) {
+          // Join conversation channel
+          await actionCableRef.current.joinConversation(id);
+          
+          // Subscribe to real-time events
+          actionCableRef.current.subscribe('new_message', handleNewMessage);
+          actionCableRef.current.subscribe('conversation_read', handleMessageRead);
+          actionCableRef.current.subscribe('typing_indicator', handleTypingIndicator);
+          actionCableRef.current.subscribe('ticket_status_changed', handleTicketStatusChange);
+        }
+      } catch (error) {
+        console.error('Failed to initialize ActionCable:', error);
+      }
+    };
+
+    initActionCable();
+
+    return () => {
+      if (actionCableRef.current && id) {
+        actionCableRef.current.leaveConversation(id);
+        actionCableRef.current.unsubscribe('new_message');
+        actionCableRef.current.unsubscribe('conversation_read');
+        actionCableRef.current.unsubscribe('typing_indicator');
+        actionCableRef.current.unsubscribe('ticket_status_changed');
+      }
+    };
+  }, [user, id]);
+
+  // ActionCable event handlers
+  const handleNewMessage = useCallback((data: any) => {
+    if (data.conversation_id === id && data.message) {
+      const newMessage: ChatMessage = {
+        ...data.message,
+        optimistic: false,
+      };
+      
+      setMessages(prev => {
+        // Remove optimistic message if it exists
+        const filteredMessages = prev.filter(msg => !msg.optimistic || msg.id !== newMessage.id);
+        return [...filteredMessages, newMessage];
+      });
+      
+      // Scroll to bottom if user sent the message
+      if (data.message.user.id === user?.id) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      }
+    }
+  }, [id, user?.id]);
+
+  const handleMessageRead = useCallback((data: any) => {
+    if (data.conversation_id === id) {
+      console.log(`${data.reader_name} read the conversation`);
+    }
+  }, [id]);
+
+  const handleTypingIndicator = useCallback((data: any) => {
+    if (data.conversation_id === id && data.user_id !== user?.id) {
+      setTypingUsers(prev => {
+        if (data.typing) {
+          const exists = prev.find(u => u.id === data.user_id);
+          if (!exists) {
+            return [...prev, { id: data.user_id, name: data.user_name }];
+          }
+          return prev;
+        } else {
+          return prev.filter(u => u.id !== data.user_id);
+        }
+      });
+    }
+  }, [id, user?.id]);
+
+  const handleTicketStatusChange = useCallback((data: any) => {
+    if (data.conversation_id === id) {
+      setConversation(prev => prev ? { ...prev, status: data.new_status } : null);
+      
+      if (data.system_message) {
+        const systemMessage: ChatMessage = {
+          ...data.system_message,
+          optimistic: false,
+        };
+        setMessages(prev => [...prev, systemMessage]);
+      }
+    }
+  }, [id]);
+
+  // Load conversation with pagination support
+  const loadConversation = useCallback(async (page = 1, limit = 50) => {
     if (!id) {
-      console.log('No conversation ID provided');
       setLoading(false);
       return;
     }
 
     try {
-      console.log('Loading conversation with ID:', id);
-      setLoading(true);
+      if (page === 1) {
+        setLoading(true);
+      } else {
+        setLoadingOlder(true);
+      }
       
-      // Try to load from support API first for better data structure
-      const response = await api.get(`/api/v1/conversations/${id}`);
-      console.log('Conversation response:', response.data);
+      const response = await api.get(`/api/v1/conversations/${id}`, {
+        params: { page, limit }
+      });
       
       if (response.data.success) {
         const conversationData = response.data.conversation;
         const messagesData = response.data.messages || [];
+        const pagination = response.data.pagination || {};
         
-        // If we don't have customer data, try to get it from the support tickets API
-        if (!conversationData.customer || !conversationData.customer.name) {
-          console.log('Customer data missing, attempting to fetch from support API...');
-          try {
-            const supportResponse = await api.get('/api/v1/support/tickets', {
-              params: { limit: 100 }
-            });
-            
-            if (supportResponse.data.success) {
-              const supportTickets = supportResponse.data.data.tickets || [];
-              const matchingTicket = supportTickets.find(ticket => ticket.id === id);
-              
-              if (matchingTicket && matchingTicket.customer) {
-                console.log('Found matching ticket with customer data:', matchingTicket.customer);
-                conversationData.customer = matchingTicket.customer;
-                conversationData.ticket_id = matchingTicket.ticket_id;
-                conversationData.priority = matchingTicket.priority;
-                conversationData.category = matchingTicket.category;
-                conversationData.assigned_agent = matchingTicket.assigned_agent;
-                conversationData.escalated = matchingTicket.escalated;
-              }
-            }
-          } catch (supportError) {
-            console.log('Failed to load support data, continuing with conversation data:', supportError);
-          }
+        if (page === 1) {
+          setConversation(conversationData);
+          setMessages(messagesData);
+          setCurrentPage(1);
+          setHasMoreMessages(pagination.has_more || false);
+          
+          // Scroll to bottom for initial load
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }, 100);
+        } else {
+          // Prepend older messages for lazy loading
+          setMessages(prev => [...messagesData, ...prev]);
+          setCurrentPage(page);
+          setHasMoreMessages(pagination.has_more || false);
         }
         
-        setConversation(conversationData);
-        setMessages(messagesData);
         console.log('Conversation loaded successfully:', conversationData.ticket_id);
       } else {
         console.error('API returned error:', response.data.message);
@@ -131,20 +244,93 @@ export default function SupportChatScreen() {
       Alert.alert('Error', 'Failed to load conversation. Please check your connection and try again.');
     } finally {
       setLoading(false);
+      setLoadingOlder(false);
+      setRefreshing(false);
     }
   }, [id]);
+
+  // Load older messages when scrolling to top
+  const loadOlderMessages = useCallback(async () => {
+    if (loadingOlder || !hasMoreMessages) return;
+    
+    await loadConversation(currentPage + 1);
+  }, [loadConversation, currentPage, hasMoreMessages, loadingOlder]);
+
+  // Refresh conversation
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadConversation(1);
+  }, [loadConversation]);
 
   useEffect(() => {
     loadConversation();
   }, [loadConversation]);
 
-  // Send message
+  // Typing indicator functionality
+  const handleTextChange = useCallback((text: string) => {
+    setInputText(text);
+    
+    if (!isTyping && text.trim() && actionCableRef.current && id) {
+      setIsTyping(true);
+      actionCableRef.current.startTyping({ conversationId: id });
+    }
+    
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    // Set new timeout to stop typing
+    typingTimeoutRef.current = setTimeout(() => {
+      if (isTyping && actionCableRef.current && id) {
+        setIsTyping(false);
+        actionCableRef.current.stopTyping(id);
+      }
+    }, 2000);
+  }, [isTyping, id]);
+
+  // Send message with optimistic updates
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || sending || !id) return;
 
     setSending(true);
     const messageText = inputText.trim();
     setInputText('');
+    
+    // Stop typing indicator
+    if (isTyping && actionCableRef.current) {
+      setIsTyping(false);
+      actionCableRef.current.stopTyping(id);
+    }
+
+    // Add optimistic message
+    const optimisticMessage: ChatMessage = {
+      id: `optimistic-${Date.now()}`,
+      content: messageText,
+      created_at: new Date().toISOString(),
+      is_system: false,
+      from_support: true,
+      message_type: 'text',
+      user: {
+        id: user?.id || '',
+        name: user?.display_name || user?.first_name || 'Support',
+        role: 'support',
+        avatar_url: user?.avatar_url,
+      },
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      optimistic: true,
+    };
+
+    setMessages(prev => [...prev, optimisticMessage]);
+    
+    // Scroll to bottom
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
 
     try {
       const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
@@ -153,51 +339,30 @@ export default function SupportChatScreen() {
       });
 
       if (response.data.success) {
-        // Add message to local state immediately for better UX
-        const newMessage: ChatMessage = {
-          id: response.data.message.id || `temp-${Date.now()}`,
-          content: messageText,
-          created_at: new Date().toISOString(),
-          is_system: false,
-          from_support: true,
-          message_type: 'text',
-          user: {
-            id: user?.id || '',
-            name: user?.display_name || user?.first_name || 'Support',
-            role: 'support',
-          },
-          timestamp: new Date().toLocaleTimeString('en-US', {
-            hour: '2-digit',
-            minute: '2-digit',
-            hour12: false,
-          }),
-        };
-
-        setMessages((prev) => [...prev, newMessage]);
+        // Remove optimistic message and add real message
+        setMessages(prev => {
+          const filteredMessages = prev.filter(msg => !msg.optimistic);
+          return [...filteredMessages, response.data.message];
+        });
         
-        // Scroll to bottom
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-
-        // Update conversation object with latest activity
-        if (conversation) {
-          setConversation({
-            ...conversation,
-            last_activity_at: new Date().toISOString(),
-          });
+        // Update conversation object
+        if (conversation && response.data.conversation) {
+          setConversation(response.data.conversation);
         }
       } else {
         throw new Error(response.data.message || 'Failed to send message');
       }
     } catch (error) {
       console.error('Failed to send message:', error);
-      setInputText(messageText); // Restore text on error
+      
+      // Remove optimistic message on error
+      setMessages(prev => prev.filter(msg => !msg.optimistic));
+      setInputText(messageText); // Restore text
       Alert.alert('Error', 'Failed to send message');
     } finally {
       setSending(false);
     }
-  }, [inputText, sending, id, user, conversation]);
+  }, [inputText, sending, id, user, conversation, isTyping]);
 
   // Quick actions for support agents
   const handleQuickAction = async (action: string) => {
@@ -214,7 +379,6 @@ export default function SupportChatScreen() {
           break;
         
         case 'escalate':
-          // This could open a modal for escalation details
           Alert.alert('Escalate Ticket', 'Escalation feature coming soon');
           break;
         
@@ -239,13 +403,15 @@ export default function SupportChatScreen() {
     setShowActions(false);
   };
 
-  const renderMessage = ({ item }: { item: ChatMessage }) => (
+  // Memoized components for performance
+  const renderMessage = useCallback(({ item }: { item: ChatMessage }) => (
     <View style={styles.messageContainer}>
       <View
         style={[
           styles.messageBubble,
           item.from_support ? styles.supportMessage : styles.customerMessage,
           item.is_system && styles.systemMessage,
+          item.optimistic && styles.optimisticMessage,
         ]}
       >
         {item.is_system && (
@@ -258,22 +424,49 @@ export default function SupportChatScreen() {
             styles.messageText,
             item.from_support ? styles.supportMessageText : styles.customerMessageText,
             item.is_system && styles.systemMessageText,
+            item.optimistic && styles.optimisticMessageText,
           ]}
         >
           {item.content}
         </Text>
-        <Text
-          style={[
-            styles.messageTime,
-            item.from_support ? styles.supportMessageTime : styles.customerMessageTime,
-            item.is_system && styles.systemMessageTime,
-          ]}
-        >
-          {item.timestamp}
-        </Text>
+        <View style={styles.messageFooter}>
+          <Text
+            style={[
+              styles.messageTime,
+              item.from_support ? styles.supportMessageTime : styles.customerMessageTime,
+              item.is_system && styles.systemMessageTime,
+            ]}
+          >
+            {item.timestamp}
+          </Text>
+          {item.optimistic && (
+            <View style={styles.optimisticIndicator}>
+              <ActivityIndicator size={12} color="rgba(255, 255, 255, 0.7)" />
+            </View>
+          )}
+        </View>
       </View>
     </View>
-  );
+  ), []);
+
+  const renderTypingIndicator = useMemo(() => {
+    if (typingUsers.length === 0) return null;
+    
+    return (
+      <View style={styles.typingContainer}>
+        <View style={styles.typingBubble}>
+          <Text style={styles.typingText}>
+            {typingUsers.map(u => u.name).join(', ')} {typingUsers.length === 1 ? 'is' : 'are'} typing...
+          </Text>
+          <View style={styles.typingDots}>
+            <View style={[styles.typingDot, { animationDelay: '0ms' }]} />
+            <View style={[styles.typingDot, { animationDelay: '200ms' }]} />
+            <View style={[styles.typingDot, { animationDelay: '400ms' }]} />
+          </View>
+        </View>
+      </View>
+    );
+  }, [typingUsers]);
 
   const renderQuickActionsModal = () => (
     <Modal
@@ -325,6 +518,22 @@ export default function SupportChatScreen() {
         </View>
       </View>
     </Modal>
+  );
+
+  const renderHeader = () => (
+    <View style={styles.listHeader}>
+      {loadingOlder && (
+        <View style={styles.loadingOlderContainer}>
+          <ActivityIndicator size="small" color="#7B3F98" />
+          <Text style={styles.loadingOlderText}>Loading older messages...</Text>
+        </View>
+      )}
+      {!hasMoreMessages && messages.length > 0 && (
+        <View style={styles.startOfConversationContainer}>
+          <Text style={styles.startOfConversationText}>Start of conversation</Text>
+        </View>
+      )}
+    </View>
   );
 
   if (loading) {
@@ -449,12 +658,22 @@ export default function SupportChatScreen() {
           renderItem={renderMessage}
           style={styles.messagesList}
           contentContainerStyle={{ paddingVertical: 8 }}
-          onContentSizeChange={() =>
-            flatListRef.current?.scrollToEnd({ animated: true })
+          onEndReached={loadOlderMessages}
+          onEndReachedThreshold={0.1}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={handleRefresh}
+              tintColor="#7B3F98"
+              colors={['#7B3F98']}
+            />
           }
-          onLayout={() =>
-            flatListRef.current?.scrollToEnd({ animated: false })
-          }
+          ListHeaderComponent={renderHeader}
+          ListFooterComponent={renderTypingIndicator}
+          maintainVisibleContentPosition={{
+            minIndexForVisible: 0,
+            autoscrollToTopThreshold: 10,
+          }}
           ListEmptyComponent={() => (
             <View style={styles.emptyMessagesContainer}>
               <MaterialIcons name="chat-bubble-outline" size={48} color="#444" />
@@ -477,7 +696,7 @@ export default function SupportChatScreen() {
                 placeholder="Type a message..."
                 placeholderTextColor="#8E8E93"
                 value={inputText}
-                onChangeText={setInputText}
+                onChangeText={handleTextChange}
                 multiline
                 maxLength={1000}
                 returnKeyType="send"
@@ -628,6 +847,29 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingHorizontal: 8,
   },
+  listHeader: {
+    paddingVertical: 8,
+  },
+  loadingOlderContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 12,
+  },
+  loadingOlderText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginLeft: 8,
+  },
+  startOfConversationContainer: {
+    alignItems: 'center',
+    paddingVertical: 12,
+  },
+  startOfConversationText: {
+    color: '#666',
+    fontSize: 12,
+    fontStyle: 'italic',
+  },
   messageContainer: {
     marginVertical: 2,
   },
@@ -656,6 +898,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
   },
+  optimisticMessage: {
+    opacity: 0.7,
+  },
   systemIndicator: {
     marginRight: 8,
   },
@@ -674,10 +919,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
   },
+  optimisticMessageText: {
+    fontStyle: 'italic',
+  },
+  messageFooter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 4,
+  },
   messageTime: {
     fontSize: 11,
-    marginTop: 4,
-    textAlign: 'right',
   },
   supportMessageTime: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -687,7 +939,39 @@ const styles = StyleSheet.create({
   },
   systemMessageTime: {
     color: '#8E8E93',
-    textAlign: 'center',
+  },
+  optimisticIndicator: {
+    marginLeft: 8,
+  },
+  typingContainer: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+  },
+  typingBubble: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#1F2C34',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 16,
+    borderBottomLeftRadius: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  typingText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontStyle: 'italic',
+    marginRight: 8,
+  },
+  typingDots: {
+    flexDirection: 'row',
+  },
+  typingDot: {
+    width: 4,
+    height: 4,
+    borderRadius: 2,
+    backgroundColor: '#8E8E93',
+    marginHorizontal: 1,
   },
   emptyMessagesContainer: {
     flex: 1,
