@@ -59,23 +59,25 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
             onPress={() => handleTabPress(tab.route)}
             activeOpacity={0.7}
           >
-            <View style={styles.tabContent}>
-              <Feather
-                name={tab.icon as any}
-                size={24}
-                color={isActive ? '#7B3F98' : '#8E8E93'}
-              />
-              {tab.badgeCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>
-                    {tab.badgeCount > 99 ? '99+' : tab.badgeCount}
-                  </Text>
-                </View>
-              )}
+            <View style={[styles.tabContent, isActive && styles.tabContentActive]}>
+              <View style={styles.iconContainer}>
+                <Feather
+                  name={tab.icon as any}
+                  size={22}
+                  color={isActive ? '#FFFFFF' : '#8E8E93'}
+                />
+                {tab.badgeCount > 0 && (
+                  <View style={styles.badge}>
+                    <Text style={styles.badgeText}>
+                      {tab.badgeCount > 99 ? '99+' : tab.badgeCount}
+                    </Text>
+                  </View>
+                )}
+              </View>
+              <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
+                {tab.label}
+              </Text>
             </View>
-            <Text style={[styles.tabLabel, isActive && styles.tabLabelActive]}>
-              {tab.label}
-            </Text>
           </TouchableOpacity>
         );
       })}
@@ -89,31 +91,44 @@ const styles = StyleSheet.create({
     backgroundColor: '#1F2C34',
     borderTopWidth: 1,
     borderTopColor: 'rgba(123, 63, 152, 0.2)',
-    paddingBottom: 8,
+    paddingBottom: 12,
     paddingTop: 8,
+    paddingHorizontal: 8,
   },
   tab: {
     flex: 1,
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingHorizontal: 4,
   },
   tabContent: {
+    alignItems: 'center',
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    minWidth: 70,
+  },
+  tabContentActive: {
+    backgroundColor: '#7B3F98',
+  },
+  iconContainer: {
     position: 'relative',
     marginBottom: 4,
   },
   badge: {
     position: 'absolute',
-    top: -6,
-    right: -8,
-    backgroundColor: '#7B3F98',
+    top: -8,
+    right: -10,
+    backgroundColor: '#FF3B30',
     borderRadius: 10,
     paddingHorizontal: 5,
     paddingVertical: 1,
     minWidth: 18,
     alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#1F2C34',
   },
   badgeText: {
-    color: '#fff',
+    color: '#FFFFFF',
     fontSize: 10,
     fontWeight: '600',
   },
@@ -123,6 +138,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   tabLabelActive: {
-    color: '#7B3F98',
+    color: '#FFFFFF',
+    fontWeight: '600',
   },
 });
