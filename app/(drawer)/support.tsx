@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Enhanced Support Screen with Cache Management and Pagination
+// app/(drawer)/support.tsx - Fixed Support Screen with proper ActionCable integration
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -182,27 +182,32 @@ export default function SupportScreen() {
           // Join conversation
           await actionCable.joinConversation(conversationId);
 
-          // Subscribe to message updates
+          // FIXED: Subscribe to message updates with proper structure handling
           actionCable.subscribe('new_message', (data) => {
-            if (data.conversation_id === conversationId) {
+            console.log('📨 New message received:', data);
+            
+            if (data.conversation_id === conversationId && data.message) {
+              // FIXED: Proper message structure handling
+              const messageData = data.message;
+              
               const newMessage: CachedMessage = {
-                id: data.message.id || `msg-${Date.now()}`,
-                content: data.message.content || '',
-                created_at: data.message.created_at || new Date().toISOString(),
-                timestamp: new Date().toLocaleTimeString('en-US', {
+                id: messageData.id || `msg-${Date.now()}`,
+                content: messageData.content || '',
+                created_at: messageData.created_at || new Date().toISOString(),
+                timestamp: messageData.timestamp || new Date().toLocaleTimeString('en-US', {
                   hour12: false,
                   hour: '2-digit',
                   minute: '2-digit',
                 }),
-                is_system: data.message.is_system || false,
-                from_support: data.message.from_support || false,
-                message_type: data.message.message_type || 'text',
-                user: data.message.user || {
-                  id: '',
-                  name: 'Unknown',
-                  role: 'unknown'
+                is_system: messageData.is_system || false,
+                from_support: messageData.from_support || false,
+                message_type: messageData.message_type || 'text',
+                user: messageData.user || {
+                  id: messageData.user?.id || '',
+                  name: messageData.user?.name || 'Unknown',
+                  role: messageData.user?.role || 'unknown'
                 },
-                metadata: data.message.metadata || {},
+                metadata: messageData.metadata || {},
                 optimistic: false,
               };
 
@@ -216,7 +221,7 @@ export default function SupportScreen() {
             }
           });
 
-          // Subscribe to typing indicators
+          // FIXED: Subscribe to typing indicators with proper handling
           actionCable.subscribe('typing_indicator', (data) => {
             if (data.conversation_id === conversationId) {
               if (data.typing && data.user_id !== user.id) {
@@ -232,7 +237,7 @@ export default function SupportScreen() {
             }
           });
 
-          // Subscribe to conversation updates
+          // FIXED: Subscribe to conversation updates with proper status handling
           actionCable.subscribe('conversation_updated', (data) => {
             if (data.conversation_id === conversationId) {
               if (data.status) {
@@ -245,12 +250,51 @@ export default function SupportScreen() {
             }
           });
 
+          // FIXED: Enhanced ticket status change handling
+          actionCable.subscribe('ticket_status_changed', (data) => {
+            if (data.conversation_id === conversationId) {
+              console.log('🎫 Ticket status changed:', data.new_status);
+              setTicketStatus(data.new_status);
+              
+              // Add system message if provided
+              if (data.system_message) {
+                const systemMessage: CachedMessage = {
+                  id: data.system_message.id,
+                  content: data.system_message.content,
+                  created_at: data.system_message.created_at,
+                  timestamp: data.system_message.timestamp,
+                  is_system: true,
+                  from_support: true,
+                  message_type: 'system',
+                  user: data.system_message.user,
+                  metadata: data.system_message.metadata || {},
+                  optimistic: false,
+                };
+                
+                cacheManager.current.addMessageToCache(conversationId, systemMessage);
+              }
+              
+              // Update cache metadata
+              cacheManager.current.updateConversationMetadata(conversationId, {
+                status: data.new_status
+              });
+            }
+          });
+
+          // FIXED: Connection status handlers
           actionCable.subscribe('connection_established', () => {
             setIsConnected(true);
+            console.log('✅ ActionCable connection established');
           });
 
           actionCable.subscribe('connection_lost', () => {
             setIsConnected(false);
+            console.log('❌ ActionCable connection lost');
+          });
+
+          actionCable.subscribe('connection_error', () => {
+            setIsConnected(false);
+            console.log('❌ ActionCable connection error');
           });
         }
       } catch (error) {
