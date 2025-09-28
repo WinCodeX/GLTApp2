@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Fixed Support Screen with package data persistence
+// app/(drawer)/support.tsx - Fixed Support Screen with ActionCable integration
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -29,6 +29,9 @@ import { useLocalSearchParams } from 'expo-router';
 import { supportApi } from '../../services/supportApi';
 import colors from '../../theme/colors';
 import api from '../../lib/api';
+import ActionCableService from '../../lib/services/ActionCableService';
+import { useUser } from '../../context/UserContext';
+import { accountManager } from '../../lib/AccountManager';
 
 // Import NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
@@ -62,6 +65,7 @@ type InquiryType = 'basic' | 'package';
 
 export default function SupportScreen() {
   const params = useLocalSearchParams();
+  const { user } = useUser();
   
   // Check if we should auto-select package inquiry (from report button)
   const autoSelectPackage = params.autoSelectPackage === 'true';
@@ -86,6 +90,11 @@ export default function SupportScreen() {
   const [ticketStatus, setTicketStatus] = useState<'none' | 'pending' | 'active' | 'closed'>('none');
   const [hasActiveTicket, setHasActiveTicket] = useState(false);
   
+  // ActionCable state
+  const [isConnected, setIsConnected] = useState(false);
+  const [isTyping, setIsTyping] = useState(false);
+  const [typingUsers, setTypingUsers] = useState<string[]>([]);
+  
   // Modal states
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
@@ -106,6 +115,155 @@ export default function SupportScreen() {
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
 
   const flatListRef = useRef<FlatList>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // ActionCable connection setup
+  const setupActionCable = useCallback(async () => {
+    if (!user) return;
+
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount) return;
+
+      const actionCable = ActionCableService.getInstance();
+      
+      // Connect to ActionCable
+      const connected = await actionCable.connect({
+        token: currentAccount.token,
+        userId: user.id,
+        autoReconnect: true,
+      });
+
+      if (connected) {
+        setIsConnected(true);
+        console.log('ActionCable connected for support');
+
+        // Subscribe to message updates
+        actionCable.subscribe('new_message', (data) => {
+          if (data.conversation_id === conversationId) {
+            const newMessage: Message = {
+              id: data.message.id || `msg-${Date.now()}`,
+              text: data.message.content || '',
+              timestamp: new Date().toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              isSupport: data.message.from_support || false,
+              type: 'text',
+              packageCode: data.message.metadata?.package_code || null,
+              isTagged: !!(data.message.metadata?.package_code),
+            };
+
+            setMessages(prev => [...prev, newMessage]);
+            
+            // Scroll to bottom
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
+          }
+        });
+
+        // Subscribe to typing indicators
+        actionCable.subscribe('typing_indicator', (data) => {
+          if (data.conversation_id === conversationId) {
+            if (data.typing && data.user_id !== user.id) {
+              setTypingUsers(prev => {
+                if (!prev.includes(data.user_name)) {
+                  return [...prev, data.user_name];
+                }
+                return prev;
+              });
+            } else {
+              setTypingUsers(prev => prev.filter(name => name !== data.user_name));
+            }
+          }
+        });
+
+        // Subscribe to conversation updates
+        actionCable.subscribe('conversation_updated', (data) => {
+          if (data.conversation_id === conversationId) {
+            if (data.status) {
+              setTicketStatus(data.status);
+            }
+          }
+        });
+
+        // Subscribe to connection status
+        actionCable.subscribe('connection_established', () => {
+          setIsConnected(true);
+        });
+
+        actionCable.subscribe('connection_lost', () => {
+          setIsConnected(false);
+        });
+      }
+    } catch (error) {
+      console.error('Failed to setup ActionCable:', error);
+      setIsConnected(false);
+    }
+  }, [user, conversationId]);
+
+  // Join conversation when conversationId is set
+  const joinConversation = useCallback(async (convId: string) => {
+    if (!isConnected) return;
+
+    try {
+      const actionCable = ActionCableService.getInstance();
+      await actionCable.joinConversation(convId);
+      console.log('Joined conversation:', convId);
+    } catch (error) {
+      console.error('Failed to join conversation:', error);
+    }
+  }, [isConnected]);
+
+  // Leave conversation when component unmounts or conversation changes
+  const leaveConversation = useCallback(async (convId: string) => {
+    if (!isConnected) return;
+
+    try {
+      const actionCable = ActionCableService.getInstance();
+      await actionCable.leaveConversation(convId);
+      console.log('Left conversation:', convId);
+    } catch (error) {
+      console.error('Failed to leave conversation:', error);
+    }
+  }, [isConnected]);
+
+  // Send typing indicator
+  const sendTypingIndicator = useCallback(async (typing: boolean) => {
+    if (!isConnected || !conversationId) return;
+
+    try {
+      const actionCable = ActionCableService.getInstance();
+      if (typing) {
+        await actionCable.startTyping({ conversationId });
+      } else {
+        await actionCable.stopTyping(conversationId);
+      }
+    } catch (error) {
+      console.error('Failed to send typing indicator:', error);
+    }
+  }, [isConnected, conversationId]);
+
+  // Handle typing with debouncing
+  const handleTyping = useCallback(() => {
+    if (!isTyping) {
+      setIsTyping(true);
+      sendTypingIndicator(true);
+    }
+
+    // Clear existing timeout
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+
+    // Set new timeout to stop typing
+    typingTimeoutRef.current = setTimeout(() => {
+      setIsTyping(false);
+      sendTypingIndicator(false);
+    }, 2000);
+  }, [isTyping, sendTypingIndicator]);
 
   // Load conversation messages from API - FIXED: Proper package data mapping
   const loadConversationMessages = useCallback(async (conversationId: string) => {
@@ -282,6 +440,34 @@ export default function SupportScreen() {
     }
   }, [autoSelectPackage, loadConversationMessages]);
 
+  // Setup ActionCable on mount
+  useEffect(() => {
+    setupActionCable();
+
+    return () => {
+      // Cleanup ActionCable connection
+      if (conversationId) {
+        leaveConversation(conversationId);
+      }
+      
+      const actionCable = ActionCableService.getInstance();
+      actionCable.disconnect();
+    };
+  }, [setupActionCable]);
+
+  // Join conversation when conversationId changes
+  useEffect(() => {
+    if (conversationId && isConnected) {
+      joinConversation(conversationId);
+    }
+
+    return () => {
+      if (conversationId && isConnected) {
+        leaveConversation(conversationId);
+      }
+    };
+  }, [conversationId, isConnected, joinConversation, leaveConversation]);
+
   // Check for existing active ticket on mount
   useEffect(() => {
     checkActiveTicket();
@@ -457,6 +643,11 @@ export default function SupportScreen() {
       keyboardDidHideListener.remove();
       keyboardDidShowListener.remove();
       backHandler.remove();
+      
+      // Clear typing timeout
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
     };
   }, [showTicketModal, showInquiryModal, showPackageModal, handleGoBack]);
 
@@ -705,7 +896,14 @@ export default function SupportScreen() {
       };
 
       setMessages(prev => [...prev, newMessage]);
+      const messageText = inputText.trim();
       setInputText('');
+      
+      // Stop typing indicator
+      if (isTyping) {
+        setIsTyping(false);
+        sendTypingIndicator(false);
+      }
       
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
@@ -714,7 +912,7 @@ export default function SupportScreen() {
       // Send message to backend
       const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-        content: inputText.trim(),
+        content: messageText,
         message_type: 'text',
         metadata
       });
@@ -748,7 +946,16 @@ export default function SupportScreen() {
     } finally {
       setIsLoading(false);
     }
-  }, [inputText, ensureConversation, selectedPackage, inquiryType]);
+  }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator]);
+
+  // Handle input text change with typing indicator
+  const handleInputTextChange = useCallback((text: string) => {
+    setInputText(text);
+    
+    if (text.trim() && conversationId) {
+      handleTyping();
+    }
+  }, [conversationId, handleTyping]);
 
   const renderMessage = ({ item }: { item: Message }) => (
     <View style={styles.messageWrapper}>
@@ -821,10 +1028,25 @@ export default function SupportScreen() {
   const getTicketStatusText = () => {
     switch (ticketStatus) {
       case 'pending': return 'Ticket Pending';
-      case 'active': return 'Online';
+      case 'active': return isConnected ? 'Online' : 'Connecting...';
       case 'closed': return 'Last seen recently';
-      default: return 'Online';
+      default: return isConnected ? 'Online' : 'Connecting...';
     }
+  };
+
+  const renderTypingIndicator = () => {
+    if (typingUsers.length === 0) return null;
+
+    return (
+      <View style={styles.typingIndicator}>
+        <Text style={styles.typingText}>
+          {typingUsers.length === 1 
+            ? `${typingUsers[0]} is typing...`
+            : `${typingUsers.join(', ')} are typing...`
+          }
+        </Text>
+      </View>
+    );
   };
 
   const renderTicketModal = () => (
@@ -1153,7 +1375,14 @@ export default function SupportScreen() {
           
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>Customer Support</Text>
-            <Text style={styles.headerSubtitle}>{getTicketStatusText()}</Text>
+            <View style={styles.headerSubtitleRow}>
+              <Text style={styles.headerSubtitle}>{getTicketStatusText()}</Text>
+              {isConnected && (
+                <View style={styles.connectionIndicator}>
+                  <View style={styles.onlineIndicator} />
+                </View>
+              )}
+            </View>
           </View>
           
           <View style={styles.headerActions}>
@@ -1186,6 +1415,9 @@ export default function SupportScreen() {
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
             onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
           />
+          
+          {/* Typing Indicator */}
+          {renderTypingIndicator()}
         </View>
 
         {/* Show inquiry type tabs when not showing modals */}
@@ -1332,7 +1564,7 @@ export default function SupportScreen() {
                 }
                 placeholderTextColor="#8E8E93"
                 value={inputText}
-                onChangeText={setInputText}
+                onChangeText={handleInputTextChange}
                 multiline
                 maxLength={1000}
                 onFocus={() => {
@@ -1431,11 +1663,24 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     flexShrink: 0,
   },
+  headerSubtitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 1,
+  },
   headerSubtitle: {
     color: '#E1BEE7',
     fontSize: 12,
-    marginTop: 1,
     lineHeight: 14,
+  },
+  connectionIndicator: {
+    marginLeft: 6,
+  },
+  onlineIndicator: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#10b981',
   },
   headerActions: {
     flexDirection: 'row',
@@ -1533,6 +1778,18 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 11,
     marginRight: 4,
+  },
+  
+  // Typing indicator styles
+  typingIndicator: {
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    marginBottom: 8,
+  },
+  typingText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontStyle: 'italic',
   },
   
   // Inquiry section styles
