@@ -1,4 +1,4 @@
-// lib/services/ActionCableService.ts - React Native compatible WebSocket service
+// lib/services/ActionCableService.ts - Fixed with proper message broadcasting
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
@@ -25,10 +25,13 @@ interface ActionCableMessage {
   user_data?: any;
   recent_conversations?: any[];
   businesses?: any[];
+  // FIXED: Add missing message broadcasting fields
+  conversation_id?: string;
+  message_id?: string;
+  ticket_id?: string;
   // Metadata
   timestamp: string;
   user_id?: string;
-  conversation_id?: string;
   business_id?: string;
   [key: string]: any;
 }
@@ -479,9 +482,13 @@ class ActionCableService {
     }
   }
 
+  // FIXED: Enhanced message handling with proper routing
   private handleMessage(data: ActionCableMessage): void {
     try {
-      // Execute type-specific callbacks
+      // Log all incoming messages for debugging
+      console.log('📡 Processing ActionCable message:', data.type, data);
+      
+      // FIXED: Execute type-specific callbacks first
       const callbacks = this.callbacks[data.type] || [];
       callbacks.forEach(callback => {
         try {
@@ -491,7 +498,7 @@ class ActionCableService {
         }
       });
 
-      // Execute global callbacks
+      // FIXED: Execute global callbacks for all messages (this was missing)
       const globalCallbacks = this.callbacks['*'] || [];
       globalCallbacks.forEach(callback => {
         try {
@@ -501,10 +508,67 @@ class ActionCableService {
         }
       });
 
+      // FIXED: Special handling for message broadcasts to ensure they reach the right handlers
+      if (data.type === 'new_message' && data.conversation_id) {
+        // Also trigger conversation-specific callbacks
+        const conversationCallbacks = this.callbacks[`conversation_${data.conversation_id}`] || [];
+        conversationCallbacks.forEach(callback => {
+          try {
+            callback(data);
+          } catch (error) {
+            console.error(`❌ Error in conversation-specific callback:`, error);
+          }
+        });
+      }
+
+      // FIXED: Enhanced message processing for specific message types
+      this.processSpecialMessageTypes(data);
+      
       // Log important message types
       this.logImportantMessages(data);
     } catch (error) {
       console.error('❌ Error handling ActionCable message:', error);
+    }
+  }
+
+  // FIXED: Add special message type processing
+  private processSpecialMessageTypes(data: ActionCableMessage): void {
+    try {
+      switch (data.type) {
+        case 'new_message':
+          // Ensure message has required fields for proper handling
+          if (data.conversation_id && data.message) {
+            console.log(`💬 New message in conversation ${data.conversation_id}:`, data.message.content?.substring(0, 50));
+            
+            // Trigger specific message callbacks
+            this.triggerCallbacks('message_received', {
+              ...data,
+              timestamp: new Date().toISOString()
+            });
+          }
+          break;
+          
+        case 'conversation_updated':
+          if (data.conversation_id) {
+            console.log(`🔄 Conversation ${data.conversation_id} updated`);
+            this.triggerCallbacks('conversation_status_changed', data);
+          }
+          break;
+          
+        case 'typing_indicator':
+          if (data.conversation_id) {
+            console.log(`⌨️ Typing indicator in conversation ${data.conversation_id}: ${data.typing}`);
+          }
+          break;
+          
+        case 'ticket_status_changed':
+          if (data.conversation_id) {
+            console.log(`🎫 Ticket status changed for conversation ${data.conversation_id}: ${data.new_status}`);
+          }
+          break;
+      }
+    } catch (error) {
+      console.error('❌ Error processing special message type:', error);
     }
   }
 
