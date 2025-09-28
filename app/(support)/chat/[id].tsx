@@ -23,6 +23,7 @@ import { useUser } from '../../../context/UserContext';
 import api from '../../../lib/api';
 import ActionCableService from '../../../lib/services/ActionCableService';
 import { accountManager } from '../../../lib/AccountManager';
+import ChatCacheManager, { CachedMessage, CachedConversation } from '../../../lib/cache/ChatCacheManager';
 
 interface ChatMessage {
   id: string;
@@ -80,8 +81,8 @@ const SCROLL_THRESHOLD = 0.1;
 export default function SupportChatScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const { user } = useUser();
-  const [conversation, setConversation] = useState<ChatConversation | null>(null);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [conversation, setConversation] = useState<CachedConversation | null>(null);
+  const [messages, setMessages] = useState<CachedMessage[]>([]);
   const [loading, setLoading] = useState(true);
   const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState('');
@@ -92,7 +93,6 @@ export default function SupportChatScreen() {
   // Enhanced pagination states
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [oldestMessageId, setOldestMessageId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
@@ -101,9 +101,21 @@ export default function SupportChatScreen() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const cacheManager = useRef(ChatCacheManager.getInstance());
+  const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Initialize ActionCable connection
+  // Initialize ActionCable connection and cache subscription
   useEffect(() => {
+    if (!id) return;
+
+    // Subscribe to cache updates
+    cacheUnsubscribeRef.current = cacheManager.current.subscribe(id, (conversationId, cachedData) => {
+      console.log(`📦 Cache updated for conversation ${conversationId}`);
+      setConversation(cachedData.conversation);
+      setMessages(cachedData.messages);
+      setHasMoreMessages(cachedData.hasMoreMessages);
+    });
+
     const initActionCable = async () => {
       try {
         const currentAccount = accountManager.getCurrentAccount();
@@ -144,21 +156,24 @@ export default function SupportChatScreen() {
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+
+      // Unsubscribe from cache updates
+      if (cacheUnsubscribeRef.current) {
+        cacheUnsubscribeRef.current();
+      }
     };
   }, [user, id]);
 
-  // ActionCable event handlers
+  // ActionCable event handlers with cache integration
   const handleNewMessage = useCallback((data: any) => {
     if (data.conversation_id === id && data.message) {
-      const newMessage: ChatMessage = {
+      const newMessage: CachedMessage = {
         ...data.message,
         optimistic: false,
       };
       
-      setMessages(prev => {
-        const filteredMessages = prev.filter(msg => !msg.optimistic || msg.id !== newMessage.id);
-        return [...filteredMessages, newMessage];
-      });
+      // Update cache with new message
+      cacheManager.current.addMessageToCache(id, newMessage);
       
       if (data.message.user.id === user?.id) {
         setTimeout(() => {
@@ -192,31 +207,53 @@ export default function SupportChatScreen() {
 
   const handleTicketStatusChange = useCallback((data: any) => {
     if (data.conversation_id === id) {
-      setConversation(prev => prev ? { ...prev, status: data.new_status } : null);
+      // Update cache with conversation status change
+      cacheManager.current.updateConversationMetadata(id, { status: data.new_status });
       
       if (data.system_message) {
-        const systemMessage: ChatMessage = {
+        const systemMessage: CachedMessage = {
           ...data.system_message,
           optimistic: false,
         };
-        setMessages(prev => [...prev, systemMessage]);
+        cacheManager.current.addMessageToCache(id, systemMessage);
       }
     }
   }, [id]);
 
-  // Enhanced conversation loading with timeout and proper pagination
-  const loadConversation = useCallback(async (isRefresh = false, olderThan?: string) => {
+  // Enhanced conversation loading with cache integration
+  const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
     if (!id) {
       setLoading(false);
       return;
     }
+
+    // Check cache first (unless it's a refresh or we need to load older messages)
+    if (!isRefresh && !loadOlder) {
+      const cachedData = cacheManager.current.getCachedConversation(id);
+      if (cachedData) {
+        console.log(`📦 Loading conversation from cache: ${id}`);
+        setConversation(cachedData.conversation);
+        setMessages(cachedData.messages);
+        setHasMoreMessages(cachedData.hasMoreMessages);
+        setLoading(false);
+        setIsInitialLoad(false);
+        
+        // Scroll to bottom for cached data
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+        }, 100);
+        return;
+      }
+    }
+
+    // If no cache or refresh requested, proceed with API call
+    console.log(`🌐 Loading conversation from API: ${id}`, { isRefresh, loadOlder });
 
     // Cancel previous request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
 
-    // Create new abort controller
     abortControllerRef.current = new AbortController();
     const timeoutId = setTimeout(() => {
       abortControllerRef.current?.abort();
@@ -225,7 +262,7 @@ export default function SupportChatScreen() {
     try {
       if (isRefresh) {
         setRefreshing(true);
-      } else if (olderThan) {
+      } else if (loadOlder) {
         setLoadingOlder(true);
       } else {
         setLoading(true);
@@ -234,14 +271,18 @@ export default function SupportChatScreen() {
       setConnectionError(false);
 
       const params: any = {
-        limit: olderThan ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
+        limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
       };
 
-      if (olderThan) {
-        params.older_than = olderThan;
+      // For pagination, get the oldest message ID from cache
+      if (loadOlder) {
+        const oldestMessageId = cacheManager.current.getOldestMessageId(id);
+        if (oldestMessageId) {
+          params.older_than = oldestMessageId;
+        }
       }
 
-      console.log('Loading conversation with params:', params);
+      console.log('API request params:', params);
 
       const response = await api.get(`/api/v1/conversations/${id}`, {
         params,
@@ -256,25 +297,28 @@ export default function SupportChatScreen() {
         const messagesData = response.data.messages || [];
         const pagination = response.data.pagination || {};
 
-        if (isRefresh || !olderThan) {
-          // Initial load or refresh
-          setConversation(conversationData);
-          setMessages(messagesData);
-          setHasMoreMessages(pagination.has_more || false);
-          setOldestMessageId(messagesData.length > 0 ? messagesData[0]?.id : null);
+        if (isRefresh || (!loadOlder && !cacheManager.current.isCached(id))) {
+          // Initial load or refresh - replace cache completely
+          cacheManager.current.setCachedConversation(
+            id,
+            conversationData,
+            messagesData,
+            pagination.has_more || false,
+            messagesData.length > 0 ? messagesData[0]?.id : null
+          );
           setIsInitialLoad(false);
 
           // Scroll to bottom for initial load
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
-        } else {
-          // Loading older messages
-          setMessages(prev => [...messagesData, ...prev]);
-          setHasMoreMessages(pagination.has_more || false);
-          if (messagesData.length > 0) {
-            setOldestMessageId(messagesData[0]?.id);
-          }
+        } else if (loadOlder) {
+          // Loading older messages - prepend to cache
+          cacheManager.current.prependOlderMessages(
+            id,
+            messagesData,
+            pagination.has_more || false
+          );
         }
 
         console.log(`Loaded ${messagesData.length} messages, has_more: ${pagination.has_more}`);
@@ -297,7 +341,7 @@ export default function SupportChatScreen() {
           'Connection Timeout', 
           'The request took too long. Please check your connection and try again.',
           [
-            { text: 'Retry', onPress: () => loadConversation(isRefresh, olderThan) },
+            { text: 'Retry', onPress: () => loadConversation(isRefresh, loadOlder) },
             { text: 'Cancel', style: 'cancel' }
           ]
         );
@@ -306,7 +350,7 @@ export default function SupportChatScreen() {
           'Error', 
           'Failed to load conversation. Please check your connection and try again.',
           [
-            { text: 'Retry', onPress: () => loadConversation(isRefresh, olderThan) },
+            { text: 'Retry', onPress: () => loadConversation(isRefresh, loadOlder) },
             { text: 'Cancel', style: 'cancel' }
           ]
         );
@@ -320,18 +364,20 @@ export default function SupportChatScreen() {
 
   // Load older messages when scrolling to top
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlder || !hasMoreMessages || !oldestMessageId) {
+    if (loadingOlder || !cacheManager.current.shouldLoadOlderMessages(id)) {
       return;
     }
     
-    console.log('Loading older messages before:', oldestMessageId);
-    await loadConversation(false, oldestMessageId);
-  }, [loadConversation, oldestMessageId, hasMoreMessages, loadingOlder]);
+    console.log('Loading older messages for conversation:', id);
+    await loadConversation(false, true);
+  }, [loadConversation, id, loadingOlder]);
 
   // Refresh conversation
   const handleRefresh = useCallback(async () => {
+    // Clear cache and reload from API
+    cacheManager.current.clearConversationCache(id);
     await loadConversation(true);
-  }, [loadConversation]);
+  }, [loadConversation, id]);
 
   // Initial load
   useEffect(() => {
@@ -359,7 +405,7 @@ export default function SupportChatScreen() {
     }, 2000);
   }, [isTyping, id]);
 
-  // Enhanced send message with timeout
+  // Enhanced send message with cache-based optimistic updates
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || sending || !id) return;
 
@@ -372,8 +418,8 @@ export default function SupportChatScreen() {
       actionCableRef.current.stopTyping(id);
     }
 
-    // Add optimistic message
-    const optimisticMessage: ChatMessage = {
+    // Add optimistic message to cache
+    const optimisticMessage: CachedMessage = {
       id: `optimistic-${Date.now()}`,
       content: messageText,
       created_at: new Date().toISOString(),
@@ -394,7 +440,7 @@ export default function SupportChatScreen() {
       optimistic: true,
     };
 
-    setMessages(prev => [...prev, optimisticMessage]);
+    cacheManager.current.addOptimisticMessage(id, optimisticMessage);
     
     setTimeout(() => {
       flatListRef.current?.scrollToEnd({ animated: true });
@@ -418,13 +464,16 @@ export default function SupportChatScreen() {
       clearTimeout(sendTimeoutId);
 
       if (response.data.success) {
-        setMessages(prev => {
-          const filteredMessages = prev.filter(msg => !msg.optimistic);
-          return [...filteredMessages, response.data.message];
-        });
+        // Remove optimistic message and add real message
+        cacheManager.current.removeOptimisticMessages(id);
+        cacheManager.current.addMessageToCache(id, response.data.message);
         
-        if (conversation && response.data.conversation) {
-          setConversation(response.data.conversation);
+        // Update conversation metadata if provided
+        if (response.data.conversation) {
+          cacheManager.current.updateConversationMetadata(id, {
+            last_activity_at: response.data.conversation.last_activity_at,
+            status: response.data.conversation.status
+          });
         }
       } else {
         throw new Error(response.data.message || 'Failed to send message');
@@ -439,12 +488,13 @@ export default function SupportChatScreen() {
         Alert.alert('Error', 'Failed to send message. Please try again.');
       }
       
-      setMessages(prev => prev.filter(msg => !msg.optimistic));
+      // Remove optimistic message on error and restore input text
+      cacheManager.current.removeOptimisticMessages(id);
       setInputText(messageText);
     } finally {
       setSending(false);
     }
-  }, [inputText, sending, id, user, conversation, isTyping]);
+  }, [inputText, sending, id, user, isTyping]);
 
   // Quick actions for support agents
   const handleQuickAction = async (action: string) => {
