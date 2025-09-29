@@ -936,13 +936,18 @@ export default function SupportChatScreen() {
         />
 
         {/* Input Area */}
-        <View style={styles.inputContainer}>
+        <View style={[
+          styles.inputContainer,
+          { 
+            paddingBottom: Platform.OS === 'ios' ? 34 : 8 
+          }
+        ]}>
           <View style={styles.inputRow}>
-            <TouchableOpacity style={styles.inputButton}>
-              <Feather name="paperclip" size={20} color="#8E8E93" />
-            </TouchableOpacity>
-            
             <View style={styles.textInputContainer}>
+              <TouchableOpacity style={styles.inputButton}>
+                <Feather name="smile" size={20} color="#8E8E93" />
+              </TouchableOpacity>
+              
               <TextInput
                 style={styles.textInput}
                 placeholder="Type a message..."
@@ -955,20 +960,29 @@ export default function SupportChatScreen() {
                 onSubmitEditing={sendMessage}
                 blurOnSubmit={false}
               />
+              
+              <TouchableOpacity style={styles.attachButton}>
+                <Feather name="paperclip" size={18} color="#8E8E93" />
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.cameraButton}>
+                <Feather name="camera" size={18} color="#8E8E93" />
+              </TouchableOpacity>
             </View>
-
+            
             <TouchableOpacity
               style={[
                 styles.sendButton,
-                inputText.trim() ? styles.sendButtonActive : styles.sendButtonInactive,
+                inputText.trim() ? styles.sendButtonActive : styles.voiceButton,
               ]}
-              onPress={sendMessage}
+              onPress={inputText.trim() ? sendMessage : undefined}
               disabled={!inputText.trim() || sending}
             >
               {sending ? (
-                <ActivityIndicator size={16} color="#fff" />
+                <ActivityIndicator size={18} color="#fff" />
+              ) : inputText.trim() ? (
+                <Feather name="send" size={18} color="#fff" />
               ) : (
-                <Feather name="send" size={16} color="#fff" />
+                <Feather name="mic" size={18} color="#fff" />
               )}
             </TouchableOpacity>
           </View>
