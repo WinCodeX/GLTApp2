@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Fixed Support Screen with proper ActionCable integration
+// app/(drawer)/support.tsx - Enhanced with instant broadcasting and WhatsApp-style status
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -27,20 +27,16 @@ import {
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
-import { supportApi } from '../../services/supportApi';
 import colors from '../../theme/colors';
 import api from '../../lib/api';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { useUser } from '../../context/UserContext';
 import { accountManager } from '../../lib/AccountManager';
 import ChatCacheManager, { CachedMessage, CachedConversation } from '../../lib/cache/ChatCacheManager';
-
-// Import NavigationHelper
 import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-// Configuration constants
 const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 10000;
@@ -56,6 +52,8 @@ interface Message {
   packageCode?: string;
   isTagged?: boolean;
   optimistic?: boolean;
+  delivered_at?: string | null;
+  read_at?: string | null;
 }
 
 interface Package {
@@ -76,14 +74,12 @@ export default function SupportScreen() {
   const params = useLocalSearchParams();
   const { user } = useUser();
   
-  // Check if we should auto-select package inquiry (from report button)
   const autoSelectPackage = params.autoSelectPackage === 'true';
   const preFilledPackageCode = params.packageCode as string;
   const preFilledPackageId = params.packageId as string;
 
   const handleGoBack = useCallback(() => {
     console.log('Support screen: navigating back');
-    
     NavigationHelper.goBack({
       fallbackRoute: '/(tabs)',
       replaceIfNoHistory: true
@@ -99,26 +95,22 @@ export default function SupportScreen() {
   const [ticketStatus, setTicketStatus] = useState<'none' | 'pending' | 'active' | 'closed'>('none');
   const [hasActiveTicket, setHasActiveTicket] = useState(false);
   
-  // Enhanced pagination states
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   
-  // ActionCable state
   const [isConnected, setIsConnected] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   const [typingUsers, setTypingUsers] = useState<string[]>([]);
   
-  // Modal states
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
   const [showPackageModal, setShowPackageModal] = useState(false);
   const [inquiryText, setInquiryText] = useState('');
   const [packageInquiry, setPackageInquiry] = useState('');
   
-  // Inquiry type management for integrated approach
   const [inquiryType, setInquiryType] = useState<InquiryType>(autoSelectPackage ? 'package' : 'basic');
   const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
   const [showPackageSearch, setShowPackageSearch] = useState(false);
@@ -127,24 +119,19 @@ export default function SupportScreen() {
   const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [loadingPackages, setLoadingPackages] = useState(false);
   
-  // Modal animation
   const slideAnim = useRef(new Animated.Value(SCREEN_HEIGHT)).current;
-
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const cacheManager = useRef(ChatCacheManager.getInstance());
   const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Cache subscription and ActionCable setup
   useEffect(() => {
     if (!conversationId) return;
 
-    // Subscribe to cache updates
     cacheUnsubscribeRef.current = cacheManager.current.subscribe(conversationId, (convId, cachedData) => {
       console.log(`📦 Cache updated for support conversation ${convId}`);
       
-      // Convert cached messages to local message format
       const localMessages = cachedData.messages.map(msg => ({
         id: msg.id,
         text: msg.content,
@@ -154,6 +141,8 @@ export default function SupportScreen() {
         packageCode: msg.metadata?.package_code || null,
         isTagged: !!(msg.metadata?.package_code),
         optimistic: msg.optimistic,
+        delivered_at: msg.delivered_at,
+        read_at: msg.read_at,
       }));
       
       setMessages(localMessages);
@@ -177,17 +166,15 @@ export default function SupportScreen() {
 
         if (connected) {
           setIsConnected(true);
-          console.log('ActionCable connected for support');
+          console.log('✅ ActionCable connected for support');
 
-          // Join conversation
           await actionCable.joinConversation(conversationId);
 
-          // FIXED: Subscribe to message updates with proper structure handling
+          // INSTANT message broadcasting handler
           actionCable.subscribe('new_message', (data) => {
-            console.log('📨 New message received:', data);
+            console.log('📨 INSTANT message received:', data);
             
             if (data.conversation_id === conversationId && data.message) {
-              // FIXED: Proper message structure handling
               const messageData = data.message;
               
               const newMessage: CachedMessage = {
@@ -209,19 +196,36 @@ export default function SupportScreen() {
                 },
                 metadata: messageData.metadata || {},
                 optimistic: false,
+                delivered_at: messageData.delivered_at,
+                read_at: messageData.read_at,
               };
 
-              // Update cache with new message
               cacheManager.current.addMessageToCache(conversationId, newMessage);
               
-              // Scroll to bottom
               setTimeout(() => {
                 flatListRef.current?.scrollToEnd({ animated: true });
               }, 100);
             }
           });
 
-          // FIXED: Subscribe to typing indicators with proper handling
+          // Message acknowledgment handler
+          actionCable.subscribe('message_acknowledged', (data) => {
+            console.log('✅ Message acknowledged:', data);
+            
+            if (data.message_id) {
+              setMessages(prev => prev.map(msg => {
+                if (msg.id === data.message_id) {
+                  if (data.status === 'delivered') {
+                    return { ...msg, delivered_at: data.timestamp };
+                  } else if (data.status === 'read') {
+                    return { ...msg, delivered_at: msg.delivered_at || data.timestamp, read_at: data.timestamp };
+                  }
+                }
+                return msg;
+              }));
+            }
+          });
+
           actionCable.subscribe('typing_indicator', (data) => {
             if (data.conversation_id === conversationId) {
               if (data.typing && data.user_id !== user.id) {
@@ -237,12 +241,10 @@ export default function SupportScreen() {
             }
           });
 
-          // FIXED: Subscribe to conversation updates with proper status handling
           actionCable.subscribe('conversation_updated', (data) => {
             if (data.conversation_id === conversationId) {
               if (data.status) {
                 setTicketStatus(data.status);
-                // Update cache metadata
                 cacheManager.current.updateConversationMetadata(conversationId, {
                   status: data.status
                 });
@@ -250,13 +252,11 @@ export default function SupportScreen() {
             }
           });
 
-          // FIXED: Enhanced ticket status change handling
           actionCable.subscribe('ticket_status_changed', (data) => {
             if (data.conversation_id === conversationId) {
               console.log('🎫 Ticket status changed:', data.new_status);
               setTicketStatus(data.new_status);
               
-              // Add system message if provided
               if (data.system_message) {
                 const systemMessage: CachedMessage = {
                   id: data.system_message.id,
@@ -274,14 +274,12 @@ export default function SupportScreen() {
                 cacheManager.current.addMessageToCache(conversationId, systemMessage);
               }
               
-              // Update cache metadata
               cacheManager.current.updateConversationMetadata(conversationId, {
                 status: data.new_status
               });
             }
           });
 
-          // FIXED: Connection status handlers
           actionCable.subscribe('connection_established', () => {
             setIsConnected(true);
             console.log('✅ ActionCable connection established');
@@ -317,7 +315,6 @@ export default function SupportScreen() {
     };
   }, [conversationId, user, isConnected]);
 
-  // Send typing indicator
   const sendTypingIndicator = useCallback(async (typing: boolean) => {
     if (!isConnected || !conversationId) return;
 
@@ -333,7 +330,6 @@ export default function SupportScreen() {
     }
   }, [isConnected, conversationId]);
 
-  // Handle typing with debouncing
   const handleTyping = useCallback(() => {
     if (!isTyping) {
       setIsTyping(true);
@@ -350,16 +346,13 @@ export default function SupportScreen() {
     }, 2000);
   }, [isTyping, sendTypingIndicator]);
 
-  // Enhanced conversation loading with cache integration
   const loadConversationMessages = useCallback(async (conversationId: string, isRefresh = false, loadOlder = false) => {
     try {
-      // Check cache first (unless it's a refresh or loading older messages)
       if (!isRefresh && !loadOlder) {
         const cachedData = cacheManager.current.getCachedConversation(conversationId);
         if (cachedData) {
           console.log(`📦 Loading support conversation from cache: ${conversationId}`);
           
-          // Convert cached messages to local format
           const localMessages = cachedData.messages.map(msg => ({
             id: msg.id,
             text: msg.content,
@@ -369,6 +362,8 @@ export default function SupportScreen() {
             packageCode: msg.metadata?.package_code || null,
             isTagged: !!(msg.metadata?.package_code),
             optimistic: msg.optimistic,
+            delivered_at: msg.delivered_at,
+            read_at: msg.read_at,
           }));
           
           setMessages(localMessages);
@@ -376,17 +371,14 @@ export default function SupportScreen() {
           setLoadingMessages(false);
           setIsInitialLoad(false);
           
-          // Restore conversation metadata
           if (cachedData.conversation.assigned_agent) {
             setTicketStatus('active');
           } else {
             setTicketStatus('pending');
           }
           
-          // Restore package selection from cache
           const conversation = cachedData.conversation;
           if (conversation.package_id) {
-            // Try to find package in cache or load it
             const foundMessage = cachedData.messages.find(msg => msg.metadata?.package_code);
             if (foundMessage?.metadata?.package_code) {
               setInquiryType('package');
@@ -401,10 +393,8 @@ export default function SupportScreen() {
         }
       }
 
-      // If no cache or refresh requested, proceed with API call
       console.log(`🌐 Loading support conversation from API: ${conversationId}`, { isRefresh, loadOlder });
 
-      // Cancel previous request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -428,7 +418,6 @@ export default function SupportScreen() {
         limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
       };
 
-      // For pagination, get the oldest message ID from cache
       if (loadOlder) {
         const oldestMessageId = cacheManager.current.getOldestMessageId(conversationId);
         if (oldestMessageId) {
@@ -451,7 +440,6 @@ export default function SupportScreen() {
         const conversationData = response.data.conversation;
         const pagination = response.data.pagination || {};
 
-        // Convert API messages to cached format
         const cachedMessages: CachedMessage[] = apiMessages.map((msg: any) => ({
           id: String(msg.id),
           content: msg.content || '',
@@ -470,9 +458,10 @@ export default function SupportScreen() {
             role: 'unknown'
           },
           metadata: msg.metadata || {},
+          delivered_at: msg.delivered_at,
+          read_at: msg.read_at,
         }));
 
-        // Create cached conversation
         const cachedConversation: CachedConversation = {
           id: conversationData.id,
           ticket_id: conversationData.ticket_id,
@@ -489,7 +478,6 @@ export default function SupportScreen() {
         };
 
         if (isRefresh || (!loadOlder && !cacheManager.current.isCached(conversationId))) {
-          // Initial load or refresh - replace cache completely
           cacheManager.current.setCachedConversation(
             conversationId,
             cachedConversation,
@@ -503,7 +491,6 @@ export default function SupportScreen() {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
         } else if (loadOlder) {
-          // Loading older messages - prepend to cache
           cacheManager.current.prependOlderMessages(
             conversationId,
             cachedMessages,
@@ -511,14 +498,12 @@ export default function SupportScreen() {
           );
         }
 
-        // Restore conversation metadata
         if (conversationData.assigned_agent) {
           setTicketStatus('active');
         } else {
           setTicketStatus('pending');
         }
 
-        // Restore package selection from conversation or messages
         if (conversationData.package) {
           const conversationPackage = conversationData.package;
           setSelectedPackage({
@@ -535,13 +520,11 @@ export default function SupportScreen() {
           setInquiryType('package');
           console.log('Restored selected package from conversation:', conversationPackage.code);
         } else {
-          // Check messages for package codes
           const messageWithPackage = cachedMessages.find(msg => msg.metadata?.package_code);
           if (messageWithPackage?.metadata?.package_code) {
             setInquiryType('package');
             console.log('Found package code in message metadata:', messageWithPackage.metadata.package_code);
             
-            // Try to load package details if needed
             if (userPackages.length === 0) {
               loadUserPackages();
             }
@@ -561,7 +544,6 @@ export default function SupportScreen() {
       setConnectionError(true);
 
       if (!isRefresh && !loadOlder) {
-        // Set default welcome message if initial loading fails
         const defaultMessages: Message[] = [{
           id: '1',
           text: 'Hello! Welcome to our customer support. How can I help you today?',
@@ -582,7 +564,6 @@ export default function SupportScreen() {
     }
   }, [userPackages.length]);
 
-  // Load older messages when scrolling to top
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlder || !conversationId || !cacheManager.current.shouldLoadOlderMessages(conversationId)) {
       return;
@@ -592,16 +573,13 @@ export default function SupportScreen() {
     await loadConversationMessages(conversationId, false, true);
   }, [loadConversationMessages, conversationId, loadingOlder]);
 
-  // Refresh conversation
   const handleRefresh = useCallback(async () => {
     if (!conversationId) return;
     
-    // Clear cache and reload from API
     cacheManager.current.clearConversationCache(conversationId);
     await loadConversationMessages(conversationId, true);
   }, [loadConversationMessages, conversationId]);
 
-  // Check for existing active ticket on mount
   const checkActiveTicket = useCallback(async () => {
     try {
       console.log('Checking for active support ticket...');
@@ -614,7 +592,6 @@ export default function SupportScreen() {
         setHasActiveTicket(true);
         setTicketStatus('active');
         
-        // Load existing messages from the conversation
         await loadConversationMessages(response.data.conversation_id);
         
         return;
@@ -623,7 +600,6 @@ export default function SupportScreen() {
       console.log('No active ticket found');
       setHasActiveTicket(false);
       
-      // Set default welcome message
       setMessages([{
         id: '1',
         text: 'Hello! Welcome to our customer support. How can I help you today?',
@@ -639,7 +615,6 @@ export default function SupportScreen() {
       setLoadingMessages(false);
       setIsInitialLoad(false);
       
-      // Show appropriate modal based on entry method
       if (autoSelectPackage) {
         setShowPackageModal(true);
       } else {
@@ -649,7 +624,6 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Error checking active ticket:', error);
       
-      // Set default welcome message
       setMessages([{
         id: '1',
         text: 'Hello! Welcome to our customer support. How can I help you today?',
@@ -665,7 +639,6 @@ export default function SupportScreen() {
       setLoadingMessages(false);
       setIsInitialLoad(false);
       
-      // If error, show modal anyway (better user experience)
       if (autoSelectPackage) {
         setShowPackageModal(true);
       } else {
@@ -674,28 +647,23 @@ export default function SupportScreen() {
     }
   }, [autoSelectPackage, loadConversationMessages]);
 
-  // Check for existing active ticket on mount
   useEffect(() => {
     checkActiveTicket();
 
     return () => {
-      // Cancel any pending requests
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
       
-      // Clear typing timeout
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
 
-      // Disconnect ActionCable
       const actionCable = ActionCableService.getInstance();
       actionCable.disconnect();
     };
   }, [checkActiveTicket]);
 
-  // Load user packages for search
   const loadUserPackages = useCallback(async () => {
     try {
       setLoadingPackages(true);
@@ -727,7 +695,6 @@ export default function SupportScreen() {
         
         console.log('Loaded packages for search:', packages.length);
 
-        // If we have a pre-filled package code, try to find and select it
         if (preFilledPackageCode) {
           const preSelectedPackage = packages.find((pkg: Package) => 
             pkg.code === preFilledPackageCode || pkg.id === preFilledPackageId
@@ -747,7 +714,6 @@ export default function SupportScreen() {
     }
   }, [preFilledPackageCode, preFilledPackageId]);
 
-  // Filter packages based on search query
   const filterPackages = useCallback((query: string) => {
     if (!query.trim()) {
       setFilteredPackages(userPackages);
@@ -765,34 +731,29 @@ export default function SupportScreen() {
     setFilteredPackages(filtered);
   }, [userPackages]);
 
-  // Handle package search input change
   const handlePackageSearchChange = useCallback((text: string) => {
     setPackageSearchQuery(text);
     filterPackages(text);
   }, [filterPackages]);
 
-  // Handle package selection
   const handlePackageSelect = useCallback((pkg: Package) => {
     setSelectedPackage(pkg);
     setShowPackageSearch(false);
     setPackageSearchQuery('');
   }, []);
 
-  // Handle inquiry type change (for integrated approach)
   const handleInquiryTypeChange = useCallback((type: InquiryType) => {
     setInquiryType(type);
     if (type === 'basic') {
       setSelectedPackage(null);
       setShowPackageSearch(false);
     } else {
-      // Load packages when switching to package inquiry
       if (userPackages.length === 0) {
         loadUserPackages();
       }
     }
   }, [userPackages.length, loadUserPackages]);
 
-  // Handle showing package search
   const handleShowPackageSearch = useCallback(() => {
     setShowPackageSearch(true);
     if (userPackages.length === 0) {
@@ -800,7 +761,6 @@ export default function SupportScreen() {
     }
   }, [userPackages.length, loadUserPackages]);
 
-  // Create or get conversation
   const ensureConversation = useCallback(async () => {
     if (conversationId) return conversationId;
 
@@ -823,7 +783,6 @@ export default function SupportScreen() {
         setTicketStatus('pending');
         console.log('Support ticket created:', newConversationId);
         
-        // Load any existing messages (like welcome messages created by the backend)
         await loadConversationMessages(newConversationId);
         
         return newConversationId;
@@ -884,7 +843,6 @@ export default function SupportScreen() {
     }
   }, [showTicketModal, showInquiryModal, showPackageModal]);
 
-  // Load packages when package modal opens
   useEffect(() => {
     if (showPackageModal && userPackages.length === 0) {
       loadUserPackages();
@@ -917,11 +875,9 @@ export default function SupportScreen() {
     setIsLoading(true);
     
     try {
-      // Set inquiry type for ticket creation
       setInquiryType('basic');
       setSelectedPackage(null);
       
-      // Create conversation
       const convId = await ensureConversation();
       
       const newMessage: Message = {
@@ -937,7 +893,6 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      // Add optimistic message to cache
       const cachedMessage: CachedMessage = {
         id: newMessage.id,
         content: newMessage.text,
@@ -962,22 +917,18 @@ export default function SupportScreen() {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      // Send message to backend
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
         content: inquiryText.trim(),
         message_type: 'text'
       });
       
       if (response.data.success) {
-        // Remove optimistic message and add real message
         cacheManager.current.removeOptimisticMessages(convId);
         cacheManager.current.addMessageToCache(convId, response.data.message);
         
-        // Update ticket status
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
-        // Add automated response
         setTimeout(() => {
           const supportResponse: CachedMessage = {
             id: (Date.now() + 1).toString(),
@@ -1010,12 +961,10 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Failed to create basic inquiry:', error);
       
-      // Remove optimistic message on error
       if (conversationId) {
         cacheManager.current.removeOptimisticMessages(conversationId);
       }
       
-      // Show error message
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         text: 'Sorry, there was an error creating your inquiry. Please try again.',
@@ -1039,10 +988,8 @@ export default function SupportScreen() {
     setIsLoading(true);
     
     try {
-      // Set inquiry type for ticket creation
       setInquiryType('package');
       
-      // Create conversation
       const convId = await ensureConversation();
       
       const newMessage: Message = {
@@ -1060,7 +1007,6 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      // Add optimistic message to cache
       const cachedMessage: CachedMessage = {
         id: newMessage.id,
         content: newMessage.text,
@@ -1085,7 +1031,6 @@ export default function SupportScreen() {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      // Send message to backend
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
         content: packageInquiry.trim(),
         message_type: 'text',
@@ -1093,15 +1038,12 @@ export default function SupportScreen() {
       });
       
       if (response.data.success) {
-        // Remove optimistic message and add real message
         cacheManager.current.removeOptimisticMessages(convId);
         cacheManager.current.addMessageToCache(convId, response.data.message);
         
-        // Update ticket status
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
-        // Add automated response
         setTimeout(() => {
           const supportResponse: CachedMessage = {
             id: (Date.now() + 1).toString(),
@@ -1134,12 +1076,10 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Failed to create package inquiry:', error);
       
-      // Remove optimistic message on error
       if (conversationId) {
         cacheManager.current.removeOptimisticMessages(conversationId);
       }
       
-      // Show error message
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         text: 'Sorry, there was an error creating your package inquiry. Please try again.',
@@ -1163,7 +1103,6 @@ export default function SupportScreen() {
     setIsLoading(true);
     
     try {
-      // Ensure conversation exists
       const convId = await ensureConversation();
       
       const newMessage: Message = {
@@ -1181,7 +1120,6 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      // Add optimistic message to cache
       const cachedMessage: CachedMessage = {
         id: newMessage.id,
         content: newMessage.text,
@@ -1204,7 +1142,6 @@ export default function SupportScreen() {
       const messageText = inputText.trim();
       setInputText('');
       
-      // Stop typing indicator
       if (isTyping) {
         setIsTyping(false);
         sendTypingIndicator(false);
@@ -1214,7 +1151,6 @@ export default function SupportScreen() {
         flatListRef.current?.scrollToEnd({ animated: true });
       }, 100);
 
-      // Send message to backend
       const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
         content: messageText,
@@ -1223,11 +1159,9 @@ export default function SupportScreen() {
       });
       
       if (response.data.success) {
-        // Remove optimistic message and add real message
         cacheManager.current.removeOptimisticMessages(convId);
         cacheManager.current.addMessageToCache(convId, response.data.message);
         
-        // Update conversation metadata if provided
         if (response.data.conversation) {
           cacheManager.current.updateConversationMetadata(convId, {
             last_activity_at: response.data.conversation.last_activity_at,
@@ -1235,7 +1169,6 @@ export default function SupportScreen() {
           });
         }
         
-        // Update ticket status
         setTicketStatus('pending');
         setHasActiveTicket(true);
       }
@@ -1243,13 +1176,11 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Failed to send message:', error);
       
-      // Remove optimistic message on error and restore input text
       if (conversationId) {
         cacheManager.current.removeOptimisticMessages(conversationId);
       }
       setInputText(inputText.trim());
       
-      // Show error message
       const errorMessage: Message = {
         id: (Date.now() + 2).toString(),
         text: 'Sorry, there was an error sending your message. Please try again.',
@@ -1267,7 +1198,6 @@ export default function SupportScreen() {
     }
   }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator, conversationId, user]);
 
-  // Handle input text change with typing indicator
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
     
@@ -1275,6 +1205,38 @@ export default function SupportScreen() {
       handleTyping();
     }
   }, [conversationId, handleTyping]);
+
+  // WhatsApp-style message status indicator
+  const renderMessageStatus = (message: Message) => {
+    if (message.isSupport || message.type === 'system' || message.optimistic) {
+      return null;
+    }
+
+    // Read: Double blue ticks
+    if (message.read_at) {
+      return (
+        <View style={styles.messageStatusContainer}>
+          <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
+        </View>
+      );
+    }
+
+    // Delivered: Double grey ticks
+    if (message.delivered_at) {
+      return (
+        <View style={styles.messageStatusContainer}>
+          <MaterialIcons name="done-all" size={16} color="rgba(255, 255, 255, 0.5)" />
+        </View>
+      );
+    }
+
+    // Sent: Single grey tick
+    return (
+      <View style={styles.messageStatusContainer}>
+        <MaterialIcons name="done" size={16} color="rgba(255, 255, 255, 0.5)" />
+      </View>
+    );
+  };
 
   const renderMessage = ({ item }: { item: Message }) => (
     <View style={styles.messageWrapper}>
@@ -1305,13 +1267,13 @@ export default function SupportScreen() {
         <View style={styles.messageFooter}>
           <Text style={styles.timestamp}>{item.timestamp}</Text>
           {!item.isSupport && (
-            <View style={styles.messageStatus}>
-              {item.optimistic ? (
+            item.optimistic ? (
+              <View style={styles.messageStatusContainer}>
                 <ActivityIndicator size={12} color="rgba(255, 255, 255, 0.7)" />
-              ) : (
-                <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
-              )}
-            </View>
+              </View>
+            ) : (
+              renderMessageStatus(item)
+            )
           )}
         </View>
       </View>
@@ -1404,7 +1366,6 @@ export default function SupportScreen() {
           >
             <View style={styles.modalHandle} />
 
-            {/* Ticket Selection Modal */}
             {showTicketModal && (
               <>
                 <Text style={styles.modalTitle}>How can we help you?</Text>
@@ -1454,7 +1415,6 @@ export default function SupportScreen() {
               </>
             )}
 
-            {/* Basic Inquiry Modal */}
             {showInquiryModal && (
               <>
                 <Text style={styles.modalTitle}>Basic Inquiry</Text>
@@ -1499,7 +1459,6 @@ export default function SupportScreen() {
               </>
             )}
 
-            {/* Package Inquiry Modal */}
             {showPackageModal && (
               <>
                 <Text style={styles.modalTitle}>Package Inquiry</Text>
@@ -1533,7 +1492,6 @@ export default function SupportScreen() {
                     </TouchableOpacity>
                   )}
 
-                  {/* Package Search Dropdown */}
                   {showPackageSearch && (
                     <View style={styles.packageSearchDropdown}>
                       <View style={styles.packageSearchInputContainer}>
@@ -1625,7 +1583,6 @@ export default function SupportScreen() {
     </Modal>
   );
 
-  // Show loading indicator when loading messages
   if (loadingMessages && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1778,14 +1735,11 @@ export default function SupportScreen() {
             )}
           />
           
-          {/* Typing Indicator */}
           {renderTypingIndicator()}
         </View>
 
-        {/* Show inquiry type tabs when not showing modals */}
         {!showTicketModal && !showInquiryModal && !showPackageModal && (
           <View style={styles.inquirySection}>
-            {/* Inquiry Type Tabs */}
             <View style={styles.inquiryTabs}>
               <TouchableOpacity
                 style={[
@@ -1824,7 +1778,6 @@ export default function SupportScreen() {
               </TouchableOpacity>
             </View>
 
-            {/* Package Selection Section */}
             {inquiryType === 'package' && (
               <View style={styles.packageSection}>
                 {selectedPackage ? (
@@ -1853,7 +1806,6 @@ export default function SupportScreen() {
                   </TouchableOpacity>
                 )}
 
-                {/* Package Search Dropdown */}
                 {showPackageSearch && (
                   <View style={styles.packageSearchDropdown}>
                     <View style={styles.packageSearchInputContainer}>
@@ -1947,7 +1899,7 @@ export default function SupportScreen() {
             <TouchableOpacity 
               style={[
                 styles.sendButtonMain,
-                inputText.trim() || isLoading ? styles.sendButtonActive : styles.voiceButton
+                inputText.trim() ? styles.sendButtonActive : styles.voiceButton
               ]}
               onPress={inputText.trim() ? sendMessage : undefined}
               disabled={isLoading}
@@ -2182,11 +2134,10 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginRight: 4,
   },
-  messageStatus: {
+  messageStatusContainer: {
     marginLeft: 4,
   },
   
-  // Typing indicator styles
   typingIndicator: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -2198,7 +2149,6 @@ const styles = StyleSheet.create({
     fontStyle: 'italic',
   },
   
-  // Inquiry section styles
   inquirySection: {
     backgroundColor: 'rgba(11, 20, 27, 0.95)',
     borderTopWidth: 0.5,
@@ -2231,7 +2181,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
   
-  // Package section styles
   packageSection: {
     paddingHorizontal: 16,
     paddingBottom: 8,
@@ -2282,7 +2231,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
   
-  // Package search dropdown styles
   packageSearchDropdown: {
     backgroundColor: '#1F2C34',
     borderRadius: 8,
@@ -2439,7 +2387,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#7B3F98',
   },
   
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
