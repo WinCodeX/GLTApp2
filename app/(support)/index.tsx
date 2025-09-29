@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - FIXED: Real-time updates for dashboard
+// app/(support)/index.tsx - FIXED: Real-time connection status
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -109,7 +109,6 @@ export default function SupportDashboard() {
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
   const actionCableSubscribed = useRef(false);
 
-  // Firebase setup
   useEffect(() => {
     setupFirebaseMessaging();
     
@@ -239,7 +238,6 @@ export default function SupportDashboard() {
         );
       }
       
-      // FIXED: Reload tickets immediately when notification received
       loadTickets(true);
       loadDashboardData();
     });
@@ -285,7 +283,6 @@ export default function SupportDashboard() {
     }
   };
 
-  // FIXED: Proper ActionCable setup with support_dashboard subscription
   const setupActionCableConnection = useCallback(async () => {
     try {
       if (!user || actionCableSubscribed.current) {
@@ -312,22 +309,25 @@ export default function SupportDashboard() {
       });
 
       if (connected) {
+        setIsConnected(true);
         setupActionCableSubscriptions();
         actionCableSubscribed.current = true;
+      } else {
+        setIsConnected(false);
+        startFallbackPolling();
       }
     } catch (error) {
       console.error('❌ Failed to setup ActionCable connection:', error);
+      setIsConnected(false);
       startFallbackPolling();
     }
   }, [user]);
 
-  // FIXED: Subscribe to support_dashboard channel for real-time updates
   const setupActionCableSubscriptions = () => {
     console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
 
     const actionCable = ActionCableService.getInstance();
 
-    // Connection status
     actionCable.subscribe('connection_established', () => {
       console.log('📡 ActionCable connected');
       setIsConnected(true);
@@ -338,12 +338,10 @@ export default function SupportDashboard() {
       setIsConnected(false);
     });
 
-    // CRITICAL: Subscribe to support_dashboard channel
     actionCable.subscribe('support_dashboard', (channel) => {
       console.log('📡 Subscribed to support_dashboard channel');
     });
 
-    // Initial state
     actionCable.subscribe('initial_state', (data) => {
       console.log('📊 Received initial state via ActionCable:', data);
       if (data.dashboard_stats) {
@@ -355,7 +353,6 @@ export default function SupportDashboard() {
       }
     });
 
-    // FIXED: Dashboard stats updates
     actionCable.subscribe('dashboard_stats_update', (data) => {
       console.log('📊 Dashboard stats update received:', data);
       if (data.stats) {
@@ -364,16 +361,14 @@ export default function SupportDashboard() {
       }
     });
 
-    // FIXED: New support ticket
     actionCable.subscribe('new_support_ticket', (data) => {
       console.log('🎫 New support ticket:', data);
       if (data.ticket) {
         setTickets(prev => [data.ticket, ...prev]);
-        loadDashboardData(); // Refresh stats
+        loadDashboardData();
       }
     });
 
-    // FIXED: Ticket status updates
     actionCable.subscribe('ticket_status_update', (data) => {
       console.log('🎫 Ticket status update:', data);
       if (data.ticket_id && data.status) {
@@ -382,15 +377,13 @@ export default function SupportDashboard() {
             ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
             : ticket
         ));
-        loadDashboardData(); // Refresh stats
+        loadDashboardData();
       }
     });
 
-    // FIXED: New message in ANY conversation
     actionCable.subscribe('new_message', (data) => {
       console.log('📨 New message received:', data);
       if (data.conversation_id && data.message) {
-        // Update the ticket in the list
         setTickets(prev => prev.map(ticket => {
           if (ticket.id === data.conversation_id) {
             const updatedTicket = { ...ticket };
@@ -409,7 +402,6 @@ export default function SupportDashboard() {
           return ticket;
         }));
         
-        // Move updated ticket to top of list
         setTickets(prev => {
           const ticket = prev.find(t => t.id === data.conversation_id);
           if (ticket) {
@@ -421,7 +413,6 @@ export default function SupportDashboard() {
       }
     });
 
-    // FIXED: Agent assignment updates
     actionCable.subscribe('agent_assignment_update', (data) => {
       console.log('👤 Agent assignment update:', data);
       if (data.ticket_id && data.agent) {
@@ -433,7 +424,6 @@ export default function SupportDashboard() {
       }
     });
 
-    // FIXED: Ticket escalation
     actionCable.subscribe('ticket_escalated', (data) => {
       console.log('🚨 Ticket escalated:', data);
       if (data.ticket_id) {
