@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Enhanced with instant broadcasting and WhatsApp-style status
+// app/(drawer)/support.tsx - Fixed with message deduplication
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -23,16 +23,13 @@ import {
 import {
   Feather,
   MaterialIcons,
-  Ionicons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams } from 'expo-router';
-import colors from '../../theme/colors';
 import api from '../../lib/api';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { useUser } from '../../context/UserContext';
 import { accountManager } from '../../lib/AccountManager';
-import ChatCacheManager, { CachedMessage, CachedConversation } from '../../lib/cache/ChatCacheManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -52,6 +49,7 @@ interface Message {
   packageCode?: string;
   isTagged?: boolean;
   optimistic?: boolean;
+  tempId?: string;
   delivered_at?: string | null;
   read_at?: string | null;
 }
@@ -79,7 +77,6 @@ export default function SupportScreen() {
   const preFilledPackageId = params.packageId as string;
 
   const handleGoBack = useCallback(() => {
-    console.log('Support screen: navigating back');
     NavigationHelper.goBack({
       fallbackRoute: '/(tabs)',
       replaceIfNoHistory: true
@@ -123,31 +120,77 @@ export default function SupportScreen() {
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const cacheManager = useRef(ChatCacheManager.getInstance());
-  const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
+  const pendingMessageIds = useRef<Set<string>>(new Set());
+  const messageMapRef = useRef<Map<string, Message>>(new Map());
+
+  // FIXED: Deduplicate messages before rendering
+  const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
+    const uniqueMap = new Map<string, Message>();
+    
+    msgs.forEach(msg => {
+      // Skip optimistic messages if we have the real message
+      if (msg.optimistic && msg.tempId) {
+        // Check if we have a real message with the same temp ID
+        const realMessage = msgs.find(m => !m.optimistic && m.id === msg.tempId);
+        if (realMessage) {
+          return; // Skip this optimistic message
+        }
+      }
+      
+      // Use the message ID as the unique key
+      if (!uniqueMap.has(msg.id)) {
+        uniqueMap.set(msg.id, msg);
+      } else {
+        // Keep the non-optimistic version if there's a duplicate
+        const existing = uniqueMap.get(msg.id)!;
+        if (existing.optimistic && !msg.optimistic) {
+          uniqueMap.set(msg.id, msg);
+        }
+      }
+    });
+    
+    // Sort by timestamp
+    return Array.from(uniqueMap.values()).sort((a, b) => {
+      const timeA = new Date(a.timestamp).getTime();
+      const timeB = new Date(b.timestamp).getTime();
+      return timeA - timeB;
+    });
+  }, []);
+
+  // FIXED: Update messages with deduplication
+  const updateMessages = useCallback((newMessages: Message[]) => {
+    setMessages(prevMessages => {
+      const combined = [...prevMessages, ...newMessages];
+      return deduplicateMessages(combined);
+    });
+  }, [deduplicateMessages]);
+
+  // FIXED: Replace optimistic message with real one
+  const replaceOptimisticMessage = useCallback((tempId: string, realMessage: Message) => {
+    setMessages(prevMessages => {
+      const updated = prevMessages.map(msg => {
+        if (msg.tempId === tempId && msg.optimistic) {
+          return { ...realMessage, tempId };
+        }
+        return msg;
+      });
+      return deduplicateMessages(updated);
+    });
+    
+    pendingMessageIds.current.delete(tempId);
+  }, [deduplicateMessages]);
+
+  // FIXED: Remove optimistic messages
+  const removeOptimisticMessages = useCallback(() => {
+    setMessages(prevMessages => {
+      const filtered = prevMessages.filter(msg => !msg.optimistic);
+      return deduplicateMessages(filtered);
+    });
+    pendingMessageIds.current.clear();
+  }, [deduplicateMessages]);
 
   useEffect(() => {
     if (!conversationId) return;
-
-    cacheUnsubscribeRef.current = cacheManager.current.subscribe(conversationId, (convId, cachedData) => {
-      console.log(`📦 Cache updated for support conversation ${convId}`);
-      
-      const localMessages = cachedData.messages.map(msg => ({
-        id: msg.id,
-        text: msg.content,
-        timestamp: msg.timestamp,
-        isSupport: msg.from_support || msg.is_system,
-        type: (msg.message_type as 'text' | 'voice' | 'system') || 'text',
-        packageCode: msg.metadata?.package_code || null,
-        isTagged: !!(msg.metadata?.package_code),
-        optimistic: msg.optimistic,
-        delivered_at: msg.delivered_at,
-        read_at: msg.read_at,
-      }));
-      
-      setMessages(localMessages);
-      setHasMoreMessages(cachedData.hasMoreMessages);
-    });
 
     const setupActionCable = async () => {
       if (!user) return;
@@ -166,52 +209,57 @@ export default function SupportScreen() {
 
         if (connected) {
           setIsConnected(true);
-          console.log('✅ ActionCable connected for support');
+          console.log('✅ ActionCable connected');
 
           await actionCable.joinConversation(conversationId);
 
-          // INSTANT message broadcasting handler
+          // FIXED: Only process messages from others
           actionCable.subscribe('new_message', (data) => {
-            console.log('📨 INSTANT message received:', data);
+            console.log('📨 Message received:', data);
             
-            if (data.conversation_id === conversationId && data.message) {
-              const messageData = data.message;
-              
-              const newMessage: CachedMessage = {
-                id: messageData.id || `msg-${Date.now()}`,
-                content: messageData.content || '',
-                created_at: messageData.created_at || new Date().toISOString(),
-                timestamp: messageData.timestamp || new Date().toLocaleTimeString('en-US', {
-                  hour12: false,
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-                is_system: messageData.is_system || false,
-                from_support: messageData.from_support || false,
-                message_type: messageData.message_type || 'text',
-                user: messageData.user || {
-                  id: messageData.user?.id || '',
-                  name: messageData.user?.name || 'Unknown',
-                  role: messageData.user?.role || 'unknown'
-                },
-                metadata: messageData.metadata || {},
-                optimistic: false,
-                delivered_at: messageData.delivered_at,
-                read_at: messageData.read_at,
-              };
-
-              cacheManager.current.addMessageToCache(conversationId, newMessage);
-              
-              setTimeout(() => {
-                flatListRef.current?.scrollToEnd({ animated: true });
-              }, 100);
+            if (data.conversation_id !== conversationId || !data.message) return;
+            
+            const messageData = data.message;
+            const messageId = String(messageData.id);
+            
+            // FIXED: Skip if this is our own message that we just sent
+            if (messageData.user?.id === user.id && pendingMessageIds.current.has(messageId)) {
+              console.log('Skipping own message:', messageId);
+              return;
             }
+            
+            // FIXED: Check if message already exists
+            if (messageMapRef.current.has(messageId)) {
+              console.log('Message already exists:', messageId);
+              return;
+            }
+            
+            const newMessage: Message = {
+              id: messageId,
+              text: messageData.content || '',
+              timestamp: messageData.timestamp || new Date().toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              isSupport: messageData.from_support || messageData.is_system || false,
+              type: (messageData.message_type as 'text' | 'voice' | 'system') || 'text',
+              packageCode: messageData.metadata?.package_code || null,
+              isTagged: !!(messageData.metadata?.package_code),
+              optimistic: false,
+              delivered_at: messageData.delivered_at,
+              read_at: messageData.read_at,
+            };
+
+            messageMapRef.current.set(messageId, newMessage);
+            updateMessages([newMessage]);
+            
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: true });
+            }, 100);
           });
 
-          // Message acknowledgment handler
           actionCable.subscribe('message_acknowledged', (data) => {
-            console.log('✅ Message acknowledged:', data);
-            
             if (data.message_id) {
               setMessages(prev => prev.map(msg => {
                 if (msg.id === data.message_id) {
@@ -227,8 +275,8 @@ export default function SupportScreen() {
           });
 
           actionCable.subscribe('typing_indicator', (data) => {
-            if (data.conversation_id === conversationId) {
-              if (data.typing && data.user_id !== user.id) {
+            if (data.conversation_id === conversationId && data.user_id !== user.id) {
+              if (data.typing) {
                 setTypingUsers(prev => {
                   if (!prev.includes(data.user_name)) {
                     return [...prev, data.user_name];
@@ -242,57 +290,39 @@ export default function SupportScreen() {
           });
 
           actionCable.subscribe('conversation_updated', (data) => {
-            if (data.conversation_id === conversationId) {
-              if (data.status) {
-                setTicketStatus(data.status);
-                cacheManager.current.updateConversationMetadata(conversationId, {
-                  status: data.status
-                });
-              }
+            if (data.conversation_id === conversationId && data.status) {
+              setTicketStatus(data.status);
             }
           });
 
           actionCable.subscribe('ticket_status_changed', (data) => {
             if (data.conversation_id === conversationId) {
-              console.log('🎫 Ticket status changed:', data.new_status);
               setTicketStatus(data.new_status);
               
               if (data.system_message) {
-                const systemMessage: CachedMessage = {
+                const systemMessage: Message = {
                   id: data.system_message.id,
-                  content: data.system_message.content,
-                  created_at: data.system_message.created_at,
+                  text: data.system_message.content,
                   timestamp: data.system_message.timestamp,
-                  is_system: true,
-                  from_support: true,
-                  message_type: 'system',
-                  user: data.system_message.user,
-                  metadata: data.system_message.metadata || {},
+                  isSupport: true,
+                  type: 'system',
                   optimistic: false,
                 };
                 
-                cacheManager.current.addMessageToCache(conversationId, systemMessage);
+                if (!messageMapRef.current.has(systemMessage.id)) {
+                  messageMapRef.current.set(systemMessage.id, systemMessage);
+                  updateMessages([systemMessage]);
+                }
               }
-              
-              cacheManager.current.updateConversationMetadata(conversationId, {
-                status: data.new_status
-              });
             }
           });
 
           actionCable.subscribe('connection_established', () => {
             setIsConnected(true);
-            console.log('✅ ActionCable connection established');
           });
 
           actionCable.subscribe('connection_lost', () => {
             setIsConnected(false);
-            console.log('❌ ActionCable connection lost');
-          });
-
-          actionCable.subscribe('connection_error', () => {
-            setIsConnected(false);
-            console.log('❌ ActionCable connection error');
           });
         }
       } catch (error) {
@@ -304,16 +334,12 @@ export default function SupportScreen() {
     setupActionCable();
 
     return () => {
-      if (cacheUnsubscribeRef.current) {
-        cacheUnsubscribeRef.current();
-      }
-      
       if (conversationId && isConnected) {
         const actionCable = ActionCableService.getInstance();
         actionCable.leaveConversation(conversationId);
       }
     };
-  }, [conversationId, user, isConnected]);
+  }, [conversationId, user, isConnected, updateMessages]);
 
   const sendTypingIndicator = useCallback(async (typing: boolean) => {
     if (!isConnected || !conversationId) return;
@@ -348,53 +374,6 @@ export default function SupportScreen() {
 
   const loadConversationMessages = useCallback(async (conversationId: string, isRefresh = false, loadOlder = false) => {
     try {
-      if (!isRefresh && !loadOlder) {
-        const cachedData = cacheManager.current.getCachedConversation(conversationId);
-        if (cachedData) {
-          console.log(`📦 Loading support conversation from cache: ${conversationId}`);
-          
-          const localMessages = cachedData.messages.map(msg => ({
-            id: msg.id,
-            text: msg.content,
-            timestamp: msg.timestamp,
-            isSupport: msg.from_support || msg.is_system,
-            type: (msg.message_type as 'text' | 'voice' | 'system') || 'text',
-            packageCode: msg.metadata?.package_code || null,
-            isTagged: !!(msg.metadata?.package_code),
-            optimistic: msg.optimistic,
-            delivered_at: msg.delivered_at,
-            read_at: msg.read_at,
-          }));
-          
-          setMessages(localMessages);
-          setHasMoreMessages(cachedData.hasMoreMessages);
-          setLoadingMessages(false);
-          setIsInitialLoad(false);
-          
-          if (cachedData.conversation.assigned_agent) {
-            setTicketStatus('active');
-          } else {
-            setTicketStatus('pending');
-          }
-          
-          const conversation = cachedData.conversation;
-          if (conversation.package_id) {
-            const foundMessage = cachedData.messages.find(msg => msg.metadata?.package_code);
-            if (foundMessage?.metadata?.package_code) {
-              setInquiryType('package');
-              console.log('Restored package inquiry from cache:', foundMessage.metadata.package_code);
-            }
-          }
-          
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-          }, 100);
-          return;
-        }
-      }
-
-      console.log(`🌐 Loading support conversation from API: ${conversationId}`, { isRefresh, loadOlder });
-
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
@@ -418,15 +397,11 @@ export default function SupportScreen() {
         limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
       };
 
-      if (loadOlder) {
-        const oldestMessageId = cacheManager.current.getOldestMessageId(conversationId);
-        if (oldestMessageId) {
-          params.older_than = oldestMessageId;
-        }
+      if (loadOlder && messages.length > 0) {
+        const oldestMessage = messages[0];
+        params.older_than = oldestMessage.id;
       }
 
-      console.log('Loading support conversation with params:', params);
-      
       const response = await api.get(`/api/v1/conversations/${conversationId}`, {
         params,
         signal: abortControllerRef.current.signal,
@@ -436,75 +411,50 @@ export default function SupportScreen() {
       clearTimeout(timeoutId);
       
       if (response.data.success && response.data.messages) {
-        const apiMessages = response.data.messages;
-        const conversationData = response.data.conversation;
-        const pagination = response.data.pagination || {};
-
-        const cachedMessages: CachedMessage[] = apiMessages.map((msg: any) => ({
+        const apiMessages: Message[] = response.data.messages.map((msg: any) => ({
           id: String(msg.id),
-          content: msg.content || '',
-          created_at: msg.created_at || new Date().toISOString(),
+          text: msg.content || '',
           timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', {
             hour12: false,
             hour: '2-digit',
             minute: '2-digit',
           }),
-          is_system: msg.is_system || false,
-          from_support: msg.from_support || false,
-          message_type: msg.message_type || 'text',
-          user: msg.user || {
-            id: '',
-            name: 'Unknown',
-            role: 'unknown'
-          },
-          metadata: msg.metadata || {},
+          isSupport: msg.from_support || msg.is_system || false,
+          type: (msg.message_type as 'text' | 'voice' | 'system') || 'text',
+          packageCode: msg.metadata?.package_code || null,
+          isTagged: !!(msg.metadata?.package_code),
+          optimistic: false,
           delivered_at: msg.delivered_at,
           read_at: msg.read_at,
         }));
 
-        const cachedConversation: CachedConversation = {
-          id: conversationData.id,
-          ticket_id: conversationData.ticket_id,
-          title: conversationData.title || 'Support Conversation',
-          status: conversationData.status,
-          priority: conversationData.priority,
-          category: conversationData.category,
-          customer: conversationData.customer,
-          assigned_agent: conversationData.assigned_agent,
-          escalated: conversationData.escalated || false,
-          package_id: conversationData.package_id,
-          created_at: conversationData.created_at,
-          last_activity_at: conversationData.last_activity_at,
-        };
+        // FIXED: Add to message map
+        apiMessages.forEach(msg => {
+          messageMapRef.current.set(msg.id, msg);
+        });
 
-        if (isRefresh || (!loadOlder && !cacheManager.current.isCached(conversationId))) {
-          cacheManager.current.setCachedConversation(
-            conversationId,
-            cachedConversation,
-            cachedMessages,
-            pagination.has_more || false,
-            cachedMessages.length > 0 ? cachedMessages[0]?.id : null
-          );
+        if (isRefresh || !loadOlder) {
+          setMessages(deduplicateMessages(apiMessages));
           setIsInitialLoad(false);
 
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
         } else if (loadOlder) {
-          cacheManager.current.prependOlderMessages(
-            conversationId,
-            cachedMessages,
-            pagination.has_more || false
-          );
+          setMessages(prev => deduplicateMessages([...apiMessages, ...prev]));
         }
 
-        if (conversationData.assigned_agent) {
+        const pagination = response.data.pagination || {};
+        setHasMoreMessages(pagination.has_more || false);
+
+        const conversationData = response.data.conversation;
+        if (conversationData?.assigned_agent) {
           setTicketStatus('active');
         } else {
           setTicketStatus('pending');
         }
 
-        if (conversationData.package) {
+        if (conversationData?.package) {
           const conversationPackage = conversationData.package;
           setSelectedPackage({
             id: String(conversationPackage.id),
@@ -518,29 +468,15 @@ export default function SupportScreen() {
             created_at: conversationPackage.created_at || new Date().toISOString(),
           });
           setInquiryType('package');
-          console.log('Restored selected package from conversation:', conversationPackage.code);
-        } else {
-          const messageWithPackage = cachedMessages.find(msg => msg.metadata?.package_code);
-          if (messageWithPackage?.metadata?.package_code) {
-            setInquiryType('package');
-            console.log('Found package code in message metadata:', messageWithPackage.metadata.package_code);
-            
-            if (userPackages.length === 0) {
-              loadUserPackages();
-            }
-          }
         }
-
-        console.log(`Loaded ${apiMessages.length} messages, has_more: ${pagination.has_more}`);
       }
       
     } catch (error: any) {
       if (error.name === 'AbortError') {
-        console.log('Request was aborted');
         return;
       }
 
-      console.error('Failed to load conversation messages:', error);
+      console.error('Failed to load conversation:', error);
       setConnectionError(true);
 
       if (!isRefresh && !loadOlder) {
@@ -562,32 +498,28 @@ export default function SupportScreen() {
       setLoadingOlder(false);
       setRefreshing(false);
     }
-  }, [userPackages.length]);
+  }, [messages, deduplicateMessages]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlder || !conversationId || !cacheManager.current.shouldLoadOlderMessages(conversationId)) {
+    if (loadingOlder || !conversationId || !hasMoreMessages) {
       return;
     }
     
-    console.log('Loading older messages for support conversation:', conversationId);
     await loadConversationMessages(conversationId, false, true);
-  }, [loadConversationMessages, conversationId, loadingOlder]);
+  }, [loadConversationMessages, conversationId, loadingOlder, hasMoreMessages]);
 
   const handleRefresh = useCallback(async () => {
     if (!conversationId) return;
     
-    cacheManager.current.clearConversationCache(conversationId);
+    messageMapRef.current.clear();
     await loadConversationMessages(conversationId, true);
   }, [loadConversationMessages, conversationId]);
 
   const checkActiveTicket = useCallback(async () => {
     try {
-      console.log('Checking for active support ticket...');
-      
       const response = await api.get('/api/v1/conversations/active_support');
       
       if (response.data.success && response.data.conversation_id) {
-        console.log('Found active ticket:', response.data.conversation_id);
         setConversationId(response.data.conversation_id);
         setHasActiveTicket(true);
         setTicketStatus('active');
@@ -597,7 +529,6 @@ export default function SupportScreen() {
         return;
       }
       
-      console.log('No active ticket found');
       setHasActiveTicket(false);
       
       setMessages([{
@@ -668,8 +599,6 @@ export default function SupportScreen() {
     try {
       setLoadingPackages(true);
       
-      console.log('Loading user packages for search...');
-      
       const response = await api.get('/api/v1/packages', {
         params: {
           per_page: 100,
@@ -692,8 +621,6 @@ export default function SupportScreen() {
 
         setUserPackages(packages);
         setFilteredPackages(packages);
-        
-        console.log('Loaded packages for search:', packages.length);
 
         if (preFilledPackageCode) {
           const preSelectedPackage = packages.find((pkg: Package) => 
@@ -703,12 +630,11 @@ export default function SupportScreen() {
           if (preSelectedPackage) {
             setSelectedPackage(preSelectedPackage);
             setInquiryType('package');
-            console.log('Pre-selected package:', preSelectedPackage.code);
           }
         }
       }
     } catch (error) {
-      console.error('Failed to load user packages:', error);
+      console.error('Failed to load packages:', error);
     } finally {
       setLoadingPackages(false);
     }
@@ -765,8 +691,6 @@ export default function SupportScreen() {
     if (conversationId) return conversationId;
 
     try {
-      console.log('Creating support ticket...');
-      
       const payload: any = {
         category: inquiryType === 'package' ? 'package_inquiry' : 'basic_inquiry'
       };
@@ -781,7 +705,6 @@ export default function SupportScreen() {
         const newConversationId = response.data.conversation_id;
         setConversationId(newConversationId);
         setTicketStatus('pending');
-        console.log('Support ticket created:', newConversationId);
         
         await loadConversationMessages(newConversationId);
         
@@ -791,10 +714,6 @@ export default function SupportScreen() {
       throw new Error(response.data.message || 'Failed to create support ticket');
     } catch (error: any) {
       console.error('Failed to create support ticket:', error);
-      console.error('Error details:', {
-        status: error.response?.status,
-        message: error.response?.data?.message || error.message
-      });
       throw error;
     }
   }, [conversationId, inquiryType, selectedPackage?.code, loadConversationMessages]);
@@ -880,8 +799,12 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
+      // FIXED: Generate unique temp ID
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      
       const newMessage: Message = {
-        id: Date.now().toString(),
+        id: tempId,
+        tempId,
         text: inquiryText.trim(),
         timestamp: new Date().toLocaleTimeString('en-US', {
           hour12: false,
@@ -893,24 +816,9 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      const cachedMessage: CachedMessage = {
-        id: newMessage.id,
-        content: newMessage.text,
-        created_at: new Date().toISOString(),
-        timestamp: newMessage.timestamp,
-        is_system: false,
-        from_support: false,
-        message_type: 'text',
-        user: {
-          id: user?.id || '',
-          name: user?.display_name || 'Customer',
-          role: 'customer'
-        },
-        metadata: {},
-        optimistic: true,
-      };
-
-      cacheManager.current.addOptimisticMessage(convId, cachedMessage);
+      // FIXED: Track pending message
+      pendingMessageIds.current.add(tempId);
+      updateMessages([newMessage]);
       closeAllModals();
       
       setTimeout(() => {
@@ -922,35 +830,46 @@ export default function SupportScreen() {
         message_type: 'text'
       });
       
-      if (response.data.success) {
-        cacheManager.current.removeOptimisticMessages(convId);
-        cacheManager.current.addMessageToCache(convId, response.data.message);
+      if (response.data.success && response.data.message) {
+        const realMessage: Message = {
+          id: String(response.data.message.id),
+          text: response.data.message.content,
+          timestamp: new Date(response.data.message.created_at).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          isSupport: false,
+          type: 'text',
+          optimistic: false,
+          delivered_at: response.data.message.delivered_at,
+          read_at: response.data.message.read_at,
+        };
+        
+        // FIXED: Replace optimistic with real message
+        replaceOptimisticMessage(tempId, realMessage);
+        messageMapRef.current.set(realMessage.id, realMessage);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
         setTimeout(() => {
-          const supportResponse: CachedMessage = {
-            id: (Date.now() + 1).toString(),
-            content: 'Thank you for contacting us. Your inquiry has been received and a support agent will respond shortly.',
-            created_at: new Date().toISOString(),
+          const supportResponse: Message = {
+            id: `system-${Date.now()}`,
+            text: 'Thank you for contacting us. Your inquiry has been received and a support agent will respond shortly.',
             timestamp: new Date().toLocaleTimeString('en-US', {
               hour12: false,
               hour: '2-digit',
               minute: '2-digit',
             }),
-            is_system: true,
-            from_support: true,
-            message_type: 'system',
-            user: {
-              id: 'system',
-              name: 'System',
-              role: 'system'
-            },
-            metadata: { type: 'automated_response' },
+            isSupport: true,
+            type: 'system',
           };
           
-          cacheManager.current.addMessageToCache(convId, supportResponse);
+          if (!messageMapRef.current.has(supportResponse.id)) {
+            messageMapRef.current.set(supportResponse.id, supportResponse);
+            updateMessages([supportResponse]);
+          }
           
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: true });
@@ -960,23 +879,7 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to create basic inquiry:', error);
-      
-      if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
-      }
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 2).toString(),
-        text: 'Sorry, there was an error creating your inquiry. Please try again.',
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: true,
-        type: 'system',
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      removeOptimisticMessages();
     } finally {
       setIsLoading(false);
     }
@@ -992,8 +895,11 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      
       const newMessage: Message = {
-        id: Date.now().toString(),
+        id: tempId,
+        tempId,
         text: packageInquiry.trim(),
         timestamp: new Date().toLocaleTimeString('en-US', {
           hour12: false,
@@ -1007,24 +913,8 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      const cachedMessage: CachedMessage = {
-        id: newMessage.id,
-        content: newMessage.text,
-        created_at: new Date().toISOString(),
-        timestamp: newMessage.timestamp,
-        is_system: false,
-        from_support: false,
-        message_type: 'text',
-        user: {
-          id: user?.id || '',
-          name: user?.display_name || 'Customer',
-          role: 'customer'
-        },
-        metadata: { package_code: selectedPackage.code },
-        optimistic: true,
-      };
-
-      cacheManager.current.addOptimisticMessage(convId, cachedMessage);
+      pendingMessageIds.current.add(tempId);
+      updateMessages([newMessage]);
       closeAllModals();
       
       setTimeout(() => {
@@ -1037,35 +927,47 @@ export default function SupportScreen() {
         metadata: { package_code: selectedPackage.code }
       });
       
-      if (response.data.success) {
-        cacheManager.current.removeOptimisticMessages(convId);
-        cacheManager.current.addMessageToCache(convId, response.data.message);
+      if (response.data.success && response.data.message) {
+        const realMessage: Message = {
+          id: String(response.data.message.id),
+          text: response.data.message.content,
+          timestamp: new Date(response.data.message.created_at).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          isSupport: false,
+          type: 'text',
+          packageCode: selectedPackage.code,
+          isTagged: true,
+          optimistic: false,
+          delivered_at: response.data.message.delivered_at,
+          read_at: response.data.message.read_at,
+        };
+        
+        replaceOptimisticMessage(tempId, realMessage);
+        messageMapRef.current.set(realMessage.id, realMessage);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
         setTimeout(() => {
-          const supportResponse: CachedMessage = {
-            id: (Date.now() + 1).toString(),
-            content: `Thank you for your inquiry about package ${selectedPackage.code}. A support agent will review your ticket and respond shortly.`,
-            created_at: new Date().toISOString(),
+          const supportResponse: Message = {
+            id: `system-${Date.now()}`,
+            text: `Thank you for your inquiry about package ${selectedPackage.code}. A support agent will review your ticket and respond shortly.`,
             timestamp: new Date().toLocaleTimeString('en-US', {
               hour12: false,
               hour: '2-digit',
               minute: '2-digit',
             }),
-            is_system: true,
-            from_support: true,
-            message_type: 'system',
-            user: {
-              id: 'system',
-              name: 'System',
-              role: 'system'
-            },
-            metadata: { type: 'automated_response', package_code: selectedPackage.code },
+            isSupport: true,
+            type: 'system',
           };
           
-          cacheManager.current.addMessageToCache(convId, supportResponse);
+          if (!messageMapRef.current.has(supportResponse.id)) {
+            messageMapRef.current.set(supportResponse.id, supportResponse);
+            updateMessages([supportResponse]);
+          }
           
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: true });
@@ -1075,28 +977,13 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to create package inquiry:', error);
-      
-      if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
-      }
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 2).toString(),
-        text: 'Sorry, there was an error creating your package inquiry. Please try again.',
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: true,
-        type: 'system',
-      };
-      setMessages(prev => [...prev, errorMessage]);
+      removeOptimisticMessages();
     } finally {
       setIsLoading(false);
     }
   };
 
+  // FIXED: Simplified sendMessage with proper deduplication
   const sendMessage = useCallback(async () => {
     if (!inputText.trim()) return;
 
@@ -1105,8 +992,11 @@ export default function SupportScreen() {
     try {
       const convId = await ensureConversation();
       
+      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      
       const newMessage: Message = {
-        id: Date.now().toString(),
+        id: tempId,
+        tempId,
         text: inputText.trim(),
         timestamp: new Date().toLocaleTimeString('en-US', {
           hour12: false,
@@ -1120,24 +1010,8 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      const cachedMessage: CachedMessage = {
-        id: newMessage.id,
-        content: newMessage.text,
-        created_at: new Date().toISOString(),
-        timestamp: newMessage.timestamp,
-        is_system: false,
-        from_support: false,
-        message_type: 'text',
-        user: {
-          id: user?.id || '',
-          name: user?.display_name || 'Customer',
-          role: 'customer'
-        },
-        metadata: selectedPackage ? { package_code: selectedPackage.code } : {},
-        optimistic: true,
-      };
-
-      cacheManager.current.addOptimisticMessage(convId, cachedMessage);
+      pendingMessageIds.current.add(tempId);
+      updateMessages([newMessage]);
       
       const messageText = inputText.trim();
       setInputText('');
@@ -1158,16 +1032,26 @@ export default function SupportScreen() {
         metadata
       });
       
-      if (response.data.success) {
-        cacheManager.current.removeOptimisticMessages(convId);
-        cacheManager.current.addMessageToCache(convId, response.data.message);
+      if (response.data.success && response.data.message) {
+        const realMessage: Message = {
+          id: String(response.data.message.id),
+          text: response.data.message.content,
+          timestamp: new Date(response.data.message.created_at).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          isSupport: false,
+          type: 'text',
+          packageCode: selectedPackage?.code,
+          isTagged: inquiryType === 'package' && !!selectedPackage,
+          optimistic: false,
+          delivered_at: response.data.message.delivered_at,
+          read_at: response.data.message.read_at,
+        };
         
-        if (response.data.conversation) {
-          cacheManager.current.updateConversationMetadata(convId, {
-            last_activity_at: response.data.conversation.last_activity_at,
-            status: response.data.conversation.status
-          });
-        }
+        replaceOptimisticMessage(tempId, realMessage);
+        messageMapRef.current.set(realMessage.id, realMessage);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
@@ -1175,28 +1059,12 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to send message:', error);
-      
-      if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
-      }
+      removeOptimisticMessages();
       setInputText(inputText.trim());
-      
-      const errorMessage: Message = {
-        id: (Date.now() + 2).toString(),
-        text: 'Sorry, there was an error sending your message. Please try again.',
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: true,
-        type: 'system',
-      };
-      setMessages(prev => [...prev, errorMessage]);
     } finally {
       setIsLoading(false);
     }
-  }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator, conversationId, user]);
+  }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator, updateMessages, replaceOptimisticMessage, removeOptimisticMessages]);
 
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
@@ -1206,13 +1074,11 @@ export default function SupportScreen() {
     }
   }, [conversationId, handleTyping]);
 
-  // WhatsApp-style message status indicator
   const renderMessageStatus = (message: Message) => {
     if (message.isSupport || message.type === 'system' || message.optimistic) {
       return null;
     }
 
-    // Read: Double blue ticks
     if (message.read_at) {
       return (
         <View style={styles.messageStatusContainer}>
@@ -1221,7 +1087,6 @@ export default function SupportScreen() {
       );
     }
 
-    // Delivered: Double grey ticks
     if (message.delivered_at) {
       return (
         <View style={styles.messageStatusContainer}>
@@ -1230,7 +1095,6 @@ export default function SupportScreen() {
       );
     }
 
-    // Sent: Single grey tick
     return (
       <View style={styles.messageStatusContainer}>
         <MaterialIcons name="done" size={16} color="rgba(255, 255, 255, 0.5)" />
@@ -1239,7 +1103,7 @@ export default function SupportScreen() {
   };
 
   const renderMessage = ({ item }: { item: Message }) => (
-    <View style={styles.messageWrapper}>
+    <View style={styles.messageWrapper} key={item.id}>
       <View style={[
         styles.messageContainer,
         item.isSupport ? styles.supportMessage : styles.userMessage,
@@ -2137,7 +2001,7 @@ const styles = StyleSheet.create({
   messageStatusContainer: {
     marginLeft: 4,
   },
-  
+
   typingIndicator: {
     paddingHorizontal: 16,
     paddingVertical: 8,
@@ -2148,7 +2012,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontStyle: 'italic',
   },
-  
+
   inquirySection: {
     backgroundColor: 'rgba(11, 20, 27, 0.95)',
     borderTopWidth: 0.5,
@@ -2180,7 +2044,7 @@ const styles = StyleSheet.create({
   inquiryTabTextActive: {
     color: '#fff',
   },
-  
+
   packageSection: {
     paddingHorizontal: 16,
     paddingBottom: 8,
@@ -2230,7 +2094,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     marginLeft: 8,
   },
-  
+
   packageSearchDropdown: {
     backgroundColor: '#1F2C34',
     borderRadius: 8,
@@ -2321,7 +2185,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     textAlign: 'center',
   },
-  
+
   inputContainerFixed: {
     backgroundColor: 'rgba(11, 20, 27, 0.95)',
     paddingHorizontal: 8,
@@ -2386,7 +2250,7 @@ const styles = StyleSheet.create({
   voiceButton: {
     backgroundColor: '#7B3F98',
   },
-  
+
   modalOverlay: {
     flex: 1,
     justifyContent: 'flex-end',
