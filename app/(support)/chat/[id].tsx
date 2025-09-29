@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - Fixed Support Chat Screen with proper message broadcasting
+// app/(support)/chat/[id].tsx - Enhanced with instant broadcasting and WhatsApp-style status
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -41,6 +41,8 @@ interface ChatMessage {
   timestamp: string;
   metadata?: any;
   optimistic?: boolean;
+  delivered_at?: string | null;
+  read_at?: string | null;
 }
 
 interface ChatConversation {
@@ -72,10 +74,9 @@ interface TypingUser {
   name: string;
 }
 
-// Configuration constants
-const INITIAL_MESSAGE_LIMIT = 20; // Load only 20 messages initially
-const PAGINATION_LIMIT = 15; // Load 15 more when paginating
-const REQUEST_TIMEOUT = 20000; // 20 second timeout
+const INITIAL_MESSAGE_LIMIT = 20;
+const PAGINATION_LIMIT = 15;
+const REQUEST_TIMEOUT = 20000;
 const SCROLL_THRESHOLD = 0.1;
 
 export default function SupportChatScreen() {
@@ -90,14 +91,12 @@ export default function SupportChatScreen() {
   const [typingUsers, setTypingUsers] = useState<TypingUser[]>([]);
   const [isTyping, setIsTyping] = useState(false);
   
-  // Enhanced pagination states
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   
-  // ActionCable connection state
   const [isConnected, setIsConnected] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
@@ -107,11 +106,9 @@ export default function SupportChatScreen() {
   const cacheManager = useRef(ChatCacheManager.getInstance());
   const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
 
-  // Initialize ActionCable connection and cache subscription
   useEffect(() => {
     if (!id) return;
 
-    // Subscribe to cache updates
     cacheUnsubscribeRef.current = cacheManager.current.subscribe(id, (conversationId, cachedData) => {
       console.log(`📦 Cache updated for conversation ${conversationId}`);
       setConversation(cachedData.conversation);
@@ -137,14 +134,13 @@ export default function SupportChatScreen() {
           
           await actionCableRef.current.joinConversation(id);
           
-          // FIXED: Enhanced message subscription with proper structure handling
           actionCableRef.current.subscribe('new_message', handleNewMessage);
           actionCableRef.current.subscribe('conversation_read', handleMessageRead);
           actionCableRef.current.subscribe('typing_indicator', handleTypingIndicator);
           actionCableRef.current.subscribe('ticket_status_changed', handleTicketStatusChange);
           actionCableRef.current.subscribe('conversation_updated', handleConversationUpdate);
+          actionCableRef.current.subscribe('message_acknowledged', handleMessageAcknowledged);
           
-          // FIXED: Connection status handlers
           actionCableRef.current.subscribe('connection_established', handleConnectionEstablished);
           actionCableRef.current.subscribe('connection_lost', handleConnectionLost);
           actionCableRef.current.subscribe('connection_error', handleConnectionError);
@@ -165,30 +161,27 @@ export default function SupportChatScreen() {
         actionCableRef.current.unsubscribe('typing_indicator');
         actionCableRef.current.unsubscribe('ticket_status_changed');
         actionCableRef.current.unsubscribe('conversation_updated');
+        actionCableRef.current.unsubscribe('message_acknowledged');
         actionCableRef.current.unsubscribe('connection_established');
         actionCableRef.current.unsubscribe('connection_lost');
         actionCableRef.current.unsubscribe('connection_error');
       }
       
-      // Cancel any pending requests
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
 
-      // Unsubscribe from cache updates
       if (cacheUnsubscribeRef.current) {
         cacheUnsubscribeRef.current();
       }
     };
   }, [user, id]);
 
-  // FIXED: Enhanced ActionCable event handlers with proper error handling
   const handleNewMessage = useCallback((data: any) => {
-    console.log('📨 New message received:', data);
+    console.log('📨 INSTANT message received:', data);
     
     if (data.conversation_id === id && data.message) {
       try {
-        // FIXED: Proper message structure handling
         const messageData = data.message;
         
         const newMessage: CachedMessage = {
@@ -210,12 +203,12 @@ export default function SupportChatScreen() {
           },
           metadata: messageData.metadata || {},
           optimistic: false,
+          delivered_at: messageData.delivered_at,
+          read_at: messageData.read_at,
         };
 
-        // Update cache with new message
         cacheManager.current.addMessageToCache(id, newMessage);
         
-        // FIXED: Auto-scroll for new messages (but not for own messages to avoid jarring)
         if (messageData.user?.id !== user?.id) {
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: true });
@@ -228,6 +221,23 @@ export default function SupportChatScreen() {
       }
     }
   }, [id, user?.id]);
+
+  const handleMessageAcknowledged = useCallback((data: any) => {
+    console.log('✅ Message acknowledged:', data);
+    
+    if (data.message_id) {
+      setMessages(prev => prev.map(msg => {
+        if (msg.id === data.message_id) {
+          if (data.status === 'delivered') {
+            return { ...msg, delivered_at: data.timestamp };
+          } else if (data.status === 'read') {
+            return { ...msg, delivered_at: msg.delivered_at || data.timestamp, read_at: data.timestamp };
+          }
+        }
+        return msg;
+      }));
+    }
+  }, []);
 
   const handleMessageRead = useCallback((data: any) => {
     if (data.conversation_id === id) {
@@ -255,10 +265,8 @@ export default function SupportChatScreen() {
     if (data.conversation_id === id) {
       console.log('🎫 Ticket status changed:', data.new_status);
       
-      // Update cache with conversation status change
       cacheManager.current.updateConversationMetadata(id, { status: data.new_status });
       
-      // FIXED: Add system message if provided
       if (data.system_message) {
         try {
           const systemMessage: CachedMessage = {
@@ -285,7 +293,6 @@ export default function SupportChatScreen() {
     if (data.conversation_id === id) {
       console.log('🔄 Conversation updated:', data);
       
-      // Update cache with conversation changes
       const updates: any = {};
       if (data.status) updates.status = data.status;
       if (data.priority) updates.priority = data.priority;
@@ -296,7 +303,6 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
-  // FIXED: Connection status handlers
   const handleConnectionEstablished = useCallback(() => {
     setIsConnected(true);
     console.log('✅ ActionCable connection established');
@@ -312,14 +318,12 @@ export default function SupportChatScreen() {
     console.log('❌ ActionCable connection error');
   }, []);
 
-  // Enhanced conversation loading with cache integration
   const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
     if (!id) {
       setLoading(false);
       return;
     }
 
-    // Check cache first (unless it's a refresh or we need to load older messages)
     if (!isRefresh && !loadOlder) {
       const cachedData = cacheManager.current.getCachedConversation(id);
       if (cachedData) {
@@ -330,7 +334,6 @@ export default function SupportChatScreen() {
         setLoading(false);
         setIsInitialLoad(false);
         
-        // Scroll to bottom for cached data
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: false });
         }, 100);
@@ -338,10 +341,8 @@ export default function SupportChatScreen() {
       }
     }
 
-    // If no cache or refresh requested, proceed with API call
     console.log(`🌐 Loading conversation from API: ${id}`, { isRefresh, loadOlder });
 
-    // Cancel previous request
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
     }
@@ -366,7 +367,6 @@ export default function SupportChatScreen() {
         limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
       };
 
-      // For pagination, get the oldest message ID from cache
       if (loadOlder) {
         const oldestMessageId = cacheManager.current.getOldestMessageId(id);
         if (oldestMessageId) {
@@ -390,7 +390,6 @@ export default function SupportChatScreen() {
         const pagination = response.data.pagination || {};
 
         if (isRefresh || (!loadOlder && !cacheManager.current.isCached(id))) {
-          // Initial load or refresh - replace cache completely
           cacheManager.current.setCachedConversation(
             id,
             conversationData,
@@ -400,12 +399,10 @@ export default function SupportChatScreen() {
           );
           setIsInitialLoad(false);
 
-          // Scroll to bottom for initial load
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
         } else if (loadOlder) {
-          // Loading older messages - prepend to cache
           cacheManager.current.prependOlderMessages(
             id,
             messagesData,
@@ -454,7 +451,6 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
-  // Load older messages when scrolling to top
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlder || !cacheManager.current.shouldLoadOlderMessages(id)) {
       return;
@@ -464,19 +460,15 @@ export default function SupportChatScreen() {
     await loadConversation(false, true);
   }, [loadConversation, id, loadingOlder]);
 
-  // Refresh conversation
   const handleRefresh = useCallback(async () => {
-    // Clear cache and reload from API
     cacheManager.current.clearConversationCache(id);
     await loadConversation(true);
   }, [loadConversation, id]);
 
-  // Initial load
   useEffect(() => {
     loadConversation();
   }, [loadConversation]);
 
-  // Typing indicator functionality
   const handleTextChange = useCallback((text: string) => {
     setInputText(text);
     
@@ -497,7 +489,6 @@ export default function SupportChatScreen() {
     }, 2000);
   }, [isTyping, id]);
 
-  // Enhanced send message with cache-based optimistic updates
   const sendMessage = useCallback(async () => {
     if (!inputText.trim() || sending || !id) return;
 
@@ -510,7 +501,6 @@ export default function SupportChatScreen() {
       actionCableRef.current.stopTyping(id);
     }
 
-    // Add optimistic message to cache
     const optimisticMessage: CachedMessage = {
       id: `optimistic-${Date.now()}`,
       content: messageText,
@@ -538,7 +528,6 @@ export default function SupportChatScreen() {
       flatListRef.current?.scrollToEnd({ animated: true });
     }, 100);
 
-    // Create abort controller for send request
     const sendAbortController = new AbortController();
     const sendTimeoutId = setTimeout(() => {
       sendAbortController.abort();
@@ -556,11 +545,9 @@ export default function SupportChatScreen() {
       clearTimeout(sendTimeoutId);
 
       if (response.data.success) {
-        // Remove optimistic message and add real message
         cacheManager.current.removeOptimisticMessages(id);
         cacheManager.current.addMessageToCache(id, response.data.message);
         
-        // Update conversation metadata if provided
         if (response.data.conversation) {
           cacheManager.current.updateConversationMetadata(id, {
             last_activity_at: response.data.conversation.last_activity_at,
@@ -582,7 +569,6 @@ export default function SupportChatScreen() {
         Alert.alert('Error', 'Failed to send message. Please try again.');
       }
       
-      // Remove optimistic message on error and restore input text
       cacheManager.current.removeOptimisticMessages(id);
       setInputText(messageText);
     } finally {
@@ -590,7 +576,6 @@ export default function SupportChatScreen() {
     }
   }, [inputText, sending, id, user, isTyping]);
 
-  // Quick actions for support agents
   const handleQuickAction = async (action: string) => {
     if (!id || !conversation) return;
 
@@ -629,7 +614,38 @@ export default function SupportChatScreen() {
     setShowActions(false);
   };
 
-  // Memoized components for performance
+  const renderMessageStatus = (message: ChatMessage) => {
+    if (message.from_support && message.user.id === user?.id) {
+      if (message.optimistic) {
+        return null;
+      }
+
+      if (message.read_at) {
+        return (
+          <View style={styles.messageStatusContainer}>
+            <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
+          </View>
+        );
+      }
+
+      if (message.delivered_at) {
+        return (
+          <View style={styles.messageStatusContainer}>
+            <MaterialIcons name="done-all" size={16} color="rgba(255, 255, 255, 0.5)" />
+          </View>
+        );
+      }
+
+      return (
+        <View style={styles.messageStatusContainer}>
+          <MaterialIcons name="done" size={16} color="rgba(255, 255, 255, 0.5)" />
+        </View>
+      );
+    }
+
+    return null;
+  };
+
   const renderMessage = useCallback(({ item }: { item: ChatMessage }) => (
     <View style={styles.messageContainer}>
       <View
@@ -665,15 +681,17 @@ export default function SupportChatScreen() {
           >
             {item.timestamp}
           </Text>
-          {item.optimistic && (
-            <View style={styles.optimisticIndicator}>
+          {item.optimistic ? (
+            <View style={styles.messageStatusContainer}>
               <ActivityIndicator size={12} color="rgba(255, 255, 255, 0.7)" />
             </View>
+          ) : (
+            renderMessageStatus(item)
           )}
         </View>
       </View>
     </View>
-  ), []);
+  ), [user?.id]);
 
   const renderTypingIndicator = useMemo(() => {
     if (typingUsers.length === 0) return null;
@@ -762,7 +780,6 @@ export default function SupportChatScreen() {
     </View>
   );
 
-  // Show connection status in header subtitle
   const getConnectionStatusText = () => {
     if (!conversation) return 'Loading...';
     if (!isConnected) return 'Connecting...';
@@ -810,7 +827,6 @@ export default function SupportChatScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -870,7 +886,6 @@ export default function SupportChatScreen() {
         </View>
       </LinearGradient>
 
-      {/* Ticket Info Bar */}
       {conversation && (
         <View style={styles.ticketInfoBar}>
           <View style={styles.ticketInfoItem}>
@@ -898,7 +913,6 @@ export default function SupportChatScreen() {
         </View>
       )}
 
-      {/* Messages */}
       <KeyboardAvoidingView
         style={styles.messagesContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -935,7 +949,6 @@ export default function SupportChatScreen() {
           )}
         />
 
-        {/* Input Area */}
         <View style={[
           styles.inputContainer,
           { 
@@ -989,13 +1002,11 @@ export default function SupportChatScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* Quick Actions Modal */}
       {renderQuickActionsModal()}
     </SafeAreaView>
   );
 }
 
-// Utility function
 const getPriorityColor = (priority: string) => {
   switch (priority) {
     case 'urgent': return '#dc2626';
@@ -1220,7 +1231,7 @@ const styles = StyleSheet.create({
   systemMessageTime: {
     color: '#8E8E93',
   },
-  optimisticIndicator: {
+  messageStatusContainer: {
     marginLeft: 8,
   },
   typingContainer: {
@@ -1271,70 +1282,69 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   inputContainer: {
-  backgroundColor: 'rgba(11, 20, 27, 0.95)',
-  paddingHorizontal: 8,
-  paddingVertical: 8,
-  paddingBottom: Platform.OS === 'ios' ? 24 : 8,
-},
-inputRow: {
-  flexDirection: 'row',
-  alignItems: 'flex-end',
-},
-textInputContainer: {
-  flex: 1,
-  flexDirection: 'row',
-  alignItems: 'center',
-  backgroundColor: '#1F2C34',
-  borderRadius: 25,
-  paddingHorizontal: 4,
-  paddingVertical: 6,
-  marginRight: 8,
-  maxHeight: 100,
-  minHeight: 45,
-  elevation: 2,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 1 },
-  shadowOpacity: 0.22,
-  shadowRadius: 2.22,
-},
-inputButton: {
-  padding: 8,
-  marginLeft: 4,
-},
-textInput: {
-  flex: 1,
-  color: '#fff',
-  fontSize: 16,
-  paddingVertical: 8,
-  paddingHorizontal: 8,
-  textAlignVertical: 'center',
-  maxHeight: 80,
-},
-attachButton: {
-  padding: 8,
-},
-cameraButton: {
-  padding: 8,
-  marginRight: 4,
-},
-sendButtonMain: {
-  width: 45,
-  height: 45,
-  borderRadius: 22.5,
-  justifyContent: 'center',
-  alignItems: 'center',
-  elevation: 3,
-  shadowColor: '#000',
-  shadowOffset: { width: 0, height: 2 },
-  shadowOpacity: 0.25,
-  shadowRadius: 3.84,
-},
-sendButtonActive: {
-  backgroundColor: '#7B3F98',
-},
-voiceButton: {
-  backgroundColor: '#7B3F98',
-},
+    backgroundColor: 'rgba(11, 20, 27, 0.95)',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+  },
+  textInputContainer: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1F2C34',
+    borderRadius: 25,
+    paddingHorizontal: 4,
+    paddingVertical: 6,
+    marginRight: 8,
+    maxHeight: 100,
+    minHeight: 45,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.22,
+    shadowRadius: 2.22,
+  },
+  inputButton: {
+    padding: 8,
+    marginLeft: 4,
+  },
+  textInput: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    textAlignVertical: 'center',
+    maxHeight: 80,
+  },
+  attachButton: {
+    padding: 8,
+  },
+  cameraButton: {
+    padding: 8,
+    marginRight: 4,
+  },
+  sendButton: {
+    width: 45,
+    height: 45,
+    borderRadius: 22.5,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 3,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
+  },
+  sendButtonActive: {
+    backgroundColor: '#7B3F98',
+  },
+  voiceButton: {
+    backgroundColor: '#7B3F98',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
