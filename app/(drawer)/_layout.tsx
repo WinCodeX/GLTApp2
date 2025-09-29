@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Fixed session validation with proper role persistence
+// app/(drawer)/_layout.tsx - FIXED: Better role persistence and validation
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter } from 'expo-router';
@@ -38,14 +38,11 @@ type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_supp
 
 // Helper function to determine effective role from user data
 const getEffectiveRole = (userData: any): string => {
-  // First priority: use primary_role if available
   if (userData.primary_role && userData.primary_role !== 'client') {
     return userData.primary_role;
   }
   
-  // Second priority: check roles array for non-client roles
   if (userData.roles && Array.isArray(userData.roles)) {
-    // Priority order: admin > support > client
     if (userData.roles.includes('admin')) {
       return 'admin';
     }
@@ -54,15 +51,7 @@ const getEffectiveRole = (userData: any): string => {
     }
   }
   
-  // Fallback: use role field or default to client
   return userData.role || 'client';
-};
-
-// Helper function to get stored role safely (for AccountManager data)
-const getStoredRole = (accountData: any): string => {
-  // AccountManager stores the effective role in the 'role' field
-  // This should be the already-computed role from login
-  return accountData.role || 'client';
 };
 
 export default function DrawerLayout() {
@@ -70,7 +59,6 @@ export default function DrawerLayout() {
   const [authState, setAuthState] = useState<AuthState>('loading');
   const router = useRouter();
 
-  // Handle app state changes
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
       if (nextAppState === 'active' && authState === 'loading') {
@@ -83,104 +71,90 @@ export default function DrawerLayout() {
     return () => subscription?.remove();
   }, [authState]);
 
-  // Session validation with proper error handling
   const performSessionValidation = useCallback(async () => {
     try {
       console.log('🔐 DrawerLayout: Starting session validation...');
       
-      // Quick initial setup
       try {
         await bootstrapApp();
       } catch (bootstrapError) {
         console.warn('Bootstrap warning (continuing):', bootstrapError);
       }
       
-      // Initialize AccountManager
+      // CRITICAL: Initialize AccountManager first
       await accountManager.initialize();
       
-      // Check for existing accounts
       const currentAccount = accountManager.getCurrentAccount();
       
-      console.log('Session check:', { 
-        hasCurrentAccount: !!currentAccount,
-        totalAccounts: accountManager.getAllAccounts().length,
+      // FIXED: Better logging of account state
+      console.log('🔐 Account state:', {
+        hasAccount: !!currentAccount,
+        accountId: currentAccount?.id,
+        email: currentAccount?.email,
         storedRole: currentAccount?.role,
-        userId: currentAccount?.id
+        totalAccounts: accountManager.getAllAccounts().length
       });
 
       if (!currentAccount) {
-        console.log('🔐 No current account found - redirecting to login');
+        console.log('🔐 No current account - redirecting to login');
         setAuthState('redirect_login');
         return;
       }
 
-      // Get stored role first for fallback
-      const storedRole = getStoredRole(currentAccount);
+      // FIXED: Get role directly from account (it's already validated)
+      const storedRole = currentAccount.role;
       console.log('🔐 Stored role from account:', storedRole);
 
-      // CRITICAL: Verify token with server before proceeding
+      // Verify token with server
       console.log('🔐 Verifying session token with server...');
       
       try {
         const response = await api.get('/api/v1/me');
-        console.log('🔐 Session token verified successfully:', {
+        console.log('🔐 Server verification successful:', {
           userId: response.data?.id,
-          serverRole: response.data?.primary_role,
-          allRoles: response.data?.roles
+          serverPrimaryRole: response.data?.primary_role,
+          serverRoles: response.data?.roles
         });
         
-        // Get the effective role from server response
         const effectiveRole = getEffectiveRole(response.data);
-        console.log('🔐 Effective role determined from server:', effectiveRole);
+        console.log('🔐 Effective role from server:', effectiveRole);
         
-        // Update account with correct role if different
+        // FIXED: Update account if server role differs
         if (storedRole !== effectiveRole) {
-          console.log('🔐 Updating stored account role from', storedRole, 'to', effectiveRole);
+          console.log('🔐 Role mismatch - updating:', {
+            stored: storedRole,
+            server: effectiveRole
+          });
+          
           try {
             await accountManager.updateAccountRole(currentAccount.id, effectiveRole);
-            console.log('🔐 Account role updated successfully');
+            console.log('✅ Account role updated successfully');
+            
+            // Use the updated role for routing
+            routeBasedOnRole(effectiveRole);
           } catch (updateError) {
-            console.error('🔐 Failed to update account role:', updateError);
-            // Continue with server role anyway
+            console.error('❌ Failed to update account role:', updateError);
+            // Use server role anyway for routing
+            routeBasedOnRole(effectiveRole);
           }
-        }
-        
-        // Route based on effective role (use server response)
-        if (effectiveRole === 'admin') {
-          console.log('🔐 Admin role detected - redirecting to admin panel');
-          setAuthState('redirect_admin');
-        } else if (effectiveRole === 'support') {
-          console.log('🔐 Support role detected - redirecting to support panel');
-          setAuthState('redirect_support');
         } else {
-          console.log('🔐 Client role - entering drawer layout');
-          setAuthState('authenticated');
-          
-          // Track home screen in navigation system
-          setTimeout(async () => {
-            try {
-              await NavigationHelper.trackRouteChange('/', {});
-              console.log('✅ Home screen tracked in navigation system');
-            } catch (error) {
-              console.error('❌ Failed to track home screen:', error);
-            }
-          }, 1000);
+          console.log('✅ Role matches - no update needed');
+          routeBasedOnRole(effectiveRole);
         }
         
-      } catch (tokenError) {
+      } catch (tokenError: any) {
         console.error('🔐 Session token verification failed:', tokenError);
         
-        // Token is invalid/expired - clean up and redirect to login
+        // Token is invalid/expired
         if (tokenError?.response?.status === 401 || 
             tokenError?.response?.status === 422 ||
             tokenError?.response?.status === 403) {
           
-          console.log('🔐 Token expired/invalid - cleaning up and redirecting to login');
+          console.log('🔐 Token expired/invalid - cleaning up');
           
-          // Clean up invalid session
           try {
             await accountManager.removeAccount(currentAccount.id);
-            console.log('🔐 Invalid account removed from storage');
+            console.log('🔐 Invalid account removed');
           } catch (cleanupError) {
             console.warn('Cleanup warning:', cleanupError);
           }
@@ -188,63 +162,61 @@ export default function DrawerLayout() {
           setAuthState('redirect_login');
           
         } else {
-          // Network or other error - use stored role as fallback
-          console.warn('🔐 Network error during token verification - using stored role as fallback');
+          // Network error - use stored role as fallback
+          console.warn('🔐 Network error - using stored role as fallback');
           console.warn('Error details:', tokenError.message);
-          console.log('🔐 Using stored role for fallback routing:', storedRole);
+          console.log('🔐 Fallback to stored role:', storedRole);
           
-          // Route based on stored role
-          if (storedRole === 'admin') {
-            console.log('🔐 Using stored admin role - redirecting to admin panel');
-            setAuthState('redirect_admin');
-          } else if (storedRole === 'support') {
-            console.log('🔐 Using stored support role - redirecting to support panel');
-            setAuthState('redirect_support');
-          } else {
-            console.log('🔐 Using stored client role - entering drawer layout');
-            setAuthState('authenticated');
-          }
+          routeBasedOnRole(storedRole);
         }
       }
       
     } catch (error) {
       console.error('🔐 Critical session validation error:', error);
       
-      // Critical error - check if we can still use stored account as last resort
+      // Last resort fallback
       try {
         const currentAccount = accountManager.getCurrentAccount();
         if (currentAccount) {
-          const storedRole = getStoredRole(currentAccount);
-          console.log('🔐 Critical error but found stored account with role:', storedRole);
-          
-          // Use stored role as emergency fallback
-          if (storedRole === 'admin') {
-            console.log('🔐 Emergency fallback to admin panel');
-            setAuthState('redirect_admin');
-            return;
-          } else if (storedRole === 'support') {
-            console.log('🔐 Emergency fallback to support panel');
-            setAuthState('redirect_support');
-            return;
-          } else {
-            console.log('🔐 Emergency fallback to client drawer');
-            setAuthState('authenticated');
-            return;
-          }
+          console.log('🔐 Using emergency fallback with role:', currentAccount.role);
+          routeBasedOnRole(currentAccount.role);
+          return;
         }
       } catch (fallbackError) {
         console.error('🔐 Fallback also failed:', fallbackError);
       }
       
-      // Final fallback - redirect to login for safety
-      console.log('🔐 All fallbacks failed - redirecting to login for security');
+      console.log('🔐 All fallbacks failed - redirecting to login');
       setAuthState('redirect_login');
     }
   }, []);
 
-  // Start session validation immediately
+  // FIXED: Separate routing logic for clarity
+  const routeBasedOnRole = (role: string) => {
+    console.log('🧭 Routing based on role:', role);
+    
+    if (role === 'admin') {
+      console.log('🧭 Admin role - redirecting to admin panel');
+      setAuthState('redirect_admin');
+    } else if (role === 'support') {
+      console.log('🧭 Support role - redirecting to support panel');
+      setAuthState('redirect_support');
+    } else {
+      console.log('🧭 Client role - entering drawer layout');
+      setAuthState('authenticated');
+      
+      setTimeout(async () => {
+        try {
+          await NavigationHelper.trackRouteChange('/', {});
+          console.log('✅ Home screen tracked');
+        } catch (error) {
+          console.error('❌ Failed to track home screen:', error);
+        }
+      }, 1000);
+    }
+  };
+
   useEffect(() => {
-    // Small delay to ensure smooth initial render
     const timer = setTimeout(() => {
       performSessionValidation();
     }, 100);
@@ -252,40 +224,36 @@ export default function DrawerLayout() {
     return () => clearTimeout(timer);
   }, [performSessionValidation]);
 
-  // Handle redirections when auth state changes
   useEffect(() => {
     const handleRedirection = async () => {
       if (authState === 'redirect_admin') {
         try {
           console.log('🧭 Redirecting to admin panel...');
-          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
+          await new Promise(resolve => setTimeout(resolve, 200));
           router.replace('/admin');
-          console.log('✅ Successfully redirected to admin panel');
+          console.log('✅ Redirected to admin panel');
         } catch (error) {
           console.error('❌ Admin redirect failed:', error);
-          // Fallback to login on navigation error
           setAuthState('redirect_login');
         }
       } else if (authState === 'redirect_support') {
         try {
           console.log('🧭 Redirecting to support panel...');
-          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
+          await new Promise(resolve => setTimeout(resolve, 200));
           router.replace('/(support)');
-          console.log('✅ Successfully redirected to support panel');
+          console.log('✅ Redirected to support panel');
         } catch (error) {
           console.error('❌ Support redirect failed:', error);
-          // Fallback to login on navigation error
           setAuthState('redirect_login');
         }
       } else if (authState === 'redirect_login') {
         try {
           console.log('🧭 Redirecting to login...');
-          await new Promise(resolve => setTimeout(resolve, 200)); // Smooth transition
+          await new Promise(resolve => setTimeout(resolve, 200));
           router.replace('/login');
-          console.log('✅ Successfully redirected to login');
+          console.log('✅ Redirected to login');
         } catch (error) {
           console.error('❌ Login redirect failed:', error);
-          // Try alternative login routes
           try {
             router.replace('/auth/login');
           } catch (altError) {
@@ -300,11 +268,9 @@ export default function DrawerLayout() {
     }
   }, [authState, router]);
 
-  // Ensure proper state on screen focus
   useFocusEffect(
     useCallback(() => {
       if (authState === 'authenticated') {
-        // Ensure home screen tracking when drawer gains focus
         setTimeout(async () => {
           try {
             const currentRoute = NavigationHelper.getCurrentRoute();
@@ -313,19 +279,17 @@ export default function DrawerLayout() {
               console.log('✅ Home screen re-tracked on focus');
             }
           } catch (error) {
-            console.error('❌ Failed to re-track home screen on focus:', error);
+            console.error('❌ Failed to re-track home screen:', error);
           }
         }, 500);
       }
     }, [authState])
   );
 
-  // Show loading screen during initial validation or redirects
   if (authState === 'loading' || authState === 'redirect_admin' || authState === 'redirect_support' || authState === 'redirect_login') {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
-  // Render drawer only when properly authenticated
   if (authState === 'authenticated') {
     return (
       <Drawer
@@ -357,6 +321,5 @@ export default function DrawerLayout() {
     );
   }
 
-  // Fallback loading screen (should never reach here)
   return <LoadingSplashScreen backgroundColor={colors.background} />;
 }
