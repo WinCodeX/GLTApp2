@@ -36,7 +36,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
-const REQUEST_TIMEOUT = 10000;
+const REQUEST_TIMEOUT = 20000;
 const SCROLL_THRESHOLD = 0.1;
 
 interface Message {
