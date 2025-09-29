@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - Enhanced Support Dashboard with Firebase and ActionCable
+// app/(support)/index.tsx - FIXED: Real-time updates for dashboard
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -107,31 +107,22 @@ export default function SupportDashboard() {
   const unsubscribeOnMessage = useRef<(() => void) | null>(null);
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
+  const actionCableSubscribed = useRef(false);
 
   // Firebase setup
   useEffect(() => {
     setupFirebaseMessaging();
     
     return () => {
-      if (unsubscribeOnMessage.current) {
-        unsubscribeOnMessage.current();
-      }
-      if (unsubscribeOnNotificationOpenedApp.current) {
-        unsubscribeOnNotificationOpenedApp.current();
-      }
-      if (unsubscribeTokenRefresh.current) {
-        unsubscribeTokenRefresh.current();
-      }
+      if (unsubscribeOnMessage.current) unsubscribeOnMessage.current();
+      if (unsubscribeOnNotificationOpenedApp.current) unsubscribeOnNotificationOpenedApp.current();
+      if (unsubscribeTokenRefresh.current) unsubscribeTokenRefresh.current();
     };
   }, []);
 
   const setupFirebaseMessaging = async () => {
     try {
       console.log('🔥 SETTING UP FIREBASE MESSAGING FOR SUPPORT DASHBOARD...');
-      console.log('🔥 Platform detection:', {
-        isNative: firebase.isNative,
-        platform: Platform.OS
-      });
       
       if (!firebase.isNative || !firebase.messaging()) {
         console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
@@ -139,9 +130,7 @@ export default function SupportDashboard() {
       }
 
       const permissionGranted = await requestFirebasePermissions();
-      if (!permissionGranted) {
-        return;
-      }
+      if (!permissionGranted) return;
 
       await getFirebaseToken();
       setupFirebaseListeners();
@@ -156,13 +145,8 @@ export default function SupportDashboard() {
 
   const requestFirebasePermissions = async (): Promise<boolean> => {
     try {
-      console.log('🔥 REQUESTING FIREBASE PERMISSIONS...');
-      
       const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available');
-        return false;
-      }
+      if (!messaging) return false;
       
       const authStatus = await messaging.requestPermission();
       const enabled = authStatus === 1 || authStatus === 2;
@@ -174,14 +158,10 @@ export default function SupportDashboard() {
         console.log('❌ FIREBASE PERMISSIONS DENIED');
         Alert.alert(
           'Notifications Required',
-          'GLT Support needs notification permissions to send you important updates about support tickets. Please enable notifications in your device settings.',
+          'GLT Support needs notification permissions to send you important updates about support tickets.',
           [
             { text: 'Maybe Later', style: 'cancel' },
-            { 
-              text: 'Open Settings', 
-              style: 'default',
-              onPress: () => Linking.openSettings() 
-            }
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
           ]
         );
         return false;
@@ -194,16 +174,10 @@ export default function SupportDashboard() {
 
   const getFirebaseToken = async () => {
     try {
-      console.log('🔥 GETTING FIREBASE FCM TOKEN FOR SUPPORT...');
-      
       const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available for token generation');
-        return;
-      }
+      if (!messaging) return;
       
       const token = await messaging.getToken();
-      
       console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
       setFcmToken(token);
 
@@ -216,23 +190,14 @@ export default function SupportDashboard() {
       });
       
     } catch (error) {
-      console.error('❌ DETAILED FCM TOKEN ERROR:', {
-        message: error.message,
-        code: error.code,
-      });
-      
-      Alert.alert(
-        'FCM Token Error',
-        `Failed to get Firebase token: ${error.message}\n\nPlease try restarting the app.`,
-        [{ text: 'OK' }]
-      );
+      console.error('❌ DETAILED FCM TOKEN ERROR:', error);
+      Alert.alert('FCM Token Error', `Failed to get Firebase token: ${error.message}`);
     }
   };
 
   const registerFCMTokenWithBackend = async (token: string) => {
     try {
       console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
-      console.log('🔥 TOKEN:', token?.substring(0, 50) + '...');
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
@@ -245,14 +210,10 @@ export default function SupportDashboard() {
         }
       });
       
-      console.log('🔥 BACKEND RESPONSE:', response.data);
-      
       if (response.data?.success) {
         console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
         await AsyncStorage.setItem('fcm_token', token);
         await AsyncStorage.setItem('fcm_token_registered', 'true');
-      } else {
-        console.error('❌ BACKEND REJECTED FCM TOKEN REGISTRATION:', response.data);
       }
       
     } catch (error) {
@@ -272,15 +233,13 @@ export default function SupportDashboard() {
           remoteMessage.notification.title,
           remoteMessage.notification.body,
           [
-            {
-              text: 'View',
-              onPress: () => handleNotificationData(remoteMessage.data)
-            },
+            { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
             { text: 'Dismiss', style: 'cancel' }
           ]
         );
       }
       
+      // FIXED: Reload tickets immediately when notification received
       loadTickets(true);
       loadDashboardData();
     });
@@ -326,11 +285,11 @@ export default function SupportDashboard() {
     }
   };
 
-  // ActionCable setup
+  // FIXED: Proper ActionCable setup with support_dashboard subscription
   const setupActionCableConnection = useCallback(async () => {
     try {
-      if (!user) {
-        console.log('📡 No user available for ActionCable connection');
+      if (!user || actionCableSubscribed.current) {
+        console.log('📡 Skipping ActionCable setup - already subscribed or no user');
         return;
       }
 
@@ -354,6 +313,7 @@ export default function SupportDashboard() {
 
       if (connected) {
         setupActionCableSubscriptions();
+        actionCableSubscribed.current = true;
       }
     } catch (error) {
       console.error('❌ Failed to setup ActionCable connection:', error);
@@ -361,11 +321,13 @@ export default function SupportDashboard() {
     }
   }, [user]);
 
+  // FIXED: Subscribe to support_dashboard channel for real-time updates
   const setupActionCableSubscriptions = () => {
     console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
 
     const actionCable = ActionCableService.getInstance();
 
+    // Connection status
     actionCable.subscribe('connection_established', () => {
       console.log('📡 ActionCable connected');
       setIsConnected(true);
@@ -376,6 +338,12 @@ export default function SupportDashboard() {
       setIsConnected(false);
     });
 
+    // CRITICAL: Subscribe to support_dashboard channel
+    actionCable.subscribe('support_dashboard', (channel) => {
+      console.log('📡 Subscribed to support_dashboard channel');
+    });
+
+    // Initial state
     actionCable.subscribe('initial_state', (data) => {
       console.log('📊 Received initial state via ActionCable:', data);
       if (data.dashboard_stats) {
@@ -387,6 +355,7 @@ export default function SupportDashboard() {
       }
     });
 
+    // FIXED: Dashboard stats updates
     actionCable.subscribe('dashboard_stats_update', (data) => {
       console.log('📊 Dashboard stats update received:', data);
       if (data.stats) {
@@ -395,14 +364,16 @@ export default function SupportDashboard() {
       }
     });
 
+    // FIXED: New support ticket
     actionCable.subscribe('new_support_ticket', (data) => {
       console.log('🎫 New support ticket:', data);
       if (data.ticket) {
         setTickets(prev => [data.ticket, ...prev]);
-        loadDashboardData();
+        loadDashboardData(); // Refresh stats
       }
     });
 
+    // FIXED: Ticket status updates
     actionCable.subscribe('ticket_status_update', (data) => {
       console.log('🎫 Ticket status update:', data);
       if (data.ticket_id && data.status) {
@@ -411,13 +382,15 @@ export default function SupportDashboard() {
             ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
             : ticket
         ));
-        loadDashboardData();
+        loadDashboardData(); // Refresh stats
       }
     });
 
+    // FIXED: New message in ANY conversation
     actionCable.subscribe('new_message', (data) => {
-      console.log('📨 New message in support ticket:', data);
+      console.log('📨 New message received:', data);
       if (data.conversation_id && data.message) {
+        // Update the ticket in the list
         setTickets(prev => prev.map(ticket => {
           if (ticket.id === data.conversation_id) {
             const updatedTicket = { ...ticket };
@@ -435,9 +408,20 @@ export default function SupportDashboard() {
           }
           return ticket;
         }));
+        
+        // Move updated ticket to top of list
+        setTickets(prev => {
+          const ticket = prev.find(t => t.id === data.conversation_id);
+          if (ticket) {
+            const others = prev.filter(t => t.id !== data.conversation_id);
+            return [ticket, ...others];
+          }
+          return prev;
+        });
       }
     });
 
+    // FIXED: Agent assignment updates
     actionCable.subscribe('agent_assignment_update', (data) => {
       console.log('👤 Agent assignment update:', data);
       if (data.ticket_id && data.agent) {
@@ -449,6 +433,7 @@ export default function SupportDashboard() {
       }
     });
 
+    // FIXED: Ticket escalation
     actionCable.subscribe('ticket_escalated', (data) => {
       console.log('🚨 Ticket escalated:', data);
       if (data.ticket_id) {
@@ -474,7 +459,6 @@ export default function SupportDashboard() {
     };
 
     pollData();
-    
     const interval = setInterval(pollData, 30000);
     
     return () => clearInterval(interval);
@@ -486,6 +470,7 @@ export default function SupportDashboard() {
     return () => {
       const actionCable = ActionCableService.getInstance();
       actionCable.disconnect();
+      actionCableSubscribed.current = false;
     };
   }, [setupActionCableConnection]);
 
@@ -804,18 +789,6 @@ export default function SupportDashboard() {
 
       {renderStatsOverview()}
 
-      {currentChat && typeof currentChat === 'string' && currentChat.length > 0 && (
-        <View style={styles.currentChatIndicator}>
-          <Feather name="message-circle" size={16} color="#E1BEE7" />
-          <Text style={styles.currentChatText}>
-            Currently in chat #{currentChat.length >= 8 ? currentChat.substring(currentChat.length - 8) : currentChat}
-          </Text>
-          <TouchableOpacity onPress={() => setCurrentChat(null)}>
-            <Feather name="x" size={16} color="#8E8E93" />
-          </TouchableOpacity>
-        </View>
-      )}
-
       {!isConnected && (
         <View style={styles.connectionBanner}>
           <MaterialIcons name="wifi-off" size={16} color="#f97316" />
@@ -989,403 +962,76 @@ const getPriorityColor = (priority: string) => {
 };
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#111B21',
-  },
-  header: {
-    paddingTop: 28,
-    paddingBottom: 20,
-    paddingHorizontal: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  headerSubtitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 2,
-  },
-  headerSubtitle: {
-    color: '#E1BEE7',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  connectionStatus: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginLeft: 8,
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 8,
-  },
-  connectedDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10b981',
-    marginRight: 4,
-  },
-  connectedText: {
-    color: '#10b981',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  headerDescription: {
-    color: '#C1A7C9',
-    fontSize: 14,
-    opacity: 0.9,
-  },
-  statsToggleButton: {
-    padding: 8,
-    marginRight: 8,
-  },
-  headerAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-  },
-  statsContainer: {
-    backgroundColor: 'rgba(123, 63, 152, 0.1)',
-    paddingVertical: 12,
-  },
-  statsHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  statsTitle: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  liveIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-  },
-  liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10b981',
-    marginRight: 4,
-  },
-  liveText: {
-    color: '#10b981',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  statCard: {
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    marginHorizontal: 8,
-    borderRadius: 12,
-    alignItems: 'center',
-    minWidth: 80,
-  },
-  statNumber: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: 'bold',
-  },
-  statLabel: {
-    color: '#E1BEE7',
-    fontSize: 12,
-    marginTop: 4,
-  },
-  currentChatIndicator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(123, 63, 152, 0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(123, 63, 152, 0.2)',
-  },
-  currentChatText: {
-    color: '#E1BEE7',
-    fontSize: 14,
-    marginLeft: 8,
-    flex: 1,
-  },
-  connectionBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(249, 115, 22, 0.1)',
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(249, 115, 22, 0.2)',
-  },
-  connectionBannerText: {
-    color: '#f97316',
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  searchContainer: {
-    padding: 16,
-  },
-  searchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1F2C34',
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-  },
-  searchInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 16,
-    marginLeft: 8,
-  },
-  filtersContainer: {
-    paddingHorizontal: 16,
-    marginBottom: 8,
-  },
-  filterPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    marginRight: 8,
-  },
-  filterPillActive: {
-    backgroundColor: '#7B3F98',
-  },
-  filterPillText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 6,
-  },
-  filterPillTextActive: {
-    color: '#fff',
-  },
-  filterPillBadge: {
-    backgroundColor: '#E1BEE7',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginLeft: 6,
-  },
-  filterPillBadgeLive: {
-    backgroundColor: '#10b981',
-  },
-  filterPillBadgeText: {
-    color: '#7B3F98',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  listContainer: {
-    flex: 1,
-  },
-  ticketItem: {
-    backgroundColor: '#1F2C34',
-    marginHorizontal: 8,
-    marginVertical: 2,
-    borderRadius: 8,
-  },
-  ticketContent: {
-    padding: 12,
-  },
-  ticketHeader: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-  },
-  customerAvatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    marginRight: 12,
-  },
-  ticketInfo: {
-    flex: 1,
-  },
-  ticketTitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  customerName: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-    flex: 1,
-  },
-  ticketMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  ticketTime: {
-    color: '#8E8E93',
-    fontSize: 12,
-  },
-  realtimeIndicator: {
-    marginLeft: 6,
-  },
-  realtimeDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: '#10b981',
-  },
-  ticketSubtitleRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 6,
-  },
-  ticketPreview: {
-    color: '#B8B8B8',
-    fontSize: 14,
-    flex: 1,
-  },
-  unreadBadge: {
-    backgroundColor: '#7B3F98',
-    borderRadius: 10,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    marginLeft: 8,
-  },
-  unreadBadgeLive: {
-    backgroundColor: '#10b981',
-  },
-  unreadText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  ticketMetaRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  ticketLeftMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  ticketRightMeta: {
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  ticketId: {
-    color: '#8E8E93',
-    fontSize: 12,
-    marginRight: 8,
-  },
-  priorityBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-    marginRight: 8,
-  },
-  priorityText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  quickAssignButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(123, 63, 152, 0.2)',
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 12,
-    marginRight: 8,
-  },
-  quickAssignText: {
-    color: '#7B3F98',
-    fontSize: 10,
-    fontWeight: '600',
-    marginLeft: 4,
-  },
-  statusBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  statusText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  assignedAgentRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  assignedAgentText: {
-    color: '#8E8E93',
-    fontSize: 12,
-    marginLeft: 4,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  loadingText: {
-    color: '#8E8E93',
-    fontSize: 16,
-    marginTop: 16,
-  },
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 100,
-  },
-  emptyText: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginTop: 16,
-  },
-  emptySubtext: {
-    color: '#8E8E93',
-    fontSize: 14,
-    marginTop: 8,
-    textAlign: 'center',
-  },
-  clearSearchButton: {
-    backgroundColor: '#7B3F98',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 16,
-    marginTop: 16,
-  },
-  clearSearchText: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
-  },
+  container: { flex: 1, backgroundColor: '#111B21' },
+  header: { paddingTop: 28, paddingBottom: 20, paddingHorizontal: 16 },
+  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerLeft: { flex: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  headerTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
+  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+  headerSubtitle: { color: '#E1BEE7', fontSize: 16, fontWeight: '500' },
+  connectionStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 8, backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  connectedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
+  connectedText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
+  headerDescription: { color: '#C1A7C9', fontSize: 14, opacity: 0.9 },
+  statsToggleButton: { padding: 8, marginRight: 8 },
+  headerAvatar: { width: 50, height: 50, borderRadius: 25 },
+  statsContainer: { backgroundColor: 'rgba(123, 63, 152, 0.1)', paddingVertical: 12 },
+  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8 },
+  statsTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
+  liveText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
+  statCard: { backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 12, marginHorizontal: 8, borderRadius: 12, alignItems: 'center', minWidth: 80 },
+  statNumber: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  statLabel: { color: '#E1BEE7', fontSize: 12, marginTop: 4 },
+  connectionBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(249, 115, 22, 0.1)', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(249, 115, 22, 0.2)' },
+  connectionBannerText: { color: '#f97316', fontSize: 14, marginLeft: 8 },
+  searchContainer: { padding: 16 },
+  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  searchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 8 },
+  filtersContainer: { paddingHorizontal: 16, marginBottom: 8 },
+  filterPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
+  filterPillActive: { backgroundColor: '#7B3F98' },
+  filterPillText: { color: '#8E8E93', fontSize: 14, fontWeight: '500', marginLeft: 6 },
+  filterPillTextActive: { color: '#fff' },
+  filterPillBadge: { backgroundColor: '#E1BEE7', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
+  filterPillBadgeLive: { backgroundColor: '#10b981' },
+  filterPillBadgeText: { color: '#7B3F98', fontSize: 12, fontWeight: '600' },
+  listContainer: { flex: 1 },
+  ticketItem: { backgroundColor: '#1F2C34', marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
+  ticketContent: { padding: 12 },
+  ticketHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  customerAvatar: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
+  ticketInfo: { flex: 1 },
+  ticketTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  customerName: { color: '#fff', fontSize: 16, fontWeight: '600', flex: 1 },
+  ticketMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketTime: { color: '#8E8E93', fontSize: 12 },
+  realtimeIndicator: { marginLeft: 6 },
+  realtimeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
+  ticketSubtitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  ticketPreview: { color: '#B8B8B8', fontSize: 14, flex: 1 },
+  unreadBadge: { backgroundColor: '#7B3F98', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 },
+  unreadBadgeLive: { backgroundColor: '#10b981' },
+  unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  ticketMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  ticketLeftMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketRightMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketId: { color: '#8E8E93', fontSize: 12, marginRight: 8 },
+  priorityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 8 },
+  priorityText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  quickAssignButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(123, 63, 152, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 8 },
+  quickAssignText: { color: '#7B3F98', fontSize: 10, fontWeight: '600', marginLeft: 4 },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  statusText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  assignedAgentRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  assignedAgentText: { color: '#8E8E93', fontSize: 12, marginLeft: 4 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
+  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
+  emptyText: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptySubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
+  clearSearchButton: { backgroundColor: '#7B3F98', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, marginTop: 16 },
+  clearSearchText: { color: '#fff', fontSize: 14, fontWeight: '500' },
 });
