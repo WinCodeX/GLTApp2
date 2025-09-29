@@ -1,10 +1,12 @@
-// lib/netStatus.ts
+// lib/netStatus.ts - Enhanced with ActionCable integration
 import NetInfo from '@react-native-community/netinfo';
 import api from './api';
+import ActionCableService from './services/ActionCableService';
 
 type NetworkStatus = 'online' | 'offline' | 'server_error';
 
 let statusCallback: ((status: NetworkStatus) => void) | null = null;
+let wasOnline = true;
 
 export const registerStatusUpdater = (callback: (status: NetworkStatus) => void) => {
   statusCallback = callback;
@@ -12,6 +14,7 @@ export const registerStatusUpdater = (callback: (status: NetworkStatus) => void)
   NetInfo.addEventListener(async (state) => {
     if (!state.isConnected) {
       console.log('📱 Device is offline');
+      wasOnline = false;
       statusCallback?.('offline');
       return;
     }
@@ -19,14 +22,22 @@ export const registerStatusUpdater = (callback: (status: NetworkStatus) => void)
     console.log('📱 Device is online, checking server connectivity...');
     
     try {
-      // Use our API instance instead of direct fetch
       const response = await api.get('/api/v1/ping', {
-        timeout: 5000, // 5 second timeout for status checks
+        timeout: 5000,
       });
       
       if (response.status === 200) {
         console.log('✅ Server is reachable');
         statusCallback?.('online');
+        
+        // If network just came back, force ActionCable reconnection
+        if (!wasOnline) {
+          console.log('🔄 Network restored - triggering ActionCable reconnection');
+          const actionCable = ActionCableService.getInstance();
+          actionCable.forceReconnect();
+        }
+        
+        wasOnline = true;
       } else {
         console.log('⚠️ Server responded with non-200 status:', response.status);
         statusCallback?.('server_error');
@@ -38,7 +49,6 @@ export const registerStatusUpdater = (callback: (status: NetworkStatus) => void)
   });
 };
 
-// Function to manually check server status
 export const checkServerStatus = async (): Promise<NetworkStatus> => {
   try {
     const netInfo = await NetInfo.fetch();
