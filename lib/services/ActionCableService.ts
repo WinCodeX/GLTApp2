@@ -1,4 +1,4 @@
-// lib/services/ActionCableService.ts - Fixed with proper message broadcasting
+// lib/services/ActionCableService.ts - Fixed with infinite reconnection and proper message broadcasting
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
@@ -25,7 +25,7 @@ interface ActionCableMessage {
   user_data?: any;
   recent_conversations?: any[];
   businesses?: any[];
-  // FIXED: Add missing message broadcasting fields
+  // Message broadcasting fields
   conversation_id?: string;
   message_id?: string;
   ticket_id?: string;
@@ -45,8 +45,6 @@ interface ConnectionConfig {
   userId: string;
   baseUrl?: string;
   autoReconnect?: boolean;
-  maxReconnectAttempts?: number;
-  reconnectInterval?: number;
 }
 
 interface TypingIndicatorConfig {
@@ -66,8 +64,10 @@ class ActionCableService {
   private callbacks: ActionCableCallbacks = {};
   private isConnected = false;
   private reconnectAttempts = 0;
-  private maxReconnectAttempts = 5;
-  private reconnectInterval = 3000;
+  private readonly MIN_RECONNECT_DELAY = 1000;  // 1 second
+  private readonly MAX_RECONNECT_DELAY = 30000; // 30 seconds
+  private reconnectTimeout: NodeJS.Timeout | null = null;
+  private isIntentionalDisconnect = false;
   private connectionConfig: ConnectionConfig | null = null;
   private heartbeatInterval: NodeJS.Timeout | null = null;
   private typingTimeouts: Map<string, NodeJS.Timeout> = new Map();
@@ -83,7 +83,6 @@ class ActionCableService {
     return ActionCableService.instance;
   }
 
-  // Enhanced connection with native WebSocket
   async connect(config: ConnectionConfig): Promise<boolean> {
     try {
       console.log('🔌 Connecting to ActionCable...', { 
@@ -93,22 +92,19 @@ class ActionCableService {
       
       this.connectionConfig = {
         autoReconnect: true,
-        maxReconnectAttempts: 5,
-        reconnectInterval: 3000,
         ...config
       };
 
-      // Get the current API base URL and convert to WebSocket URL
+      this.isIntentionalDisconnect = false;
+
       const apiBaseUrl = config.baseUrl || getCurrentApiBaseUrl();
       const wsUrl = this.convertToWebSocketUrl(apiBaseUrl);
       
       console.log('🔗 WebSocket URL:', wsUrl);
 
-      // Create WebSocket connection with authentication
       const connectionUrl = `${wsUrl}/cable?token=${config.token}&user_id=${config.userId}`;
       this.websocket = new WebSocket(connectionUrl);
 
-      // Set up WebSocket event handlers
       this.setupWebSocketHandlers();
 
       return new Promise((resolve, reject) => {
@@ -126,17 +122,11 @@ class ActionCableService {
           this.isConnected = true;
           this.reconnectAttempts = 0;
           
-          // Subscribe to user notifications channel
           this.subscribeToChannel();
-          
-          // Request initial state
           this.requestInitialState();
-          
-          // Start heartbeat
           this.startHeartbeat();
           this.startPing();
           
-          // Trigger connection callbacks
           this.triggerCallbacks('connection_established', { connected: true });
           
           resolve(true);
@@ -154,8 +144,8 @@ class ActionCableService {
       console.error('❌ Failed to connect to ActionCable:', error);
       this.triggerCallbacks('connection_error', { error: error.message });
       
-      if (this.connectionConfig?.autoReconnect) {
-        this.handleDisconnection();
+      if (this.connectionConfig?.autoReconnect && !this.isIntentionalDisconnect) {
+        this.scheduleReconnection();
       }
       
       return false;
@@ -170,7 +160,6 @@ class ActionCableService {
         const data = JSON.parse(event.data);
         
         if (data.type === 'ping') {
-          // Respond to ping with pong
           this.sendMessage({ type: 'pong' });
           return;
         }
@@ -200,19 +189,117 @@ class ActionCableService {
       this.stopHeartbeat();
       this.stopPing();
       
-      // Trigger disconnection callbacks
       this.triggerCallbacks('connection_lost', { connected: false });
       
-      // Handle reconnection
-      if (this.connectionConfig?.autoReconnect) {
-        this.handleDisconnection();
+      if (this.connectionConfig?.autoReconnect && !this.isIntentionalDisconnect) {
+        this.scheduleReconnection();
       }
     };
 
     this.websocket.onerror = (error) => {
       console.error('❌ WebSocket error:', error);
       this.triggerCallbacks('connection_error', { error: 'WebSocket error' });
+      
+      if (this.connectionConfig?.autoReconnect && !this.isIntentionalDisconnect) {
+        this.scheduleReconnection();
+      }
     };
+  }
+
+  disconnect(): void {
+    try {
+      console.log('🔌 Disconnecting from ActionCable...');
+      
+      this.isIntentionalDisconnect = true;
+      this.stopReconnecting();
+      
+      this.stopHeartbeat();
+      this.stopPing();
+      this.clearAllTypingTimeouts();
+      
+      if (this.websocket) {
+        this.websocket.close();
+        this.websocket = null;
+      }
+      
+      this.isConnected = false;
+      this.subscribedConversations.clear();
+      this.subscribedBusinesses.clear();
+      this.connectionConfig = null;
+      this.subscriptionIdentifier = null;
+      
+      console.log('✅ Disconnected from ActionCable');
+    } catch (error) {
+      console.error('❌ Error disconnecting from ActionCable:', error);
+    }
+  }
+
+  private scheduleReconnection(): void {
+    this.stopReconnecting();
+
+    const exponentialDelay = this.MIN_RECONNECT_DELAY * Math.pow(2, this.reconnectAttempts);
+    const delay = Math.min(exponentialDelay, this.MAX_RECONNECT_DELAY);
+    
+    this.reconnectAttempts++;
+    
+    console.log(`🔄 Scheduling reconnection attempt #${this.reconnectAttempts} in ${delay}ms`);
+    
+    this.reconnectTimeout = setTimeout(() => {
+      this.attemptReconnection();
+    }, delay);
+  }
+
+  private async attemptReconnection(): Promise<void> {
+    if (this.isIntentionalDisconnect) {
+      console.log('⏸️ Skipping reconnection - user disconnected intentionally');
+      return;
+    }
+
+    if (!this.connectionConfig) {
+      console.error('❌ Cannot reconnect - no connection config');
+      return;
+    }
+
+    console.log(`🔄 Attempting to reconnect (attempt #${this.reconnectAttempts})...`);
+    
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (currentAccount) {
+        this.connectionConfig.token = currentAccount.token;
+      }
+
+      const connected = await this.connect(this.connectionConfig);
+      
+      if (connected) {
+        console.log('✅ Reconnection successful!');
+        this.reconnectAttempts = 0;
+        
+        await this.resubscribeToChannels();
+      } else {
+        console.warn('⚠️ Reconnection failed, will retry...');
+        this.scheduleReconnection();
+      }
+    } catch (error) {
+      console.error('❌ Reconnection error:', error);
+      this.scheduleReconnection();
+    }
+  }
+
+  private stopReconnecting(): void {
+    if (this.reconnectTimeout) {
+      clearTimeout(this.reconnectTimeout);
+      this.reconnectTimeout = null;
+    }
+  }
+
+  public forceReconnect(): void {
+    console.log('🔄 Force reconnect requested');
+    this.reconnectAttempts = 0;
+    this.stopReconnecting();
+    
+    if (this.connectionConfig && !this.isIntentionalDisconnect) {
+      this.attemptReconnection();
+    }
   }
 
   private subscribeToChannel(): void {
@@ -237,36 +324,6 @@ class ActionCableService {
     }
   }
 
-  // Enhanced disconnect with cleanup
-  disconnect(): void {
-    try {
-      console.log('🔌 Disconnecting from ActionCable...');
-      
-      // Clear all timeouts
-      this.stopHeartbeat();
-      this.stopPing();
-      this.clearAllTypingTimeouts();
-      
-      // Close WebSocket connection
-      if (this.websocket) {
-        this.websocket.close();
-        this.websocket = null;
-      }
-      
-      // Clear state
-      this.isConnected = false;
-      this.subscribedConversations.clear();
-      this.subscribedBusinesses.clear();
-      this.connectionConfig = null;
-      this.subscriptionIdentifier = null;
-      
-      console.log('✅ Disconnected from ActionCable');
-    } catch (error) {
-      console.error('❌ Error disconnecting from ActionCable:', error);
-    }
-  }
-
-  // Subscribe to specific message types with enhanced error handling
   subscribe(type: string, callback: (data: ActionCableMessage) => void): () => void {
     if (!this.callbacks[type]) {
       this.callbacks[type] = [];
@@ -275,11 +332,9 @@ class ActionCableService {
     
     console.log(`📡 Subscribed to ActionCable messages of type: ${type}`);
     
-    // Return unsubscribe function
     return () => this.unsubscribe(type, callback);
   }
 
-  // Enhanced unsubscribe
   unsubscribe(type: string, callback?: (data: ActionCableMessage) => void): void {
     if (!this.callbacks[type]) return;
     
@@ -295,7 +350,6 @@ class ActionCableService {
     console.log(`📡 Unsubscribed from ActionCable messages of type: ${type}`);
   }
 
-  // Enhanced perform with error handling and retry logic
   perform(action: string, data: any = {}): Promise<boolean> {
     return new Promise((resolve) => {
       if (!this.subscriptionIdentifier || !this.isConnected) {
@@ -324,19 +378,15 @@ class ActionCableService {
     });
   }
 
-  // ENHANCED: Request comprehensive initial state
   async requestInitialState(): Promise<boolean> {
     return this.perform('request_initial_state', {});
   }
 
-  // ENHANCED: Request just counts (backward compatibility)
   async requestInitialCounts(): Promise<boolean> {
     return this.perform('request_counts', {});
   }
 
-  // ENHANCED: Mark notification as read with optimistic updates
   async markNotificationRead(notificationId: number): Promise<boolean> {
-    // Trigger optimistic update immediately
     this.triggerCallbacks('notification_read_optimistic', { 
       notification_id: notificationId 
     });
@@ -344,9 +394,7 @@ class ActionCableService {
     return this.perform('mark_notification_read', { notification_id: notificationId });
   }
 
-  // ENHANCED: Mark message as read with optimistic updates
   async markMessageRead(conversationId: string): Promise<boolean> {
-    // Trigger optimistic update immediately
     this.triggerCallbacks('message_read_optimistic', { 
       conversation_id: conversationId 
     });
@@ -354,21 +402,17 @@ class ActionCableService {
     return this.perform('mark_message_read', { conversation_id: conversationId });
   }
 
-  // ENHANCED: Typing indicators with automatic timeout
   async startTyping(config: TypingIndicatorConfig): Promise<boolean> {
     const { conversationId, timeout = 3000 } = config;
     
-    // Clear existing timeout for this conversation
     this.clearTypingTimeout(conversationId);
     
-    // Send typing indicator
     const success = await this.perform('typing_indicator', {
       conversation_id: conversationId,
       typing: true
     });
     
     if (success) {
-      // Set automatic stop timeout
       const timeoutId = setTimeout(() => {
         this.stopTyping(conversationId);
       }, timeout);
@@ -388,7 +432,6 @@ class ActionCableService {
     });
   }
 
-  // ENHANCED: Conversation management
   async joinConversation(conversationId: string): Promise<boolean> {
     const success = await this.perform('join_conversation', {
       conversation_id: conversationId
@@ -412,7 +455,6 @@ class ActionCableService {
     return success;
   }
 
-  // ENHANCED: Business channel management
   async subscribeToBusinessUpdates(businessId: string): Promise<boolean> {
     const success = await this.perform('subscribe_to_business', {
       business_id: businessId
@@ -425,17 +467,15 @@ class ActionCableService {
     return success;
   }
 
-  // ENHANCED: Presence management
   async updatePresence(status: 'online' | 'away' | 'busy' | 'offline' = 'online'): Promise<boolean> {
     return this.perform('update_presence', { status });
   }
 
-  // ENHANCED: Connection status with detailed information
   getConnectionStatus() {
     return {
       connected: this.isConnected,
       reconnectAttempts: this.reconnectAttempts,
-      maxReconnectAttempts: this.maxReconnectAttempts,
+      willReconnect: !this.isIntentionalDisconnect && this.connectionConfig?.autoReconnect,
       hasSubscription: !!this.subscriptionIdentifier,
       subscribedConversations: Array.from(this.subscribedConversations),
       subscribedBusinesses: Array.from(this.subscribedBusinesses),
@@ -444,12 +484,10 @@ class ActionCableService {
     };
   }
 
-  // ENHANCED: Check if connected
   isConnectedToActionCable(): boolean {
     return this.isConnected && !!this.websocket && this.websocket.readyState === WebSocket.OPEN;
   }
 
-  // ENHANCED: Get subscribed channels info
   getSubscriptionInfo() {
     return {
       conversations: Array.from(this.subscribedConversations),
@@ -460,17 +498,14 @@ class ActionCableService {
 
   private convertToWebSocketUrl(apiUrl: string): string {
     try {
-      // Remove /api/v1 from the end if present
       const baseUrl = apiUrl.replace(/\/api\/v1\/?$/, '');
       
-      // Convert HTTP to WebSocket
       if (baseUrl.startsWith('https://')) {
         return baseUrl.replace('https://', 'wss://');
       } else if (baseUrl.startsWith('http://')) {
         return baseUrl.replace('http://', 'ws://');
       }
       
-      // Assume HTTPS if no protocol
       if (!baseUrl.includes('://')) {
         return `wss://${baseUrl}`;
       }
@@ -482,13 +517,10 @@ class ActionCableService {
     }
   }
 
-  // FIXED: Enhanced message handling with proper routing
   private handleMessage(data: ActionCableMessage): void {
     try {
-      // Log all incoming messages for debugging
       console.log('📡 Processing ActionCable message:', data.type, data);
       
-      // FIXED: Execute type-specific callbacks first
       const callbacks = this.callbacks[data.type] || [];
       callbacks.forEach(callback => {
         try {
@@ -498,7 +530,6 @@ class ActionCableService {
         }
       });
 
-      // FIXED: Execute global callbacks for all messages (this was missing)
       const globalCallbacks = this.callbacks['*'] || [];
       globalCallbacks.forEach(callback => {
         try {
@@ -508,9 +539,7 @@ class ActionCableService {
         }
       });
 
-      // FIXED: Special handling for message broadcasts to ensure they reach the right handlers
       if (data.type === 'new_message' && data.conversation_id) {
-        // Also trigger conversation-specific callbacks
         const conversationCallbacks = this.callbacks[`conversation_${data.conversation_id}`] || [];
         conversationCallbacks.forEach(callback => {
           try {
@@ -521,26 +550,20 @@ class ActionCableService {
         });
       }
 
-      // FIXED: Enhanced message processing for specific message types
       this.processSpecialMessageTypes(data);
-      
-      // Log important message types
       this.logImportantMessages(data);
     } catch (error) {
       console.error('❌ Error handling ActionCable message:', error);
     }
   }
 
-  // FIXED: Add special message type processing
   private processSpecialMessageTypes(data: ActionCableMessage): void {
     try {
       switch (data.type) {
         case 'new_message':
-          // Ensure message has required fields for proper handling
           if (data.conversation_id && data.message) {
             console.log(`💬 New message in conversation ${data.conversation_id}:`, data.message.content?.substring(0, 50));
             
-            // Trigger specific message callbacks
             this.triggerCallbacks('message_received', {
               ...data,
               timestamp: new Date().toISOString()
@@ -623,73 +646,14 @@ class ActionCableService {
     });
   }
 
-  private async handleDisconnection(): Promise<void> {
-    if (!this.connectionConfig?.autoReconnect) {
-      return;
-    }
-
-    if (this.reconnectAttempts < this.maxReconnectAttempts) {
-      this.reconnectAttempts++;
-      console.log(`🔄 Attempting to reconnect (${this.reconnectAttempts}/${this.maxReconnectAttempts})...`);
-      
-      // Exponential backoff
-      const delay = this.reconnectInterval * Math.pow(2, this.reconnectAttempts - 1);
-      
-      setTimeout(async () => {
-        await this.reconnect();
-      }, Math.min(delay, 30000)); // Max 30 seconds delay
-    } else {
-      console.error('❌ Max reconnection attempts reached');
-      this.triggerCallbacks('max_reconnect_attempts_reached', { 
-        attempts: this.reconnectAttempts 
-      });
-    }
-  }
-
-  private async reconnect(): Promise<void> {
-    if (!this.connectionConfig) {
-      console.error('❌ No connection config available for reconnection');
-      return;
-    }
-
-    try {
-      console.log('🔄 Attempting to reconnect to ActionCable...');
-      
-      // Get fresh token if available
-      const currentAccount = accountManager.getCurrentAccount();
-      if (currentAccount) {
-        this.connectionConfig.token = currentAccount.token;
-      }
-      
-      // Attempt reconnection
-      const success = await this.connect(this.connectionConfig);
-      
-      if (success) {
-        console.log('✅ Successfully reconnected to ActionCable');
-        
-        // Resubscribe to conversations and businesses
-        await this.resubscribeToChannels();
-      }
-    } catch (error) {
-      console.error('❌ Reconnection failed:', error);
-      
-      // Continue reconnection attempts
-      if (this.connectionConfig.autoReconnect) {
-        this.handleDisconnection();
-      }
-    }
-  }
-
   private async resubscribeToChannels(): Promise<void> {
     try {
       console.log('🔄 Resubscribing to channels...');
       
-      // Resubscribe to conversations
       const conversationPromises = Array.from(this.subscribedConversations).map(
         conversationId => this.joinConversation(conversationId)
       );
       
-      // Resubscribe to businesses
       const businessPromises = Array.from(this.subscribedBusinesses).map(
         businessId => this.subscribeToBusinessUpdates(businessId)
       );
@@ -711,7 +675,7 @@ class ActionCableService {
           console.warn('⚠️ Heartbeat presence update failed:', error);
         });
       }
-    }, 30000); // Every 30 seconds
+    }, 30000);
   }
 
   private stopHeartbeat(): void {
@@ -728,7 +692,7 @@ class ActionCableService {
       if (this.isConnected && this.websocket?.readyState === WebSocket.OPEN) {
         this.sendMessage({ type: 'ping' });
       }
-    }, 25000); // Every 25 seconds
+    }, 25000);
   }
 
   private stopPing(): void {
@@ -754,5 +718,4 @@ class ActionCableService {
 
 export default ActionCableService;
 
-// Export types for use in other files
 export type { ActionCableMessage, ConnectionConfig, TypingIndicatorConfig };
