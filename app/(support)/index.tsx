@@ -1,5 +1,5 @@
-// app/(support)/index.tsx - Fixed Support Dashboard with ActionCable integration
-import React, { useState, useEffect, useCallback } from 'react';
+// app/(support)/index.tsx - Enhanced Support Dashboard with Firebase and ActionCable
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -13,6 +13,8 @@ import {
   Image,
   Alert,
   ScrollView,
+  Platform,
+  Linking,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -22,6 +24,8 @@ import api from '../../lib/api';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { SupportBottomTabs } from '../../components/support/SupportBottomTabs';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import firebase from '../../config/firebase';
 
 interface SupportTicket {
   id: string;
@@ -96,155 +100,395 @@ export default function SupportDashboard() {
   const [currentChat, setCurrentChat] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
   
-  // ActionCable state
   const [isConnected, setIsConnected] = useState(false);
   const [realtimeStats, setRealtimeStats] = useState<DashboardStats | null>(null);
+  const [fcmToken, setFcmToken] = useState<string>('');
 
-  // Setup ActionCable connection for real-time updates
-  const setupActionCable = useCallback(async () => {
-    if (!user) return;
+  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
+  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
+  const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
 
+  // Firebase setup
+  useEffect(() => {
+    setupFirebaseMessaging();
+    
+    return () => {
+      if (unsubscribeOnMessage.current) {
+        unsubscribeOnMessage.current();
+      }
+      if (unsubscribeOnNotificationOpenedApp.current) {
+        unsubscribeOnNotificationOpenedApp.current();
+      }
+      if (unsubscribeTokenRefresh.current) {
+        unsubscribeTokenRefresh.current();
+      }
+    };
+  }, []);
+
+  const setupFirebaseMessaging = async () => {
     try {
+      console.log('🔥 SETTING UP FIREBASE MESSAGING FOR SUPPORT DASHBOARD...');
+      console.log('🔥 Platform detection:', {
+        isNative: firebase.isNative,
+        platform: Platform.OS
+      });
+      
+      if (!firebase.isNative || !firebase.messaging()) {
+        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
+        return;
+      }
+
+      const permissionGranted = await requestFirebasePermissions();
+      if (!permissionGranted) {
+        return;
+      }
+
+      await getFirebaseToken();
+      setupFirebaseListeners();
+      handleInitialNotification();
+      
+      console.log('✅ FIREBASE MESSAGING SETUP COMPLETE FOR SUPPORT');
+      
+    } catch (error) {
+      console.error('❌ FAILED TO SETUP FIREBASE MESSAGING:', error);
+    }
+  };
+
+  const requestFirebasePermissions = async (): Promise<boolean> => {
+    try {
+      console.log('🔥 REQUESTING FIREBASE PERMISSIONS...');
+      
+      const messaging = firebase.messaging();
+      if (!messaging) {
+        console.log('🔥 Firebase messaging not available');
+        return false;
+      }
+      
+      const authStatus = await messaging.requestPermission();
+      const enabled = authStatus === 1 || authStatus === 2;
+
+      if (enabled) {
+        console.log('✅ FIREBASE AUTHORIZATION STATUS:', authStatus);
+        return true;
+      } else {
+        console.log('❌ FIREBASE PERMISSIONS DENIED');
+        Alert.alert(
+          'Notifications Required',
+          'GLT Support needs notification permissions to send you important updates about support tickets. Please enable notifications in your device settings.',
+          [
+            { text: 'Maybe Later', style: 'cancel' },
+            { 
+              text: 'Open Settings', 
+              style: 'default',
+              onPress: () => Linking.openSettings() 
+            }
+          ]
+        );
+        return false;
+      }
+    } catch (error) {
+      console.error('❌ ERROR REQUESTING FIREBASE PERMISSIONS:', error);
+      return false;
+    }
+  };
+
+  const getFirebaseToken = async () => {
+    try {
+      console.log('🔥 GETTING FIREBASE FCM TOKEN FOR SUPPORT...');
+      
+      const messaging = firebase.messaging();
+      if (!messaging) {
+        console.log('🔥 Firebase messaging not available for token generation');
+        return;
+      }
+      
+      const token = await messaging.getToken();
+      
+      console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
+      setFcmToken(token);
+
+      await registerFCMTokenWithBackend(token);
+      
+      unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
+        console.log('🔥 FCM TOKEN REFRESHED:', newToken?.substring(0, 50) + '...');
+        setFcmToken(newToken);
+        await registerFCMTokenWithBackend(newToken);
+      });
+      
+    } catch (error) {
+      console.error('❌ DETAILED FCM TOKEN ERROR:', {
+        message: error.message,
+        code: error.code,
+      });
+      
+      Alert.alert(
+        'FCM Token Error',
+        `Failed to get Firebase token: ${error.message}\n\nPlease try restarting the app.`,
+        [{ text: 'OK' }]
+      );
+    }
+  };
+
+  const registerFCMTokenWithBackend = async (token: string) => {
+    try {
+      console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
+      console.log('🔥 TOKEN:', token?.substring(0, 50) + '...');
+      
+      const response = await api.post('/api/v1/push_tokens', {
+        push_token: token,
+        platform: 'fcm',
+        device_info: {
+          platform: Platform.OS,
+          version: Platform.Version,
+          isDevice: true,
+          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
+        }
+      });
+      
+      console.log('🔥 BACKEND RESPONSE:', response.data);
+      
+      if (response.data?.success) {
+        console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
+        await AsyncStorage.setItem('fcm_token', token);
+        await AsyncStorage.setItem('fcm_token_registered', 'true');
+      } else {
+        console.error('❌ BACKEND REJECTED FCM TOKEN REGISTRATION:', response.data);
+      }
+      
+    } catch (error) {
+      console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
+    }
+  };
+
+  const setupFirebaseListeners = () => {
+    const messaging = firebase.messaging();
+    if (!messaging) return;
+
+    unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
+      console.log('🔥 FOREGROUND MESSAGE RECEIVED IN SUPPORT:', remoteMessage);
+      
+      if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
+        Alert.alert(
+          remoteMessage.notification.title,
+          remoteMessage.notification.body,
+          [
+            {
+              text: 'View',
+              onPress: () => handleNotificationData(remoteMessage.data)
+            },
+            { text: 'Dismiss', style: 'cancel' }
+          ]
+        );
+      }
+      
+      loadTickets(true);
+      loadDashboardData();
+    });
+
+    unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
+      console.log('🔥 NOTIFICATION OPENED APP FROM BACKGROUND:', remoteMessage);
+      handleNotificationData(remoteMessage.data);
+    });
+  };
+
+  const handleInitialNotification = async () => {
+    try {
+      const messaging = firebase.messaging();
+      if (!messaging) return;
+
+      const initialNotification = await messaging.getInitialNotification();
+      
+      if (initialNotification) {
+        console.log('🔥 APP OPENED BY NOTIFICATION (FROM KILLED STATE):', initialNotification);
+        setTimeout(() => {
+          handleNotificationData(initialNotification.data);
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('🔥 ERROR HANDLING INITIAL NOTIFICATION:', error);
+    }
+  };
+
+  const handleNotificationData = async (data: any) => {
+    console.log('🔥 HANDLING NOTIFICATION DATA IN SUPPORT:', data);
+    
+    try {
+      if (data?.conversation_id) {
+        router.push(`/(support)/chat/${data.conversation_id}`);
+      } else if (data?.ticket_id) {
+        const ticket = tickets.find(t => t.ticket_id === data.ticket_id);
+        if (ticket) {
+          router.push(`/(support)/chat/${ticket.id}`);
+        }
+      }
+    } catch (error) {
+      console.error('🔥 ERROR HANDLING NOTIFICATION DATA:', error);
+    }
+  };
+
+  // ActionCable setup
+  const setupActionCableConnection = useCallback(async () => {
+    try {
+      if (!user) {
+        console.log('📡 No user available for ActionCable connection');
+        return;
+      }
+
       const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount) return;
+      if (!currentAccount) {
+        console.log('📡 No account available for ActionCable connection');
+        return;
+      }
+
+      console.log('📡 Setting up ActionCable connection for support dashboard...');
 
       const actionCable = ActionCableService.getInstance();
       
-      // Connect to ActionCable
       const connected = await actionCable.connect({
         token: currentAccount.token,
-        userId: user.id,
+        userId: currentAccount.id,
         autoReconnect: true,
+        maxReconnectAttempts: 5,
+        reconnectInterval: 3000
       });
 
       if (connected) {
-        setIsConnected(true);
-        console.log('ActionCable connected for support dashboard');
-
-        // Subscribe to dashboard updates
-        actionCable.subscribe('dashboard_stats_update', (data) => {
-          console.log('Dashboard stats update received:', data);
-          if (data.stats) {
-            setRealtimeStats(data.stats);
-            setDashboardStats(data.stats);
-          }
-        });
-
-        // Subscribe to new support tickets
-        actionCable.subscribe('new_support_ticket', (data) => {
-          console.log('New support ticket:', data);
-          if (data.ticket) {
-            setTickets(prev => [data.ticket, ...prev]);
-            // Update stats
-            loadDashboardData();
-          }
-        });
-
-        // Subscribe to ticket status updates
-        actionCable.subscribe('ticket_status_update', (data) => {
-          console.log('Ticket status update:', data);
-          if (data.ticket_id && data.status) {
-            setTickets(prev => prev.map(ticket => 
-              ticket.id === data.ticket_id 
-                ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
-                : ticket
-            ));
-            // Update stats
-            loadDashboardData();
-          }
-        });
-
-        // Subscribe to new messages in tickets
-        actionCable.subscribe('new_message', (data) => {
-          console.log('New message in support ticket:', data);
-          if (data.conversation_id && data.message) {
-            setTickets(prev => prev.map(ticket => {
-              if (ticket.id === data.conversation_id) {
-                const updatedTicket = { ...ticket };
-                updatedTicket.last_message = {
-                  content: data.message.content,
-                  created_at: data.message.created_at,
-                  from_support: data.message.from_support
-                };
-                updatedTicket.last_activity_at = data.message.created_at;
-                if (!data.message.from_support) {
-                  updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
-                }
-                updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
-                return updatedTicket;
-              }
-              return ticket;
-            }));
-          }
-        });
-
-        // Subscribe to agent assignment updates
-        actionCable.subscribe('agent_assignment_update', (data) => {
-          console.log('Agent assignment update:', data);
-          if (data.ticket_id && data.agent) {
-            setTickets(prev => prev.map(ticket => 
-              ticket.id === data.ticket_id 
-                ? { ...ticket, assigned_agent: data.agent, status: 'assigned' }
-                : ticket
-            ));
-          }
-        });
-
-        // Subscribe to ticket escalation
-        actionCable.subscribe('ticket_escalated', (data) => {
-          console.log('Ticket escalated:', data);
-          if (data.ticket_id) {
-            setTickets(prev => prev.map(ticket => 
-              ticket.id === data.ticket_id 
-                ? { ...ticket, escalated: true, priority: 'high' }
-                : ticket
-            ));
-          }
-        });
-
-        // Subscribe to connection status updates
-        actionCable.subscribe('connection_established', () => {
-          setIsConnected(true);
-          console.log('ActionCable connection established');
-          // Request fresh dashboard data
-          actionCable.requestInitialState();
-        });
-
-        actionCable.subscribe('connection_lost', () => {
-          setIsConnected(false);
-          console.log('ActionCable connection lost');
-        });
-
-        // Subscribe to initial state response
-        actionCable.subscribe('initial_state', (data) => {
-          console.log('Initial state received:', data);
-          if (data.dashboard_stats) {
-            setRealtimeStats(data.dashboard_stats);
-            setDashboardStats(data.dashboard_stats);
-          }
-          if (data.agent_stats) {
-            setAgentStats(data.agent_stats);
-          }
-        });
-
-        // Request initial dashboard state
-        await actionCable.requestInitialState();
-        
-        // Subscribe to business updates if user has businesses
-        if (user.businesses && user.businesses.length > 0) {
-          for (const business of user.businesses) {
-            await actionCable.subscribeToBusinessUpdates(business.id);
-          }
-        }
-
+        setupActionCableSubscriptions();
       }
     } catch (error) {
-      console.error('Failed to setup ActionCable for dashboard:', error);
-      setIsConnected(false);
+      console.error('❌ Failed to setup ActionCable connection:', error);
+      startFallbackPolling();
     }
   }, [user]);
 
-  // Load dashboard data
+  const setupActionCableSubscriptions = () => {
+    console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
+
+    const actionCable = ActionCableService.getInstance();
+
+    actionCable.subscribe('connection_established', () => {
+      console.log('📡 ActionCable connected');
+      setIsConnected(true);
+    });
+
+    actionCable.subscribe('connection_lost', () => {
+      console.log('📡 ActionCable disconnected');
+      setIsConnected(false);
+    });
+
+    actionCable.subscribe('initial_state', (data) => {
+      console.log('📊 Received initial state via ActionCable:', data);
+      if (data.dashboard_stats) {
+        setRealtimeStats(data.dashboard_stats);
+        setDashboardStats(data.dashboard_stats);
+      }
+      if (data.agent_stats) {
+        setAgentStats(data.agent_stats);
+      }
+    });
+
+    actionCable.subscribe('dashboard_stats_update', (data) => {
+      console.log('📊 Dashboard stats update received:', data);
+      if (data.stats) {
+        setRealtimeStats(data.stats);
+        setDashboardStats(data.stats);
+      }
+    });
+
+    actionCable.subscribe('new_support_ticket', (data) => {
+      console.log('🎫 New support ticket:', data);
+      if (data.ticket) {
+        setTickets(prev => [data.ticket, ...prev]);
+        loadDashboardData();
+      }
+    });
+
+    actionCable.subscribe('ticket_status_update', (data) => {
+      console.log('🎫 Ticket status update:', data);
+      if (data.ticket_id && data.status) {
+        setTickets(prev => prev.map(ticket => 
+          ticket.id === data.ticket_id 
+            ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
+            : ticket
+        ));
+        loadDashboardData();
+      }
+    });
+
+    actionCable.subscribe('new_message', (data) => {
+      console.log('📨 New message in support ticket:', data);
+      if (data.conversation_id && data.message) {
+        setTickets(prev => prev.map(ticket => {
+          if (ticket.id === data.conversation_id) {
+            const updatedTicket = { ...ticket };
+            updatedTicket.last_message = {
+              content: data.message.content,
+              created_at: data.message.created_at,
+              from_support: data.message.from_support
+            };
+            updatedTicket.last_activity_at = data.message.created_at;
+            if (!data.message.from_support) {
+              updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
+            }
+            updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
+            return updatedTicket;
+          }
+          return ticket;
+        }));
+      }
+    });
+
+    actionCable.subscribe('agent_assignment_update', (data) => {
+      console.log('👤 Agent assignment update:', data);
+      if (data.ticket_id && data.agent) {
+        setTickets(prev => prev.map(ticket => 
+          ticket.id === data.ticket_id 
+            ? { ...ticket, assigned_agent: data.agent, status: 'assigned' }
+            : ticket
+        ));
+      }
+    });
+
+    actionCable.subscribe('ticket_escalated', (data) => {
+      console.log('🚨 Ticket escalated:', data);
+      if (data.ticket_id) {
+        setTickets(prev => prev.map(ticket => 
+          ticket.id === data.ticket_id 
+            ? { ...ticket, escalated: true, priority: 'high' }
+            : ticket
+        ));
+      }
+    });
+
+    console.log('✅ ActionCable subscriptions configured for support dashboard');
+  };
+
+  const startFallbackPolling = useCallback(() => {
+    console.log('⏳ Starting fallback polling for support dashboard...');
+    
+    const pollData = () => {
+      if (!isConnected) {
+        loadTickets(true);
+        loadDashboardData();
+      }
+    };
+
+    pollData();
+    
+    const interval = setInterval(pollData, 30000);
+    
+    return () => clearInterval(interval);
+  }, [isConnected]);
+
+  useEffect(() => {
+    setupActionCableConnection();
+    
+    return () => {
+      const actionCable = ActionCableService.getInstance();
+      actionCable.disconnect();
+    };
+  }, [setupActionCableConnection]);
+
   const loadDashboardData = useCallback(async () => {
     try {
       const response = await api.get('/api/v1/support/dashboard');
@@ -255,7 +499,6 @@ export default function SupportDashboard() {
         setDashboardStats(stats);
         setAgentStats(agentPerformance);
         
-        // If we have real-time stats, prefer those
         if (!realtimeStats) {
           setRealtimeStats(stats);
         }
@@ -265,13 +508,11 @@ export default function SupportDashboard() {
     }
   }, [realtimeStats]);
 
-  // Load support tickets
   const loadTickets = useCallback(async (refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      // Use support-specific endpoint
       const endpoint = '/api/v1/support/tickets';
       const params: any = {
         limit: 50,
@@ -300,18 +541,6 @@ export default function SupportDashboard() {
     }
   }, [activeFilter, searchQuery]);
 
-  // Setup ActionCable on mount
-  useEffect(() => {
-    setupActionCable();
-
-    return () => {
-      // Cleanup ActionCable connection
-      const actionCable = ActionCableService.getInstance();
-      actionCable.disconnect();
-    };
-  }, [setupActionCable]);
-
-  // Load data on mount and filter change
   useEffect(() => {
     loadDashboardData();
   }, [loadDashboardData]);
@@ -320,7 +549,16 @@ export default function SupportDashboard() {
     loadTickets();
   }, [loadTickets]);
 
-  // Quick assign ticket to current user
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    
+    if (!isConnected) {
+      cleanup = startFallbackPolling();
+    }
+    
+    return cleanup;
+  }, [isConnected, startFallbackPolling]);
+
   const handleQuickAssign = async (ticketId: string) => {
     try {
       const response = await api.post(`/api/v1/support/tickets/${ticketId}/assign`, {
@@ -328,7 +566,6 @@ export default function SupportDashboard() {
       });
       
       if (response.data.success) {
-        // Optimistic update
         setTickets(prev => prev.map(ticket => 
           ticket.id === ticketId 
             ? { 
@@ -348,22 +585,18 @@ export default function SupportDashboard() {
     } catch (error) {
       console.error('Failed to assign ticket:', error);
       Alert.alert('Error', 'Failed to assign ticket');
-      // Refresh to get correct state
       loadTickets();
     }
   };
 
-  // Handle real-time ticket read status
   const handleTicketRead = useCallback(async (ticketId: string) => {
     try {
-      // Mark as read optimistically
       setTickets(prev => prev.map(ticket => 
         ticket.id === ticketId 
           ? { ...ticket, unread_count: 0 }
           : ticket
       ));
 
-      // Send read status via ActionCable
       const actionCable = ActionCableService.getInstance();
       await actionCable.markMessageRead(ticketId);
       
@@ -372,35 +605,6 @@ export default function SupportDashboard() {
     }
   }, []);
 
-  // Update presence status
-  const updatePresenceStatus = useCallback(async (status: 'online' | 'away' | 'busy' | 'offline') => {
-    try {
-      const actionCable = ActionCableService.getInstance();
-      await actionCable.updatePresence(status);
-    } catch (error) {
-      console.error('Failed to update presence:', error);
-    }
-  }, []);
-
-  // Handle app state changes for presence
-  useEffect(() => {
-    const handleAppStateChange = (nextAppState: string) => {
-      if (nextAppState === 'active') {
-        updatePresenceStatus('online');
-      } else if (nextAppState === 'background') {
-        updatePresenceStatus('away');
-      }
-    };
-
-    // Note: In React Native, you would use AppState.addEventListener
-    // For this example, we'll assume presence is handled automatically by ActionCable
-
-    return () => {
-      updatePresenceStatus('offline');
-    };
-  }, [updatePresenceStatus]);
-
-  // Get status counts from loaded tickets
   const statusCounts = {
     in_progress: tickets.filter(t => t.status === 'in_progress').length,
     pending: tickets.filter(t => t.status === 'pending').length,
@@ -410,7 +614,6 @@ export default function SupportDashboard() {
     closed: tickets.filter(t => t.status === 'closed').length,
   };
 
-  // Use real-time stats if available, otherwise fall back to loaded stats
   const currentStats = realtimeStats || dashboardStats;
 
   const renderStatsOverview = () => {
@@ -556,7 +759,6 @@ export default function SupportDashboard() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -600,10 +802,8 @@ export default function SupportDashboard() {
         </View>
       </LinearGradient>
 
-      {/* Stats Overview */}
       {renderStatsOverview()}
 
-      {/* Current Chat Indicator - FIXED WITH PROPER STRING HANDLING */}
       {currentChat && typeof currentChat === 'string' && currentChat.length > 0 && (
         <View style={styles.currentChatIndicator}>
           <Feather name="message-circle" size={16} color="#E1BEE7" />
@@ -616,7 +816,6 @@ export default function SupportDashboard() {
         </View>
       )}
 
-      {/* Connection Status Banner */}
       {!isConnected && (
         <View style={styles.connectionBanner}>
           <MaterialIcons name="wifi-off" size={16} color="#f97316" />
@@ -626,7 +825,6 @@ export default function SupportDashboard() {
         </View>
       )}
 
-      {/* Search Bar */}
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <Feather name="search" size={20} color="#8E8E93" />
@@ -647,7 +845,6 @@ export default function SupportDashboard() {
         </View>
       </View>
 
-      {/* Filter Pills */}
       <View style={styles.filtersContainer}>
         <FlatList
           horizontal
@@ -690,7 +887,6 @@ export default function SupportDashboard() {
         />
       </View>
 
-      {/* Tickets List */}
       <View style={styles.listContainer}>
         {loading ? (
           <View style={styles.loadingContainer}>
@@ -742,13 +938,11 @@ export default function SupportDashboard() {
         )}
       </View>
 
-      {/* Bottom Tabs */}
       <SupportBottomTabs currentTab="chats" />
     </SafeAreaView>
   );
 }
 
-// Utility functions
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
   const now = new Date();
