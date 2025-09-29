@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - Fixed with message deduplication
+// app/(drawer)/support.tsx - FIXED: Simplified message management
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -120,74 +120,7 @@ export default function SupportScreen() {
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
-  const pendingMessageIds = useRef<Set<string>>(new Set());
-  const messageMapRef = useRef<Map<string, Message>>(new Map());
-
-  // FIXED: Deduplicate messages before rendering
-  const deduplicateMessages = useCallback((msgs: Message[]): Message[] => {
-    const uniqueMap = new Map<string, Message>();
-    
-    msgs.forEach(msg => {
-      // Skip optimistic messages if we have the real message
-      if (msg.optimistic && msg.tempId) {
-        // Check if we have a real message with the same temp ID
-        const realMessage = msgs.find(m => !m.optimistic && m.id === msg.tempId);
-        if (realMessage) {
-          return; // Skip this optimistic message
-        }
-      }
-      
-      // Use the message ID as the unique key
-      if (!uniqueMap.has(msg.id)) {
-        uniqueMap.set(msg.id, msg);
-      } else {
-        // Keep the non-optimistic version if there's a duplicate
-        const existing = uniqueMap.get(msg.id)!;
-        if (existing.optimistic && !msg.optimistic) {
-          uniqueMap.set(msg.id, msg);
-        }
-      }
-    });
-    
-    // Sort by timestamp
-    return Array.from(uniqueMap.values()).sort((a, b) => {
-      const timeA = new Date(a.timestamp).getTime();
-      const timeB = new Date(b.timestamp).getTime();
-      return timeA - timeB;
-    });
-  }, []);
-
-  // FIXED: Update messages with deduplication
-  const updateMessages = useCallback((newMessages: Message[]) => {
-    setMessages(prevMessages => {
-      const combined = [...prevMessages, ...newMessages];
-      return deduplicateMessages(combined);
-    });
-  }, [deduplicateMessages]);
-
-  // FIXED: Replace optimistic message with real one
-  const replaceOptimisticMessage = useCallback((tempId: string, realMessage: Message) => {
-    setMessages(prevMessages => {
-      const updated = prevMessages.map(msg => {
-        if (msg.tempId === tempId && msg.optimistic) {
-          return { ...realMessage, tempId };
-        }
-        return msg;
-      });
-      return deduplicateMessages(updated);
-    });
-    
-    pendingMessageIds.current.delete(tempId);
-  }, [deduplicateMessages]);
-
-  // FIXED: Remove optimistic messages
-  const removeOptimisticMessages = useCallback(() => {
-    setMessages(prevMessages => {
-      const filtered = prevMessages.filter(msg => !msg.optimistic);
-      return deduplicateMessages(filtered);
-    });
-    pendingMessageIds.current.clear();
-  }, [deduplicateMessages]);
+  const messageIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!conversationId) return;
@@ -213,7 +146,6 @@ export default function SupportScreen() {
 
           await actionCable.joinConversation(conversationId);
 
-          // FIXED: Only process messages from others
           actionCable.subscribe('new_message', (data) => {
             console.log('📨 Message received:', data);
             
@@ -222,15 +154,9 @@ export default function SupportScreen() {
             const messageData = data.message;
             const messageId = String(messageData.id);
             
-            // FIXED: Skip if this is our own message that we just sent
-            if (messageData.user?.id === user.id && pendingMessageIds.current.has(messageId)) {
-              console.log('Skipping own message:', messageId);
-              return;
-            }
-            
-            // FIXED: Check if message already exists
-            if (messageMapRef.current.has(messageId)) {
-              console.log('Message already exists:', messageId);
+            // Skip if message already exists
+            if (messageIdsRef.current.has(messageId)) {
+              console.log('Skipping duplicate message:', messageId);
               return;
             }
             
@@ -251,8 +177,8 @@ export default function SupportScreen() {
               read_at: messageData.read_at,
             };
 
-            messageMapRef.current.set(messageId, newMessage);
-            updateMessages([newMessage]);
+            messageIdsRef.current.add(messageId);
+            setMessages(prev => [...prev, newMessage]);
             
             setTimeout(() => {
               flatListRef.current?.scrollToEnd({ animated: true });
@@ -309,9 +235,9 @@ export default function SupportScreen() {
                   optimistic: false,
                 };
                 
-                if (!messageMapRef.current.has(systemMessage.id)) {
-                  messageMapRef.current.set(systemMessage.id, systemMessage);
-                  updateMessages([systemMessage]);
+                if (!messageIdsRef.current.has(systemMessage.id)) {
+                  messageIdsRef.current.add(systemMessage.id);
+                  setMessages(prev => [...prev, systemMessage]);
                 }
               }
             }
@@ -339,7 +265,7 @@ export default function SupportScreen() {
         actionCable.leaveConversation(conversationId);
       }
     };
-  }, [conversationId, user, isConnected, updateMessages]);
+  }, [conversationId, user, isConnected]);
 
   const sendTypingIndicator = useCallback(async (typing: boolean) => {
     if (!isConnected || !conversationId) return;
@@ -411,37 +337,37 @@ export default function SupportScreen() {
       clearTimeout(timeoutId);
       
       if (response.data.success && response.data.messages) {
-        const apiMessages: Message[] = response.data.messages.map((msg: any) => ({
-          id: String(msg.id),
-          text: msg.content || '',
-          timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', {
-            hour12: false,
-            hour: '2-digit',
-            minute: '2-digit',
-          }),
-          isSupport: msg.from_support || msg.is_system || false,
-          type: (msg.message_type as 'text' | 'voice' | 'system') || 'text',
-          packageCode: msg.metadata?.package_code || null,
-          isTagged: !!(msg.metadata?.package_code),
-          optimistic: false,
-          delivered_at: msg.delivered_at,
-          read_at: msg.read_at,
-        }));
-
-        // FIXED: Add to message map
-        apiMessages.forEach(msg => {
-          messageMapRef.current.set(msg.id, msg);
+        const apiMessages: Message[] = response.data.messages.map((msg: any) => {
+          const messageId = String(msg.id);
+          messageIdsRef.current.add(messageId);
+          
+          return {
+            id: messageId,
+            text: msg.content || '',
+            timestamp: new Date(msg.created_at).toLocaleTimeString('en-US', {
+              hour12: false,
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            isSupport: msg.from_support || msg.is_system || false,
+            type: (msg.message_type as 'text' | 'voice' | 'system') || 'text',
+            packageCode: msg.metadata?.package_code || null,
+            isTagged: !!(msg.metadata?.package_code),
+            optimistic: false,
+            delivered_at: msg.delivered_at,
+            read_at: msg.read_at,
+          };
         });
 
         if (isRefresh || !loadOlder) {
-          setMessages(deduplicateMessages(apiMessages));
+          setMessages(apiMessages);
           setIsInitialLoad(false);
 
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
         } else if (loadOlder) {
-          setMessages(prev => deduplicateMessages([...apiMessages, ...prev]));
+          setMessages(prev => [...apiMessages, ...prev]);
         }
 
         const pagination = response.data.pagination || {};
@@ -492,13 +418,14 @@ export default function SupportScreen() {
           type: 'text',
         }];
         setMessages(defaultMessages);
+        messageIdsRef.current.add('1');
       }
     } finally {
       setLoadingMessages(false);
       setLoadingOlder(false);
       setRefreshing(false);
     }
-  }, [messages, deduplicateMessages]);
+  }, [messages]);
 
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlder || !conversationId || !hasMoreMessages) {
@@ -511,7 +438,7 @@ export default function SupportScreen() {
   const handleRefresh = useCallback(async () => {
     if (!conversationId) return;
     
-    messageMapRef.current.clear();
+    messageIdsRef.current.clear();
     await loadConversationMessages(conversationId, true);
   }, [loadConversationMessages, conversationId]);
 
@@ -531,7 +458,7 @@ export default function SupportScreen() {
       
       setHasActiveTicket(false);
       
-      setMessages([{
+      const welcomeMessage: Message = {
         id: '1',
         text: 'Hello! Welcome to our customer support. How can I help you today?',
         timestamp: new Date().toLocaleTimeString('en-US', {
@@ -541,7 +468,10 @@ export default function SupportScreen() {
         }),
         isSupport: true,
         type: 'text',
-      }]);
+      };
+      
+      setMessages([welcomeMessage]);
+      messageIdsRef.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -555,7 +485,7 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Error checking active ticket:', error);
       
-      setMessages([{
+      const welcomeMessage: Message = {
         id: '1',
         text: 'Hello! Welcome to our customer support. How can I help you today?',
         timestamp: new Date().toLocaleTimeString('en-US', {
@@ -565,7 +495,10 @@ export default function SupportScreen() {
         }),
         isSupport: true,
         type: 'text',
-      }]);
+      };
+      
+      setMessages([welcomeMessage]);
+      messageIdsRef.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -799,8 +732,7 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
-      // FIXED: Generate unique temp ID
-      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      const tempId = `temp-${Date.now()}`;
       
       const newMessage: Message = {
         id: tempId,
@@ -816,9 +748,7 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      // FIXED: Track pending message
-      pendingMessageIds.current.add(tempId);
-      updateMessages([newMessage]);
+      setMessages(prev => [...prev, newMessage]);
       closeAllModals();
       
       setTimeout(() => {
@@ -846,9 +776,8 @@ export default function SupportScreen() {
           read_at: response.data.message.read_at,
         };
         
-        // FIXED: Replace optimistic with real message
-        replaceOptimisticMessage(tempId, realMessage);
-        messageMapRef.current.set(realMessage.id, realMessage);
+        setMessages(prev => prev.filter(m => m.id !== tempId).concat(realMessage));
+        messageIdsRef.current.add(realMessage.id);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
@@ -866,9 +795,9 @@ export default function SupportScreen() {
             type: 'system',
           };
           
-          if (!messageMapRef.current.has(supportResponse.id)) {
-            messageMapRef.current.set(supportResponse.id, supportResponse);
-            updateMessages([supportResponse]);
+          if (!messageIdsRef.current.has(supportResponse.id)) {
+            messageIdsRef.current.add(supportResponse.id);
+            setMessages(prev => [...prev, supportResponse]);
           }
           
           setTimeout(() => {
@@ -879,7 +808,7 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to create basic inquiry:', error);
-      removeOptimisticMessages();
+      setMessages(prev => prev.filter(m => !m.optimistic));
     } finally {
       setIsLoading(false);
     }
@@ -895,7 +824,7 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
-      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      const tempId = `temp-${Date.now()}`;
       
       const newMessage: Message = {
         id: tempId,
@@ -913,8 +842,7 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      pendingMessageIds.current.add(tempId);
-      updateMessages([newMessage]);
+      setMessages(prev => [...prev, newMessage]);
       closeAllModals();
       
       setTimeout(() => {
@@ -945,8 +873,8 @@ export default function SupportScreen() {
           read_at: response.data.message.read_at,
         };
         
-        replaceOptimisticMessage(tempId, realMessage);
-        messageMapRef.current.set(realMessage.id, realMessage);
+        setMessages(prev => prev.filter(m => m.id !== tempId).concat(realMessage));
+        messageIdsRef.current.add(realMessage.id);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
@@ -964,9 +892,9 @@ export default function SupportScreen() {
             type: 'system',
           };
           
-          if (!messageMapRef.current.has(supportResponse.id)) {
-            messageMapRef.current.set(supportResponse.id, supportResponse);
-            updateMessages([supportResponse]);
+          if (!messageIdsRef.current.has(supportResponse.id)) {
+            messageIdsRef.current.add(supportResponse.id);
+            setMessages(prev => [...prev, supportResponse]);
           }
           
           setTimeout(() => {
@@ -977,13 +905,12 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to create package inquiry:', error);
-      removeOptimisticMessages();
+      setMessages(prev => prev.filter(m => !m.optimistic));
     } finally {
       setIsLoading(false);
     }
   };
 
-  // FIXED: Simplified sendMessage with proper deduplication
   const sendMessage = useCallback(async () => {
     if (!inputText.trim()) return;
 
@@ -992,7 +919,7 @@ export default function SupportScreen() {
     try {
       const convId = await ensureConversation();
       
-      const tempId = `temp-${Date.now()}-${Math.random()}`;
+      const tempId = `temp-${Date.now()}`;
       
       const newMessage: Message = {
         id: tempId,
@@ -1010,8 +937,7 @@ export default function SupportScreen() {
         optimistic: true,
       };
 
-      pendingMessageIds.current.add(tempId);
-      updateMessages([newMessage]);
+      setMessages(prev => [...prev, newMessage]);
       
       const messageText = inputText.trim();
       setInputText('');
@@ -1050,8 +976,8 @@ export default function SupportScreen() {
           read_at: response.data.message.read_at,
         };
         
-        replaceOptimisticMessage(tempId, realMessage);
-        messageMapRef.current.set(realMessage.id, realMessage);
+        setMessages(prev => prev.filter(m => m.id !== tempId).concat(realMessage));
+        messageIdsRef.current.add(realMessage.id);
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
@@ -1059,12 +985,12 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to send message:', error);
-      removeOptimisticMessages();
+      setMessages(prev => prev.filter(m => !m.optimistic));
       setInputText(inputText.trim());
     } finally {
       setIsLoading(false);
     }
-  }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator, updateMessages, replaceOptimisticMessage, removeOptimisticMessages]);
+  }, [inputText, ensureConversation, selectedPackage, inquiryType, isTyping, sendTypingIndicator]);
 
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
@@ -1784,6 +1710,7 @@ export default function SupportScreen() {
     </SafeAreaView>
   );
 }
+
 
 const styles = StyleSheet.create({
   container: {
