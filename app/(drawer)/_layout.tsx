@@ -110,13 +110,19 @@ export default function DrawerLayout() {
       
       try {
         const response = await api.get('/api/v1/me');
+        
+        // FIXED: Handle both possible response structures
+        // Login endpoint: response.data = { status, user: {...}, token }
+        // Me endpoint: response.data = { user: {...} } OR response.data = {...user fields}
+        const userData = response.data?.user || response.data;
+        
         console.log('🔐 Server verification successful:', {
-          userId: response.data?.id,
-          serverPrimaryRole: response.data?.primary_role,
-          serverRoles: response.data?.roles
+          userId: userData?.id,
+          serverPrimaryRole: userData?.primary_role,
+          serverRoles: userData?.roles
         });
         
-        const effectiveRole = getEffectiveRole(response.data);
+        const effectiveRole = getEffectiveRole(userData);
         console.log('🔐 Effective role from server:', effectiveRole);
         
         // FIXED: Update account if server role differs
