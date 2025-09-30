@@ -1,4 +1,4 @@
-// lib/services/ActionCableService.ts - FIXED: No changes needed, already working correctly
+// lib/services/ActionCableService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
@@ -137,6 +137,7 @@ class ActionCableService {
   }
 
   private processMessage(message: ActionCableMessage): void {
+    // Trigger type-specific callbacks
     const callbacks = this.callbacks[message.type] || [];
     callbacks.forEach(callback => {
       try {
@@ -146,6 +147,7 @@ class ActionCableService {
       }
     });
 
+    // Trigger global callbacks
     const globalCallbacks = this.callbacks['*'] || [];
     globalCallbacks.forEach(callback => {
       try {
