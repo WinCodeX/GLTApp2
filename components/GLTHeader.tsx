@@ -1,7 +1,19 @@
-// components/GLTHeader.tsx - Enhanced with ActionCable real-time integration
+// components/GLTHeader.tsx - Enhanced with reliable ActionCable integration
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Image, Animated, Dimensions, Modal, Alert, Linking, Platform } from 'react-native';
+import { 
+  View, 
+  Text, 
+  TouchableOpacity, 
+  StyleSheet, 
+  Image, 
+  Animated, 
+  Dimensions, 
+  Modal, 
+  Alert, 
+  Linking, 
+  Platform 
+} from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { useNavigation, DrawerActions } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,15 +26,9 @@ import { SafeLogo } from '../components/SafeLogo';
 import UpdateService from '../lib/services/updateService';
 import colors from '../theme/colors';
 import api from '../lib/api';
-
-// CRITICAL: Import Firebase using the amarjanica pattern
 import firebase from '../config/firebase';
-
-// ENHANCED: Import ActionCable service for real-time updates
 import ActionCableService from '../lib/services/ActionCableService';
 import { accountManager } from '../lib/AccountManager';
-
-// CRITICAL: Import NavigationHelper for proper navigation tracking
 import { NavigationHelper } from '../lib/helpers/navigation';
 
 const { width: screenWidth } = Dimensions.get('window');
@@ -44,7 +50,6 @@ interface DownloadProgress {
   status: 'checking' | 'downloading' | 'installing' | 'complete' | 'error';
 }
 
-// Enhanced Safe Avatar Component
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
@@ -65,24 +70,16 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
   useEffect(() => {
-    console.log('🎭 Header SafeAvatar: Update triggered', {
-      avatarUrl,
-      updateTrigger,
-      timestamp: Date.now()
-    });
-    
     setHasError(false);
     setImageKey(Date.now());
   }, [avatarUrl, updateTrigger]);
   
   if (!fullAvatarUrl || hasError) {
     return (
-      <TouchableOpacity style={style} disabled>
-        <Image
-          source={fallbackSource}
-          style={{ width: size, height: size, borderRadius: size / 2 }}
-        />
-      </TouchableOpacity>
+      <Image
+        source={fallbackSource}
+        style={{ width: size, height: size, borderRadius: size / 2 }}
+      />
     );
   }
 
@@ -97,13 +94,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
         }
       }}
       style={[{ width: size, height: size, borderRadius: size / 2 }, style]}
-      onError={(error) => {
-        console.warn('🎭 Header SafeAvatar failed to load:', {
-          url: fullAvatarUrl,
-          error: error
-        });
-        setHasError(true);
-      }}
+      onError={() => setHasError(true)}
     />
   );
 };
@@ -127,7 +118,8 @@ export default function GLTHeader({
   
   const [notificationCount, setNotificationCount] = useState(0);
   const [cartCount, setCartCount] = useState(0);
-  const [isActionCableConnected, setIsActionCableConnected] = useState(false);
+  const [isConnected, setIsConnected] = useState(false);
+  
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress>({
     isDownloading: false,
     progress: 0,
@@ -140,343 +132,211 @@ export default function GLTHeader({
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [fcmToken, setFcmToken] = useState<string>('');
   
-  // Double tap detection for avatar cycling
   const lastTapRef = useRef<number>(0);
   const tapTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   
-  // Progress animation refs
   const progressBarAnim = useRef(new Animated.Value(0)).current;
   const progressBarHeight = useRef(new Animated.Value(0)).current;
   
-  // Firebase messaging listeners refs
   const unsubscribeOnMessage = useRef<(() => void) | null>(null);
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
 
-  // ActionCable service instance
-  const actionCableService = ActionCableService.getInstance();
+  const actionCableRef = useRef<ActionCableService | null>(null);
+  const subscriptionsSetup = useRef(false);
 
-  // ENHANCED: ActionCable integration with real-time updates
-  useEffect(() => {
-    setupActionCableConnection();
-    
-    return () => {
-      cleanupActionCableSubscriptions();
-    };
-  }, [user]);
+  // ============================================
+  // ACTIONCABLE SETUP - Simplified and Reliable
+  // ============================================
+  
+  const setupActionCable = useCallback(async () => {
+    if (!user || subscriptionsSetup.current) return;
 
-  const setupActionCableConnection = async () => {
     try {
-      if (!user) {
-        console.log('📡 No user available for ActionCable connection');
-        return;
-      }
-
       const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount) {
-        console.log('📡 No account available for ActionCable connection');
-        return;
-      }
+      if (!currentAccount) return;
 
-      console.log('📡 Setting up ActionCable connection...');
+      console.log('📡 Header: Setting up ActionCable...');
 
-      // Connect to ActionCable
-      const connected = await actionCableService.connect({
+      actionCableRef.current = ActionCableService.getInstance();
+      
+      const connected = await actionCableRef.current.connect({
         token: currentAccount.token,
         userId: currentAccount.id,
         autoReconnect: true,
-        maxReconnectAttempts: 5,
-        reconnectInterval: 3000
       });
 
       if (connected) {
-        setupActionCableSubscriptions();
+        setIsConnected(true);
+        setupSubscriptions();
+        subscriptionsSetup.current = true;
       }
     } catch (error) {
-      console.error('❌ Failed to setup ActionCable connection:', error);
-      // Fallback to API polling if ActionCable fails
-      startFallbackPolling();
+      console.error('❌ Header: Failed to setup ActionCable:', error);
+      setIsConnected(false);
     }
-  };
+  }, [user]);
 
-  const setupActionCableSubscriptions = () => {
-    console.log('📡 Setting up ActionCable subscriptions...');
+  const setupSubscriptions = () => {
+    if (!actionCableRef.current) return;
 
-    // Subscribe to connection status updates
-    actionCableService.subscribe('connection_established', () => {
-      console.log('📡 ActionCable connected');
-      setIsActionCableConnected(true);
+    console.log('📡 Header: Setting up subscriptions...');
+
+    // Connection status
+    actionCableRef.current.subscribe('connection_established', () => {
+      console.log('✅ Header: Connected');
+      setIsConnected(true);
     });
 
-    actionCableService.subscribe('connection_lost', () => {
-      console.log('📡 ActionCable disconnected');
-      setIsActionCableConnected(false);
+    actionCableRef.current.subscribe('connection_lost', () => {
+      console.log('❌ Header: Disconnected');
+      setIsConnected(false);
     });
 
-    // Subscribe to initial state and counts
-    actionCableService.subscribe('initial_state', (data) => {
-      console.log('📊 Received initial state via ActionCable:', data.counts);
+    // Initial state
+    actionCableRef.current.subscribe('initial_state', (data) => {
       if (data.counts) {
         setNotificationCount(data.counts.notifications || 0);
         setCartCount(data.counts.cart || 0);
       }
     });
 
-    actionCableService.subscribe('initial_counts', (data) => {
-      console.log('📊 Received initial counts via ActionCable:', {
-        notifications: data.notification_count,
-        cart: data.cart_count
-      });
+    actionCableRef.current.subscribe('initial_counts', (data) => {
       setNotificationCount(data.notification_count || 0);
       setCartCount(data.cart_count || 0);
     });
 
-    // Subscribe to notification count updates
-    actionCableService.subscribe('notification_count_update', (data) => {
-      console.log('🔔 Notification count updated via ActionCable:', data.notification_count);
+    // Real-time updates
+    actionCableRef.current.subscribe('notification_count_update', (data) => {
       setNotificationCount(data.notification_count || 0);
     });
 
-    // Subscribe to cart count updates
-    actionCableService.subscribe('cart_count_update', (data) => {
-      console.log('🛒 Cart count updated via ActionCable:', data.cart_count);
+    actionCableRef.current.subscribe('cart_count_update', (data) => {
       setCartCount(data.cart_count || 0);
     });
 
-    // Subscribe to new notifications
-    actionCableService.subscribe('new_notification', (data) => {
-      console.log('🔔 New notification received via ActionCable');
-      // Increment count optimistically (server will send updated count)
+    actionCableRef.current.subscribe('new_notification', () => {
       setNotificationCount(prev => prev + 1);
     });
 
-    // Subscribe to avatar updates for immediate UI refresh
-    actionCableService.subscribe('avatar_changed', (data) => {
-      if (data.user_id === user?.id) {
-        console.log('👤 Avatar changed for current user - triggering refresh');
-        // The UserContext will handle the actual update
-      }
-    });
-
-    // Subscribe to business updates
-    actionCableService.subscribe('business_updated', (data) => {
-      console.log('🏢 Business updated via ActionCable:', data.business?.id);
-      // The UserContext will handle business updates
-    });
-
-    console.log('✅ ActionCable subscriptions configured');
+    console.log('✅ Header: Subscriptions configured');
   };
 
-  const cleanupActionCableSubscriptions = () => {
-    console.log('📡 Cleaning up ActionCable subscriptions...');
-    
-    // Unsubscribe from all our specific subscriptions
-    const subscriptionTypes = [
-      'connection_established',
-      'connection_lost', 
-      'initial_state',
-      'initial_counts',
-      'notification_count_update',
-      'cart_count_update',
-      'new_notification',
-      'avatar_changed',
-      'business_updated'
-    ];
+  useEffect(() => {
+    setupActionCable();
 
-    subscriptionTypes.forEach(type => {
-      actionCableService.unsubscribe(type);
-    });
-  };
+    return () => {
+      subscriptionsSetup.current = false;
+    };
+  }, [setupActionCable]);
 
-  // Fallback polling if ActionCable is not available
-  const startFallbackPolling = useCallback(() => {
-    console.log('⏳ Starting fallback polling for counts...');
-    
-    const pollCounts = () => {
-      if (!isActionCableConnected) {
+  // Fallback polling when disconnected
+  useEffect(() => {
+    if (!isConnected) {
+      console.log('⏳ Header: Starting fallback polling...');
+      
+      const poll = () => {
         fetchNotificationCount();
         fetchCartCount();
-      }
-    };
+      };
 
-    // Initial fetch
-    pollCounts();
-    
-    // Poll every 30 seconds as fallback (increased from 10s since ActionCable should handle most updates)
-    const interval = setInterval(pollCounts, 30000);
-    
-    return () => clearInterval(interval);
-  }, [isActionCableConnected]);
-
-  // Enhanced notification marking with ActionCable integration
-  const markNotificationAsRead = async (notificationId: string) => {
-    try {
-      // Try ActionCable first for instant feedback
-      if (isActionCableConnected) {
-        const success = await actionCableService.markNotificationRead(parseInt(notificationId));
-        if (success) {
-          console.log('✅ Notification marked as read via ActionCable');
-          return;
-        }
-      }
-
-      // Fallback to API
-      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
-      console.log('✅ Notification marked as read via API');
+      poll();
+      const interval = setInterval(poll, 30000);
       
-      // Refresh counts manually if ActionCable is not available
-      if (!isActionCableConnected) {
-        fetchNotificationCount();
-      }
-      
-    } catch (error) {
-      console.error('❌ Failed to mark notification as read:', error);
+      return () => clearInterval(interval);
     }
-  };
+  }, [isConnected]);
 
   // ============================================
-  // FIREBASE SETUP - Following amarjanica pattern
+  // FIREBASE SETUP
   // ============================================
+  
   useEffect(() => {
     setupFirebaseMessaging();
     
     return () => {
-      // Cleanup Firebase listeners
-      if (unsubscribeOnMessage.current) {
-        unsubscribeOnMessage.current();
-      }
-      if (unsubscribeOnNotificationOpenedApp.current) {
-        unsubscribeOnNotificationOpenedApp.current();
-      }
-      if (unsubscribeTokenRefresh.current) {
-        unsubscribeTokenRefresh.current();
-      }
+      if (unsubscribeOnMessage.current) unsubscribeOnMessage.current();
+      if (unsubscribeOnNotificationOpenedApp.current) unsubscribeOnNotificationOpenedApp.current();
+      if (unsubscribeTokenRefresh.current) unsubscribeTokenRefresh.current();
     };
   }, []);
 
   const setupFirebaseMessaging = async () => {
     try {
-      console.log('🔥 SETTING UP FIREBASE MESSAGING...');
-      console.log('🔥 Platform detection:', {
-        isNative: firebase.isNative,
-        platform: Platform.OS
-      });
+      console.log('🔥 Header: Setting up Firebase...');
       
-      // Only setup on native platforms (not web/Expo Go)
       if (!firebase.isNative || !firebase.messaging()) {
-        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
+        console.log('🔥 Header: Skipping Firebase - not native');
         return;
       }
 
-      // Request permission first
       const permissionGranted = await requestFirebasePermissions();
-      if (!permissionGranted) {
-        return;
-      }
+      if (!permissionGranted) return;
 
-      // Get FCM token
       await getFirebaseToken();
-      
-      // Set up Firebase notification handlers
       setupFirebaseListeners();
-      
-      // Handle notification that opened app from killed state
       handleInitialNotification();
       
-      console.log('✅ FIREBASE MESSAGING SETUP COMPLETE');
-      
+      console.log('✅ Header: Firebase setup complete');
     } catch (error) {
-      console.error('❌ FAILED TO SETUP FIREBASE MESSAGING:', error);
+      console.error('❌ Header: Firebase setup failed:', error);
     }
   };
 
   const requestFirebasePermissions = async (): Promise<boolean> => {
     try {
-      console.log('🔥 REQUESTING FIREBASE PERMISSIONS...');
-      
       const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available');
-        return false;
-      }
+      if (!messaging) return false;
       
       const authStatus = await messaging.requestPermission();
-      const enabled = authStatus === 1 || authStatus === 2; // AUTHORIZED or PROVISIONAL
+      const enabled = authStatus === 1 || authStatus === 2;
 
       if (enabled) {
-        console.log('✅ FIREBASE AUTHORIZATION STATUS:', authStatus);
+        console.log('✅ Firebase permissions granted');
         return true;
       } else {
-        console.log('❌ FIREBASE PERMISSIONS DENIED');
         Alert.alert(
           'Notifications Required',
-          'GLT needs notification permissions to send you important updates about your packages. Please enable notifications in your device settings.',
+          'GLT needs notification permissions to send you important updates.',
           [
             { text: 'Maybe Later', style: 'cancel' },
-            { 
-              text: 'Open Settings', 
-              style: 'default',
-              onPress: () => Linking.openSettings() 
-            }
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
           ]
         );
         return false;
       }
     } catch (error) {
-      console.error('❌ ERROR REQUESTING FIREBASE PERMISSIONS:', error);
+      console.error('❌ Firebase permissions error:', error);
       return false;
     }
   };
 
   const getFirebaseToken = async () => {
     try {
-      console.log('🔥 GETTING FIREBASE FCM TOKEN...');
-      
       const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available for token generation');
-        return;
-      }
+      if (!messaging) return;
       
-      // Get FCM token
       const token = await messaging.getToken();
-      
-      console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
+      console.log('🔥 FCM token received');
       setFcmToken(token);
 
-      // Register with backend
       await registerFCMTokenWithBackend(token);
       
-      // Listen for token refresh
       unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
-        console.log('🔥 FCM TOKEN REFRESHED:', newToken?.substring(0, 50) + '...');
+        console.log('🔥 FCM token refreshed');
         setFcmToken(newToken);
         await registerFCMTokenWithBackend(newToken);
       });
-      
     } catch (error) {
-      console.error('❌ DETAILED FCM TOKEN ERROR:', {
-        message: error.message,
-        code: error.code,
-        stack: error.stack?.split('\n').slice(0, 5)
-      });
-      
-      Alert.alert(
-        'FCM Token Error',
-        `Failed to get Firebase token: ${error.message}\n\nPlease try restarting the app.`,
-        [{ text: 'OK' }]
-      );
+      console.error('❌ FCM token error:', error);
     }
   };
 
   const registerFCMTokenWithBackend = async (token: string) => {
     try {
-      console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
-      console.log('🔥 TOKEN:', token?.substring(0, 50) + '...');
-      
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
-        platform: 'fcm', // Changed from 'expo' to 'fcm'
+        platform: 'fcm',
         device_info: {
           platform: Platform.OS,
           version: Platform.Version,
@@ -485,18 +345,13 @@ export default function GLTHeader({
         }
       });
       
-      console.log('🔥 BACKEND RESPONSE:', response.data);
-      
       if (response.data?.success) {
-        console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
+        console.log('✅ FCM token registered');
         await AsyncStorage.setItem('fcm_token', token);
         await AsyncStorage.setItem('fcm_token_registered', 'true');
-      } else {
-        console.error('❌ BACKEND REJECTED FCM TOKEN REGISTRATION:', response.data);
       }
-      
     } catch (error) {
-      console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
+      console.error('❌ FCM token registration failed:', error);
     }
   };
 
@@ -504,37 +359,27 @@ export default function GLTHeader({
     const messaging = firebase.messaging();
     if (!messaging) return;
 
-    // Listen for foreground messages
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
-      console.log('🔥 FOREGROUND MESSAGE RECEIVED:', remoteMessage);
+      console.log('🔥 Foreground message received');
       
-      // Update notification count immediately via ActionCable or fallback
-      if (isActionCableConnected) {
-        // ActionCable will handle the update
-        console.log('📡 ActionCable will handle notification count update');
-      } else {
+      if (!isConnected) {
         setNotificationCount(prev => prev + 1);
       }
       
-      // Show local notification for foreground messages
       if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
         Alert.alert(
           remoteMessage.notification.title,
           remoteMessage.notification.body,
           [
-            {
-              text: 'View',
-              onPress: () => handleNotificationData(remoteMessage.data)
-            },
+            { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
             { text: 'Dismiss', style: 'cancel' }
           ]
         );
       }
     });
 
-    // Listen for notification opened app (from background)
     unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
-      console.log('🔥 NOTIFICATION OPENED APP FROM BACKGROUND:', remoteMessage);
+      console.log('🔥 Notification opened app');
       handleNotificationData(remoteMessage.data);
     });
   };
@@ -544,26 +389,23 @@ export default function GLTHeader({
       const messaging = firebase.messaging();
       if (!messaging) return;
 
-      // Check if app was opened by a notification (from killed state)
       const initialNotification = await messaging.getInitialNotification();
       
       if (initialNotification) {
-        console.log('🔥 APP OPENED BY NOTIFICATION (FROM KILLED STATE):', initialNotification);
-        // Give some time for app to fully load before handling
+        console.log('🔥 App opened by notification');
         setTimeout(() => {
           handleNotificationData(initialNotification.data);
         }, 2000);
       }
     } catch (error) {
-      console.error('🔥 ERROR HANDLING INITIAL NOTIFICATION:', error);
+      console.error('🔥 Initial notification error:', error);
     }
   };
 
   const handleNotificationData = async (data: any) => {
-    console.log('🔥 HANDLING NOTIFICATION DATA:', data);
+    console.log('🔥 Handling notification data:', data);
     
     try {
-      // Handle different notification types
       if (data?.type === 'package_update' && data?.package_id) {
         await NavigationHelper.navigateTo('/(drawer)/track', {
           params: { packageId: data.package_id },
@@ -575,114 +417,41 @@ export default function GLTHeader({
           trackInHistory: true
         });
       } else {
-        // Navigate to notifications screen
         await NavigationHelper.navigateTo('/(drawer)/notifications', {
           params: {},
           trackInHistory: true
         });
       }
       
-      // Mark notification as read if we have the ID
       if (data?.notification_id) {
         markNotificationAsRead(data.notification_id);
       }
-      
     } catch (error) {
-      console.error('🔥 ERROR HANDLING NOTIFICATION DATA:', error);
-      
-      // Fallback navigation
-      try {
-        await NavigationHelper.navigateTo('/(drawer)/notifications', {
-          params: {},
-          trackInHistory: true
-        });
-      } catch (fallbackError) {
-        console.error('🔥 FALLBACK NAVIGATION FAILED:', fallbackError);
-      }
+      console.error('🔥 Notification handling error:', error);
     }
   };
 
   // ============================================
-  // FALLBACK API METHODS (when ActionCable unavailable)
+  // FALLBACK API METHODS
   // ============================================
   
-  // Enhanced notification count fetching with multiple fallbacks
   const fetchNotificationCount = async () => {
     try {
-      console.log('🔔 Fetching notification count from API...');
+      const response = await api.get('/api/v1/notifications/unread_count', {
+        timeout: 8000
+      });
       
-      // Method 1: Try the dedicated unread_count endpoint
-      try {
-        const response = await api.get('/api/v1/notifications/unread_count', {
-          timeout: 8000
-        });
-        console.log('🔔 Unread count endpoint response:', response.data);
-        
-        if (response.data && response.data.success) {
-          const count = response.data.unread_count || response.data.count || 0;
-          setNotificationCount(count);
-          console.log('🔔 Notification count updated from unread_count endpoint:', count);
-          return;
-        }
-      } catch (unreadCountError) {
-        console.log('🔔 Unread count endpoint failed, trying fallback:', unreadCountError.response?.status);
+      if (response.data?.success) {
+        const count = response.data.unread_count || response.data.count || 0;
+        setNotificationCount(count);
       }
-      
-      // Method 2: Fallback to notifications index endpoint
-      try {
-        const response = await api.get('/api/v1/notifications', {
-          params: {
-            per_page: 1,
-            page: 1,
-            unread_only: 'true'
-          },
-          timeout: 8000
-        });
-        
-        console.log('🔔 Notifications index response:', response.data);
-        
-        if (response.data && response.data.success) {
-          const count = response.data.unread_count || response.data.pagination?.total_count || 0;
-          setNotificationCount(count);
-          console.log('🔔 Notification count updated from index endpoint:', count);
-          return;
-        }
-      } catch (indexError) {
-        console.log('🔔 Index endpoint also failed:', indexError.response?.status);
-      }
-      
-      // Method 3: Manual count fallback
-      try {
-        const response = await api.get('/api/v1/notifications', {
-          params: {
-            per_page: 50,
-            page: 1
-          },
-          timeout: 10000
-        });
-        
-        if (response.data && response.data.success && response.data.data) {
-          const unreadCount = response.data.data.filter((notification: any) => !notification.read).length;
-          setNotificationCount(unreadCount);
-          console.log('🔔 Notification count updated from manual count:', unreadCount);
-          return;
-        }
-      } catch (manualCountError) {
-        console.log('🔔 Manual count also failed:', manualCountError.response?.status);
-      }
-      
-      console.warn('🔔 All notification count methods failed, keeping previous count');
-      
     } catch (error) {
-      console.error('🔔 Unexpected error in fetchNotificationCount:', error);
+      console.error('Failed to fetch notification count:', error);
     }
   };
 
-  // Fetch cart count
   const fetchCartCount = async () => {
     try {
-      console.log('🛒 Fetching ALL pending_unpaid packages for cart count...');
-      
       const response = await api.get('/api/v1/packages', {
         params: {
           state: 'pending_unpaid',
@@ -697,8 +466,6 @@ export default function GLTHeader({
         
         const pagination = response.data.pagination;
         if (pagination && pagination.total_pages > 1) {
-          console.log(`🛒 Multiple pages detected for cart count: ${pagination.total_pages} pages total`);
-          
           const additionalPages = [];
           for (let page = 2; page <= pagination.total_pages; page++) {
             additionalPages.push(
@@ -719,7 +486,6 @@ export default function GLTHeader({
           }, 0);
 
           totalCount += additionalCount;
-          console.log(`🛒 Total cart count with all pages: ${totalCount}`);
         }
         
         setCartCount(totalCount);
@@ -729,18 +495,31 @@ export default function GLTHeader({
     }
   };
 
-  // Setup fallback polling when ActionCable is not connected
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    
-    if (!isActionCableConnected) {
-      cleanup = startFallbackPolling();
-    }
-    
-    return cleanup;
-  }, [isActionCableConnected, startFallbackPolling]);
+  const markNotificationAsRead = async (notificationId: string) => {
+    try {
+      if (isConnected && actionCableRef.current) {
+        const success = await actionCableRef.current.markNotificationRead(parseInt(notificationId));
+        if (success) {
+          console.log('✅ Notification marked as read via ActionCable');
+          return;
+        }
+      }
 
-  // Monitor download progress (existing functionality)
+      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
+      console.log('✅ Notification marked as read via API');
+      
+      if (!isConnected) {
+        fetchNotificationCount();
+      }
+    } catch (error) {
+      console.error('❌ Failed to mark notification as read:', error);
+    }
+  };
+
+  // ============================================
+  // UPDATE PROGRESS MONITORING
+  // ============================================
+  
   useEffect(() => {
     const checkDownloadProgress = async () => {
       try {
@@ -779,7 +558,6 @@ export default function GLTHeader({
     return () => clearInterval(interval);
   }, []);
 
-  // Animate progress bar
   useEffect(() => {
     if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
       Animated.timing(progressBarHeight, {
@@ -802,6 +580,10 @@ export default function GLTHeader({
     }
   }, [downloadProgress.isDownloading, downloadProgress.progress]);
 
+  // ============================================
+  // NAVIGATION HANDLERS
+  // ============================================
+  
   const handleOpenDrawer = () => {
     navigation.dispatch(DrawerActions.openDrawer());
   };
@@ -811,22 +593,13 @@ export default function GLTHeader({
       onBackPress();
     } else {
       try {
-        console.log('🔙 Header: UI back button pressed - using immediate navigation');
-        const success = NavigationHelper.goBackImmediate({
+        NavigationHelper.goBackImmediate({
           fallbackRoute: '/(drawer)/',
           replaceIfNoHistory: true
         });
-        
-        console.log('🔙 Header: UI back navigation completed immediately:', success);
       } catch (error) {
-        console.error('🔙 Header: UI back navigation failed:', error);
-        
-        // Fallback to router back
-        try {
-          router.back();
-        } catch (fallbackError) {
-          console.error('🔙 Header: Router back fallback also failed:', fallbackError);
-        }
+        console.error('Back navigation failed:', error);
+        router.back();
       }
     }
   };
@@ -838,7 +611,7 @@ export default function GLTHeader({
         trackInHistory: true
       });
     } catch (error) {
-      console.error('Navigation to notifications failed:', error);
+      console.error('Navigation failed:', error);
       router.push('/(drawer)/notifications');
     }
   };
@@ -850,7 +623,8 @@ export default function GLTHeader({
         trackInHistory: true
       });
     } catch (error) {
-      console.error('Navigation to cart failed:', error);
+      console.error('Navigation failed:', error);
+      router.push('/(drawer)/cart');
     }
   };
 
@@ -866,10 +640,10 @@ export default function GLTHeader({
     }
   };
 
-  const handleCloseInstallModal = () => {
-    setShowInstallModal(false);
-  };
-
+  // ============================================
+  // AVATAR & BUSINESS CYCLING
+  // ============================================
+  
   const handleAvatarPress = () => {
     const now = Date.now();
     const timeSinceLastTap = now - lastTapRef.current;
@@ -880,47 +654,28 @@ export default function GLTHeader({
     }
     
     if (timeSinceLastTap < 300) {
-      console.log('🎭 Header: Double tap detected, cycling business selection');
       handleAvatarDoubleTap();
       lastTapRef.current = 0;
     } else {
       lastTapRef.current = now;
       tapTimeoutRef.current = setTimeout(async () => {
-        console.log('🎭 Header: Single tap, navigating to business page');
-        
         try {
           await NavigationHelper.navigateTo('/(drawer)/business', {
             params: {},
             trackInHistory: true
           });
         } catch (error) {
-          console.error('🎭 Header: Navigation error:', error);
-          try {
-            await NavigationHelper.navigateTo('/(drawer)/Business', {
-              params: {},
-              trackInHistory: true
-            });
-          } catch (fallbackError) {
-            console.error('🎭 Header: Fallback navigation also failed:', fallbackError);
-          }
+          console.error('Navigation error:', error);
         }
-        
         tapTimeoutRef.current = null;
       }, 300);
     }
   };
 
   const handleAvatarDoubleTap = () => {
-    const allBusinessOptions = [
-      null, // "You" mode
-      ...businesses.owned,
-      ...businesses.joined
-    ];
+    const allBusinessOptions = [null, ...businesses.owned, ...businesses.joined];
     
-    if (allBusinessOptions.length <= 1) {
-      console.log('🎭 Header: No businesses to cycle through');
-      return;
-    }
+    if (allBusinessOptions.length <= 1) return;
     
     let currentIndex = 0;
     if (selectedBusiness) {
@@ -933,13 +688,6 @@ export default function GLTHeader({
     const nextIndex = (currentIndex + 1) % allBusinessOptions.length;
     const nextSelection = allBusinessOptions[nextIndex];
     
-    console.log('🎭 Header: Cycling selection:', {
-      from: selectedBusiness?.name || 'You',
-      to: nextSelection?.name || 'You',
-      currentIndex,
-      nextIndex
-    });
-    
     setSelectedBusiness(nextSelection);
   };
 
@@ -951,6 +699,10 @@ export default function GLTHeader({
     };
   }, []);
 
+  // ============================================
+  // RENDER HELPERS
+  // ============================================
+  
   const renderBadge = (count: number, color: string) => {
     if (count === 0) return null;
     
@@ -969,13 +721,11 @@ export default function GLTHeader({
     return '#ff6b35';
   };
 
-  // Determine if we're in business mode and get appropriate image
   const isBusinessMode = !!selectedBusiness;
 
   return (
     <>
       <View style={[styles.container, { paddingTop: insets.top + 10 }]}>
-        {/* Left section: Back/Menu + Title */}
         <View style={styles.leftContainer}>
           {showBackButton ? (
             <TouchableOpacity onPress={handleBackPress} style={styles.backButton}>
@@ -988,14 +738,13 @@ export default function GLTHeader({
           )}
           <Text style={styles.title}>{title}</Text>
           
-          {/* ENHANCED: Connection indicator */}
           {__DEV__ && (
             <View style={[
               styles.connectionIndicator,
-              { backgroundColor: isActionCableConnected ? '#10b981' : '#ef4444' }
+              { backgroundColor: isConnected ? '#10b981' : '#ef4444' }
             ]}>
               <Feather 
-                name={isActionCableConnected ? 'wifi' : 'wifi-off'} 
+                name={isConnected ? 'wifi' : 'wifi-off'} 
                 size={10} 
                 color="white" 
               />
@@ -1003,9 +752,7 @@ export default function GLTHeader({
           )}
         </View>
 
-        {/* Right section: Notifications + Cart + Avatar */}
         <View style={styles.rightContainer}>
-          {/* Notifications */}
           <TouchableOpacity onPress={handleNotifications} style={styles.iconButton}>
             <View style={styles.iconContainer}>
               <Feather name="bell" size={22} color="white" />
@@ -1013,7 +760,6 @@ export default function GLTHeader({
             </View>
           </TouchableOpacity>
 
-          {/* Cart */}
           <TouchableOpacity onPress={handleCart} style={styles.iconButton}>
             <View style={styles.iconContainer}>
               <Feather name="shopping-cart" size={22} color="white" />
@@ -1021,7 +767,6 @@ export default function GLTHeader({
             </View>
           </TouchableOpacity>
 
-          {/* Avatar Preview with Business Cycling */}
           <TouchableOpacity onPress={handleAvatarPress} style={styles.avatarButton}>
             <View style={styles.avatarContainer}>
               {isBusinessMode ? (
@@ -1056,15 +801,7 @@ export default function GLTHeader({
         </View>
       </View>
       
-      {/* Progress Bar under header */}
-      <Animated.View
-        style={[
-          styles.progressBarContainer,
-          {
-            height: progressBarHeight,
-          },
-        ]}
-      >
+      <Animated.View style={[styles.progressBarContainer, { height: progressBarHeight }]}>
         <View style={styles.progressBarBackground}>
           <Animated.View
             style={[
@@ -1081,12 +818,11 @@ export default function GLTHeader({
         </View>
       </Animated.View>
 
-      {/* Install Modal */}
       <Modal
         visible={showInstallModal}
         transparent={true}
         animationType="fade"
-        onRequestClose={handleCloseInstallModal}
+        onRequestClose={() => setShowInstallModal(false)}
       >
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -1099,7 +835,7 @@ export default function GLTHeader({
                   <Feather name="check-circle" size={24} color="#10b981" />
                 </View>
                 <Text style={styles.modalTitle}>Update Downloaded</Text>
-                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.closeButton}>
+                <TouchableOpacity onPress={() => setShowInstallModal(false)} style={styles.closeButton}>
                   <Feather name="x" size={20} color="#ccc" />
                 </TouchableOpacity>
               </View>
@@ -1109,7 +845,7 @@ export default function GLTHeader({
               </Text>
               
               <View style={styles.modalButtons}>
-                <TouchableOpacity onPress={handleCloseInstallModal} style={styles.laterButton}>
+                <TouchableOpacity onPress={() => setShowInstallModal(false)} style={styles.laterButton}>
                   <Text style={styles.laterButtonText}>Later</Text>
                 </TouchableOpacity>
                 
@@ -1169,7 +905,6 @@ const styles = StyleSheet.create({
     fontFamily: 'System',
     flex: 1,
   },
-  // ENHANCED: Connection indicator for development
   connectionIndicator: {
     width: 16,
     height: 16,
@@ -1236,8 +971,6 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: colors.header,
   },
-  
-  // Progress Bar Styles
   progressBarContainer: {
     width: '100%',
     backgroundColor: colors.header,
@@ -1252,8 +985,6 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 0,
   },
-
-  // Modal Styles
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.7)',
