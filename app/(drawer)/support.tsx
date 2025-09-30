@@ -1,5 +1,5 @@
-// app/(drawer)/support.tsx - FIXED: Cached conversations with streaming
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+// app/(drawer)/support.tsx - FULLY FIXED: All improvements implemented
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
   Text,
@@ -19,6 +19,8 @@ import {
   BackHandler,
   ActivityIndicator,
   RefreshControl,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import {
   Feather,
@@ -40,6 +42,10 @@ const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 20000;
 const SCROLL_THRESHOLD = 0.1;
+const CACHE_STALE_TIME = 5 * 60 * 1000; // 5 minutes
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
+const SCROLL_BUTTON_THRESHOLD = 200;
 
 interface Message {
   id: string;
@@ -54,6 +60,9 @@ interface Message {
   tempId?: string;
   delivered_at?: string | null;
   read_at?: string | null;
+  sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  retryCount?: number;
+  created_at?: string;
 }
 
 interface Package {
@@ -66,6 +75,12 @@ interface Package {
   cost: number;
   delivery_type: string;
   created_at: string;
+}
+
+interface AgentPresence {
+  status: 'online' | 'offline' | 'away';
+  last_seen?: string;
+  is_typing?: boolean;
 }
 
 type InquiryType = 'basic' | 'package';
@@ -101,10 +116,17 @@ export default function SupportScreen() {
   const [connectionError, setConnectionError] = useState(false);
   
   const [isConnected, setIsConnected] = useState(false);
+  const [subscriptionReady, setSubscriptionReady] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [typingUsers, setTypingUsers] = useState<string[]>([]);
-  const [agentOnline, setAgentOnline] = useState(false);
-  const [lastSeenTime, setLastSeenTime] = useState<string | null>(null);
+  const [agentPresence, setAgentPresence] = useState<AgentPresence>({
+    status: 'offline',
+  });
+  
+  // Scroll management
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
+  const [isNearBottom, setIsNearBottom] = useState(true);
+  const [currentScrollOffset, setCurrentScrollOffset] = useState(0);
   
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
@@ -130,33 +152,178 @@ export default function SupportScreen() {
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
   const conversationLoadedRef = useRef(false);
   const conversationIdStorageKey = 'active_support_conversation_id';
+  const conversationLoadedStorageKey = 'conversation_loaded_state';
+  const cacheTimestampKey = 'cache_timestamp';
+  const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const appState = useRef(AppState.currentState);
+  const lastReadMessageIdRef = useRef<string | null>(null);
 
-  useEffect(() => {
-    // Load saved conversation ID from storage
-    const loadSavedConversationId = async () => {
-      try {
-        const savedId = await AsyncStorage.getItem(conversationIdStorageKey);
-        if (savedId) {
-          console.log('📦 Found saved conversation ID:', savedId);
-          setConversationId(savedId);
-          setHasActiveTicket(true);
+  // ============= STORAGE PERSISTENCE =============
+  
+  const saveConversationLoadedState = useCallback(async () => {
+    try {
+      await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
+      await AsyncStorage.setItem(cacheTimestampKey, Date.now().toString());
+    } catch (error) {
+      console.error('Failed to save conversation loaded state:', error);
+    }
+  }, []);
+
+  const loadConversationLoadedState = useCallback(async () => {
+    try {
+      const [loaded, timestamp] = await Promise.all([
+        AsyncStorage.getItem(conversationLoadedStorageKey),
+        AsyncStorage.getItem(cacheTimestampKey),
+      ]);
+      
+      if (loaded === 'true' && timestamp) {
+        const cacheAge = Date.now() - parseInt(timestamp, 10);
+        if (cacheAge < CACHE_STALE_TIME) {
+          conversationLoadedRef.current = true;
+          return true;
+        } else {
+          // Cache is stale, clear it
+          await clearConversationLoadedState();
         }
-      } catch (error) {
-        console.error('Error loading saved conversation ID:', error);
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to load conversation state:', error);
+      return false;
+    }
+  }, []);
+
+  const clearConversationLoadedState = useCallback(async () => {
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(conversationLoadedStorageKey),
+        AsyncStorage.removeItem(cacheTimestampKey),
+      ]);
+      conversationLoadedRef.current = false;
+    } catch (error) {
+      console.error('Failed to clear conversation state:', error);
+    }
+  }, []);
+
+  // ============= APP STATE MANAGEMENT =============
+  
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription.remove();
+    };
+  }, [conversationId, isConnected]);
+
+  const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
+    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      console.log('📱 App came to foreground');
+      
+      // Reconnect if needed
+      if (!isConnected && conversationId) {
+        await reconnectActionCable();
+      }
+      
+      // Mark messages as read if chat is open
+      if (conversationId) {
+        await markMessagesAsReadIfVisible();
+      }
+    } else if (nextAppState.match(/inactive|background/)) {
+      console.log('📱 App went to background');
+      
+      // Update presence to away
+      if (isConnected) {
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.updatePresence('away');
+      }
+    }
+    
+    appState.current = nextAppState;
+  }, [conversationId, isConnected]);
+
+  const reconnectActionCable = useCallback(async () => {
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount || !user) return;
+
+      const actionCable = ActionCableService.getInstance();
+      const connected = await actionCable.connect({
+        token: currentAccount.token,
+        userId: user.id,
+        autoReconnect: true,
+      });
+
+      if (connected && conversationId) {
+        await actionCable.joinConversation(conversationId);
+        setupActionCableSubscriptions();
+      }
+    } catch (error) {
+      console.error('Failed to reconnect ActionCable:', error);
+    }
+  }, [conversationId, user]);
+
+  // ============= AUTO MARK AS READ =============
+  
+  const markMessagesAsReadIfVisible = useCallback(async () => {
+    if (!conversationId || !isConnected || appState.current !== 'active') return;
+
+    try {
+      // Find the last unread message from the agent
+      const lastUnreadAgentMessage = messages
+        .filter(msg => msg.isSupport && !msg.read_at && msg.id !== lastReadMessageIdRef.current)
+        .pop();
+
+      if (lastUnreadAgentMessage) {
+        console.log('📖 Auto-marking messages as read');
+        
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.perform('mark_message_read', {
+          conversation_id: conversationId,
+        });
+        
+        lastReadMessageIdRef.current = lastUnreadAgentMessage.id;
+      }
+    } catch (error) {
+      console.error('Failed to mark messages as read:', error);
+    }
+  }, [conversationId, isConnected, messages]);
+
+  // Auto-mark messages as read when new messages arrive and chat is visible
+  useEffect(() => {
+    if (appState.current === 'active' && messages.length > 0) {
+      markMessagesAsReadIfVisible();
+    }
+  }, [messages, markMessagesAsReadIfVisible]);
+
+  // ============= STORAGE & CACHE INITIALIZATION =============
+  
+  useEffect(() => {
+    const initializeConversation = async () => {
+      const savedId = await AsyncStorage.getItem(conversationIdStorageKey);
+      if (savedId) {
+        console.log('📦 Found saved conversation ID:', savedId);
+        setConversationId(savedId);
+        setHasActiveTicket(true);
+        
+        // Check if we have valid cached state
+        const hasValidCache = await loadConversationLoadedState();
+        if (hasValidCache) {
+          console.log('✅ Using cached conversation state');
+        }
       }
     };
 
-    loadSavedConversationId();
+    initializeConversation();
   }, []);
 
+  // ============= CACHE SUBSCRIPTION =============
+  
   useEffect(() => {
     if (!conversationId) return;
 
-    // Subscribe to cache updates
     cacheUnsubscribeRef.current = cacheManager.current.subscribe(conversationId, (convId, cachedData) => {
       console.log(`📦 Cache updated for conversation ${convId}`);
       
-      // Convert cached messages to UI message format
       const uiMessages: Message[] = cachedData.messages.map(msg => ({
         id: msg.id,
         text: msg.content,
@@ -166,21 +333,33 @@ export default function SupportScreen() {
         packageCode: msg.metadata?.package_code,
         isTagged: !!msg.metadata?.package_code,
         optimistic: msg.optimistic,
+        tempId: msg.optimistic ? msg.id : undefined,
         delivered_at: msg.delivered_at,
         read_at: msg.read_at,
+        sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
+        created_at: msg.created_at,
       }));
 
       setMessages(uiMessages);
       setHasMoreMessages(cachedData.hasMoreMessages);
       
-      // Update refs
       messageIdsRef.current.clear();
       uiMessages.forEach(msg => messageIdsRef.current.add(msg.id));
     });
 
-    const setupActionCable = async () => {
-      if (!user) return;
+    return () => {
+      if (cacheUnsubscribeRef.current) {
+        cacheUnsubscribeRef.current();
+      }
+    };
+  }, [conversationId]);
 
+  // ============= ACTIONCABLE SETUP =============
+  
+  useEffect(() => {
+    if (!conversationId || !user) return;
+
+    const setupActionCable = async () => {
       try {
         const currentAccount = accountManager.getCurrentAccount();
         if (!currentAccount) return;
@@ -197,13 +376,24 @@ export default function SupportScreen() {
           setIsConnected(true);
           console.log('✅ ActionCable connected');
 
+          // Join conversation and wait for confirmation
           await actionCable.joinConversation(conversationId);
+          
+          // Small delay to ensure subscription is fully established
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          setSubscriptionReady(true);
+          console.log('✅ Subscription ready');
 
           setupActionCableSubscriptions();
+          
+          // Request agent presence
+          await requestAgentPresence();
         }
       } catch (error) {
         console.error('Failed to setup ActionCable:', error);
         setIsConnected(false);
+        setSubscriptionReady(false);
       }
     };
 
@@ -217,19 +407,32 @@ export default function SupportScreen() {
       
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
-
-      if (cacheUnsubscribeRef.current) {
-        cacheUnsubscribeRef.current();
-      }
+      
+      setSubscriptionReady(false);
     };
-  }, [conversationId, user, isConnected]);
+  }, [conversationId, user]);
 
+  const requestAgentPresence = useCallback(async () => {
+    if (!conversationId) return;
+
+    try {
+      // Request presence data for conversation participants
+      const actionCable = ActionCableService.getInstance();
+      await actionCable.perform('get_user_presence', {
+        conversation_id: conversationId,
+      });
+    } catch (error) {
+      console.error('Failed to request agent presence:', error);
+    }
+  }, [conversationId]);
+
+  // ============= ACTIONCABLE SUBSCRIPTIONS =============
+  
   const setupActionCableSubscriptions = () => {
     if (!conversationId) return;
 
     const actionCable = ActionCableService.getInstance();
 
-    // Clear existing subscriptions
     actionCableSubscriptions.current.forEach(unsub => unsub());
     actionCableSubscriptions.current = [];
 
@@ -245,6 +448,11 @@ export default function SupportScreen() {
       if (messageIdsRef.current.has(messageId)) {
         console.log('Skipping duplicate message:', messageId);
         return;
+      }
+      
+      // Remove optimistic message if this is the real version
+      if (messageData.temp_id) {
+        cacheManager.current.removeOptimisticMessages(conversationId);
       }
       
       const newMessage: CachedMessage = {
@@ -273,9 +481,19 @@ export default function SupportScreen() {
       cacheManager.current.addMessageToCache(conversationId, newMessage);
       
       if (messageData.user?.id !== user?.id) {
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
+        // Auto-scroll for agent messages if near bottom
+        if (isNearBottom) {
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
+        } else {
+          setUnreadCount(prev => prev + 1);
+        }
+        
+        // Auto-mark as read if visible
+        if (appState.current === 'active') {
+          setTimeout(() => markMessagesAsReadIfVisible(), 500);
+        }
       }
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
@@ -286,9 +504,14 @@ export default function SupportScreen() {
         setMessages(prev => prev.map(msg => {
           if (msg.id === data.message_id) {
             if (data.status === 'delivered') {
-              return { ...msg, delivered_at: data.timestamp };
+              return { ...msg, delivered_at: data.timestamp, sendStatus: 'delivered' };
             } else if (data.status === 'read') {
-              return { ...msg, delivered_at: msg.delivered_at || data.timestamp, read_at: data.timestamp };
+              return { 
+                ...msg, 
+                delivered_at: msg.delivered_at || data.timestamp, 
+                read_at: data.timestamp,
+                sendStatus: 'read'
+              };
             }
           }
           return msg;
@@ -303,7 +526,8 @@ export default function SupportScreen() {
         console.log(`📖 ${data.reader_name || 'Agent'} read the conversation`);
         setMessages(prev => prev.map(msg => ({
           ...msg,
-          read_at: msg.read_at || data.timestamp
+          read_at: msg.read_at || data.timestamp,
+          sendStatus: msg.sendStatus === 'delivered' || msg.sendStatus === 'sent' ? 'read' : msg.sendStatus,
         })));
       }
     });
@@ -312,16 +536,10 @@ export default function SupportScreen() {
     // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
       if (data.conversation_id === conversationId && data.user_id !== user?.id) {
-        if (data.typing) {
-          setTypingUsers(prev => {
-            if (!prev.includes(data.user_name)) {
-              return [...prev, data.user_name];
-            }
-            return prev;
-          });
-        } else {
-          setTypingUsers(prev => prev.filter(name => name !== data.user_name));
-        }
+        setAgentPresence(prev => ({
+          ...prev,
+          is_typing: data.typing,
+        }));
       }
     });
     actionCableSubscriptions.current.push(unsubTyping);
@@ -364,10 +582,11 @@ export default function SupportScreen() {
     // Presence updates
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
       if (data.conversation_id === conversationId && data.user_id !== user?.id) {
-        setAgentOnline(data.status === 'online');
-        if (data.status !== 'online' && data.last_seen) {
-          setLastSeenTime(data.last_seen);
-        }
+        setAgentPresence({
+          status: data.status as 'online' | 'offline' | 'away',
+          last_seen: data.last_seen || data.last_seen_at,
+          is_typing: false,
+        });
       }
     });
     actionCableSubscriptions.current.push(unsubPresence);
@@ -380,12 +599,15 @@ export default function SupportScreen() {
 
     const unsubLost = actionCable.subscribe('connection_lost', () => {
       setIsConnected(false);
+      setSubscriptionReady(false);
     });
     actionCableSubscriptions.current.push(unsubLost);
 
     console.log('✅ ActionCable subscriptions configured');
   };
 
+  // ============= TYPING INDICATOR =============
+  
   const sendTypingIndicator = useCallback(async (typing: boolean) => {
     if (!isConnected || !conversationId) return;
 
@@ -417,10 +639,12 @@ export default function SupportScreen() {
     }, 2000);
   }, [isTyping, sendTypingIndicator]);
 
+  // ============= MESSAGE LOADING =============
+  
   const loadConversationMessages = useCallback(async (conversationId: string, isRefresh = false, loadOlder = false) => {
     try {
       // Check cache first (only on initial load)
-      if (!isRefresh && !loadOlder && !conversationLoadedRef.current) {
+      if (!isRefresh && !loadOlder && conversationLoadedRef.current) {
         const cachedData = cacheManager.current.getCachedConversation(conversationId);
         if (cachedData) {
           console.log(`📦 Loading conversation from cache: ${conversationId}`);
@@ -434,22 +658,24 @@ export default function SupportScreen() {
             packageCode: msg.metadata?.package_code,
             isTagged: !!msg.metadata?.package_code,
             optimistic: msg.optimistic,
+            tempId: msg.optimistic ? msg.id : undefined,
             delivered_at: msg.delivered_at,
             read_at: msg.read_at,
+            sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
+            created_at: msg.created_at,
           }));
 
           setMessages(uiMessages);
           setHasMoreMessages(cachedData.hasMoreMessages);
           setLoadingMessages(false);
           setIsInitialLoad(false);
-          conversationLoadedRef.current = true;
           
           messageIdsRef.current.clear();
           uiMessages.forEach(msg => messageIdsRef.current.add(msg.id));
           
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-          }, 100);
+          // Silently fetch newer messages in background
+          setTimeout(() => backgroundSyncMessages(conversationId), 2000);
+          
           return;
         }
       }
@@ -506,10 +732,7 @@ export default function SupportScreen() {
           );
           setIsInitialLoad(false);
           conversationLoadedRef.current = true;
-
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-          }, 100);
+          await saveConversationLoadedState();
         } else if (loadOlder) {
           cacheManager.current.prependOlderMessages(
             conversationId,
@@ -521,7 +744,14 @@ export default function SupportScreen() {
         const conversationData = response.data.conversation;
         if (conversationData?.assigned_agent) {
           setTicketStatus('active');
-          setAgentOnline(true);
+          
+          // Set agent presence from conversation data
+          if (conversationData.assigned_agent.presence) {
+            setAgentPresence({
+              status: conversationData.assigned_agent.presence.status || 'offline',
+              last_seen: conversationData.assigned_agent.presence.last_seen,
+            });
+          }
         } else {
           setTicketStatus('pending');
         }
@@ -575,6 +805,30 @@ export default function SupportScreen() {
     }
   }, [messages]);
 
+  const backgroundSyncMessages = useCallback(async (conversationId: string) => {
+    try {
+      console.log('🔄 Background syncing messages...');
+      
+      const response = await api.get(`/api/v1/conversations/${conversationId}`, {
+        params: { limit: 10 },
+        timeout: 10000,
+      });
+
+      if (response.data.success && response.data.messages) {
+        const newMessages = response.data.messages;
+        
+        // Update cache with any new messages
+        newMessages.forEach((msg: any) => {
+          if (!messageIdsRef.current.has(String(msg.id))) {
+            cacheManager.current.addMessageToCache(conversationId, msg);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Background sync failed:', error);
+    }
+  }, []);
+
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlder || !conversationId || !hasMoreMessages) {
       return;
@@ -587,7 +841,7 @@ export default function SupportScreen() {
     if (!conversationId) return;
     
     messageIdsRef.current.clear();
-    conversationLoadedRef.current = false;
+    await clearConversationLoadedState();
     cacheManager.current.clearConversationCache(conversationId);
     await loadConversationMessages(conversationId, true);
   }, [loadConversationMessages, conversationId]);
@@ -602,15 +856,12 @@ export default function SupportScreen() {
         setHasActiveTicket(true);
         setTicketStatus('active');
         
-        // Save to storage
         await AsyncStorage.setItem(conversationIdStorageKey, activeConvId);
-        
         await loadConversationMessages(activeConvId);
         
         return;
       }
       
-      // No active ticket
       setHasActiveTicket(false);
       await AsyncStorage.removeItem(conversationIdStorageKey);
       
@@ -668,11 +919,9 @@ export default function SupportScreen() {
   }, [autoSelectPackage, loadConversationMessages]);
 
   useEffect(() => {
-    // Only check for active ticket if no conversation ID is saved
     if (!conversationId) {
       checkActiveTicket();
     } else {
-      // Load the saved conversation
       loadConversationMessages(conversationId);
     }
 
@@ -684,9 +933,149 @@ export default function SupportScreen() {
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
+      
+      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      retryTimeoutsRef.current.clear();
     };
   }, [conversationId]);
 
+  // ============= MESSAGE RETRY LOGIC =============
+  
+  const scheduleMessageRetry = useCallback((tempId: string, message: CachedMessage, retryCount: number) => {
+    if (retryCount >= MAX_RETRY_ATTEMPTS) {
+      console.error('Max retry attempts reached for message:', tempId);
+      
+      // Mark message as failed
+      setMessages(prev => prev.map(msg => 
+        msg.tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg
+      ));
+      return;
+    }
+
+    const delay = RETRY_DELAYS[retryCount] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+    
+    console.log(`⏳ Scheduling retry ${retryCount + 1} for message in ${delay}ms`);
+    
+    const timeout = setTimeout(() => {
+      retryFailedMessage(tempId, message, retryCount + 1);
+    }, delay);
+
+    retryTimeoutsRef.current.set(tempId, timeout);
+  }, []);
+
+  const retryFailedMessage = useCallback(async (tempId: string, message: CachedMessage, retryCount: number) => {
+    if (!conversationId || !isConnected) {
+      scheduleMessageRetry(tempId, message, retryCount);
+      return;
+    }
+
+    try {
+      console.log(`🔄 Retrying message (attempt ${retryCount}):`, tempId);
+      
+      // Try sending via ActionCable
+      const actionCable = ActionCableService.getInstance();
+      const success = await actionCable.perform('send_message', {
+        conversation_id: conversationId,
+        content: message.content,
+        message_type: message.message_type,
+        metadata: message.metadata,
+        temp_id: tempId,
+      });
+
+      if (success) {
+        console.log('✅ Message retry successful');
+        retryTimeoutsRef.current.delete(tempId);
+      } else {
+        scheduleMessageRetry(tempId, message, retryCount);
+      }
+    } catch (error) {
+      console.error('Message retry failed:', error);
+      scheduleMessageRetry(tempId, message, retryCount);
+    }
+  }, [conversationId, isConnected, scheduleMessageRetry]);
+
+  // ============= SCROLL MANAGEMENT =============
+  
+  const handleScroll = useCallback((event: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const currentOffset = contentOffset.y;
+    const maxOffset = contentSize.height - layoutMeasurement.height;
+    const distanceFromBottom = maxOffset - currentOffset;
+    
+    setCurrentScrollOffset(currentOffset);
+    setIsNearBottom(distanceFromBottom < 100);
+    setShowScrollButton(distanceFromBottom > SCROLL_BUTTON_THRESHOLD);
+    
+    // Clear unread count if scrolled to bottom
+    if (distanceFromBottom < 50) {
+      setUnreadCount(0);
+    }
+  }, []);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    flatListRef.current?.scrollToEnd({ animated });
+    setUnreadCount(0);
+  }, []);
+
+  // Consolidated auto-scroll logic
+  useEffect(() => {
+    if (messages.length === 0) return;
+
+    // Only auto-scroll if user is near bottom
+    if (isNearBottom) {
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      });
+    }
+  }, [messages.length, isNearBottom]);
+
+  // ============= DAY SEPARATORS =============
+  
+  const groupedMessages = useMemo(() => {
+    const groups: { [key: string]: Message[] } = {};
+    
+    messages.forEach(msg => {
+      const date = new Date(msg.created_at || msg.timestamp);
+      const dateKey = date.toDateString();
+      
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(msg);
+    });
+    
+    return groups;
+  }, [messages]);
+
+  const formatDateHeader = useCallback((dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        weekday: 'long', 
+        month: 'short', 
+        day: 'numeric' 
+      });
+    }
+  }, []);
+
+  const renderDateSeparator = useCallback((dateStr: string) => (
+    <View style={styles.dateSeparator} key={`date-${dateStr}`}>
+      <View style={styles.dateSeparatorLine} />
+      <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      <View style={styles.dateSeparatorLine} />
+    </View>
+  ), [formatDateHeader]);
+
+  // ============= PACKAGE MANAGEMENT =============
+  
   const loadUserPackages = useCallback(async () => {
     try {
       setLoadingPackages(true);
@@ -779,6 +1168,8 @@ export default function SupportScreen() {
     }
   }, [userPackages.length, loadUserPackages]);
 
+  // ============= CONVERSATION CREATION =============
+  
   const ensureConversation = useCallback(async () => {
     if (conversationId) return conversationId;
 
@@ -798,10 +1189,15 @@ export default function SupportScreen() {
         setConversationId(newConversationId);
         setTicketStatus('pending');
         
-        // Save to storage
         await AsyncStorage.setItem(conversationIdStorageKey, newConversationId);
-        
         await loadConversationMessages(newConversationId);
+        
+        // Wait for ActionCable subscription to be ready
+        let retries = 0;
+        while (!subscriptionReady && retries < 10) {
+          await new Promise(resolve => setTimeout(resolve, 500));
+          retries++;
+        }
         
         return newConversationId;
       }
@@ -811,8 +1207,10 @@ export default function SupportScreen() {
       console.error('Failed to create support ticket:', error);
       throw error;
     }
-  }, [conversationId, inquiryType, selectedPackage?.code, loadConversationMessages]);
+  }, [conversationId, inquiryType, selectedPackage?.code, loadConversationMessages, subscriptionReady]);
 
+  // ============= EVENT HANDLERS =============
+  
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -883,6 +1281,8 @@ export default function SupportScreen() {
     setShowPackageModal(true);
   };
 
+  // ============= MESSAGE SENDING =============
+  
   const createBasicInquiryTicket = async () => {
     if (!inquiryText.trim()) return;
 
@@ -920,13 +1320,12 @@ export default function SupportScreen() {
       cacheManager.current.addOptimisticMessage(convId, optimisticMessage);
       closeAllModals();
       
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(() => scrollToBottom(), 100);
 
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
         content: inquiryText.trim(),
-        message_type: 'text'
+        message_type: 'text',
+        temp_id: tempId,
       });
       
       if (response.data.success && response.data.message) {
@@ -935,43 +1334,16 @@ export default function SupportScreen() {
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
-        
-        setTimeout(() => {
-          const systemMessage: CachedMessage = {
-            id: `system-${Date.now()}`,
-            content: 'Thank you for contacting us. Your inquiry has been received and a support agent will respond shortly.',
-            created_at: new Date().toISOString(),
-            timestamp: new Date().toLocaleTimeString('en-US', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            is_system: true,
-            from_support: true,
-            message_type: 'system',
-            user: {
-              id: 'system',
-              name: 'System',
-              role: 'system'
-            },
-            metadata: {},
-            optimistic: false,
-          };
-          
-          if (!messageIdsRef.current.has(systemMessage.id)) {
-            cacheManager.current.addMessageToCache(convId, systemMessage);
-          }
-          
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }, 1500);
       }
       
     } catch (error) {
       console.error('Failed to create basic inquiry:', error);
       if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
+        const optimisticMsg = cacheManager.current.getCachedConversation(conversationId)
+          ?.messages.find(m => m.optimistic);
+        if (optimisticMsg) {
+          scheduleMessageRetry(optimisticMsg.id, optimisticMsg, 0);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -1014,14 +1386,13 @@ export default function SupportScreen() {
       cacheManager.current.addOptimisticMessage(convId, optimisticMessage);
       closeAllModals();
       
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(() => scrollToBottom(), 100);
 
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
         content: packageInquiry.trim(),
         message_type: 'text',
-        metadata: { package_code: selectedPackage.code }
+        metadata: { package_code: selectedPackage.code },
+        temp_id: tempId,
       });
       
       if (response.data.success && response.data.message) {
@@ -1030,43 +1401,16 @@ export default function SupportScreen() {
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
-        
-        setTimeout(() => {
-          const systemMessage: CachedMessage = {
-            id: `system-${Date.now()}`,
-            content: `Thank you for your inquiry about package ${selectedPackage.code}. A support agent will review your ticket and respond shortly.`,
-            created_at: new Date().toISOString(),
-            timestamp: new Date().toLocaleTimeString('en-US', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            is_system: true,
-            from_support: true,
-            message_type: 'system',
-            user: {
-              id: 'system',
-              name: 'System',
-              role: 'system'
-            },
-            metadata: {},
-            optimistic: false,
-          };
-          
-          if (!messageIdsRef.current.has(systemMessage.id)) {
-            cacheManager.current.addMessageToCache(convId, systemMessage);
-          }
-          
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }, 1500);
       }
       
     } catch (error) {
       console.error('Failed to create package inquiry:', error);
       if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
+        const optimisticMsg = cacheManager.current.getCachedConversation(conversationId)
+          ?.messages.find(m => m.optimistic);
+        if (optimisticMsg) {
+          scheduleMessageRetry(optimisticMsg.id, optimisticMsg, 0);
+        }
       }
     } finally {
       setIsLoading(false);
@@ -1074,9 +1418,15 @@ export default function SupportScreen() {
   };
 
   const sendMessage = useCallback(async () => {
-    if (!inputText.trim()) return;
+    if (!inputText.trim() || !subscriptionReady) return;
 
-    setIsLoading(true);
+    const messageContent = inputText.trim();
+    setInputText('');
+    
+    if (isTyping) {
+      setIsTyping(false);
+      sendTypingIndicator(false);
+    }
     
     try {
       const convId = await ensureConversation();
@@ -1085,7 +1435,7 @@ export default function SupportScreen() {
       
       const optimisticMessage: CachedMessage = {
         id: tempId,
-        content: inputText.trim(),
+        content: messageContent,
         created_at: new Date().toISOString(),
         timestamp: new Date().toLocaleTimeString('en-US', {
           hour12: false,
@@ -1106,23 +1456,14 @@ export default function SupportScreen() {
 
       cacheManager.current.addOptimisticMessage(convId, optimisticMessage);
       
-      const messageText = inputText.trim();
-      setInputText('');
-      
-      if (isTyping) {
-        setIsTyping(false);
-        sendTypingIndicator(false);
-      }
-      
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      setTimeout(() => scrollToBottom(), 100);
 
       const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
       const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-        content: messageText,
+        content: messageContent,
         message_type: 'text',
-        metadata
+        metadata,
+        temp_id: tempId,
       });
       
       if (response.data.success && response.data.message) {
@@ -1135,14 +1476,19 @@ export default function SupportScreen() {
       
     } catch (error) {
       console.error('Failed to send message:', error);
+      
+      // Keep the message in the list and schedule retry
       if (conversationId) {
-        cacheManager.current.removeOptimisticMessages(conversationId);
+        const optimisticMsg = cacheManager.current.getCachedConversation(conversationId)
+          ?.messages.find(m => m.optimistic);
+        if (optimisticMsg) {
+          scheduleMessageRetry(optimisticMsg.id, optimisticMsg, 0);
+        }
       }
-      setInputText(inputText.trim());
-    } finally {
-      setIsLoading(false);
+      
+      // Don't restore input text - message is in retry queue
     }
-  }, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, conversationId, user]);
+  }, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, conversationId, user, subscriptionReady, scheduleMessageRetry]);
 
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
@@ -1152,12 +1498,81 @@ export default function SupportScreen() {
     }
   }, [conversationId, handleTyping]);
 
+  // ============= HELPER FUNCTIONS =============
+  
+  const getStateBadgeColor = (state: string) => {
+    switch (state) {
+      case 'pending_unpaid': return '#ef4444';
+      case 'pending': return '#f97316';
+      case 'submitted': return '#eab308';
+      case 'in_transit': return '#8b5cf6';
+      case 'delivered': return '#10b981';
+      case 'collected': return '#2563eb';
+      case 'rejected': return '#ef4444';
+      default: return '#8b5cf6';
+    }
+  };
+
+  const getTicketStatusText = () => {
+    // Show typing indicator in header if agent is typing
+    if (agentPresence.is_typing) {
+      return 'typing...';
+    }
+
+    switch (ticketStatus) {
+      case 'pending': return 'Ticket Pending';
+      case 'active': 
+        if (agentPresence.status === 'online') return 'Online';
+        if (agentPresence.last_seen) {
+          const lastSeen = new Date(agentPresence.last_seen);
+          const now = new Date();
+          const diffMinutes = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
+          
+          if (diffMinutes < 1) return 'Last seen just now';
+          if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
+          const diffHours = Math.floor(diffMinutes / 60);
+          if (diffHours < 24) return `Last seen ${diffHours}h ago`;
+          return 'Last seen recently';
+        }
+        return isConnected ? 'Online' : 'Connecting...';
+      case 'closed': return 'Chat closed';
+      default: return isConnected ? 'Connected' : 'Connecting...';
+    }
+  };
+
+  // ============= RENDER FUNCTIONS =============
+  
   const renderMessageStatus = (message: Message) => {
-    if (message.isSupport || message.type === 'system' || message.optimistic) {
+    if (message.isSupport || message.type === 'system') {
       return null;
     }
 
-    if (message.read_at) {
+    if (message.sendStatus === 'failed') {
+      return (
+        <TouchableOpacity
+          style={styles.messageStatusContainer}
+          onPress={() => {
+            const cachedMsg = cacheManager.current.getCachedConversation(conversationId!)
+              ?.messages.find(m => m.id === message.tempId);
+            if (cachedMsg) {
+              retryFailedMessage(message.tempId!, cachedMsg, message.retryCount || 0);
+            }
+          }}
+        >
+          <MaterialIcons name="error-outline" size={16} color="#ef4444" />
+        </TouchableOpacity>
+      );
+    }
+
+    if (message.optimistic || message.sendStatus === 'pending') {
+      return (
+        <View style={styles.messageStatusContainer}>
+          <MaterialIcons name="schedule" size={16} color="rgba(255, 255, 255, 0.5)" />
+        </View>
+      );
+    }
+
+    if (message.read_at || message.sendStatus === 'read') {
       return (
         <View style={styles.messageStatusContainer}>
           <MaterialIcons name="done-all" size={16} color="#4FC3F7" />
@@ -1165,7 +1580,7 @@ export default function SupportScreen() {
       );
     }
 
-    if (message.delivered_at) {
+    if (message.delivered_at || message.sendStatus === 'delivered') {
       return (
         <View style={styles.messageStatusContainer}>
           <MaterialIcons name="done-all" size={16} color="rgba(255, 255, 255, 0.5)" />
@@ -1185,7 +1600,8 @@ export default function SupportScreen() {
       <View style={[
         styles.messageContainer,
         item.isSupport ? styles.supportMessage : styles.userMessage,
-        item.optimistic && styles.optimisticMessage
+        item.optimistic && styles.optimisticMessage,
+        item.sendStatus === 'failed' && styles.failedMessage,
       ]}>
         {item.isTagged && item.packageCode && (
           <View style={styles.taggedHeader}>
@@ -1208,15 +1624,7 @@ export default function SupportScreen() {
         ]}>{item.text}</Text>
         <View style={styles.messageFooter}>
           <Text style={styles.timestamp}>{item.timestamp}</Text>
-          {!item.isSupport && (
-            item.optimistic ? (
-              <View style={styles.messageStatusContainer}>
-                <ActivityIndicator size={12} color="rgba(255, 255, 255, 0.7)" />
-              </View>
-            ) : (
-              renderMessageStatus(item)
-            )
-          )}
+          {!item.isSupport && renderMessageStatus(item)}
         </View>
       </View>
     </View>
@@ -1245,55 +1653,28 @@ export default function SupportScreen() {
     </TouchableOpacity>
   );
 
-  const getStateBadgeColor = (state: string) => {
-    switch (state) {
-      case 'pending_unpaid': return '#ef4444';
-      case 'pending': return '#f97316';
-      case 'submitted': return '#eab308';
-      case 'in_transit': return '#8b5cf6';
-      case 'delivered': return '#10b981';
-      case 'collected': return '#2563eb';
-      case 'rejected': return '#ef4444';
-      default: return '#8b5cf6';
-    }
-  };
-
-  const getTicketStatusText = () => {
-    switch (ticketStatus) {
-      case 'pending': return 'Ticket Pending';
-      case 'active': 
-        if (agentOnline) return 'Online';
-        if (lastSeenTime) {
-          const lastSeen = new Date(lastSeenTime);
-          const now = new Date();
-          const diffMinutes = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
-          
-          if (diffMinutes < 1) return 'Last seen just now';
-          if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
-          const diffHours = Math.floor(diffMinutes / 60);
-          if (diffHours < 24) return `Last seen ${diffHours}h ago`;
-          return 'Last seen recently';
-        }
-        return isConnected ? 'Online' : 'Connecting...';
-      case 'closed': return 'Last seen recently';
-      default: return isConnected ? 'Online' : 'Connecting...';
-    }
-  };
-
-  const renderTypingIndicator = () => {
-    if (typingUsers.length === 0) return null;
-
-    return (
-      <View style={styles.typingIndicator}>
-        <Text style={styles.typingText}>
-          {typingUsers.length === 1 
-            ? `${typingUsers[0]} is typing...`
-            : `${typingUsers.join(', ')} are typing...`
-          }
-        </Text>
-      </View>
+  const renderFlatListData = useMemo(() => {
+    const data: any[] = [];
+    const dateKeys = Object.keys(groupedMessages).sort((a, b) => 
+      new Date(a).getTime() - new Date(b).getTime()
     );
-  };
+
+    dateKeys.forEach((dateKey) => {
+      data.push({ type: 'date', dateKey, id: `date-${dateKey}` });
+      groupedMessages[dateKey].forEach(msg => {
+        data.push({ type: 'message', message: msg, id: msg.id });
+      });
+    });
+
+    return data;
+  }, [groupedMessages]);
+
+  const renderItem = useCallback(({ item }: any) => {
+    if (item.type === 'date') {
+      return renderDateSeparator(item.dateKey);
+    }
+    return renderMessage({ item: item.message });
+  }, [renderDateSeparator]);
 
   const renderTicketModal = () => (
     <Modal
@@ -1538,6 +1919,8 @@ export default function SupportScreen() {
     </Modal>
   );
 
+  // ============= MAIN RENDER =============
+  
   if (loadingMessages && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
@@ -1625,8 +2008,13 @@ export default function SupportScreen() {
           <View style={styles.headerInfo}>
             <Text style={styles.headerTitle}>Customer Support</Text>
             <View style={styles.headerSubtitleRow}>
-              <Text style={styles.headerSubtitle}>{getTicketStatusText()}</Text>
-              {isConnected && (ticketStatus === 'active' && agentOnline) && (
+              <Text style={[
+                styles.headerSubtitle,
+                agentPresence.is_typing && styles.typingText
+              ]}>
+                {getTicketStatusText()}
+              </Text>
+              {isConnected && !agentPresence.is_typing && (ticketStatus === 'active' && agentPresence.status === 'online') && (
                 <View style={styles.connectionIndicator}>
                   <View style={styles.onlineIndicator} />
                 </View>
@@ -1656,13 +2044,13 @@ export default function SupportScreen() {
         <View style={[styles.messagesContainer, { marginBottom: keyboardHeight > 0 ? 0 : 0 }]}>
           <FlatList
             ref={flatListRef}
-            data={messages}
-            renderItem={renderMessage}
+            data={renderFlatListData}
+            renderItem={renderItem}
             keyExtractor={(item) => item.id}
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
-            onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
-            onLayout={() => flatListRef.current?.scrollToEnd({ animated: false })}
+            onScroll={handleScroll}
+            scrollEventThrottle={16}
             onEndReached={loadOlderMessages}
             onEndReachedThreshold={SCROLL_THRESHOLD}
             refreshControl={
@@ -1690,7 +2078,23 @@ export default function SupportScreen() {
             )}
           />
           
-          {renderTypingIndicator()}
+          {/* Scroll to bottom button */}
+          {showScrollButton && (
+            <TouchableOpacity
+              style={styles.scrollToBottomButton}
+              onPress={() => scrollToBottom(true)}
+              activeOpacity={0.8}
+            >
+              <View style={styles.scrollToBottomContent}>
+                <Feather name="arrow-down" size={20} color="#fff" />
+                {unreadCount > 0 && (
+                  <View style={styles.unreadBadge}>
+                    <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+                  </View>
+                )}
+              </View>
+            </TouchableOpacity>
+          )}
         </View>
 
         {!showTicketModal && !showInquiryModal && !showPackageModal && (
@@ -1837,9 +2241,7 @@ export default function SupportScreen() {
                 multiline
                 maxLength={1000}
                 onFocus={() => {
-                  setTimeout(() => {
-                    flatListRef.current?.scrollToEnd({ animated: true });
-                  }, 100);
+                  setTimeout(() => scrollToBottom(), 100);
                 }}
               />
               
@@ -1854,14 +2256,12 @@ export default function SupportScreen() {
             <TouchableOpacity 
               style={[
                 styles.sendButtonMain,
-                inputText.trim() ? styles.sendButtonActive : styles.voiceButton
+                inputText.trim() && subscriptionReady ? styles.sendButtonActive : styles.voiceButton
               ]}
-              onPress={inputText.trim() ? sendMessage : undefined}
-              disabled={isLoading}
+              onPress={inputText.trim() && subscriptionReady ? sendMessage : undefined}
+              disabled={!subscriptionReady}
             >
-              {isLoading ? (
-                <ActivityIndicator size={18} color="#fff" />
-              ) : inputText.trim() ? (
+              {inputText.trim() ? (
                 <Feather name="send" size={18} color="#fff" />
               ) : (
                 <Feather name="mic" size={18} color="#fff" />
@@ -1954,6 +2354,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 14,
   },
+  typingText: {
+    fontStyle: 'italic',
+    color: '#4FC3F7',
+  },
   connectionIndicator: {
     marginLeft: 6,
   },
@@ -2004,6 +2408,25 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: 'italic',
   },
+  dateSeparator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: 16,
+    paddingHorizontal: 12,
+  },
+  dateSeparatorLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  dateSeparatorText: {
+    color: '#8E8E93',
+    fontSize: 12,
+    fontWeight: '500',
+    marginHorizontal: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
   messageWrapper: {
     marginVertical: 3,
   },
@@ -2032,6 +2455,9 @@ const styles = StyleSheet.create({
   },
   optimisticMessage: {
     opacity: 0.7,
+  },
+  failedMessage: {
+    backgroundColor: '#5A2D3D',
   },
   taggedHeader: {
     backgroundColor: 'rgba(225, 190, 231, 0.1)',
@@ -2080,7 +2506,7 @@ const styles = StyleSheet.create({
   },
   messageFooter: {
     flexDirection: 'row',
-    alignItems: 'center',
+alignItems: 'center',
     justifyContent: 'flex-end',
     marginTop: 2,
   },
@@ -2092,15 +2518,44 @@ const styles = StyleSheet.create({
   messageStatusContainer: {
     marginLeft: 4,
   },
-  typingIndicator: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    marginBottom: 8,
+  scrollToBottomButton: {
+    position: 'absolute',
+    bottom: 16,
+    right: 16,
+    backgroundColor: '#7B3F98',
+    borderRadius: 28,
+    width: 56,
+    height: 56,
+    justifyContent: 'center',
+    alignItems: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.3,
+    shadowRadius: 6,
   },
-  typingText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    fontStyle: 'italic',
+  scrollToBottomContent: {
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  unreadBadge: {
+    position: 'absolute',
+    top: -8,
+    right: -8,
+    backgroundColor: '#ef4444',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    borderWidth: 2,
+    borderColor: '#0B141B',
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '700',
   },
   inquirySection: {
     backgroundColor: 'rgba(11, 20, 27, 0.95)',
