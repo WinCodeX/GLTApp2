@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: Proper online status + auto mark as read
+// app/(support)/chat/[id].tsx - FIXED: Cached conversations with streaming
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -100,7 +100,6 @@ export default function SupportChatScreen() {
   const [isConnected, setIsConnected] = useState(false);
   const [customerOnline, setCustomerOnline] = useState(false);
   const [lastSeenTime, setLastSeenTime] = useState<string | null>(null);
-  const [hasMarkedAsRead, setHasMarkedAsRead] = useState(false);
   
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -114,6 +113,7 @@ export default function SupportChatScreen() {
   useEffect(() => {
     if (!id) return;
 
+    // Subscribe to cache updates
     cacheUnsubscribeRef.current = cacheManager.current.subscribe(id, (conversationId, cachedData) => {
       console.log(`📦 Cache updated for conversation ${conversationId}`);
       setConversation(cachedData.conversation);
@@ -140,11 +140,6 @@ export default function SupportChatScreen() {
           await actionCableRef.current.joinConversation(id);
           
           setupActionCableSubscriptions();
-          
-          // FIXED: Mark messages as read when conversation loads
-          if (!hasMarkedAsRead) {
-            await markConversationAsRead();
-          }
         }
       } catch (error) {
         console.error('Failed to initialize ActionCable:', error);
@@ -172,29 +167,16 @@ export default function SupportChatScreen() {
     };
   }, [user, id]);
 
-  // FIXED: Mark conversation as read
-  const markConversationAsRead = useCallback(async () => {
-    if (!id || !actionCableRef.current || hasMarkedAsRead) return;
-
-    try {
-      const success = await actionCableRef.current.markMessageRead(id);
-      if (success) {
-        setHasMarkedAsRead(true);
-        console.log('✅ Marked conversation as read');
-      }
-    } catch (error) {
-      console.error('Failed to mark conversation as read:', error);
-    }
-  }, [id, hasMarkedAsRead]);
-
   const setupActionCableSubscriptions = () => {
     if (!actionCableRef.current || !id) return;
 
     const actionCable = actionCableRef.current;
 
+    // Clear existing subscriptions
     actionCableSubscriptions.current.forEach(unsub => unsub());
     actionCableSubscriptions.current = [];
 
+    // New message handler
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 INSTANT message received:', data);
       
@@ -232,15 +214,13 @@ export default function SupportChatScreen() {
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: true });
         }, 100);
-        
-        // FIXED: Auto mark as read when receiving new messages
-        markConversationAsRead();
       }
       
       console.log('✅ New message processed and cached');
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
+    // Message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         setMessages(prev => prev.map(msg => {
@@ -257,6 +237,7 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubAcknowledged);
 
+    // Message read
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
       if (data.conversation_id === id) {
         console.log(`📖 ${data.reader_name || 'Someone'} read the conversation`);
@@ -268,6 +249,7 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubRead);
 
+    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
       if (data.conversation_id === id && data.user_id !== user?.id) {
         setTypingUsers(prev => {
@@ -285,6 +267,7 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
+    // Ticket status
     const unsubStatus = actionCable.subscribe('ticket_status_changed', (data) => {
       if (data.conversation_id === id) {
         console.log('🎫 Ticket status changed:', data.new_status);
@@ -310,6 +293,7 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubStatus);
 
+    // Conversation update
     const unsubUpdate = actionCable.subscribe('conversation_updated', (data) => {
       if (data.conversation_id === id) {
         console.log('🔄 Conversation updated:', data);
@@ -325,37 +309,18 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubUpdate);
 
-    // FIXED: Proper presence tracking
+    // Presence updates
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
       if (data.conversation_id === id && data.user_id !== user?.id) {
-        console.log('👤 Customer presence changed:', data.status);
-        
-        const isOnline = data.status === 'online';
-        setCustomerOnline(isOnline);
-        
-        if (!isOnline && data.last_seen) {
+        setCustomerOnline(data.status === 'online');
+        if (data.status !== 'online' && data.last_seen) {
           setLastSeenTime(data.last_seen);
-        } else if (isOnline) {
-          setLastSeenTime(null);
         }
       }
     });
     actionCableSubscriptions.current.push(unsubPresence);
 
-    // FIXED: Track user joined events for initial presence
-    const unsubJoined = actionCable.subscribe('user_joined_conversation', (data) => {
-      if (data.conversation_id === id && data.user_id !== user?.id) {
-        console.log('👤 Customer joined conversation');
-        if (data.user_presence) {
-          setCustomerOnline(data.user_presence.is_online);
-          if (!data.user_presence.is_online && data.user_presence.last_seen_at) {
-            setLastSeenTime(data.user_presence.last_seen_at);
-          }
-        }
-      }
-    });
-    actionCableSubscriptions.current.push(unsubJoined);
-
+    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       setIsConnected(true);
       console.log('✅ ActionCable connection established');
@@ -383,6 +348,7 @@ export default function SupportChatScreen() {
       return;
     }
 
+    // Check if already loaded from cache (only on initial load)
     if (!isRefresh && !loadOlder && !conversationLoadedRef.current) {
       const cachedData = cacheManager.current.getCachedConversation(id);
       if (cachedData) {
@@ -397,12 +363,6 @@ export default function SupportChatScreen() {
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: false });
         }, 100);
-        
-        // FIXED: Mark as read after loading from cache
-        if (!hasMarkedAsRead && actionCableRef.current) {
-          markConversationAsRead();
-        }
-        
         return;
       }
     }
@@ -467,25 +427,12 @@ export default function SupportChatScreen() {
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
           }, 100);
-          
-          // FIXED: Mark as read after loading from API
-          if (!hasMarkedAsRead && actionCableRef.current) {
-            markConversationAsRead();
-          }
         } else if (loadOlder) {
           cacheManager.current.prependOlderMessages(
             id,
             messagesData,
             pagination.has_more || false
           );
-        }
-
-        // FIXED: Get initial customer presence from conversation data
-        if (conversationData.customer_presence) {
-          setCustomerOnline(conversationData.customer_presence.is_online);
-          if (!conversationData.customer_presence.is_online && conversationData.customer_presence.last_seen_at) {
-            setLastSeenTime(conversationData.customer_presence.last_seen_at);
-          }
         }
 
         console.log(`Loaded ${messagesData.length} messages, has_more: ${pagination.has_more}`);
@@ -514,7 +461,7 @@ export default function SupportChatScreen() {
       setLoadingOlder(false);
       setRefreshing(false);
     }
-  }, [id, hasMarkedAsRead, markConversationAsRead]);
+  }, [id]);
 
   const loadOlderMessages = useCallback(async () => {
     if (loadingOlder || !cacheManager.current.shouldLoadOlderMessages(id)) {
@@ -528,7 +475,6 @@ export default function SupportChatScreen() {
   const handleRefresh = useCallback(async () => {
     cacheManager.current.clearConversationCache(id);
     conversationLoadedRef.current = false;
-    setHasMarkedAsRead(false);
     await loadConversation(true);
   }, [loadConversation, id]);
 
@@ -845,15 +791,10 @@ export default function SupportChatScreen() {
     </View>
   );
 
-  // FIXED: Proper status display with last seen time
   const getConnectionStatusText = () => {
     if (!conversation) return 'Loading...';
     if (!isConnected) return 'Connecting...';
-    
-    if (customerOnline) {
-      return 'Online';
-    }
-    
+    if (customerOnline) return 'Online';
     if (lastSeenTime) {
       const lastSeen = new Date(lastSeenTime);
       const now = new Date();
@@ -861,18 +802,11 @@ export default function SupportChatScreen() {
       
       if (diffMinutes < 1) return 'Last seen just now';
       if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
-      
       const diffHours = Math.floor(diffMinutes / 60);
       if (diffHours < 24) return `Last seen ${diffHours}h ago`;
-      
-      const diffDays = Math.floor(diffHours / 24);
-      if (diffDays === 1) return 'Last seen yesterday';
-      if (diffDays < 7) return `Last seen ${diffDays} days ago`;
-      
       return 'Last seen recently';
     }
-    
-    return 'Offline';
+    return 'Online';
   };
 
   if (loading && isInitialLoad) {
@@ -1152,7 +1086,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   headerStatusText: {
-    color: '#8E8E93',
+    color: '#10b981',
     fontSize: 11,
     marginTop: 1,
   },
