@@ -5,7 +5,7 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.8.0';
+export const CHANGELOG_VERSION = '1.8.1';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const AUTO_DISMISS_DELAY = 10000;
 
