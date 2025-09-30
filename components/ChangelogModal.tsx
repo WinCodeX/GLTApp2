@@ -5,18 +5,16 @@ import { Modal, StyleSheet, Text, TouchableOpacity, View, ActivityIndicator, Pla
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.7.9';
+export const CHANGELOG_VERSION = '1.8.0';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const AUTO_DISMISS_DELAY = 10000;
 
 const CHANGELOG_CONTENT = [
-  'Fixed going back in screens',
-  'Terms and conditions update',
-  'Auto reject feature added',
-  'Polished UI in contact screen',
-  'Push notifications and sounds added',
+  
   'Talk to a representative implemented',
   'Support functionality implemented',
+'WhatsApp style messaging in talk to a rep',
+'ActionCable for instant messages and notifications',
   'Other Bug fixes',
 ];
 
