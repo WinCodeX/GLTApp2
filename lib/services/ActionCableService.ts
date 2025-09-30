@@ -1,22 +1,19 @@
-// lib/services/ActionCableService.ts - Fixed with infinite reconnection and proper message broadcasting
+// lib/services/ActionCableService.ts
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
 
 interface ActionCableMessage {
   type: string;
-  // Count updates
   notification_count?: number;
   cart_count?: number;
   unread_messages_count?: number;
-  // Entity updates
   notification?: any;
   message?: any;
   conversation?: any;
   package?: any;
   business?: any;
   user?: any;
-  // State information
   counts?: {
     notifications: number;
     cart: number;
@@ -25,11 +22,13 @@ interface ActionCableMessage {
   user_data?: any;
   recent_conversations?: any[];
   businesses?: any[];
-  // Message broadcasting fields
   conversation_id?: string;
   message_id?: string;
   ticket_id?: string;
-  // Metadata
+  stats?: any;
+  dashboard_stats?: any;
+  agent_stats?: any;
+  ticket?: any;
   timestamp: string;
   user_id?: string;
   business_id?: string;
@@ -64,8 +63,8 @@ class ActionCableService {
   private callbacks: ActionCableCallbacks = {};
   private isConnected = false;
   private reconnectAttempts = 0;
-  private readonly MIN_RECONNECT_DELAY = 1000;  // 1 second
-  private readonly MAX_RECONNECT_DELAY = 30000; // 30 seconds
+  private readonly MIN_RECONNECT_DELAY = 1000;
+  private readonly MAX_RECONNECT_DELAY = 30000;
   private reconnectTimeout: NodeJS.Timeout | null = null;
   private isIntentionalDisconnect = false;
   private connectionConfig: ConnectionConfig | null = null;
@@ -75,6 +74,7 @@ class ActionCableService {
   private subscribedBusinesses: Set<string> = new Set();
   private subscriptionIdentifier: string | null = null;
   private pingInterval: NodeJS.Timeout | null = null;
+  private supportDashboardSubscribed = false;
 
   static getInstance(): ActionCableService {
     if (!ActionCableService.instance) {
@@ -123,6 +123,7 @@ class ActionCableService {
           this.reconnectAttempts = 0;
           
           this.subscribeToChannel();
+          this.subscribeToSupportDashboard();
           this.requestInitialState();
           this.startHeartbeat();
           this.startPing();
@@ -170,12 +171,23 @@ class ActionCableService {
         }
 
         if (data.type === 'confirm_subscription') {
-          console.log('📡 ActionCable subscription confirmed');
+          console.log('📡 ActionCable subscription confirmed:', data.identifier);
+          
+          // Check if this is the support dashboard subscription
+          try {
+            const identifier = JSON.parse(data.identifier);
+            if (identifier.channel === 'SupportDashboardChannel') {
+              this.supportDashboardSubscribed = true;
+              console.log('✅ Support dashboard subscription confirmed');
+            }
+          } catch (e) {
+            // Ignore parsing errors
+          }
           return;
         }
 
         if (data.message) {
-          console.log('📡 ActionCable message received:', data.message.type, data.message);
+          console.log('📡 ActionCable message received:', data.message.type);
           this.handleMessage(data.message);
         }
       } catch (error) {
@@ -186,6 +198,7 @@ class ActionCableService {
     this.websocket.onclose = (event) => {
       console.log('❌ WebSocket connection closed:', event.code, event.reason);
       this.isConnected = false;
+      this.supportDashboardSubscribed = false;
       this.stopHeartbeat();
       this.stopPing();
       
@@ -223,6 +236,7 @@ class ActionCableService {
       }
       
       this.isConnected = false;
+      this.supportDashboardSubscribed = false;
       this.subscribedConversations.clear();
       this.subscribedBusinesses.clear();
       this.connectionConfig = null;
@@ -315,6 +329,22 @@ class ActionCableService {
       identifier: this.subscriptionIdentifier
     };
 
+    this.sendMessage(subscribeCommand);
+  }
+
+  private subscribeToSupportDashboard(): void {
+    if (!this.connectionConfig) return;
+
+    const supportDashboardIdentifier = JSON.stringify({
+      channel: 'SupportDashboardChannel'
+    });
+
+    const subscribeCommand: ActionCableCommand = {
+      command: 'subscribe',
+      identifier: supportDashboardIdentifier
+    };
+
+    console.log('📡 Subscribing to SupportDashboardChannel...');
     this.sendMessage(subscribeCommand);
   }
 
@@ -477,6 +507,7 @@ class ActionCableService {
       reconnectAttempts: this.reconnectAttempts,
       willReconnect: !this.isIntentionalDisconnect && this.connectionConfig?.autoReconnect,
       hasSubscription: !!this.subscriptionIdentifier,
+      supportDashboardSubscribed: this.supportDashboardSubscribed,
       subscribedConversations: Array.from(this.subscribedConversations),
       subscribedBusinesses: Array.from(this.subscribedBusinesses),
       config: this.connectionConfig,
@@ -492,7 +523,8 @@ class ActionCableService {
     return {
       conversations: Array.from(this.subscribedConversations),
       businesses: Array.from(this.subscribedBusinesses),
-      isConnected: this.isConnected
+      isConnected: this.isConnected,
+      supportDashboardSubscribed: this.supportDashboardSubscribed
     };
   }
 
@@ -519,7 +551,7 @@ class ActionCableService {
 
   private handleMessage(data: ActionCableMessage): void {
     try {
-      console.log('📡 Processing ActionCable message:', data.type, data);
+      console.log('📡 Processing ActionCable message:', data.type);
       
       const callbacks = this.callbacks[data.type] || [];
       callbacks.forEach(callback => {
@@ -562,7 +594,7 @@ class ActionCableService {
       switch (data.type) {
         case 'new_message':
           if (data.conversation_id && data.message) {
-            console.log(`💬 New message in conversation ${data.conversation_id}:`, data.message.content?.substring(0, 50));
+            console.log(`💬 New message in conversation ${data.conversation_id}`);
             
             this.triggerCallbacks('message_received', {
               ...data,
@@ -586,8 +618,13 @@ class ActionCableService {
           
         case 'ticket_status_changed':
           if (data.conversation_id) {
-            console.log(`🎫 Ticket status changed for conversation ${data.conversation_id}: ${data.new_status}`);
+            console.log(`🎫 Ticket status changed for conversation ${data.conversation_id}`);
           }
+          break;
+
+        case 'dashboard_stats_update':
+        case 'initial_state':
+          console.log('📊 Dashboard stats received');
           break;
       }
     } catch (error) {
@@ -601,7 +638,9 @@ class ActionCableService {
         console.log('📊 Initial state received:', {
           counts: data.counts,
           conversations: data.recent_conversations?.length,
-          businesses: data.businesses?.length
+          businesses: data.businesses?.length,
+          dashboard_stats: data.dashboard_stats,
+          agent_stats: data.agent_stats
         });
         break;
         
@@ -632,6 +671,14 @@ class ActionCableService {
       case 'business_updated':
         console.log('🏢 Business updated:', data.business?.id);
         break;
+
+      case 'dashboard_stats_update':
+        console.log('📊 Dashboard stats updated:', data.stats);
+        break;
+
+      case 'new_support_ticket':
+        console.log('🎫 New support ticket:', data.ticket?.id);
+        break;
     }
   }
 
@@ -649,6 +696,11 @@ class ActionCableService {
   private async resubscribeToChannels(): Promise<void> {
     try {
       console.log('🔄 Resubscribing to channels...');
+      
+      // Resubscribe to support dashboard
+      if (this.supportDashboardSubscribed) {
+        this.subscribeToSupportDashboard();
+      }
       
       const conversationPromises = Array.from(this.subscribedConversations).map(
         conversationId => this.joinConversation(conversationId)
