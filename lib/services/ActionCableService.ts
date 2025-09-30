@@ -1,4 +1,5 @@
-// lib/services/ActionCableService.ts
+// lib/services/ActionCableService.ts - Updated with app update support
+
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
 import { accountManager } from '../AccountManager';
@@ -29,6 +30,13 @@ interface ActionCableMessage {
   dashboard_stats?: any;
   agent_stats?: any;
   ticket?: any;
+  version?: string;
+  changelog?: string[];
+  description?: string;
+  force_update?: boolean;
+  download_url?: string;
+  file_size?: number;
+  release_date?: string;
   timestamp: string;
   user_id?: string;
   business_id?: string;
@@ -173,12 +181,13 @@ class ActionCableService {
         if (data.type === 'confirm_subscription') {
           console.log('📡 ActionCable subscription confirmed:', data.identifier);
           
-          // Check if this is the support dashboard subscription
           try {
             const identifier = JSON.parse(data.identifier);
             if (identifier.channel === 'SupportDashboardChannel') {
               this.supportDashboardSubscribed = true;
               console.log('✅ Support dashboard subscription confirmed');
+            } else if (identifier.channel === 'UserNotificationsChannel') {
+              console.log('✅ User notifications channel confirmed - now receiving app updates');
             }
           } catch (e) {
             // Ignore parsing errors
@@ -329,6 +338,7 @@ class ActionCableService {
       identifier: this.subscriptionIdentifier
     };
 
+    console.log('📡 Subscribing to UserNotificationsChannel (includes app updates)...');
     this.sendMessage(subscribeCommand);
   }
 
@@ -626,6 +636,21 @@ class ActionCableService {
         case 'initial_state':
           console.log('📊 Dashboard stats received');
           break;
+
+        case 'app_update_available':
+          console.log(`🔄 App update available: ${data.version}`);
+          console.log(`   Force update: ${data.force_update}`);
+          console.log(`   Download URL: ${data.download_url}`);
+          console.log(`   File size: ${data.file_size ? `${(data.file_size / 1024 / 1024).toFixed(2)}MB` : 'unknown'}`);
+          break;
+
+        case 'app_update_progress':
+          console.log(`📥 Download progress: ${data.progress}%`);
+          break;
+
+        case 'app_update_downloaded':
+          console.log(`✅ Update ${data.version} downloaded and ready to install`);
+          break;
       }
     } catch (error) {
       console.error('❌ Error processing special message type:', error);
@@ -679,6 +704,25 @@ class ActionCableService {
       case 'new_support_ticket':
         console.log('🎫 New support ticket:', data.ticket?.id);
         break;
+
+      case 'app_update_available':
+        console.log('🔄 App update broadcast received:', {
+          version: data.version,
+          force_update: data.force_update,
+          file_size: data.file_size,
+          changelog_items: data.changelog?.length || 0
+        });
+        break;
+
+      case 'app_update_progress':
+        if (data.progress && data.progress % 10 === 0) {
+          console.log(`📥 Update download: ${data.progress}% complete`);
+        }
+        break;
+
+      case 'app_update_downloaded':
+        console.log('✅ Update download complete:', data.version);
+        break;
     }
   }
 
@@ -697,7 +741,6 @@ class ActionCableService {
     try {
       console.log('🔄 Resubscribing to channels...');
       
-      // Resubscribe to support dashboard
       if (this.supportDashboardSubscribed) {
         this.subscribeToSupportDashboard();
       }
