@@ -1,4 +1,4 @@
-// components/GLTHeader.tsx - Enhanced with reliable ActionCable integration
+// components/GLTHeader.tsx - FIXED: Updates via ActionCable, no polling
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
@@ -48,6 +48,15 @@ interface DownloadProgress {
   remainingTime: number;
   version?: string;
   status: 'checking' | 'downloading' | 'installing' | 'complete' | 'error';
+}
+
+interface UpdateInfo {
+  available: boolean;
+  version?: string;
+  changelog?: string[];
+  force_update?: boolean;
+  download_url?: string;
+  file_size?: number;
 }
 
 interface SafeAvatarProps {
@@ -129,6 +138,8 @@ export default function GLTHeader({
     remainingTime: 0,
     status: 'checking',
   });
+  const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [showInstallModal, setShowInstallModal] = useState(false);
   const [fcmToken, setFcmToken] = useState<string>('');
   
@@ -144,9 +155,10 @@ export default function GLTHeader({
 
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
+  const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
   // ============================================
-  // ACTIONCABLE SETUP - Simplified and Reliable
+  // ACTIONCABLE SETUP
   // ============================================
   
   const setupActionCable = useCallback(async () => {
@@ -182,42 +194,108 @@ export default function GLTHeader({
 
     console.log('📡 Header: Setting up subscriptions...');
 
+    // Clear existing subscriptions
+    actionCableSubscriptions.current.forEach(unsub => unsub());
+    actionCableSubscriptions.current = [];
+
+    const actionCable = actionCableRef.current;
+
     // Connection status
-    actionCableRef.current.subscribe('connection_established', () => {
+    const unsubConnected = actionCable.subscribe('connection_established', () => {
       console.log('✅ Header: Connected');
       setIsConnected(true);
     });
+    actionCableSubscriptions.current.push(unsubConnected);
 
-    actionCableRef.current.subscribe('connection_lost', () => {
+    const unsubLost = actionCable.subscribe('connection_lost', () => {
       console.log('❌ Header: Disconnected');
       setIsConnected(false);
     });
+    actionCableSubscriptions.current.push(unsubLost);
 
     // Initial state
-    actionCableRef.current.subscribe('initial_state', (data) => {
+    const unsubInitialState = actionCable.subscribe('initial_state', (data) => {
       if (data.counts) {
         setNotificationCount(data.counts.notifications || 0);
         setCartCount(data.counts.cart || 0);
       }
     });
+    actionCableSubscriptions.current.push(unsubInitialState);
 
-    actionCableRef.current.subscribe('initial_counts', (data) => {
+    const unsubInitialCounts = actionCable.subscribe('initial_counts', (data) => {
       setNotificationCount(data.notification_count || 0);
       setCartCount(data.cart_count || 0);
     });
+    actionCableSubscriptions.current.push(unsubInitialCounts);
 
-    // Real-time updates
-    actionCableRef.current.subscribe('notification_count_update', (data) => {
+    // Real-time count updates
+    const unsubNotificationCount = actionCable.subscribe('notification_count_update', (data) => {
       setNotificationCount(data.notification_count || 0);
     });
+    actionCableSubscriptions.current.push(unsubNotificationCount);
 
-    actionCableRef.current.subscribe('cart_count_update', (data) => {
+    const unsubCartCount = actionCable.subscribe('cart_count_update', (data) => {
       setCartCount(data.cart_count || 0);
     });
+    actionCableSubscriptions.current.push(unsubCartCount);
 
-    actionCableRef.current.subscribe('new_notification', () => {
+    const unsubNewNotification = actionCable.subscribe('new_notification', () => {
       setNotificationCount(prev => prev + 1);
     });
+    actionCableSubscriptions.current.push(unsubNewNotification);
+
+    // ============================================
+    // UPDATE NOTIFICATIONS VIA ACTIONCABLE
+    // ============================================
+    
+    const unsubUpdateAvailable = actionCable.subscribe('app_update_available', (data) => {
+      console.log('🔄 Update available:', data);
+      
+      const update: UpdateInfo = {
+        available: true,
+        version: data.version,
+        changelog: data.changelog,
+        force_update: data.force_update,
+        download_url: data.download_url,
+        file_size: data.file_size,
+      };
+      
+      setUpdateInfo(update);
+      setShowUpdateModal(true);
+    });
+    actionCableSubscriptions.current.push(unsubUpdateAvailable);
+
+    const unsubUpdateDownloaded = actionCable.subscribe('app_update_downloaded', (data) => {
+      console.log('✅ Update downloaded:', data);
+      
+      setDownloadProgress(prev => ({
+        ...prev,
+        isDownloading: false,
+        progress: 100,
+        status: 'complete',
+        version: data.version,
+      }));
+      
+      setShowInstallModal(true);
+    });
+    actionCableSubscriptions.current.push(unsubUpdateDownloaded);
+
+    const unsubUpdateProgress = actionCable.subscribe('app_update_progress', (data) => {
+      console.log('📥 Update progress:', data.progress);
+      
+      setDownloadProgress(prev => ({
+        ...prev,
+        isDownloading: true,
+        progress: data.progress || 0,
+        downloadedBytes: data.downloaded_bytes || 0,
+        totalBytes: data.total_bytes || 0,
+        speed: data.speed || 0,
+        remainingTime: data.remaining_time || 0,
+        status: 'downloading',
+        version: data.version,
+      }));
+    });
+    actionCableSubscriptions.current.push(unsubUpdateProgress);
 
     console.log('✅ Header: Subscriptions configured');
   };
@@ -227,10 +305,12 @@ export default function GLTHeader({
 
     return () => {
       subscriptionsSetup.current = false;
+      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current = [];
     };
   }, [setupActionCable]);
 
-  // Fallback polling when disconnected
+  // Fallback polling only when disconnected
   useEffect(() => {
     if (!isConnected) {
       console.log('⏳ Header: Starting fallback polling...');
@@ -246,6 +326,73 @@ export default function GLTHeader({
       return () => clearInterval(interval);
     }
   }, [isConnected]);
+
+  // ============================================
+  // DOWNLOAD PROGRESS MONITORING (Local only)
+  // ============================================
+  
+  useEffect(() => {
+    // Only check local download progress, not for updates
+    const checkLocalDownloadProgress = async () => {
+      try {
+        const progressData = await AsyncStorage.getItem('download_progress');
+        if (progressData) {
+          const progress = JSON.parse(progressData);
+          setDownloadProgress(prev => ({
+            ...prev,
+            ...progress,
+            isDownloading: true,
+            status: 'downloading',
+          }));
+        }
+        
+        const updateService = UpdateService.getInstance();
+        const { hasDownload, version } = await updateService.hasCompletedDownload();
+        
+        if (hasDownload && version) {
+          setDownloadProgress(prev => ({
+            ...prev,
+            isDownloading: false,
+            progress: 100,
+            status: 'complete',
+            version,
+          }));
+          setShowInstallModal(true);
+        }
+      } catch (error) {
+        console.error('Failed to check local download progress:', error);
+      }
+    };
+    
+    checkLocalDownloadProgress();
+    
+    // Only check every 5 seconds instead of 2
+    const interval = setInterval(checkLocalDownloadProgress, 5000);
+    
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
+      Animated.timing(progressBarHeight, {
+        toValue: 3,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+      
+      Animated.timing(progressBarAnim, {
+        toValue: downloadProgress.progress / 100,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    } else {
+      Animated.timing(progressBarHeight, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: false,
+      }).start();
+    }
+  }, [downloadProgress.isDownloading, downloadProgress.progress]);
 
   // ============================================
   // FIREBASE SETUP
@@ -517,68 +664,36 @@ export default function GLTHeader({
   };
 
   // ============================================
-  // UPDATE PROGRESS MONITORING
+  // UPDATE HANDLERS
   // ============================================
   
-  useEffect(() => {
-    const checkDownloadProgress = async () => {
-      try {
-        const progressData = await AsyncStorage.getItem('download_progress');
-        if (progressData) {
-          const progress = JSON.parse(progressData);
-          setDownloadProgress(prev => ({
-            ...prev,
-            ...progress,
-            isDownloading: true,
-            status: 'downloading',
-          }));
-        }
-        
-        const updateService = UpdateService.getInstance();
-        const { hasDownload, version } = await updateService.hasCompletedDownload();
-        
-        if (hasDownload && version) {
-          setDownloadProgress(prev => ({
-            ...prev,
-            isDownloading: false,
-            progress: 100,
-            status: 'complete',
-            version,
-          }));
-          setShowInstallModal(true);
-        }
-      } catch (error) {
-        console.error('Failed to check download progress:', error);
-      }
-    };
+  const handleDownloadUpdate = async () => {
+    if (!updateInfo?.download_url) return;
     
-    checkDownloadProgress();
-    const interval = setInterval(checkDownloadProgress, 2000);
-    
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    if (downloadProgress.isDownloading || downloadProgress.progress > 0) {
-      Animated.timing(progressBarHeight, {
-        toValue: 3,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+    try {
+      setShowUpdateModal(false);
       
-      Animated.timing(progressBarAnim, {
-        toValue: downloadProgress.progress / 100,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
-    } else {
-      Animated.timing(progressBarHeight, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: false,
-      }).start();
+      const updateService = UpdateService.getInstance();
+      await updateService.downloadUpdate(updateInfo.download_url, updateInfo.version!);
+      
+    } catch (error) {
+      console.error('Failed to download update:', error);
+      Alert.alert('Update Failed', 'Failed to download update. Please try again later.');
     }
-  }, [downloadProgress.isDownloading, downloadProgress.progress]);
+  };
+
+  const handleInstallUpdate = async () => {
+    if (downloadProgress.status === 'complete' && downloadProgress.version) {
+      try {
+        const updateService = UpdateService.getInstance();
+        setShowInstallModal(false);
+        await updateService.installDownloadedAPK(downloadProgress.version);
+      } catch (error) {
+        console.error('Failed to install update:', error);
+        Alert.alert('Installation Failed', 'Failed to install update.');
+      }
+    }
+  };
 
   // ============================================
   // NAVIGATION HANDLERS
@@ -625,18 +740,6 @@ export default function GLTHeader({
     } catch (error) {
       console.error('Navigation failed:', error);
       router.push('/(drawer)/cart');
-    }
-  };
-
-  const handleInstallUpdate = async () => {
-    if (downloadProgress.status === 'complete' && downloadProgress.version) {
-      try {
-        const updateService = UpdateService.getInstance();
-        setShowInstallModal(false);
-        await updateService.installDownloadedAPK(downloadProgress.version);
-      } catch (error) {
-        console.error('Failed to install update:', error);
-      }
     }
   };
 
@@ -818,6 +921,63 @@ export default function GLTHeader({
         </View>
       </Animated.View>
 
+      {/* Update Available Modal */}
+      <Modal
+        visible={showUpdateModal}
+        transparent={true}
+        animationType="fade"
+        onRequestClose={() => !updateInfo?.force_update && setShowUpdateModal(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <LinearGradient
+              colors={['#1a1a2e', '#2d3748']}
+              style={styles.modalGradient}
+            >
+              <View style={styles.modalHeader}>
+                <View style={styles.modalIcon}>
+                  <Feather name="download" size={24} color="#3b82f6" />
+                </View>
+                <Text style={styles.modalTitle}>Update Available</Text>
+                {!updateInfo?.force_update && (
+                  <TouchableOpacity onPress={() => setShowUpdateModal(false)} style={styles.closeButton}>
+                    <Feather name="x" size={20} color="#ccc" />
+                  </TouchableOpacity>
+                )}
+              </View>
+              
+              <Text style={styles.modalText}>
+                GLT version {updateInfo?.version} is available for download.
+              </Text>
+              
+              {updateInfo?.changelog && updateInfo.changelog.length > 0 && (
+                <View style={styles.changelogContainer}>
+                  <Text style={styles.changelogTitle}>What's New:</Text>
+                  {updateInfo.changelog.map((item, index) => (
+                    <Text key={index} style={styles.changelogItem}>• {item}</Text>
+                  ))}
+                </View>
+              )}
+              
+              <View style={styles.modalButtons}>
+                {!updateInfo?.force_update && (
+                  <TouchableOpacity onPress={() => setShowUpdateModal(false)} style={styles.laterButton}>
+                    <Text style={styles.laterButtonText}>Later</Text>
+                  </TouchableOpacity>
+                )}
+                
+                <TouchableOpacity onPress={handleDownloadUpdate} style={styles.installButton}>
+                  <LinearGradient colors={['#3b82f6', '#2563eb']} style={styles.installButtonGradient}>
+                    <Text style={styles.installButtonText}>Download Now</Text>
+                  </LinearGradient>
+                </TouchableOpacity>
+              </View>
+            </LinearGradient>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Install Ready Modal */}
       <Modal
         visible={showInstallModal}
         transparent={true}
@@ -994,7 +1154,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     width: '100%',
-    maxWidth: 340,
+    maxWidth: 380,
     borderRadius: 16,
     overflow: 'hidden',
     elevation: 10,
@@ -1015,7 +1175,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    backgroundColor: 'rgba(59, 130, 246, 0.2)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -1033,7 +1193,25 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#ccc',
     lineHeight: 22,
-    marginBottom: 24,
+    marginBottom: 16,
+  },
+  changelogContainer: {
+    marginBottom: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    padding: 12,
+    borderRadius: 8,
+  },
+  changelogTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  changelogItem: {
+    fontSize: 13,
+    color: '#ccc',
+    lineHeight: 20,
+    marginBottom: 4,
   },
   modalButtons: {
     flexDirection: 'row',
