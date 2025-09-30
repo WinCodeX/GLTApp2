@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - FIXED: Real-time connection status
+// app/(support)/index.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -13,8 +13,6 @@ import {
   Image,
   Alert,
   ScrollView,
-  Platform,
-  Linking,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -24,8 +22,6 @@ import api from '../../lib/api';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { SupportBottomTabs } from '../../components/support/SupportBottomTabs';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import firebase from '../../config/firebase';
 
 interface SupportTicket {
   id: string;
@@ -55,7 +51,6 @@ interface SupportTicket {
   last_activity_at: string;
   created_at: string;
   escalated: boolean;
-  package_id?: string;
 }
 
 interface DashboardStats {
@@ -65,18 +60,6 @@ interface DashboardStats {
   resolved_today: number;
   avg_response_time: string;
   satisfaction_score: number;
-  tickets_by_priority: {
-    high: number;
-    normal: number;
-    low: number;
-  };
-}
-
-interface AgentStats {
-  tickets_resolved_today: number;
-  avg_resolution_time: string;
-  active_tickets: number;
-  satisfaction_rating: number;
 }
 
 const STATUS_FILTERS = [
@@ -91,408 +74,152 @@ const STATUS_FILTERS = [
 export default function SupportDashboard() {
   const { user } = useUser();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
-  const [dashboardStats, setDashboardStats] = useState<DashboardStats | null>(null);
-  const [agentStats, setAgentStats] = useState<AgentStats | null>(null);
+  const [dashboardStats, setDashboardStats] = useState<DashboardStats>({
+    total_tickets: 0,
+    pending_tickets: 0,
+    in_progress_tickets: 0,
+    resolved_today: 0,
+    avg_response_time: '0m',
+    satisfaction_score: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('in_progress');
-  const [currentChat, setCurrentChat] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
-  
   const [isConnected, setIsConnected] = useState(false);
-  const [realtimeStats, setRealtimeStats] = useState<DashboardStats | null>(null);
-  const [fcmToken, setFcmToken] = useState<string>('');
+  
+  const actionCableRef = useRef<ActionCableService | null>(null);
+  const subscriptionsSetup = useRef(false);
 
-  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
-  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
-  const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
-  const actionCableSubscribed = useRef(false);
+  const setupActionCable = useCallback(async () => {
+    if (!user || subscriptionsSetup.current) return;
 
-  useEffect(() => {
-    setupFirebaseMessaging();
-    
-    return () => {
-      if (unsubscribeOnMessage.current) unsubscribeOnMessage.current();
-      if (unsubscribeOnNotificationOpenedApp.current) unsubscribeOnNotificationOpenedApp.current();
-      if (unsubscribeTokenRefresh.current) unsubscribeTokenRefresh.current();
-    };
-  }, []);
-
-  const setupFirebaseMessaging = async () => {
     try {
-      console.log('🔥 SETTING UP FIREBASE MESSAGING FOR SUPPORT DASHBOARD...');
-      
-      if (!firebase.isNative || !firebase.messaging()) {
-        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
-        return;
-      }
-
-      const permissionGranted = await requestFirebasePermissions();
-      if (!permissionGranted) return;
-
-      await getFirebaseToken();
-      setupFirebaseListeners();
-      handleInitialNotification();
-      
-      console.log('✅ FIREBASE MESSAGING SETUP COMPLETE FOR SUPPORT');
-      
-    } catch (error) {
-      console.error('❌ FAILED TO SETUP FIREBASE MESSAGING:', error);
-    }
-  };
-
-  const requestFirebasePermissions = async (): Promise<boolean> => {
-    try {
-      const messaging = firebase.messaging();
-      if (!messaging) return false;
-      
-      const authStatus = await messaging.requestPermission();
-      const enabled = authStatus === 1 || authStatus === 2;
-
-      if (enabled) {
-        console.log('✅ FIREBASE AUTHORIZATION STATUS:', authStatus);
-        return true;
-      } else {
-        console.log('❌ FIREBASE PERMISSIONS DENIED');
-        Alert.alert(
-          'Notifications Required',
-          'GLT Support needs notification permissions to send you important updates about support tickets.',
-          [
-            { text: 'Maybe Later', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() }
-          ]
-        );
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ ERROR REQUESTING FIREBASE PERMISSIONS:', error);
-      return false;
-    }
-  };
-
-  const getFirebaseToken = async () => {
-    try {
-      const messaging = firebase.messaging();
-      if (!messaging) return;
-      
-      const token = await messaging.getToken();
-      console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
-      setFcmToken(token);
-
-      await registerFCMTokenWithBackend(token);
-      
-      unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
-        console.log('🔥 FCM TOKEN REFRESHED:', newToken?.substring(0, 50) + '...');
-        setFcmToken(newToken);
-        await registerFCMTokenWithBackend(newToken);
-      });
-      
-    } catch (error) {
-      console.error('❌ DETAILED FCM TOKEN ERROR:', error);
-      Alert.alert('FCM Token Error', `Failed to get Firebase token: ${error.message}`);
-    }
-  };
-
-  const registerFCMTokenWithBackend = async (token: string) => {
-    try {
-      console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
-      
-      const response = await api.post('/api/v1/push_tokens', {
-        push_token: token,
-        platform: 'fcm',
-        device_info: {
-          platform: Platform.OS,
-          version: Platform.Version,
-          isDevice: true,
-          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
-        }
-      });
-      
-      if (response.data?.success) {
-        console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
-        await AsyncStorage.setItem('fcm_token', token);
-        await AsyncStorage.setItem('fcm_token_registered', 'true');
-      }
-      
-    } catch (error) {
-      console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
-    }
-  };
-
-  const setupFirebaseListeners = () => {
-    const messaging = firebase.messaging();
-    if (!messaging) return;
-
-    unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
-      console.log('🔥 FOREGROUND MESSAGE RECEIVED IN SUPPORT:', remoteMessage);
-      
-      if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
-        Alert.alert(
-          remoteMessage.notification.title,
-          remoteMessage.notification.body,
-          [
-            { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
-            { text: 'Dismiss', style: 'cancel' }
-          ]
-        );
-      }
-      
-      loadTickets(true);
-      loadDashboardData();
-    });
-
-    unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
-      console.log('🔥 NOTIFICATION OPENED APP FROM BACKGROUND:', remoteMessage);
-      handleNotificationData(remoteMessage.data);
-    });
-  };
-
-  const handleInitialNotification = async () => {
-    try {
-      const messaging = firebase.messaging();
-      if (!messaging) return;
-
-      const initialNotification = await messaging.getInitialNotification();
-      
-      if (initialNotification) {
-        console.log('🔥 APP OPENED BY NOTIFICATION (FROM KILLED STATE):', initialNotification);
-        setTimeout(() => {
-          handleNotificationData(initialNotification.data);
-        }, 2000);
-      }
-    } catch (error) {
-      console.error('🔥 ERROR HANDLING INITIAL NOTIFICATION:', error);
-    }
-  };
-
-  const handleNotificationData = async (data: any) => {
-    console.log('🔥 HANDLING NOTIFICATION DATA IN SUPPORT:', data);
-    
-    try {
-      if (data?.conversation_id) {
-        router.push(`/(support)/chat/${data.conversation_id}`);
-      } else if (data?.ticket_id) {
-        const ticket = tickets.find(t => t.ticket_id === data.ticket_id);
-        if (ticket) {
-          router.push(`/(support)/chat/${ticket.id}`);
-        }
-      }
-    } catch (error) {
-      console.error('🔥 ERROR HANDLING NOTIFICATION DATA:', error);
-    }
-  };
-
-  const setupActionCableConnection = useCallback(async () => {
-    try {
-      if (!user || actionCableSubscribed.current) {
-        console.log('📡 Skipping ActionCable setup - already subscribed or no user');
-        return;
-      }
-
       const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount) {
-        console.log('📡 No account available for ActionCable connection');
-        return;
-      }
+      if (!currentAccount) return;
 
-      console.log('📡 Setting up ActionCable connection for support dashboard...');
+      console.log('📡 Setting up ActionCable for support dashboard...');
 
-      const actionCable = ActionCableService.getInstance();
+      actionCableRef.current = ActionCableService.getInstance();
       
-      const connected = await actionCable.connect({
+      const connected = await actionCableRef.current.connect({
         token: currentAccount.token,
         userId: currentAccount.id,
         autoReconnect: true,
-        maxReconnectAttempts: 5,
-        reconnectInterval: 3000
       });
 
       if (connected) {
         setIsConnected(true);
-        setupActionCableSubscriptions();
-        actionCableSubscribed.current = true;
-      } else {
-        setIsConnected(false);
-        startFallbackPolling();
+        setupSubscriptions();
+        subscriptionsSetup.current = true;
       }
     } catch (error) {
-      console.error('❌ Failed to setup ActionCable connection:', error);
+      console.error('❌ Failed to setup ActionCable:', error);
       setIsConnected(false);
-      startFallbackPolling();
     }
   }, [user]);
 
-  const setupActionCableSubscriptions = () => {
-    console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
+  const setupSubscriptions = () => {
+    if (!actionCableRef.current) return;
 
-    const actionCable = ActionCableService.getInstance();
+    console.log('📡 Setting up subscriptions...');
 
-    actionCable.subscribe('connection_established', () => {
-      console.log('📡 ActionCable connected');
+    actionCableRef.current.subscribe('connection_established', () => {
+      console.log('✅ Connection established');
       setIsConnected(true);
     });
 
-    actionCable.subscribe('connection_lost', () => {
-      console.log('📡 ActionCable disconnected');
+    actionCableRef.current.subscribe('connection_lost', () => {
+      console.log('❌ Connection lost');
       setIsConnected(false);
     });
 
-    actionCable.subscribe('support_dashboard', (channel) => {
-      console.log('📡 Subscribed to support_dashboard channel');
-    });
-
-    actionCable.subscribe('initial_state', (data) => {
-      console.log('📊 Received initial state via ActionCable:', data);
-      if (data.dashboard_stats) {
-        setRealtimeStats(data.dashboard_stats);
-        setDashboardStats(data.dashboard_stats);
-      }
-      if (data.agent_stats) {
-        setAgentStats(data.agent_stats);
-      }
-    });
-
-    actionCable.subscribe('dashboard_stats_update', (data) => {
-      console.log('📊 Dashboard stats update received:', data);
+    actionCableRef.current.subscribe('dashboard_stats_update', (data) => {
+      console.log('📊 Stats update:', data);
       if (data.stats) {
-        setRealtimeStats(data.stats);
         setDashboardStats(data.stats);
       }
     });
 
-    actionCable.subscribe('new_support_ticket', (data) => {
-      console.log('🎫 New support ticket:', data);
+    actionCableRef.current.subscribe('new_support_ticket', (data) => {
+      console.log('🎫 New ticket:', data);
       if (data.ticket) {
         setTickets(prev => [data.ticket, ...prev]);
-        loadDashboardData();
+        setDashboardStats(prev => ({
+          ...prev,
+          total_tickets: prev.total_tickets + 1,
+          pending_tickets: prev.pending_tickets + 1,
+        }));
       }
     });
 
-    actionCable.subscribe('ticket_status_update', (data) => {
-      console.log('🎫 Ticket status update:', data);
+    actionCableRef.current.subscribe('ticket_status_update', (data) => {
+      console.log('🔄 Status update:', data);
       if (data.ticket_id && data.status) {
         setTickets(prev => prev.map(ticket => 
           ticket.id === data.ticket_id 
             ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
             : ticket
         ));
-        loadDashboardData();
       }
     });
 
-    actionCable.subscribe('new_message', (data) => {
-      console.log('📨 New message received:', data);
+    actionCableRef.current.subscribe('new_message', (data) => {
+      console.log('💬 New message:', data);
       if (data.conversation_id && data.message) {
         setTickets(prev => prev.map(ticket => {
           if (ticket.id === data.conversation_id) {
-            const updatedTicket = { ...ticket };
-            updatedTicket.last_message = {
-              content: data.message.content,
-              created_at: data.message.created_at,
-              from_support: data.message.from_support
+            return {
+              ...ticket,
+              last_message: {
+                content: data.message.content,
+                created_at: data.message.created_at,
+                from_support: data.message.from_support
+              },
+              last_activity_at: data.message.created_at,
+              unread_count: !data.message.from_support ? (ticket.unread_count || 0) + 1 : ticket.unread_count,
+              message_count: (ticket.message_count || 0) + 1,
             };
-            updatedTicket.last_activity_at = data.message.created_at;
-            if (!data.message.from_support) {
-              updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
-            }
-            updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
-            return updatedTicket;
           }
           return ticket;
         }));
-        
-        setTickets(prev => {
-          const ticket = prev.find(t => t.id === data.conversation_id);
-          if (ticket) {
-            const others = prev.filter(t => t.id !== data.conversation_id);
-            return [ticket, ...others];
-          }
-          return prev;
-        });
       }
     });
 
-    actionCable.subscribe('agent_assignment_update', (data) => {
-      console.log('👤 Agent assignment update:', data);
-      if (data.ticket_id && data.agent) {
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === data.ticket_id 
-            ? { ...ticket, assigned_agent: data.agent, status: 'assigned' }
-            : ticket
-        ));
+    actionCableRef.current.subscribe('initial_state', (data) => {
+      console.log('📊 Initial state:', data);
+      if (data.dashboard_stats) {
+        setDashboardStats(data.dashboard_stats);
       }
     });
-
-    actionCable.subscribe('ticket_escalated', (data) => {
-      console.log('🚨 Ticket escalated:', data);
-      if (data.ticket_id) {
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === data.ticket_id 
-            ? { ...ticket, escalated: true, priority: 'high' }
-            : ticket
-        ));
-      }
-    });
-
-    console.log('✅ ActionCable subscriptions configured for support dashboard');
   };
-
-  const startFallbackPolling = useCallback(() => {
-    console.log('⏳ Starting fallback polling for support dashboard...');
-    
-    const pollData = () => {
-      if (!isConnected) {
-        loadTickets(true);
-        loadDashboardData();
-      }
-    };
-
-    pollData();
-    const interval = setInterval(pollData, 30000);
-    
-    return () => clearInterval(interval);
-  }, [isConnected]);
-
-  useEffect(() => {
-    setupActionCableConnection();
-    
-    return () => {
-      const actionCable = ActionCableService.getInstance();
-      actionCable.disconnect();
-      actionCableSubscribed.current = false;
-    };
-  }, [setupActionCableConnection]);
 
   const loadDashboardData = useCallback(async () => {
     try {
       const response = await api.get('/api/v1/support/dashboard');
-      if (response.data.success) {
-        const stats = response.data.data.stats;
-        const agentPerformance = response.data.data.agent_performance;
-        
-        setDashboardStats(stats);
-        setAgentStats(agentPerformance);
-        
-        if (!realtimeStats) {
-          setRealtimeStats(stats);
-        }
+      if (response.data.success && response.data.data) {
+        const stats = response.data.data.stats || {};
+        setDashboardStats({
+          total_tickets: stats.total_tickets || 0,
+          pending_tickets: stats.pending_tickets || 0,
+          in_progress_tickets: stats.in_progress_tickets || 0,
+          resolved_today: stats.resolved_today || 0,
+          avg_response_time: stats.avg_response_time || '0m',
+          satisfaction_score: stats.satisfaction_score || 0,
+        });
       }
     } catch (error) {
-      console.error('Failed to load dashboard stats:', error);
+      console.error('Failed to load dashboard:', error);
     }
-  }, [realtimeStats]);
+  }, []);
 
   const loadTickets = useCallback(async (refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      const endpoint = '/api/v1/support/tickets';
-      const params: any = {
-        limit: 50,
-        page: 1,
-      };
+      const params: any = { limit: 50, page: 1 };
 
       if (activeFilter !== 'all') {
         params.status = activeFilter;
@@ -502,14 +229,13 @@ export default function SupportDashboard() {
         params.search = searchQuery.trim();
       }
 
-      const response = await api.get(endpoint, { params });
+      const response = await api.get('/api/v1/support/tickets', { params });
 
       if (response.data.success) {
         setTickets(response.data.data.tickets || []);
       }
     } catch (error) {
-      console.error('Failed to load support tickets:', error);
-      Alert.alert('Error', 'Failed to load support tickets');
+      console.error('Failed to load tickets:', error);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -517,68 +243,16 @@ export default function SupportDashboard() {
   }, [activeFilter, searchQuery]);
 
   useEffect(() => {
+    setupActionCable();
     loadDashboardData();
-  }, [loadDashboardData]);
-
-  useEffect(() => {
     loadTickets();
-  }, [loadTickets]);
 
-  useEffect(() => {
-    let cleanup: (() => void) | undefined;
-    
-    if (!isConnected) {
-      cleanup = startFallbackPolling();
-    }
-    
-    return cleanup;
-  }, [isConnected, startFallbackPolling]);
-
-  const handleQuickAssign = async (ticketId: string) => {
-    try {
-      const response = await api.post(`/api/v1/support/tickets/${ticketId}/assign`, {
-        agent_id: user?.id
-      });
-      
-      if (response.data.success) {
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === ticketId 
-            ? { 
-                ...ticket, 
-                assigned_agent: { 
-                  id: user?.id || '', 
-                  name: user?.display_name || user?.first_name || 'Me',
-                  email: user?.email || ''
-                },
-                status: 'assigned' as const
-              }
-            : ticket
-        ));
-        
-        Alert.alert('Success', 'Ticket assigned to you');
+    return () => {
+      if (actionCableRef.current) {
+        actionCableRef.current.disconnect();
       }
-    } catch (error) {
-      console.error('Failed to assign ticket:', error);
-      Alert.alert('Error', 'Failed to assign ticket');
-      loadTickets();
-    }
-  };
-
-  const handleTicketRead = useCallback(async (ticketId: string) => {
-    try {
-      setTickets(prev => prev.map(ticket => 
-        ticket.id === ticketId 
-          ? { ...ticket, unread_count: 0 }
-          : ticket
-      ));
-
-      const actionCable = ActionCableService.getInstance();
-      await actionCable.markMessageRead(ticketId);
-      
-    } catch (error) {
-      console.error('Failed to mark ticket as read:', error);
-    }
-  }, []);
+    };
+  }, [setupActionCable, loadDashboardData, loadTickets]);
 
   const statusCounts = {
     in_progress: tickets.filter(t => t.status === 'in_progress').length,
@@ -589,10 +263,8 @@ export default function SupportDashboard() {
     closed: tickets.filter(t => t.status === 'closed').length,
   };
 
-  const currentStats = realtimeStats || dashboardStats;
-
   const renderStatsOverview = () => {
-    if (!currentStats || !showStats) return null;
+    if (!showStats) return null;
 
     return (
       <View style={styles.statsContainer}>
@@ -608,37 +280,25 @@ export default function SupportDashboard() {
         
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{currentStats.total_tickets}</Text>
-            <Text style={styles.statLabel}>Total Tickets</Text>
+            <Text style={styles.statNumber}>{dashboardStats.total_tickets}</Text>
+            <Text style={styles.statLabel}>Total</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{currentStats.pending_tickets}</Text>
+            <Text style={styles.statNumber}>{dashboardStats.pending_tickets}</Text>
             <Text style={styles.statLabel}>Pending</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{currentStats.in_progress_tickets}</Text>
-            <Text style={styles.statLabel}>In Progress</Text>
+            <Text style={styles.statNumber}>{dashboardStats.in_progress_tickets}</Text>
+            <Text style={styles.statLabel}>Active</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{currentStats.resolved_today}</Text>
-            <Text style={styles.statLabel}>Resolved Today</Text>
+            <Text style={styles.statNumber}>{dashboardStats.resolved_today}</Text>
+            <Text style={styles.statLabel}>Resolved</Text>
           </View>
           <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{currentStats.avg_response_time}</Text>
-            <Text style={styles.statLabel}>Avg Response</Text>
+            <Text style={styles.statNumber}>{dashboardStats.avg_response_time}</Text>
+            <Text style={styles.statLabel}>Avg Time</Text>
           </View>
-          {agentStats && (
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{agentStats.active_tickets}</Text>
-              <Text style={styles.statLabel}>My Active</Text>
-            </View>
-          )}
-          {currentStats.satisfaction_score && (
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{currentStats.satisfaction_score.toFixed(1)}</Text>
-              <Text style={styles.statLabel}>Satisfaction</Text>
-            </View>
-          )}
         </ScrollView>
       </View>
     );
@@ -647,86 +307,34 @@ export default function SupportDashboard() {
   const renderTicketItem = ({ item }: { item: SupportTicket }) => (
     <TouchableOpacity
       style={styles.ticketItem}
-      onPress={() => {
-        console.log('Navigating to chat with ID:', item.id);
-        setCurrentChat(item.id);
-        handleTicketRead(item.id);
-        router.push(`/(support)/chat/${item.id}`);
-      }}
+      onPress={() => router.push(`/(support)/chat/${item.id}`)}
     >
-      <View style={styles.ticketContent}>
-        <View style={styles.ticketHeader}>
-          <Image
-            source={
-              item.customer.avatar_url
-                ? { uri: item.customer.avatar_url }
-                : require('../../assets/images/avatar_placeholder.png')
-            }
-            style={styles.customerAvatar}
-          />
-          <View style={styles.ticketInfo}>
-            <View style={styles.ticketTitleRow}>
-              <Text style={styles.customerName} numberOfLines={1}>
-                {item.customer.name}
-              </Text>
-              <View style={styles.ticketMeta}>
-                {item.escalated && (
-                  <Feather name="alert-triangle" size={12} color="#f97316" style={{ marginRight: 4 }} />
-                )}
-                <Text style={styles.ticketTime}>
-                  {formatTime(item.last_activity_at)}
-                </Text>
-                {isConnected && (
-                  <View style={styles.realtimeIndicator}>
-                    <View style={styles.realtimeDot} />
-                  </View>
-                )}
-              </View>
-            </View>
-            <View style={styles.ticketSubtitleRow}>
-              <Text style={styles.ticketPreview} numberOfLines={1}>
-                {item.last_message?.content || 'No messages yet'}
-              </Text>
-              {item.unread_count > 0 && (
-                <View style={[styles.unreadBadge, isConnected && styles.unreadBadgeLive]}>
-                  <Text style={styles.unreadText}>{item.unread_count}</Text>
-                </View>
-              )}
-            </View>
-            <View style={styles.ticketMetaRow}>
-              <View style={styles.ticketLeftMeta}>
-                <Text style={styles.ticketId}>#{item.ticket_id}</Text>
-                <View style={[styles.priorityBadge, { backgroundColor: getPriorityColor(item.priority) }]}>
-                  <Text style={styles.priorityText}>{item.priority.toUpperCase()}</Text>
-                </View>
-              </View>
-              <View style={styles.ticketRightMeta}>
-                {!item.assigned_agent && item.status === 'pending' && (
-                  <TouchableOpacity
-                    style={styles.quickAssignButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleQuickAssign(item.id);
-                    }}
-                  >
-                    <Feather name="user-plus" size={12} color="#7B3F98" />
-                    <Text style={styles.quickAssignText}>Assign</Text>
-                  </TouchableOpacity>
-                )}
-                <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
-                  <Text style={styles.statusText}>{item.status.replace('_', ' ').toUpperCase()}</Text>
-                </View>
-              </View>
-            </View>
-            {item.assigned_agent && (
-              <View style={styles.assignedAgentRow}>
-                <Feather name="user" size={12} color="#8E8E93" />
-                <Text style={styles.assignedAgentText}>
-                  Assigned to {item.assigned_agent.name}
-                </Text>
-              </View>
-            )}
+      <Image
+        source={
+          item.customer.avatar_url
+            ? { uri: item.customer.avatar_url }
+            : require('../../assets/images/avatar_placeholder.png')
+        }
+        style={styles.customerAvatar}
+      />
+      <View style={styles.ticketInfo}>
+        <View style={styles.ticketRow}>
+          <Text style={styles.customerName}>{item.customer.name}</Text>
+          <Text style={styles.ticketTime}>{formatTime(item.last_activity_at)}</Text>
+        </View>
+        <Text style={styles.ticketPreview} numberOfLines={1}>
+          {item.last_message?.content || 'No messages'}
+        </Text>
+        <View style={styles.ticketMeta}>
+          <Text style={styles.ticketId}>#{item.ticket_id}</Text>
+          <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
+            <Text style={styles.statusText}>{item.status.toUpperCase()}</Text>
           </View>
+          {item.unread_count > 0 && (
+            <View style={styles.unreadBadge}>
+              <Text style={styles.unreadText}>{item.unread_count}</Text>
+            </View>
+          )}
         </View>
       </View>
     </TouchableOpacity>
@@ -736,17 +344,13 @@ export default function SupportDashboard() {
     <SafeAreaView style={styles.container}>
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
         style={styles.header}
       >
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
             <Text style={styles.headerTitle}>GLT Support</Text>
             <View style={styles.headerSubtitleRow}>
-              <Text style={styles.headerSubtitle}>
-                Welcome back, {user?.first_name || 'Agent'}
-              </Text>
+              <Text style={styles.headerSubtitle}>Welcome back, {user?.first_name}</Text>
               {isConnected && (
                 <View style={styles.connectionStatus}>
                   <View style={styles.connectedDot} />
@@ -755,151 +359,76 @@ export default function SupportDashboard() {
               )}
             </View>
             <Text style={styles.headerDescription}>
-              {currentStats ? `${currentStats.pending_tickets} pending • ${currentStats.total_tickets} total tickets` : 'Loading dashboard...'}
+              {dashboardStats.pending_tickets} pending • {dashboardStats.total_tickets} total
             </Text>
           </View>
-          <View style={styles.headerRight}>
-            <TouchableOpacity
-              style={styles.statsToggleButton}
-              onPress={() => setShowStats(!showStats)}
-            >
-              <Feather name={showStats ? 'eye-off' : 'eye'} size={20} color="#fff" />
-            </TouchableOpacity>
-            <Image
-              source={
-                user?.avatar_url
-                  ? { uri: user.avatar_url }
-                  : require('../../assets/images/avatar_placeholder.png')
-              }
-              style={styles.headerAvatar}
-            />
-          </View>
+          <TouchableOpacity
+            style={styles.statsToggleButton}
+            onPress={() => setShowStats(!showStats)}
+          >
+            <Feather name={showStats ? 'eye-off' : 'eye'} size={20} color="#fff" />
+          </TouchableOpacity>
         </View>
       </LinearGradient>
 
       {renderStatsOverview()}
-
-      {!isConnected && (
-        <View style={styles.connectionBanner}>
-          <MaterialIcons name="wifi-off" size={16} color="#f97316" />
-          <Text style={styles.connectionBannerText}>
-            Real-time updates unavailable. Reconnecting...
-          </Text>
-        </View>
-      )}
 
       <View style={styles.searchContainer}>
         <View style={styles.searchInputContainer}>
           <Feather name="search" size={20} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search tickets, customers, or ticket IDs..."
+            placeholder="Search tickets..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
-            returnKeyType="search"
-            onSubmitEditing={() => loadTickets()}
           />
-          {searchQuery.length > 0 && (
-            <TouchableOpacity onPress={() => setSearchQuery('')}>
-              <Feather name="x" size={16} color="#8E8E93" />
-            </TouchableOpacity>
-          )}
         </View>
       </View>
 
-      <View style={styles.filtersContainer}>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={STATUS_FILTERS}
-          keyExtractor={(item) => item.key}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[
-                styles.filterPill,
-                activeFilter === item.key && styles.filterPillActive
-              ]}
-              onPress={() => setActiveFilter(item.key)}
-            >
-              <Feather 
-                name={item.icon as any} 
-                size={14} 
-                color={activeFilter === item.key ? '#fff' : '#8E8E93'} 
-              />
-              <Text
-                style={[
-                  styles.filterPillText,
-                  activeFilter === item.key && styles.filterPillTextActive
-                ]}
-              >
-                {item.label}
-              </Text>
-              {statusCounts[item.key] > 0 && (
-                <View style={[
-                  styles.filterPillBadge,
-                  isConnected && styles.filterPillBadgeLive
-                ]}>
-                  <Text style={styles.filterPillBadgeText}>
-                    {statusCounts[item.key]}
-                  </Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          )}
-        />
-      </View>
-
-      <View style={styles.listContainer}>
-        {loading ? (
-          <View style={styles.loadingContainer}>
-            <ActivityIndicator size="large" color="#7B3F98" />
-            <Text style={styles.loadingText}>Loading support tickets...</Text>
-          </View>
-        ) : (
-          <FlatList
-            data={tickets}
-            keyExtractor={(item) => item.id}
-            renderItem={renderTicketItem}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={() => {
-                  loadTickets(true);
-                  loadDashboardData();
-                }}
-                colors={['#7B3F98']}
-                tintColor="#7B3F98"
-              />
-            }
-            ListEmptyComponent={() => (
-              <View style={styles.emptyContainer}>
-                <MaterialIcons name="support-agent" size={64} color="#444" />
-                <Text style={styles.emptyText}>No tickets found</Text>
-                <Text style={styles.emptySubtext}>
-                  {activeFilter === 'in_progress' 
-                    ? 'No active support tickets'
-                    : activeFilter === 'pending'
-                    ? 'No pending support tickets'
-                    : searchQuery
-                    ? `No tickets match "${searchQuery}"`
-                    : `No ${activeFilter} tickets`
-                  }
-                </Text>
-                {searchQuery && (
-                  <TouchableOpacity
-                    style={styles.clearSearchButton}
-                    onPress={() => setSearchQuery('')}
-                  >
-                    <Text style={styles.clearSearchText}>Clear search</Text>
-                  </TouchableOpacity>
-                )}
+      <FlatList
+        horizontal
+        data={STATUS_FILTERS}
+        keyExtractor={(item) => item.key}
+        renderItem={({ item }) => (
+          <TouchableOpacity
+            style={[styles.filterPill, activeFilter === item.key && styles.filterPillActive]}
+            onPress={() => setActiveFilter(item.key)}
+          >
+            <Text style={[styles.filterText, activeFilter === item.key && styles.filterTextActive]}>
+              {item.label}
+            </Text>
+            {statusCounts[item.key] > 0 && (
+              <View style={styles.filterBadge}>
+                <Text style={styles.filterBadgeText}>{statusCounts[item.key]}</Text>
               </View>
             )}
-            contentContainerStyle={tickets.length === 0 ? { flex: 1 } : undefined}
-          />
+          </TouchableOpacity>
         )}
-      </View>
+        style={styles.filtersList}
+        showsHorizontalScrollIndicator={false}
+      />
+
+      {loading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#7B3F98" />
+        </View>
+      ) : (
+        <FlatList
+          data={tickets}
+          keyExtractor={(item) => item.id}
+          renderItem={renderTicketItem}
+          refreshControl={
+            <RefreshControl refreshing={refreshing} onRefresh={() => loadTickets(true)} />
+          }
+          ListEmptyComponent={() => (
+            <View style={styles.emptyContainer}>
+              <MaterialIcons name="support-agent" size={64} color="#444" />
+              <Text style={styles.emptyText}>No tickets found</Text>
+            </View>
+          )}
+        />
+      )}
 
       <SupportBottomTabs currentTab="chats" />
     </SafeAreaView>
@@ -909,24 +438,17 @@ export default function SupportDashboard() {
 const formatTime = (dateString: string) => {
   const date = new Date(dateString);
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+  const diff = now.getTime() - date.getTime();
+  const days = Math.floor(diff / (1000 * 60 * 60 * 24));
 
-  if (diffDays === 0) {
-    return date.toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false
-    });
-  } else if (diffDays === 1) {
+  if (days === 0) {
+    return date.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+  } else if (days === 1) {
     return 'Yesterday';
-  } else if (diffDays < 7) {
+  } else if (days < 7) {
     return date.toLocaleDateString('en-US', { weekday: 'short' });
   } else {
-    return date.toLocaleDateString('en-US', {
-      month: 'short',
-      day: 'numeric'
-    });
+    return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
   }
 };
 
@@ -941,33 +463,21 @@ const getStatusColor = (status: string) => {
   }
 };
 
-const getPriorityColor = (priority: string) => {
-  switch (priority) {
-    case 'urgent': return '#dc2626';
-    case 'high': return '#f97316';
-    case 'normal': return '#6b7280';
-    case 'low': return '#10b981';
-    default: return '#6b7280';
-  }
-};
-
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#111B21' },
   header: { paddingTop: 28, paddingBottom: 20, paddingHorizontal: 16 },
-  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerContent: { flexDirection: 'row', justifyContent: 'space-between' },
   headerLeft: { flex: 1 },
-  headerRight: { flexDirection: 'row', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
-  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
-  headerSubtitle: { color: '#E1BEE7', fontSize: 16, fontWeight: '500' },
+  headerTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold' },
+  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
+  headerSubtitle: { color: '#E1BEE7', fontSize: 16 },
   connectionStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 8, backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
   connectedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
   connectedText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
-  headerDescription: { color: '#C1A7C9', fontSize: 14, opacity: 0.9 },
-  statsToggleButton: { padding: 8, marginRight: 8 },
-  headerAvatar: { width: 50, height: 50, borderRadius: 25 },
+  headerDescription: { color: '#C1A7C9', fontSize: 14, marginTop: 2 },
+  statsToggleButton: { padding: 8 },
   statsContainer: { backgroundColor: 'rgba(123, 63, 152, 0.1)', paddingVertical: 12 },
-  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8 },
+  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', paddingHorizontal: 16, marginBottom: 8 },
   statsTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
   liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
   liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
@@ -975,53 +485,30 @@ const styles = StyleSheet.create({
   statCard: { backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 12, marginHorizontal: 8, borderRadius: 12, alignItems: 'center', minWidth: 80 },
   statNumber: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
   statLabel: { color: '#E1BEE7', fontSize: 12, marginTop: 4 },
-  connectionBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(249, 115, 22, 0.1)', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(249, 115, 22, 0.2)' },
-  connectionBannerText: { color: '#f97316', fontSize: 14, marginLeft: 8 },
   searchContainer: { padding: 16 },
   searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
   searchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 8 },
-  filtersContainer: { paddingHorizontal: 16, marginBottom: 8 },
+  filtersList: { paddingHorizontal: 16, marginBottom: 8 },
   filterPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
   filterPillActive: { backgroundColor: '#7B3F98' },
-  filterPillText: { color: '#8E8E93', fontSize: 14, fontWeight: '500', marginLeft: 6 },
-  filterPillTextActive: { color: '#fff' },
-  filterPillBadge: { backgroundColor: '#E1BEE7', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
-  filterPillBadgeLive: { backgroundColor: '#10b981' },
-  filterPillBadgeText: { color: '#7B3F98', fontSize: 12, fontWeight: '600' },
-  listContainer: { flex: 1 },
-  ticketItem: { backgroundColor: '#1F2C34', marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
-  ticketContent: { padding: 12 },
-  ticketHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  filterText: { color: '#8E8E93', fontSize: 14 },
+  filterTextActive: { color: '#fff' },
+  filterBadge: { backgroundColor: '#E1BEE7', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
+  filterBadgeText: { color: '#7B3F98', fontSize: 12, fontWeight: '600' },
+  ticketItem: { flexDirection: 'row', backgroundColor: '#1F2C34', marginHorizontal: 8, marginVertical: 2, borderRadius: 8, padding: 12 },
   customerAvatar: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
   ticketInfo: { flex: 1 },
-  ticketTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  customerName: { color: '#fff', fontSize: 16, fontWeight: '600', flex: 1 },
-  ticketMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 4 },
+  customerName: { color: '#fff', fontSize: 16, fontWeight: '600' },
   ticketTime: { color: '#8E8E93', fontSize: 12 },
-  realtimeIndicator: { marginLeft: 6 },
-  realtimeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
-  ticketSubtitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  ticketPreview: { color: '#B8B8B8', fontSize: 14, flex: 1 },
-  unreadBadge: { backgroundColor: '#7B3F98', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 },
-  unreadBadgeLive: { backgroundColor: '#10b981' },
-  unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  ticketMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  ticketLeftMeta: { flexDirection: 'row', alignItems: 'center' },
-  ticketRightMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketPreview: { color: '#B8B8B8', fontSize: 14, marginBottom: 6 },
+  ticketMeta: { flexDirection: 'row', alignItems: 'center' },
   ticketId: { color: '#8E8E93', fontSize: 12, marginRight: 8 },
-  priorityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 8 },
-  priorityText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-  quickAssignButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(123, 63, 152, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 8 },
-  quickAssignText: { color: '#7B3F98', fontSize: 10, fontWeight: '600', marginLeft: 4 },
-  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 8 },
   statusText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-  assignedAgentRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  assignedAgentText: { color: '#8E8E93', fontSize: 12, marginLeft: 4 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
+  unreadBadge: { backgroundColor: '#10b981', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2 },
+  unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  emptyText: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 },
-  emptySubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
-  clearSearchButton: { backgroundColor: '#7B3F98', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, marginTop: 16 },
-  clearSearchText: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  emptyText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
 });
