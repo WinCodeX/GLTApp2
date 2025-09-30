@@ -2,7 +2,7 @@
   "expo": {
     "name": "gltapp2",
     "slug": "gltapp2",
-    "version": "1.7.9",
+    "version": "1.8.0",
     "orientation": "portrait",
     "icon": "./assets/images/Glt_icon.png",
     "scheme": "https",
