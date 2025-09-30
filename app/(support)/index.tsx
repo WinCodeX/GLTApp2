@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - FIXED: Proper stats streaming
+// app/(support)/index.tsx - FULLY FIXED: All improvements implemented
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -15,6 +15,8 @@ import {
   ScrollView,
   Platform,
   Linking,
+  AppState,
+  AppStateStatus,
 } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -56,6 +58,10 @@ interface SupportTicket {
   created_at: string;
   escalated: boolean;
   package_id?: string;
+  typing_user?: {
+    id: string;
+    name: string;
+  };
 }
 
 interface DashboardStats {
@@ -88,6 +94,8 @@ const STATUS_FILTERS = [
   { key: 'closed', label: 'Closed', icon: 'x-circle' },
 ];
 
+const BACKGROUND_SYNC_INTERVAL = 30000; // 30 seconds
+
 export default function SupportDashboard() {
   const { user } = useUser();
   const [tickets, setTickets] = useState<SupportTicket[]>([]);
@@ -97,17 +105,110 @@ export default function SupportDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeFilter, setActiveFilter] = useState('in_progress');
-  const [currentChat, setCurrentChat] = useState<string | null>(null);
   const [showStats, setShowStats] = useState(false);
   
   const [isConnected, setIsConnected] = useState(false);
   const [fcmToken, setFcmToken] = useState<string>('');
+  const [typingUsers, setTypingUsers] = useState<Map<string, { id: string; name: string }>>(new Map());
 
   const unsubscribeOnMessage = useRef<(() => void) | null>(null);
   const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
   const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
+  const appState = useRef(AppState.currentState);
+  const backgroundSyncInterval = useRef<NodeJS.Timeout | null>(null);
+  const lastSyncTime = useRef<number>(Date.now());
 
+  // ============= APP STATE MANAGEMENT =============
+  
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', handleAppStateChange);
+    
+    return () => {
+      subscription.remove();
+    };
+  }, [isConnected]);
+
+  const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
+    if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
+      console.log('📱 App came to foreground - syncing dashboard');
+      
+      if (!isConnected) {
+        await setupActionCableConnection();
+      }
+      
+      // Sync data that might have changed while app was in background
+      const timeSinceLastSync = Date.now() - lastSyncTime.current;
+      if (timeSinceLastSync > BACKGROUND_SYNC_INTERVAL) {
+        await Promise.all([
+          loadTickets(true),
+          loadDashboardData(),
+        ]);
+      }
+      
+      // Resume background sync
+      if (backgroundSyncInterval.current) {
+        clearInterval(backgroundSyncInterval.current);
+      }
+      backgroundSyncInterval.current = setInterval(backgroundSync, BACKGROUND_SYNC_INTERVAL);
+      
+    } else if (nextAppState.match(/inactive|background/)) {
+      console.log('📱 App went to background');
+      
+      // Clear background sync
+      if (backgroundSyncInterval.current) {
+        clearInterval(backgroundSyncInterval.current);
+        backgroundSyncInterval.current = null;
+      }
+      
+      if (isConnected) {
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.updatePresence('away');
+      }
+    }
+    
+    appState.current = nextAppState;
+  }, [isConnected]);
+
+  const backgroundSync = useCallback(async () => {
+    if (appState.current !== 'active') return;
+    
+    try {
+      console.log('🔄 Background sync triggered');
+      
+      // Light sync - only fetch new data, don't show loading indicators
+      const response = await api.get('/api/v1/support/tickets', {
+        params: {
+          limit: 50,
+          page: 1,
+          status: activeFilter !== 'all' ? activeFilter : undefined,
+        },
+        timeout: 10000,
+      });
+
+      if (response.data.success) {
+        const newTickets = response.data.data.tickets || [];
+        
+        // Update tickets while preserving typing indicators
+        setTickets(prev => {
+          const updatedTickets = newTickets.map((newTicket: SupportTicket) => {
+            const existingTicket = prev.find(t => t.id === newTicket.id);
+            return existingTicket?.typing_user 
+              ? { ...newTicket, typing_user: existingTicket.typing_user }
+              : newTicket;
+          });
+          return updatedTickets;
+        });
+        
+        lastSyncTime.current = Date.now();
+      }
+    } catch (error) {
+      console.error('Background sync failed:', error);
+    }
+  }, [activeFilter]);
+
+  // ============= FIREBASE MESSAGING =============
+  
   useEffect(() => {
     setupFirebaseMessaging();
     
@@ -189,7 +290,6 @@ export default function SupportDashboard() {
       
     } catch (error) {
       console.error('❌ DETAILED FCM TOKEN ERROR:', error);
-      Alert.alert('FCM Token Error', `Failed to get Firebase token: ${error.message}`);
     }
   };
 
@@ -282,6 +382,8 @@ export default function SupportDashboard() {
     }
   };
 
+  // ============= ACTIONCABLE SETUP =============
+  
   const setupActionCableConnection = useCallback(async () => {
     try {
       if (!user) {
@@ -299,7 +401,6 @@ export default function SupportDashboard() {
 
       const actionCable = ActionCableService.getInstance();
       
-      // Clear any existing subscriptions
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
       
@@ -312,6 +413,12 @@ export default function SupportDashboard() {
       if (connected) {
         setIsConnected(true);
         setupActionCableSubscriptions();
+        
+        // Start background sync
+        if (backgroundSyncInterval.current) {
+          clearInterval(backgroundSyncInterval.current);
+        }
+        backgroundSyncInterval.current = setInterval(backgroundSync, BACKGROUND_SYNC_INTERVAL);
       } else {
         setIsConnected(false);
       }
@@ -319,7 +426,7 @@ export default function SupportDashboard() {
       console.error('❌ Failed to setup ActionCable connection:', error);
       setIsConnected(false);
     }
-  }, [user]);
+  }, [user, backgroundSync]);
 
   const setupActionCableSubscriptions = () => {
     console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
@@ -393,39 +500,105 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTicketStatus);
 
+    // New message - update ticket preview and unread count
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 New message received:', data);
       if (data.conversation_id && data.message) {
-        setTickets(prev => prev.map(ticket => {
-          if (ticket.id === data.conversation_id) {
-            const updatedTicket = { ...ticket };
-            updatedTicket.last_message = {
-              content: data.message.content,
-              created_at: data.message.created_at,
-              from_support: data.message.from_support
-            };
-            updatedTicket.last_activity_at = data.message.created_at;
-            if (!data.message.from_support) {
-              updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
-            }
-            updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
-            return updatedTicket;
-          }
-          return ticket;
-        }));
-        
-        // Move updated ticket to top
         setTickets(prev => {
-          const ticket = prev.find(t => t.id === data.conversation_id);
+          const updatedTickets = prev.map(ticket => {
+            if (ticket.id === data.conversation_id) {
+              const updatedTicket = { ...ticket };
+              updatedTicket.last_message = {
+                content: data.message.content,
+                created_at: data.message.created_at,
+                from_support: data.message.from_support
+              };
+              updatedTicket.last_activity_at = data.message.created_at;
+              
+              // Only increment unread if it's a customer message
+              if (!data.message.from_support) {
+                updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
+              }
+              
+              updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
+              
+              // Clear typing indicator when message is sent
+              if (updatedTicket.typing_user && updatedTicket.typing_user.id === data.message.user?.id) {
+                delete updatedTicket.typing_user;
+              }
+              
+              return updatedTicket;
+            }
+            return ticket;
+          });
+          
+          // Move updated ticket to top
+          const ticket = updatedTickets.find(t => t.id === data.conversation_id);
           if (ticket) {
-            const others = prev.filter(t => t.id !== data.conversation_id);
+            const others = updatedTickets.filter(t => t.id !== data.conversation_id);
             return [ticket, ...others];
           }
-          return prev;
+          
+          return updatedTickets;
         });
       }
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
+
+    // Typing indicator - show in ticket list
+    const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
+      console.log('⌨️ Typing indicator:', data);
+      if (data.conversation_id && data.user_id !== user?.id) {
+        setTickets(prev => prev.map(ticket => {
+          if (ticket.id === data.conversation_id) {
+            if (data.typing) {
+              // Set typing indicator
+              return {
+                ...ticket,
+                typing_user: {
+                  id: data.user_id,
+                  name: data.user_name
+                }
+              };
+            } else {
+              // Clear typing indicator
+              const { typing_user, ...rest } = ticket;
+              return rest;
+            }
+          }
+          return ticket;
+        }));
+        
+        // Also update local typing users map
+        if (data.typing) {
+          setTypingUsers(prev => {
+            const newMap = new Map(prev);
+            newMap.set(data.conversation_id, { id: data.user_id, name: data.user_name });
+            return newMap;
+          });
+        } else {
+          setTypingUsers(prev => {
+            const newMap = new Map(prev);
+            newMap.delete(data.conversation_id);
+            return newMap;
+          });
+        }
+      }
+    });
+    actionCableSubscriptions.current.push(unsubTyping);
+
+    // Message read - decrement unread count
+    const unsubRead = actionCable.subscribe('conversation_read', (data) => {
+      console.log('📖 Conversation read:', data);
+      if (data.conversation_id && data.reader_id === user?.id) {
+        setTickets(prev => prev.map(ticket => 
+          ticket.id === data.conversation_id 
+            ? { ...ticket, unread_count: 0 }
+            : ticket
+        ));
+      }
+    });
+    actionCableSubscriptions.current.push(unsubRead);
 
     const unsubAgentAssignment = actionCable.subscribe('agent_assignment_update', (data) => {
       console.log('👤 Agent assignment update:', data);
@@ -454,6 +627,8 @@ export default function SupportDashboard() {
     console.log('✅ ActionCable subscriptions configured for support dashboard');
   };
 
+  // ============= DATA LOADING =============
+  
   const loadDashboardData = useCallback(async () => {
     try {
       const response = await api.get('/api/v1/support/dashboard');
@@ -503,7 +678,19 @@ export default function SupportDashboard() {
       const response = await api.get(endpoint, { params });
 
       if (response.data.success) {
-        setTickets(response.data.data.tickets || []);
+        const newTickets = response.data.data.tickets || [];
+        
+        // Preserve typing indicators from current state
+        setTickets(prevTickets => {
+          return newTickets.map((newTicket: SupportTicket) => {
+            const existingTicket = prevTickets.find(t => t.id === newTicket.id);
+            return existingTicket?.typing_user 
+              ? { ...newTicket, typing_user: existingTicket.typing_user }
+              : newTicket;
+          });
+        });
+        
+        lastSyncTime.current = Date.now();
       }
     } catch (error) {
       console.error('Failed to load support tickets:', error);
@@ -520,6 +707,10 @@ export default function SupportDashboard() {
     return () => {
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
+      
+      if (backgroundSyncInterval.current) {
+        clearInterval(backgroundSyncInterval.current);
+      }
     };
   }, [setupActionCableConnection]);
 
@@ -531,6 +722,8 @@ export default function SupportDashboard() {
     loadTickets();
   }, [loadTickets]);
 
+  // ============= ACTIONS =============
+  
   const handleQuickAssign = async (ticketId: string) => {
     try {
       const response = await api.post(`/api/v1/support/tickets/${ticketId}/assign`, {
@@ -563,6 +756,7 @@ export default function SupportDashboard() {
 
   const handleTicketRead = useCallback(async (ticketId: string) => {
     try {
+      // Optimistically clear unread count
       setTickets(prev => prev.map(ticket => 
         ticket.id === ticketId 
           ? { ...ticket, unread_count: 0 }
@@ -577,6 +771,8 @@ export default function SupportDashboard() {
     }
   }, []);
 
+  // ============= COMPUTED VALUES =============
+  
   const statusCounts = {
     in_progress: tickets.filter(t => t.status === 'in_progress').length,
     pending: tickets.filter(t => t.status === 'pending').length,
@@ -586,6 +782,8 @@ export default function SupportDashboard() {
     closed: tickets.filter(t => t.status === 'closed').length,
   };
 
+  // ============= RENDER FUNCTIONS =============
+  
   const renderStatsOverview = () => {
     if (!dashboardStats || !showStats) return null;
 
@@ -644,7 +842,6 @@ export default function SupportDashboard() {
       style={styles.ticketItem}
       onPress={() => {
         console.log('Navigating to chat with ID:', item.id);
-        setCurrentChat(item.id);
         handleTicketRead(item.id);
         router.push(`/(support)/chat/${item.id}`);
       }}
@@ -679,9 +876,15 @@ export default function SupportDashboard() {
               </View>
             </View>
             <View style={styles.ticketSubtitleRow}>
-              <Text style={styles.ticketPreview} numberOfLines={1}>
-                {item.last_message?.content || 'No messages yet'}
-              </Text>
+              {item.typing_user ? (
+                <Text style={styles.typingIndicator} numberOfLines={1}>
+                  {item.typing_user.name} is typing...
+                </Text>
+              ) : (
+                <Text style={styles.ticketPreview} numberOfLines={1}>
+                  {item.last_message?.content || 'No messages yet'}
+                </Text>
+              )}
               {item.unread_count > 0 && (
                 <View style={[styles.unreadBadge, isConnected && styles.unreadBadgeLive]}>
                   <Text style={styles.unreadText}>{item.unread_count}</Text>
@@ -997,6 +1200,7 @@ const styles = StyleSheet.create({
   realtimeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
   ticketSubtitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   ticketPreview: { color: '#B8B8B8', fontSize: 14, flex: 1 },
+  typingIndicator: { color: '#4FC3F7', fontSize: 14, flex: 1, fontStyle: 'italic' },
   unreadBadge: { backgroundColor: '#7B3F98', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 },
   unreadBadgeLive: { backgroundColor: '#10b981' },
   unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
