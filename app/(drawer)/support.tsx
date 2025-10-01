@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - FIXED: All improvements implemented
+// app/(drawer)/support.tsx - FIXED: Phase 1 & 3 improvements
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -27,7 +27,7 @@ import {
   MaterialIcons,
 } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams } from 'expo-router';
+import { useLocalSearchParams, useRouter } from 'expo-router';
 import api from '../../lib/api';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { useUser } from '../../context/UserContext';
@@ -48,7 +48,6 @@ const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
 const LOAD_MORE_THRESHOLD = 3;
 
-// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
 const normalizeId = (id: any): string => String(id);
 
 interface Message {
@@ -91,6 +90,7 @@ type InquiryType = 'basic' | 'package';
 
 export default function SupportScreen() {
   const params = useLocalSearchParams();
+  const router = useRouter();
   const { user } = useUser();
   
   const autoSelectPackage = params.autoSelectPackage === 'true';
@@ -165,9 +165,71 @@ export default function SupportScreen() {
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const presenceCheckInterval = useRef<NodeJS.Timeout | null>(null);
   const hasFetchedInitialMessages = useRef(false);
-  const processingMessages = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
   const hasScrolledToBottomRef = useRef(false);
+  
+  // FIXED: Add chat visibility tracking
+  const isChatVisible = useRef(true);
+  const isChatFocused = useRef(true);
+
+  // ============= COMPREHENSIVE CLEANUP FUNCTION =============
+  
+  const clearAllChatData = useCallback(async () => {
+    try {
+      console.log('🧹 Clearing all support chat data...');
+      
+      // Clear AsyncStorage
+      const keys = await AsyncStorage.getAllKeys();
+      const supportKeys = keys.filter(k => 
+        k.startsWith('active_support_conversation') ||
+        k.startsWith('support_conversation_messages') ||
+        k.startsWith('conversation_loaded_support') ||
+        k.startsWith('cache_timestamp_support') ||
+        k === conversationIdStorageKey ||
+        k === conversationLoadedStorageKey ||
+        k === cacheTimestampKey
+      );
+      
+      if (supportKeys.length > 0) {
+        await AsyncStorage.multiRemove(supportKeys);
+      }
+      
+      // Clear memory caches
+      if (conversationId) {
+        cacheManager.current.clearConversationCache(conversationId);
+      }
+      
+      // Clear refs
+      conversationLoadedRef.current = false;
+      hasFetchedInitialMessages.current = false;
+      hasScrolledToBottomRef.current = false;
+      messageIdsRef.current.clear();
+      lastReadMessageIdRef.current = null;
+      
+      // Clear state
+      setMessages([]);
+      setConversationId(null);
+      setHasActiveTicket(false);
+      setTicketStatus('none');
+      
+      console.log('✅ All support chat data cleared');
+    } catch (error) {
+      console.error('Failed to clear chat data:', error);
+    }
+  }, [conversationId]);
+
+  // Listen for logout events
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount && conversationId) {
+        await clearAllChatData();
+      }
+    };
+    
+    const interval = setInterval(checkAuthStatus, 1000);
+    return () => clearInterval(interval);
+  }, [conversationId, clearAllChatData]);
 
   // ============= STORAGE PERSISTENCE =============
   
@@ -263,17 +325,21 @@ export default function SupportScreen() {
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
     if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
       console.log('📱 App came to foreground');
+      isChatVisible.current = true;
+      isChatFocused.current = true;
       
       if (!isConnected && conversationId) {
         await reconnectActionCable();
       }
       
-      if (conversationId) {
-        await requestAgentPresence();
+      // FIXED: Only mark as read when chat is actually visible
+      if (conversationId && isChatVisible.current) {
         await markMessagesAsReadIfVisible();
       }
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App went to background');
+      isChatVisible.current = false;
+      isChatFocused.current = false;
       
       if (conversationId && messages.length > 0) {
         await saveConversationState(conversationId, messages);
@@ -316,10 +382,17 @@ export default function SupportScreen() {
     }
   }, [conversationId, user]);
 
-  // ============= AUTO MARK AS READ =============
+  // ============= FIXED: AUTO MARK AS READ =============
   
   const markMessagesAsReadIfVisible = useCallback(async () => {
-    if (!conversationId || !isConnected || appState.current !== 'active') return;
+    // FIXED: Only mark as read when chat is actually visible and focused
+    if (!conversationId || !isConnected || !isChatVisible.current || !isChatFocused.current) {
+      return;
+    }
+    
+    if (appState.current !== 'active') {
+      return;
+    }
 
     try {
       const lastUnreadAgentMessage = messages
@@ -327,7 +400,7 @@ export default function SupportScreen() {
         .pop();
 
       if (lastUnreadAgentMessage) {
-        console.log('📖 Auto-marking messages as read');
+        console.log('📖 Auto-marking messages as read (chat is visible and focused)');
         
         const actionCable = ActionCableService.getInstance();
         await actionCable.perform('mark_message_read', {
@@ -342,7 +415,8 @@ export default function SupportScreen() {
   }, [conversationId, isConnected, messages]);
 
   useEffect(() => {
-    if (appState.current === 'active' && messages.length > 0) {
+    // FIXED: Only auto-mark when conditions are met
+    if (isChatVisible.current && isChatFocused.current && appState.current === 'active' && messages.length > 0) {
       markMessagesAsReadIfVisible();
     }
   }, [messages, markMessagesAsReadIfVisible]);
@@ -462,7 +536,7 @@ export default function SupportScreen() {
     }
   }, [conversationId, isConnected]);
 
-  // ============= ACTIONCABLE SUBSCRIPTIONS =============
+  // ============= FIXED: ACTIONCABLE SUBSCRIPTIONS =============
   
   const setupActionCableSubscriptions = () => {
     if (!conversationId) return;
@@ -474,6 +548,7 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current = [];
 
+    // FIXED: Improved message handling with immediate processing
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
@@ -482,17 +557,14 @@ export default function SupportScreen() {
       const messageData = data.message;
       const messageId = normalizeId(messageData.id);
       
-      if (processingMessages.current.has(messageId)) {
-        console.log('Skipping message already being processed:', messageId);
-        return;
-      }
-      
+      // FIXED: Simple duplicate check without aggressive timeout
       if (messageIdsRef.current.has(messageId)) {
         console.log('Skipping duplicate message:', messageId);
         return;
       }
       
-      processingMessages.current.add(messageId);
+      // FIXED: Immediate processing - remove timeout delay
+      messageIdsRef.current.add(messageId);
       
       setMessages(prev => {
         let updatedMessages = prev;
@@ -521,12 +593,7 @@ export default function SupportScreen() {
         
         const newMessages = [...updatedMessages, newMessage];
         
-        messageIdsRef.current.add(messageId);
         saveConversationState(conversationId, newMessages);
-        
-        setTimeout(() => {
-          processingMessages.current.delete(messageId);
-        }, 1000);
         
         return newMessages;
       });
@@ -540,13 +607,15 @@ export default function SupportScreen() {
           setUnreadCount(prev => prev + 1);
         }
         
-        if (appState.current === 'active') {
+        // FIXED: Only mark as read if chat is visible
+        if (isChatVisible.current && isChatFocused.current && appState.current === 'active') {
           setTimeout(() => markMessagesAsReadIfVisible(), 500);
         }
       }
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
+    // FIXED: Improved message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         const normalizedId = normalizeId(data.message_id);
@@ -882,7 +951,6 @@ export default function SupportScreen() {
     if (!conversationId) return;
     
     messageIdsRef.current.clear();
-    processingMessages.current.clear();
     hasFetchedInitialMessages.current = false;
     hasScrolledToBottomRef.current = false;
     await clearConversationState();
@@ -962,7 +1030,7 @@ export default function SupportScreen() {
     }
   }, [autoSelectPackage, loadConversationMessages, clearConversationState]);
 
-  // ============= MESSAGE RETRY LOGIC =============
+  // ============= FIXED: MESSAGE RETRY LOGIC =============
   
   const scheduleMessageRetry = useCallback((tempId: string, message: Message, retryCount: number) => {
     if (retryCount >= MAX_RETRY_ATTEMPTS) {
@@ -1058,7 +1126,6 @@ export default function SupportScreen() {
       setUnreadCount(0);
     }
 
-    // Load more when near top (within first 3 messages ~ 300px)
     if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
       loadOlderMessages();
     }
@@ -1109,23 +1176,27 @@ export default function SupportScreen() {
       return 'Yesterday';
     } else {
       return date.toLocaleDateString('en-US', { 
-        weekday: 'long', 
         month: 'short', 
-        day: 'numeric' 
+        day: 'numeric',
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
       });
     }
   }, []);
 
+  // FIXED: Improved day separator styling
   const renderDateSeparator = useCallback((dateStr: string) => (
     <View style={styles.dateSeparator} key={`date-${dateStr}`}>
       <View style={styles.dateSeparatorLine} />
-      <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      <View style={styles.dateSeparatorBadge}>
+        <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      </View>
       <View style={styles.dateSeparatorLine} />
     </View>
   ), [formatDateHeader]);
 
-  // ============= PACKAGE MANAGEMENT =============
-  
+  // Package and conversation creation methods continue...
+  // (keeping all existing functionality for package management, inquiry creation, etc.)
+
   const loadUserPackages = useCallback(async () => {
     try {
       setLoadingPackages(true);
@@ -1218,8 +1289,6 @@ export default function SupportScreen() {
     }
   }, [userPackages.length, loadUserPackages]);
 
-  // ============= CONVERSATION CREATION =============
-  
   const ensureConversation = useCallback(async () => {
     if (conversationId) return conversationId;
 
@@ -1259,8 +1328,6 @@ export default function SupportScreen() {
     }
   }, [conversationId, inquiryType, selectedPackage?.code, subscriptionReady, saveConversationState, setupActionCableConnection]);
 
-  // ============= EVENT HANDLERS =============
-  
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -1344,8 +1411,6 @@ export default function SupportScreen() {
     setShowPackageModal(true);
   };
 
-  // ============= MESSAGE SENDING =============
-  
   const createBasicInquiryTicket = async () => {
     if (!inquiryText.trim()) return;
 
@@ -1599,8 +1664,6 @@ export default function SupportScreen() {
     }
   }, [conversationId, handleTyping]);
 
-  // ============= HELPER FUNCTIONS =============
-  
   const getStateBadgeColor = (state: string) => {
     switch (state) {
       case 'pending_unpaid': return '#ef4444';
@@ -1642,8 +1705,6 @@ export default function SupportScreen() {
     }
   };
 
-  // ============= RENDER FUNCTIONS =============
-  
   const renderMessageStatus = (message: Message) => {
     if (message.isSupport || message.type === 'system') {
       return null;
@@ -1700,6 +1761,7 @@ export default function SupportScreen() {
       <View style={[
         styles.messageContainer,
         item.isSupport ? styles.supportMessage : styles.userMessage,
+        item.type === 'system' && styles.systemMessage,
         item.optimistic && styles.optimisticMessage,
         item.sendStatus === 'failed' && styles.failedMessage,
       ]}>
@@ -1718,8 +1780,15 @@ export default function SupportScreen() {
           </View>
         )}
         
+        {item.type === 'system' && (
+          <View style={styles.systemIndicator}>
+            <MaterialIcons name="info" size={14} color="#8E8E93" />
+          </View>
+        )}
+        
         <Text style={[
           styles.messageText,
+          item.type === 'system' && styles.systemMessageText,
           item.optimistic && styles.optimisticMessageText
         ]}>{item.text}</Text>
         <View style={styles.messageFooter}>
@@ -2019,8 +2088,6 @@ export default function SupportScreen() {
     </Modal>
   );
 
-  // ============= MAIN RENDER =============
-  
   if (loadingMessages && isInitialLoad && messages.length === 0) {
     return (
       <SafeAreaView style={styles.container}>
@@ -2051,13 +2118,8 @@ export default function SupportScreen() {
               <Text style={styles.headerSubtitle}>Loading...</Text>
             </View>
             
+            {/* FIXED: Removed call icons */}
             <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerButton}>
-                <Feather name="video" size={22} color="#fff" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.headerButton}>
-                <Feather name="phone" size={22} color="#fff" />
-              </TouchableOpacity>
               <TouchableOpacity style={styles.headerButton}>
                 <Feather name="more-vertical" size={22} color="#fff" />
               </TouchableOpacity>
@@ -2122,13 +2184,8 @@ export default function SupportScreen() {
             </View>
           </View>
           
+          {/* FIXED: Removed call icons */}
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.headerButton}>
-              <Feather name="video" size={22} color="#fff" />
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.headerButton}>
-              <Feather name="phone" size={22} color="#fff" />
-            </TouchableOpacity>
             <TouchableOpacity style={styles.headerButton}>
               <Feather name="more-vertical" size={22} color="#fff" />
             </TouchableOpacity>
@@ -2372,7 +2429,7 @@ export default function SupportScreen() {
   );
 }
 
-// Styles remain exactly the same...
+// FIXED: Updated styles with improved day separator and system message
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -2467,7 +2524,7 @@ const styles = StyleSheet.create({
   headerActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    minWidth: 120,
+    minWidth: 40,
   },
   headerButton: {
     marginLeft: 16,
@@ -2505,22 +2562,31 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontStyle: 'italic',
   },
+  // FIXED: Improved day separator styling
   dateSeparator: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginVertical: 16,
-    paddingHorizontal: 12,
+    marginVertical: 20,
+    paddingHorizontal: 16,
   },
   dateSeparatorLine: {
     flex: 1,
     height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+  },
+  dateSeparatorBadge: {
+    backgroundColor: 'rgba(31, 44, 52, 0.95)',
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 12,
+    marginHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.1)',
   },
   dateSeparatorText: {
     color: '#8E8E93',
-    fontSize: 12,
-    fontWeight: '500',
-    marginHorizontal: 12,
+    fontSize: 13,
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },
@@ -2549,6 +2615,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#6B46C1',
     borderBottomRightRadius: 4,
     marginRight: 4,
+  },
+  // FIXED: System message styling with proper padding
+  systemMessage: {
+    alignSelf: 'center',
+    backgroundColor: 'rgba(142, 142, 147, 0.15)',
+    borderRadius: 12,
+    maxWidth: '85%',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    marginHorizontal: 20,
+    marginVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(142, 142, 147, 0.2)',
   },
   optimisticMessage: {
     opacity: 0.7,
@@ -2592,11 +2671,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontStyle: 'italic',
   },
+  systemIndicator: {
+    marginRight: 8,
+    alignSelf: 'center',
+  },
   messageText: {
     color: '#fff',
     fontSize: 16,
     lineHeight: 20,
     paddingTop: 4,
+    flexWrap: 'wrap',
+  },
+  // FIXED: System message text with proper wrapping
+  systemMessageText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    fontStyle: 'italic',
+    textAlign: 'center',
+    flexShrink: 1,
   },
   optimisticMessageText: {
     fontStyle: 'italic',
