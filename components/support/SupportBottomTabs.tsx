@@ -1,8 +1,9 @@
-// components/support/SupportBottomTabs.tsx - Bottom Navigation
+// components/support/SupportBottomTabs.tsx - Bottom Navigation with Dynamic Unread Count
 import React from 'react';
 import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
+import { useUnreadConversationsCount } from '../../lib/hooks/useUnreadConversationsCount';
 
 interface SupportBottomTabsProps {
   currentTab: 'chats' | 'updates' | 'calls' | 'account';
@@ -10,6 +11,7 @@ interface SupportBottomTabsProps {
 
 export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab }) => {
   const pathname = usePathname();
+  const unreadChatsCount = useUnreadConversationsCount();
 
   const tabs = [
     {
@@ -17,7 +19,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
       label: 'Chats',
       icon: 'message-square',
       route: '/(support)',
-      badgeCount: 5, // Dynamic count would come from context
+      badgeCount: unreadChatsCount,
     },
     {
       key: 'updates',
