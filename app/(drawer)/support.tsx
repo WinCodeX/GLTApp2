@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - FIXED: AsyncStorage type mismatch, duplicate keys, and ID consistency
+// app/(drawer)/support.tsx - FIXED: All improvements implemented
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -42,10 +42,14 @@ const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 20000;
 const SCROLL_THRESHOLD = 0.1;
-const CACHE_STALE_TIME = 5 * 60 * 1000; // 5 minutes
+const CACHE_STALE_TIME = 5 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
-const RETRY_DELAYS = [5000, 15000, 30000]; // 5s, 15s, 30s
+const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
+const LOAD_MORE_THRESHOLD = 3;
+
+// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
+const normalizeId = (id: any): string => String(id);
 
 interface Message {
   id: string;
@@ -85,9 +89,6 @@ interface AgentPresence {
 
 type InquiryType = 'basic' | 'package';
 
-// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
-const normalizeMessageId = (id: any): string => String(id);
-
 export default function SupportScreen() {
   const params = useLocalSearchParams();
   const { user } = useUser();
@@ -125,11 +126,11 @@ export default function SupportScreen() {
     status: 'offline',
   });
   
-  // Scroll management
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [currentScrollOffset, setCurrentScrollOffset] = useState(0);
+  const [shouldScrollToEnd, setShouldScrollToEnd] = useState(true);
   
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
@@ -165,24 +166,23 @@ export default function SupportScreen() {
   const presenceCheckInterval = useRef<NodeJS.Timeout | null>(null);
   const hasFetchedInitialMessages = useRef(false);
   const processingMessages = useRef<Set<string>>(new Set());
+  const isLoadingMoreRef = useRef(false);
+  const hasScrolledToBottomRef = useRef(false);
 
-  // ============= STORAGE PERSISTENCE IMPROVEMENTS =============
+  // ============= STORAGE PERSISTENCE =============
   
   const saveConversationState = useCallback(async (convId: string, msgs: Message[]) => {
     try {
-      // FIX 1: Always convert conversation ID to string for AsyncStorage
       await AsyncStorage.setItem(conversationIdStorageKey, String(convId));
       
-      // Save messages
-      const messagesToSave = msgs.slice(0, 50); // Save last 50 messages
+      const messagesToSave = msgs.slice(0, 50);
       await AsyncStorage.setItem(
         `${conversationMessagesStorageKey}_${String(convId)}`,
         JSON.stringify(messagesToSave)
       );
       
-      // Save metadata
       await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
-      await AsyncStorage.setItem(cacheTimestampKey, Date.now().toString());
+      await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
       
       conversationLoadedRef.current = true;
     } catch (error) {
@@ -204,23 +204,20 @@ export default function SupportScreen() {
       if (loaded === 'true' && timestamp && savedMessages) {
         const cacheAge = Date.now() - parseInt(timestamp, 10);
         
-        // Load saved messages even if cache is stale, we'll sync in background
         const messages = JSON.parse(savedMessages) as Message[];
         
-        setConversationId(savedId);
+        setConversationId(normalizeId(savedId));
         setHasActiveTicket(true);
         setMessages(messages);
         
-        // Populate message IDs with normalization
         messageIdsRef.current.clear();
-        messages.forEach(msg => messageIdsRef.current.add(normalizeMessageId(msg.id)));
+        messages.forEach(msg => messageIdsRef.current.add(normalizeId(msg.id)));
         
         conversationLoadedRef.current = true;
         hasFetchedInitialMessages.current = true;
         
         console.log('✅ Loaded saved conversation state');
         
-        // If cache is stale, sync in background
         if (cacheAge > CACHE_STALE_TIME) {
           setTimeout(() => backgroundSyncMessages(savedId), 2000);
         }
@@ -267,12 +264,10 @@ export default function SupportScreen() {
     if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
       console.log('📱 App came to foreground');
       
-      // Reconnect if needed
       if (!isConnected && conversationId) {
         await reconnectActionCable();
       }
       
-      // Request fresh agent presence
       if (conversationId) {
         await requestAgentPresence();
         await markMessagesAsReadIfVisible();
@@ -280,12 +275,10 @@ export default function SupportScreen() {
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App went to background');
       
-      // Save current state
       if (conversationId && messages.length > 0) {
         await saveConversationState(conversationId, messages);
       }
       
-      // Update presence to away
       if (isConnected) {
         const actionCable = ActionCableService.getInstance();
         await actionCable.updatePresence('away');
@@ -303,7 +296,7 @@ export default function SupportScreen() {
       const actionCable = ActionCableService.getInstance();
       const connected = await actionCable.connect({
         token: currentAccount.token,
-        userId: user.id,
+        userId: normalizeId(user.id),
         autoReconnect: true,
       });
 
@@ -316,7 +309,6 @@ export default function SupportScreen() {
     } catch (error) {
       console.error('Failed to reconnect ActionCable:', error);
       
-      // Schedule retry
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -355,25 +347,27 @@ export default function SupportScreen() {
     }
   }, [messages, markMessagesAsReadIfVisible]);
 
-  // ============= INITIALIZATION WITH PERSISTENCE =============
+  // ============= INITIALIZATION =============
   
   useEffect(() => {
     const initializeConversation = async () => {
-      // Try to load saved state first
       const hasSavedState = await loadSavedConversationState();
       
       if (hasSavedState) {
         setLoadingMessages(false);
         setIsInitialLoad(false);
         
-        // Setup ActionCable after loading saved state
         setTimeout(() => {
           if (conversationId) {
             setupActionCableConnection();
           }
         }, 500);
+        
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+          hasScrolledToBottomRef.current = true;
+        }, 100);
       } else {
-        // No saved state, check for active ticket
         checkActiveTicket();
       }
     };
@@ -381,7 +375,7 @@ export default function SupportScreen() {
     initializeConversation();
   }, []);
 
-  // ============= ACTIONCABLE SETUP WITH IMPROVEMENTS =============
+  // ============= ACTIONCABLE SETUP =============
   
   const setupActionCableConnection = useCallback(async () => {
     if (!conversationId || !user) return;
@@ -394,7 +388,7 @@ export default function SupportScreen() {
       
       const connected = await actionCable.connect({
         token: currentAccount.token,
-        userId: user.id,
+        userId: normalizeId(user.id),
         autoReconnect: true,
       });
 
@@ -402,32 +396,24 @@ export default function SupportScreen() {
         setIsConnected(true);
         console.log('✅ ActionCable connected');
 
-        // Join conversation
         await actionCable.joinConversation(conversationId);
-        
-        // Small delay to ensure subscription is ready
         await new Promise(resolve => setTimeout(resolve, 500));
         
         setSubscriptionReady(true);
-        
         setupActionCableSubscriptions();
-        
-        // Request agent presence
         await requestAgentPresence();
         
-        // Setup presence check interval
         if (presenceCheckInterval.current) {
           clearInterval(presenceCheckInterval.current);
         }
         presenceCheckInterval.current = setInterval(() => {
           requestAgentPresence();
-        }, 30000); // Check every 30 seconds
+        }, 30000);
       }
     } catch (error) {
       console.error('Failed to setup ActionCable:', error);
       setIsConnected(false);
       
-      // Retry connection
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -446,7 +432,9 @@ export default function SupportScreen() {
         actionCable.leaveConversation(conversationId);
       }
       
-      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current.forEach(unsub => {
+        if (unsub) unsub();
+      });
       actionCableSubscriptions.current = [];
       
       if (presenceCheckInterval.current) {
@@ -474,43 +462,38 @@ export default function SupportScreen() {
     }
   }, [conversationId, isConnected]);
 
-  // ============= ACTIONCABLE SUBSCRIPTIONS WITH DEDUP =============
+  // ============= ACTIONCABLE SUBSCRIPTIONS =============
   
   const setupActionCableSubscriptions = () => {
     if (!conversationId) return;
 
     const actionCable = ActionCableService.getInstance();
 
-    // Clear existing subscriptions
-    actionCableSubscriptions.current.forEach(unsub => unsub());
+    actionCableSubscriptions.current.forEach(unsub => {
+      if (unsub) unsub();
+    });
     actionCableSubscriptions.current = [];
 
-    // FIX 2: New message with enhanced deduplication
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
       if (data.conversation_id !== conversationId || !data.message) return;
       
       const messageData = data.message;
-      // FIX 2: Normalize message ID immediately
-      const messageId = normalizeMessageId(messageData.id);
+      const messageId = normalizeId(messageData.id);
       
-      // Check if we're already processing this message
       if (processingMessages.current.has(messageId)) {
         console.log('Skipping message already being processed:', messageId);
         return;
       }
       
-      // Check if message already exists
       if (messageIdsRef.current.has(messageId)) {
         console.log('Skipping duplicate message:', messageId);
         return;
       }
       
-      // Mark as processing
       processingMessages.current.add(messageId);
       
-      // Remove optimistic message if this is the real version
       setMessages(prev => {
         let updatedMessages = prev;
         
@@ -518,7 +501,6 @@ export default function SupportScreen() {
           updatedMessages = prev.filter(msg => msg.tempId !== messageData.temp_id);
         }
         
-        // Add new message with normalized ID
         const newMessage: Message = {
           id: messageId,
           text: messageData.content || '',
@@ -539,13 +521,9 @@ export default function SupportScreen() {
         
         const newMessages = [...updatedMessages, newMessage];
         
-        // Update message IDs
         messageIdsRef.current.add(messageId);
-        
-        // Save state
         saveConversationState(conversationId, newMessages);
         
-        // Clear processing flag
         setTimeout(() => {
           processingMessages.current.delete(messageId);
         }, 1000);
@@ -553,7 +531,6 @@ export default function SupportScreen() {
         return newMessages;
       });
       
-      // Auto-scroll if needed
       if (messageData.from_support) {
         if (isNearBottom) {
           setTimeout(() => {
@@ -563,7 +540,6 @@ export default function SupportScreen() {
           setUnreadCount(prev => prev + 1);
         }
         
-        // Auto-mark as read
         if (appState.current === 'active') {
           setTimeout(() => markMessagesAsReadIfVisible(), 500);
         }
@@ -571,10 +547,9 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
-    // Message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
-        const normalizedId = normalizeMessageId(data.message_id);
+        const normalizedId = normalizeId(data.message_id);
         setMessages(prev => prev.map(msg => {
           if (msg.id === normalizedId || msg.tempId === normalizedId) {
             if (data.status === 'delivered') {
@@ -594,9 +569,8 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubAcknowledged);
 
-    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
-      if (data.conversation_id === conversationId && data.user_id !== user?.id) {
+      if (data.conversation_id === conversationId && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setAgentPresence(prev => ({
           ...prev,
           is_typing: data.typing,
@@ -605,9 +579,8 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
-    // Presence updates
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
-      if (data.conversation_id === conversationId && data.user_id !== user?.id) {
+      if (data.conversation_id === conversationId && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         console.log('👤 Agent presence update:', data);
         setAgentPresence({
           status: data.status as 'online' | 'offline' | 'away',
@@ -618,12 +591,10 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubPresence);
 
-    // Users presence data response
     const unsubUsersPresence = actionCable.subscribe('users_presence_data', (data) => {
       console.log('👥 Users presence data:', data);
       if (data.presence_data && Array.isArray(data.presence_data)) {
-        // Find agent presence in the data
-        const agentData = data.presence_data.find(p => p.user_id !== user?.id);
+        const agentData = data.presence_data.find(p => normalizeId(p.user_id) !== normalizeId(user?.id));
         if (agentData) {
           setAgentPresence({
             status: agentData.status || 'offline',
@@ -635,7 +606,6 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubUsersPresence);
 
-    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       setIsConnected(true);
       setSubscriptionReady(true);
@@ -646,7 +616,6 @@ export default function SupportScreen() {
       setIsConnected(false);
       setSubscriptionReady(false);
       
-      // Schedule reconnection
       if (reconnectTimeoutRef.current) {
         clearTimeout(reconnectTimeoutRef.current);
       }
@@ -690,11 +659,10 @@ export default function SupportScreen() {
     }, 2000);
   }, [isTyping, sendTypingIndicator]);
 
-  // ============= MESSAGE LOADING IMPROVEMENTS =============
+  // ============= MESSAGE LOADING =============
   
   const loadConversationMessages = useCallback(async (conversationId: string, isRefresh = false, loadOlder = false) => {
     try {
-      // Skip if we already have messages and not refreshing/loading older
       if (!isRefresh && !loadOlder && hasFetchedInitialMessages.current && messages.length > 0) {
         console.log('Skipping message load - already have messages');
         return;
@@ -715,6 +683,7 @@ export default function SupportScreen() {
         setRefreshing(true);
       } else if (loadOlder) {
         setLoadingOlder(true);
+        isLoadingMoreRef.current = true;
       } else {
         setLoadingMessages(true);
       }
@@ -742,9 +711,8 @@ export default function SupportScreen() {
         const apiMessages = response.data.messages;
         const pagination = response.data.pagination || {};
 
-        // FIX 4: Normalize IDs when loading messages
         const newMessages: Message[] = apiMessages.map((msg: any) => ({
-          id: normalizeMessageId(msg.id),
+          id: normalizeId(msg.id),
           text: msg.content,
           timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
             hour12: false,
@@ -762,7 +730,6 @@ export default function SupportScreen() {
         }));
 
         if (isRefresh || (!loadOlder && !hasFetchedInitialMessages.current)) {
-          // Full refresh or initial load
           setMessages(newMessages);
           setHasMoreMessages(pagination.has_more || false);
           
@@ -772,8 +739,12 @@ export default function SupportScreen() {
           hasFetchedInitialMessages.current = true;
           await saveConversationState(conversationId, newMessages);
           
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+            hasScrolledToBottomRef.current = true;
+          }, 100);
+          
         } else if (loadOlder) {
-          // Prepend older messages
           setMessages(prev => {
             const combined = [...newMessages, ...prev];
             const uniqueMessages = Array.from(
@@ -786,7 +757,6 @@ export default function SupportScreen() {
           newMessages.forEach(msg => messageIdsRef.current.add(msg.id));
         }
 
-        // Handle conversation metadata
         const conversationData = response.data.conversation;
         if (conversationData?.assigned_agent) {
           setTicketStatus('active');
@@ -804,7 +774,7 @@ export default function SupportScreen() {
         if (conversationData?.package) {
           const conversationPackage = conversationData.package;
           setSelectedPackage({
-            id: normalizeMessageId(conversationPackage.id),
+            id: normalizeId(conversationPackage.id),
             code: conversationPackage.code,
             state: conversationPackage.state,
             state_display: conversationPackage.state_display,
@@ -828,7 +798,6 @@ export default function SupportScreen() {
       console.error('Failed to load conversation:', error);
       setConnectionError(true);
 
-      // Fallback to default welcome message only if we have no messages
       if (!isRefresh && !loadOlder && messages.length === 0) {
         const defaultMessage: Message = {
           id: '1',
@@ -849,6 +818,7 @@ export default function SupportScreen() {
       setLoadingOlder(false);
       setRefreshing(false);
       setIsInitialLoad(false);
+      isLoadingMoreRef.current = false;
     }
   }, [messages, saveConversationState]);
 
@@ -864,13 +834,12 @@ export default function SupportScreen() {
       if (response.data.success && response.data.messages) {
         const newMessages = response.data.messages;
         
-        // Update with any new messages
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
           const toAdd = newMessages
-            .filter((msg: any) => !existingIds.has(normalizeMessageId(msg.id)))
+            .filter((msg: any) => !existingIds.has(normalizeId(msg.id)))
             .map((msg: any) => ({
-              id: normalizeMessageId(msg.id),
+              id: normalizeId(msg.id),
               text: msg.content,
               timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
                 hour12: false,
@@ -902,7 +871,7 @@ export default function SupportScreen() {
   }, [saveConversationState]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlder || !conversationId || !hasMoreMessages) {
+    if (isLoadingMoreRef.current || !conversationId || !hasMoreMessages || loadingOlder) {
       return;
     }
     
@@ -915,6 +884,7 @@ export default function SupportScreen() {
     messageIdsRef.current.clear();
     processingMessages.current.clear();
     hasFetchedInitialMessages.current = false;
+    hasScrolledToBottomRef.current = false;
     await clearConversationState();
     await loadConversationMessages(conversationId, true);
   }, [loadConversationMessages, conversationId, clearConversationState]);
@@ -926,7 +896,7 @@ export default function SupportScreen() {
       const response = await api.get('/api/v1/conversations/active_support');
       
       if (response.data.success && response.data.conversation_id) {
-        const activeConvId = normalizeMessageId(response.data.conversation_id);
+        const activeConvId = normalizeId(response.data.conversation_id);
         setConversationId(activeConvId);
         setHasActiveTicket(true);
         setTicketStatus('active');
@@ -936,7 +906,6 @@ export default function SupportScreen() {
         return;
       }
       
-      // No active ticket
       setHasActiveTicket(false);
       await clearConversationState();
       
@@ -1028,7 +997,6 @@ export default function SupportScreen() {
     try {
       console.log(`🔄 Retrying message (attempt ${retryCount}):`, tempId);
       
-      // Try sending via API
       const response = await api.post(`/api/v1/conversations/${conversationId}/send_message`, {
         content: message.text,
         message_type: message.type || 'text',
@@ -1039,11 +1007,10 @@ export default function SupportScreen() {
       if (response.data.success && response.data.message) {
         console.log('✅ Message retry successful');
         
-        // Remove optimistic message and add real one
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeMessageId(response.data.message.id),
+            id: normalizeId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || new Date().toLocaleTimeString('en-US', {
               hour12: false,
@@ -1081,6 +1048,7 @@ export default function SupportScreen() {
     const currentOffset = contentOffset.y;
     const maxOffset = contentSize.height - layoutMeasurement.height;
     const distanceFromBottom = maxOffset - currentOffset;
+    const distanceFromTop = currentOffset;
     
     setCurrentScrollOffset(currentOffset);
     setIsNearBottom(distanceFromBottom < 100);
@@ -1089,7 +1057,12 @@ export default function SupportScreen() {
     if (distanceFromBottom < 50) {
       setUnreadCount(0);
     }
-  }, []);
+
+    // Load more when near top (within first 3 messages ~ 300px)
+    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
+      loadOlderMessages();
+    }
+  }, [hasMoreMessages, loadOlderMessages]);
 
   const scrollToBottom = useCallback((animated = true) => {
     flatListRef.current?.scrollToEnd({ animated });
@@ -1166,7 +1139,7 @@ export default function SupportScreen() {
 
       if (response.data && response.data.success) {
         const packages = response.data.data.map((pkg: any) => ({
-          id: normalizeMessageId(pkg.id || ''),
+          id: normalizeId(pkg.id || ''),
           code: pkg.code || '',
           state: pkg.state || 'unknown',
           state_display: pkg.state_display || 'Unknown',
@@ -1262,17 +1235,14 @@ export default function SupportScreen() {
       const response = await api.post('/api/v1/conversations/support_ticket', payload);
       
       if (response.data.success && response.data.conversation_id) {
-        const newConversationId = normalizeMessageId(response.data.conversation_id);
+        const newConversationId = normalizeId(response.data.conversation_id);
         setConversationId(newConversationId);
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
         await saveConversationState(newConversationId, []);
-        
-        // Setup ActionCable for new conversation
         await setupActionCableConnection();
         
-        // Wait for subscription to be ready
         let retries = 0;
         while (!subscriptionReady && retries < 10) {
           await new Promise(resolve => setTimeout(resolve, 500));
@@ -1348,7 +1318,6 @@ export default function SupportScreen() {
     }
   }, [showPackageModal, userPackages.length, loadUserPackages]);
 
-  // Save state when messages change
   useEffect(() => {
     if (conversationId && messages.length > 0 && !loadingMessages) {
       saveConversationState(conversationId, messages);
@@ -1375,7 +1344,7 @@ export default function SupportScreen() {
     setShowPackageModal(true);
   };
 
-  // ============= MESSAGE SENDING WITH DEDUP =============
+  // ============= MESSAGE SENDING =============
   
   const createBasicInquiryTicket = async () => {
     if (!inquiryText.trim()) return;
@@ -1418,11 +1387,10 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
-        // Remove optimistic and add real message
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeMessageId(response.data.message.id),
+            id: normalizeId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1441,14 +1409,12 @@ export default function SupportScreen() {
         
         setTicketStatus('pending');
       } else {
-        // Schedule retry
         scheduleMessageRetry(tempId, optimisticMessage, 0);
       }
       
     } catch (error) {
       console.error('Failed to create basic inquiry:', error);
       
-      // Find the optimistic message and mark it for retry
       const optimisticMsg = messages.find(m => m.optimistic);
       if (optimisticMsg && optimisticMsg.tempId) {
         scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
@@ -1501,11 +1467,10 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
-        // Remove optimistic and add real message
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeMessageId(response.data.message.id),
+            id: normalizeId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1526,14 +1491,12 @@ export default function SupportScreen() {
         
         setTicketStatus('pending');
       } else {
-        // Schedule retry
         scheduleMessageRetry(tempId, optimisticMessage, 0);
       }
       
     } catch (error) {
       console.error('Failed to create package inquiry:', error);
       
-      // Find the optimistic message and mark it for retry
       const optimisticMsg = messages.find(m => m.optimistic);
       if (optimisticMsg && optimisticMsg.tempId) {
         scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
@@ -1544,7 +1507,6 @@ export default function SupportScreen() {
   };
 
   const sendMessage = useCallback(async () => {
-    // Allow sending even if not connected - will retry
     if (!inputText.trim()) return;
 
     const messageContent = inputText.trim();
@@ -1591,11 +1553,10 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
-        // Remove optimistic and add real message
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeMessageId(response.data.message.id),
+            id: normalizeId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1617,14 +1578,12 @@ export default function SupportScreen() {
         setTicketStatus('pending');
         setHasActiveTicket(true);
       } else {
-        // Schedule retry
         scheduleMessageRetry(tempId, optimisticMessage, 0);
       }
       
     } catch (error) {
       console.error('Failed to send message:', error);
       
-      // Find the optimistic message and mark it for retry
       const optimisticMsg = messages.find(m => m.tempId === tempId);
       if (optimisticMsg) {
         scheduleMessageRetry(tempId, optimisticMsg, 0);
@@ -1656,7 +1615,6 @@ export default function SupportScreen() {
   };
 
   const getTicketStatusText = () => {
-    // Show typing indicator in header if agent is typing
     if (agentPresence.is_typing) {
       return 'typing...';
     }
@@ -1804,7 +1762,6 @@ export default function SupportScreen() {
     dateKeys.forEach((dateKey) => {
       data.push({ type: 'date', dateKey, id: `date-${dateKey}` });
       groupedMessages[dateKey].forEach((msg, index) => {
-        // FIX 3: Add index-based fallback to ensure unique keys
         data.push({ type: 'message', message: msg, id: `${msg.id}-${index}` });
       });
     });
@@ -2194,8 +2151,6 @@ export default function SupportScreen() {
             showsVerticalScrollIndicator={false}
             onScroll={handleScroll}
             scrollEventThrottle={16}
-            onEndReached={loadOlderMessages}
-            onEndReachedThreshold={SCROLL_THRESHOLD}
             refreshControl={
               <RefreshControl
                 refreshing={refreshing}
@@ -2417,6 +2372,7 @@ export default function SupportScreen() {
   );
 }
 
+// Styles remain exactly the same...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
