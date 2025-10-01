@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FULLY FIXED: All improvements implemented
+// app/(support)/chat/[id].tsx - FIXED: All improvements implemented
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -40,9 +40,13 @@ const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
 
+// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
+const normalizeId = (id: any): string => String(id);
+
 interface ChatMessage extends CachedMessage {
   sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   retryCount?: number;
+  tempId?: string;
 }
 
 interface ChatConversation {
@@ -76,7 +80,8 @@ interface CustomerPresence {
 }
 
 export default function SupportChatScreen() {
-  const { id } = useLocalSearchParams<{ id: string }>();
+  const { id: rawId } = useLocalSearchParams<{ id: string }>();
+  const id = normalizeId(rawId);
   const { user } = useUser();
   const [conversation, setConversation] = useState<CachedConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -115,13 +120,14 @@ export default function SupportChatScreen() {
   const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
+  const processingMessages = useRef<Set<string>>(new Set());
 
   // ============= STORAGE PERSISTENCE =============
   
   const saveConversationLoadedState = useCallback(async () => {
     try {
       await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
-      await AsyncStorage.setItem(cacheTimestampKey, Date.now().toString());
+      await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
     } catch (error) {
       console.error('Failed to save conversation loaded state:', error);
     }
@@ -202,7 +208,7 @@ export default function SupportChatScreen() {
       actionCableRef.current = ActionCableService.getInstance();
       const connected = await actionCableRef.current.connect({
         token: currentAccount.token,
-        userId: user.id.toString(),
+        userId: normalizeId(user.id),
         autoReconnect: true,
       });
 
@@ -255,6 +261,7 @@ export default function SupportChatScreen() {
       
       const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
         ...msg,
+        id: normalizeId(msg.id),
         sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
       }));
       
@@ -284,7 +291,7 @@ export default function SupportChatScreen() {
         
         const connected = await actionCableRef.current.connect({
           token: currentAccount.token,
-          userId: user.id.toString(),
+          userId: normalizeId(user.id),
           autoReconnect: true,
         });
 
@@ -313,12 +320,21 @@ export default function SupportChatScreen() {
         actionCableRef.current.leaveConversation(id);
       }
       
-      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current.forEach(unsub => {
+        if (unsub) unsub();
+      });
       actionCableSubscriptions.current = [];
       
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      retryTimeoutsRef.current.clear();
       
       setSubscriptionReady(false);
     };
@@ -346,17 +362,27 @@ export default function SupportChatScreen() {
 
     const actionCable = actionCableRef.current;
 
-    actionCableSubscriptions.current.forEach(unsub => unsub());
+    actionCableSubscriptions.current.forEach(unsub => {
+      if (unsub) unsub();
+    });
     actionCableSubscriptions.current = [];
 
-    // New message
+    // New message with enhanced deduplication
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
       if (data.conversation_id !== id || !data.message) return;
       
       const messageData = data.message;
-      const messageId = String(messageData.id);
+      const messageId = normalizeId(messageData.id);
+      
+      // Check if we're already processing this message
+      if (processingMessages.current.has(messageId)) {
+        console.log('Skipping duplicate message:', messageId);
+        return;
+      }
+      
+      processingMessages.current.add(messageId);
       
       if (messageData.temp_id) {
         cacheManager.current.removeOptimisticMessages(id);
@@ -375,7 +401,7 @@ export default function SupportChatScreen() {
         from_support: messageData.from_support || false,
         message_type: messageData.message_type || 'text',
         user: messageData.user || {
-          id: messageData.user?.id || '',
+          id: normalizeId(messageData.user?.id) || '',
           name: messageData.user?.name || 'Unknown',
           role: messageData.user?.role || 'unknown'
         },
@@ -387,7 +413,12 @@ export default function SupportChatScreen() {
 
       cacheManager.current.addMessageToCache(id, newMessage);
       
-      if (messageData.user?.id !== user?.id) {
+      // Clear processing flag after a delay
+      setTimeout(() => {
+        processingMessages.current.delete(messageId);
+      }, 1000);
+      
+      if (messageData.user?.id !== normalizeId(user?.id)) {
         if (isNearBottom) {
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: true });
@@ -406,8 +437,9 @@ export default function SupportChatScreen() {
     // Message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
+        const normalizedMessageId = normalizeId(data.message_id);
         setMessages(prev => prev.map(msg => {
-          if (msg.id === data.message_id) {
+          if (msg.id === normalizedMessageId) {
             if (data.status === 'delivered') {
               return { ...msg, delivered_at: data.timestamp, sendStatus: 'delivered' };
             } else if (data.status === 'read') {
@@ -440,7 +472,7 @@ export default function SupportChatScreen() {
 
     // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
-      if (data.conversation_id === id && data.user_id !== user?.id) {
+      if (data.conversation_id === id && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setCustomerPresence(prev => ({
           ...prev,
           is_typing: data.typing,
@@ -458,7 +490,7 @@ export default function SupportChatScreen() {
         
         if (data.system_message) {
           const systemMessage: CachedMessage = {
-            id: data.system_message.id,
+            id: normalizeId(data.system_message.id),
             content: data.system_message.content,
             created_at: data.system_message.created_at,
             timestamp: data.system_message.timestamp,
@@ -493,7 +525,7 @@ export default function SupportChatScreen() {
 
     // Presence updates
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
-      if (data.conversation_id === id && data.user_id !== user?.id) {
+      if (data.conversation_id === id && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setCustomerPresence({
           status: data.status as 'online' | 'offline' | 'away',
           last_seen: data.last_seen || data.last_seen_at,
@@ -524,9 +556,10 @@ export default function SupportChatScreen() {
     if (retryCount >= MAX_RETRY_ATTEMPTS) {
       console.error('Max retry attempts reached for message:', tempId);
       
-      setMessages(prev => prev.map(msg => 
-        (msg as any).tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg
-      ));
+      setMessages(prev => prev.map(msg => {
+        const chatMsg = msg as ChatMessage;
+        return chatMsg.tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg;
+      }));
       return;
     }
 
@@ -664,6 +697,7 @@ export default function SupportChatScreen() {
         
         const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
           ...msg,
+          id: normalizeId(msg.id),
           sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
         }));
         
@@ -728,13 +762,19 @@ export default function SupportChatScreen() {
         const messagesData = response.data.messages || [];
         const pagination = response.data.pagination || {};
 
+        // Normalize all message IDs
+        const normalizedMessages = messagesData.map((msg: any) => ({
+          ...msg,
+          id: normalizeId(msg.id),
+        }));
+
         if (isRefresh || (!loadOlder && !conversationLoadedRef.current)) {
           cacheManager.current.setCachedConversation(
             id,
             conversationData,
-            messagesData,
+            normalizedMessages,
             pagination.has_more || false,
-            messagesData.length > 0 ? messagesData[0]?.id : null
+            normalizedMessages.length > 0 ? normalizedMessages[0]?.id : null
           );
           setIsInitialLoad(false);
           conversationLoadedRef.current = true;
@@ -746,7 +786,7 @@ export default function SupportChatScreen() {
         } else if (loadOlder) {
           cacheManager.current.prependOlderMessages(
             id,
-            messagesData,
+            normalizedMessages,
             pagination.has_more || false
           );
         }
@@ -758,7 +798,7 @@ export default function SupportChatScreen() {
           });
         }
 
-        console.log(`Loaded ${messagesData.length} messages, has_more: ${pagination.has_more}`);
+        console.log(`Loaded ${normalizedMessages.length} messages, has_more: ${pagination.has_more}`);
       }
       
     } catch (error: any) {
@@ -799,10 +839,13 @@ export default function SupportChatScreen() {
         const newMessages = response.data.messages;
         
         newMessages.forEach((msg: any) => {
-          const messageId = String(msg.id);
+          const messageId = normalizeId(msg.id);
           const existingMessage = messages.find(m => m.id === messageId);
           if (!existingMessage) {
-            cacheManager.current.addMessageToCache(conversationId, msg);
+            cacheManager.current.addMessageToCache(conversationId, {
+              ...msg,
+              id: messageId,
+            });
           }
         });
       }
@@ -875,7 +918,7 @@ export default function SupportChatScreen() {
       from_support: true,
       message_type: 'text',
       user: {
-        id: user?.id || '',
+        id: normalizeId(user?.id) || '',
         name: user?.display_name || user?.first_name || 'Support',
         role: 'support',
         avatar_url: user?.avatar_url,
@@ -903,7 +946,10 @@ export default function SupportChatScreen() {
 
       if (response.data.success) {
         cacheManager.current.removeOptimisticMessages(id);
-        cacheManager.current.addMessageToCache(id, response.data.message);
+        cacheManager.current.addMessageToCache(id, {
+          ...response.data.message,
+          id: normalizeId(response.data.message.id),
+        });
         
         if (response.data.conversation) {
           cacheManager.current.updateConversationMetadata(id, {
@@ -917,10 +963,10 @@ export default function SupportChatScreen() {
     } catch (error: any) {
       console.error('Failed to send message:', error);
       
-      const optimisticMsg = cacheManager.current.getCachedConversation(id)
-        ?.messages.find(m => m.optimistic);
+      const cachedConv = cacheManager.current.getCachedConversation(id);
+      const optimisticMsg = cachedConv?.messages.find(m => m.optimistic);
       if (optimisticMsg) {
-        scheduleMessageRetry(optimisticMsg.id, optimisticMsg, 0);
+        scheduleMessageRetry(tempId, optimisticMsg, 0);
       }
     }
   }, [inputText, subscriptionReady, id, user, isTyping, scheduleMessageRetry]);
@@ -934,7 +980,7 @@ export default function SupportChatScreen() {
       switch (action) {
         case 'assign_to_me':
           await api.post(`/api/v1/support/tickets/${id}/assign`, {
-            agent_id: user?.id
+            agent_id: normalizeId(user?.id)
           });
           Alert.alert('Success', 'Ticket assigned to you');
           loadConversation(true);
@@ -992,7 +1038,7 @@ export default function SupportChatScreen() {
   // ============= RENDER FUNCTIONS =============
   
   const renderMessageStatus = (message: ChatMessage) => {
-    if (!message.from_support || message.user.id !== user?.id) {
+    if (!message.from_support || normalizeId(message.user.id) !== normalizeId(user?.id)) {
       return null;
     }
 
@@ -1001,10 +1047,12 @@ export default function SupportChatScreen() {
         <TouchableOpacity
           style={styles.messageStatusContainer}
           onPress={() => {
-            const cachedMsg = cacheManager.current.getCachedConversation(id)
-              ?.messages.find(m => m.id === (message as any).tempId);
-            if (cachedMsg) {
-              retryFailedMessage((message as any).tempId!, cachedMsg, message.retryCount || 0);
+            if (message.tempId) {
+              const cachedMsg = cacheManager.current.getCachedConversation(id)
+                ?.messages.find(m => m.id === message.tempId);
+              if (cachedMsg) {
+                retryFailedMessage(message.tempId, cachedMsg, message.retryCount || 0);
+              }
             }
           }}
         >
@@ -1084,7 +1132,7 @@ export default function SupportChatScreen() {
         </View>
       </View>
     </View>
-  ), [user?.id, retryFailedMessage]);
+  ), [user?.id, retryFailedMessage, id]);
 
   const renderFlatListData = useMemo(() => {
     const data: any[] = [];
@@ -1319,7 +1367,7 @@ export default function SupportChatScreen() {
         <FlatList
           ref={flatListRef}
           data={renderFlatListData}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item, index) => `${item.id}-${index}`}
           renderItem={renderItem}
           style={styles.messagesList}
           contentContainerStyle={{ paddingVertical: 8 }}
