@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: Improved loading, persistence, and scroll behavior
+// app/(support)/chat/[id].tsx - FIXED: Phase 1 & 3 improvements
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -33,13 +33,12 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 20000;
-const LOAD_MORE_THRESHOLD = 3; // Load more when within 3 messages from top
+const LOAD_MORE_THRESHOLD = 3;
 const CACHE_STALE_TIME = 5 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
 
-// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
 const normalizeId = (id: any): string => String(id);
 
 interface ChatMessage extends CachedMessage {
@@ -120,9 +119,63 @@ export default function SupportChatScreen() {
   const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
-  const processingMessages = useRef<Set<string>>(new Set());
   const isLoadingMoreRef = useRef(false);
   const hasScrolledToBottomRef = useRef(false);
+  
+  // FIXED: Add chat visibility tracking
+  const isChatVisible = useRef(true);
+  const isChatFocused = useRef(true);
+
+  // ============= COMPREHENSIVE CLEANUP FUNCTION =============
+  
+  const clearAllChatData = useCallback(async () => {
+    try {
+      console.log('🧹 Clearing all support agent chat data...');
+      
+      // Clear AsyncStorage
+      const keys = await AsyncStorage.getAllKeys();
+      const supportKeys = keys.filter(k => 
+        k.startsWith('conversation_loaded_support_') ||
+        k.startsWith('cache_timestamp_support_') ||
+        k.includes('support_conversation')
+      );
+      
+      if (supportKeys.length > 0) {
+        await AsyncStorage.multiRemove(supportKeys);
+      }
+      
+      // Clear memory caches
+      if (id) {
+        cacheManager.current.clearConversationCache(id);
+      }
+      
+      // Clear refs
+      conversationLoadedRef.current = false;
+      hasScrolledToBottomRef.current = false;
+      lastReadMessageIdRef.current = null;
+      
+      // Clear state
+      setMessages([]);
+      setConversation(null);
+      
+      console.log('✅ All support agent chat data cleared');
+    } catch (error) {
+      console.error('Failed to clear chat data:', error);
+    }
+  }, [id]);
+
+  // Listen for logout events
+  useEffect(() => {
+    const checkAuthStatus = async () => {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount && id) {
+        await clearAllChatData();
+      }
+    };
+    
+    const interval = setInterval(checkAuthStatus, 1000);
+    return () => clearInterval(interval);
+  }, [id, clearAllChatData]);
 
   // ============= STORAGE PERSISTENCE =============
   
@@ -183,16 +236,21 @@ export default function SupportChatScreen() {
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
     if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
       console.log('📱 App came to foreground');
+      isChatVisible.current = true;
+      isChatFocused.current = true;
       
       if (!isConnected && id) {
         await reconnectActionCable();
       }
       
-      if (id) {
+      // FIXED: Only mark as read when chat is actually visible
+      if (id && isChatVisible.current) {
         await markCustomerMessagesAsReadIfVisible();
       }
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App went to background');
+      isChatVisible.current = false;
+      isChatFocused.current = false;
       
       if (isConnected && actionCableRef.current) {
         await actionCableRef.current.updatePresence('away');
@@ -223,10 +281,17 @@ export default function SupportChatScreen() {
     }
   }, [id, user]);
 
-  // ============= AUTO MARK AS READ =============
+  // ============= FIXED: AUTO MARK AS READ =============
   
   const markCustomerMessagesAsReadIfVisible = useCallback(async () => {
-    if (!id || !isConnected || appState.current !== 'active') return;
+    // FIXED: Only mark as read when chat is actually visible and focused
+    if (!id || !isConnected || !isChatVisible.current || !isChatFocused.current) {
+      return;
+    }
+    
+    if (appState.current !== 'active') {
+      return;
+    }
 
     try {
       const lastUnreadCustomerMessage = messages
@@ -234,7 +299,7 @@ export default function SupportChatScreen() {
         .pop();
 
       if (lastUnreadCustomerMessage && actionCableRef.current) {
-        console.log('📖 Auto-marking customer messages as read');
+        console.log('📖 Auto-marking customer messages as read (chat is visible and focused)');
         
         await actionCableRef.current.perform('mark_message_read', {
           conversation_id: id,
@@ -248,12 +313,14 @@ export default function SupportChatScreen() {
   }, [id, isConnected, messages]);
 
   useEffect(() => {
-    if (appState.current === 'active' && messages.length > 0) {
+    // FIXED: Only auto-mark when conditions are met
+    if (isChatVisible.current && isChatFocused.current && appState.current === 'active' && messages.length > 0) {
       markCustomerMessagesAsReadIfVisible();
     }
   }, [messages, markCustomerMessagesAsReadIfVisible]);
 
-  // ============= CACHE SUBSCRIPTION =============
+  // Continue with remaining implementation...
+// ============= CACHE SUBSCRIPTION =============
   
   useEffect(() => {
     if (!id) return;
@@ -271,7 +338,6 @@ export default function SupportChatScreen() {
       setMessages(uiMessages);
       setHasMoreMessages(cachedData.hasMoreMessages);
       
-      // Auto-scroll to bottom only on initial load or new messages
       if (shouldScrollToEnd && !hasScrolledToBottomRef.current) {
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: false });
@@ -366,7 +432,7 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
-  // ============= ACTIONCABLE SUBSCRIPTIONS =============
+  // ============= FIXED: ACTIONCABLE SUBSCRIPTIONS =============
   
   const setupActionCableSubscriptions = () => {
     if (!actionCableRef.current || !id) return;
@@ -378,7 +444,7 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current = [];
 
-    // New message with enhanced deduplication
+    // FIXED: Improved message handling with immediate processing
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
@@ -387,13 +453,11 @@ export default function SupportChatScreen() {
       const messageData = data.message;
       const messageId = normalizeId(messageData.id);
       
-      // Check if we're already processing this message
-      if (processingMessages.current.has(messageId)) {
+      // FIXED: Simple duplicate check
+      if (cacheManager.current.getCachedConversation(id)?.messages.find(m => m.id === messageId)) {
         console.log('Skipping duplicate message:', messageId);
         return;
       }
-      
-      processingMessages.current.add(messageId);
       
       if (messageData.temp_id) {
         cacheManager.current.removeOptimisticMessages(id);
@@ -424,11 +488,6 @@ export default function SupportChatScreen() {
 
       cacheManager.current.addMessageToCache(id, newMessage);
       
-      // Clear processing flag after a delay
-      setTimeout(() => {
-        processingMessages.current.delete(messageId);
-      }, 1000);
-      
       if (messageData.user?.id !== normalizeId(user?.id)) {
         if (isNearBottom) {
           setTimeout(() => {
@@ -438,14 +497,15 @@ export default function SupportChatScreen() {
           setUnreadCount(prev => prev + 1);
         }
         
-        if (appState.current === 'active') {
+        // FIXED: Only mark as read if chat is visible
+        if (isChatVisible.current && isChatFocused.current && appState.current === 'active') {
           setTimeout(() => markCustomerMessagesAsReadIfVisible(), 500);
         }
       }
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
-    // Message acknowledgment
+    // FIXED: Improved message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         const normalizedMessageId = normalizeId(data.message_id);
@@ -468,7 +528,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubAcknowledged);
 
-    // Message read
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
       if (data.conversation_id === id) {
         console.log(`📖 ${data.reader_name || 'Customer'} read the conversation`);
@@ -481,7 +540,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubRead);
 
-    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
       if (data.conversation_id === id && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setCustomerPresence(prev => ({
@@ -492,7 +550,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
-    // Ticket status
     const unsubStatus = actionCable.subscribe('ticket_status_changed', (data) => {
       if (data.conversation_id === id) {
         console.log('🎫 Ticket status changed:', data.new_status);
@@ -518,7 +575,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubStatus);
 
-    // Conversation update
     const unsubUpdate = actionCable.subscribe('conversation_updated', (data) => {
       if (data.conversation_id === id) {
         console.log('🔄 Conversation updated:', data);
@@ -534,7 +590,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubUpdate);
 
-    // Presence updates
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
       if (data.conversation_id === id && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setCustomerPresence({
@@ -546,7 +601,6 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubPresence);
 
-    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       setIsConnected(true);
     });
@@ -561,7 +615,7 @@ export default function SupportChatScreen() {
     console.log('✅ ActionCable subscriptions configured');
   };
 
-  // ============= MESSAGE RETRY LOGIC =============
+  // ============= FIXED: MESSAGE RETRY LOGIC =============
   
   const scheduleMessageRetry = useCallback((tempId: string, message: CachedMessage, retryCount: number) => {
     if (retryCount >= MAX_RETRY_ATTEMPTS) {
@@ -633,8 +687,6 @@ export default function SupportChatScreen() {
       setUnreadCount(0);
     }
 
-    // Check if user is near the top (within first 3 messages)
-    // This is approximate - each message is roughly 80-100px
     if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
       loadOlderMessages();
     }
@@ -685,17 +737,20 @@ export default function SupportChatScreen() {
       return 'Yesterday';
     } else {
       return date.toLocaleDateString('en-US', { 
-        weekday: 'long', 
         month: 'short', 
-        day: 'numeric' 
+        day: 'numeric',
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
       });
     }
   }, []);
 
+  // FIXED: Improved day separator styling
   const renderDateSeparator = useCallback((dateStr: string) => (
     <View style={styles.dateSeparator} key={`date-${dateStr}`}>
       <View style={styles.dateSeparatorLine} />
-      <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      <View style={styles.dateSeparatorBadge}>
+        <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      </View>
       <View style={styles.dateSeparatorLine} />
     </View>
   ), [formatDateHeader]);
@@ -708,7 +763,6 @@ export default function SupportChatScreen() {
       return;
     }
 
-    // Check cache first for initial load
     if (!isRefresh && !loadOlder && conversationLoadedRef.current) {
       const cachedData = cacheManager.current.getCachedConversation(id);
       if (cachedData && cachedData.messages.length > 0) {
@@ -726,13 +780,11 @@ export default function SupportChatScreen() {
         setLoading(false);
         setIsInitialLoad(false);
         
-        // Scroll to bottom after cache load
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: false });
           hasScrolledToBottomRef.current = true;
         }, 100);
         
-        // Background sync to check for new messages
         setTimeout(() => backgroundSyncMessages(id), 2000);
         return;
       }
@@ -785,7 +837,6 @@ export default function SupportChatScreen() {
         const messagesData = response.data.messages || [];
         const pagination = response.data.pagination || {};
 
-        // Normalize all message IDs
         const normalizedMessages = messagesData.map((msg: any) => ({
           ...msg,
           id: normalizeId(msg.id),
@@ -803,7 +854,6 @@ export default function SupportChatScreen() {
           conversationLoadedRef.current = true;
           await saveConversationLoadedState();
 
-          // Scroll to bottom after API load
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
             hasScrolledToBottomRef.current = true;
@@ -835,9 +885,6 @@ export default function SupportChatScreen() {
 
       console.error('Failed to load conversation:', error);
       setConnectionError(true);
-
-      // Removed Alert.alert - just log the error
-      console.error('Connection error - please retry manually');
     } finally {
       setLoading(false);
       setLoadingOlder(false);
@@ -889,7 +936,7 @@ export default function SupportChatScreen() {
     setShouldScrollToEnd(true);
     hasScrolledToBottomRef.current = false;
     await loadConversation(true);
-  }, [loadConversation, id]);
+  }, [loadConversation, id, clearConversationLoadedState]);
 
   useEffect(() => {
     loadConversation();
@@ -1343,13 +1390,8 @@ export default function SupportChatScreen() {
           </View>
         </View>
 
+        {/* FIXED: Removed call icons */}
         <View style={styles.headerActions}>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Feather name="phone" size={20} color="#fff" />
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.headerActionButton}>
-            <Feather name="video" size={20} color="#fff" />
-          </TouchableOpacity>
           <TouchableOpacity
             style={styles.headerActionButton}
             onPress={() => setShowActions(true)}
@@ -1505,6 +1547,7 @@ const getPriorityColor = (priority: string) => {
   }
 };
 
+// FIXED: Improved styles with day separator and system message fixes
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B141B' },
   header: { flexDirection: 'row', alignItems: 'center', paddingTop: 28, paddingBottom: 12, paddingHorizontal: 12 },
@@ -1537,21 +1580,25 @@ const styles = StyleSheet.create({
   loadingOlderText: { color: '#8E8E93', fontSize: 14, marginLeft: 8 },
   startOfConversationContainer: { alignItems: 'center', paddingVertical: 12 },
   startOfConversationText: { color: '#666', fontSize: 12, fontStyle: 'italic' },
-  dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 16, paddingHorizontal: 12 },
-  dateSeparatorLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.1)' },
-  dateSeparatorText: { color: '#8E8E93', fontSize: 12, fontWeight: '500', marginHorizontal: 12, textTransform: 'uppercase', letterSpacing: 0.5 },
+  // FIXED: Improved day separator
+  dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, paddingHorizontal: 16 },
+  dateSeparatorLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+  dateSeparatorBadge: { backgroundColor: 'rgba(31, 44, 52, 0.95)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginHorizontal: 16, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  dateSeparatorText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   messageContainer: { marginVertical: 2 },
   messageBubble: { maxWidth: '80%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, position: 'relative' },
   supportMessage: { alignSelf: 'flex-end', backgroundColor: '#7B3F98', borderBottomRightRadius: 4 },
   customerMessage: { alignSelf: 'flex-start', backgroundColor: '#1F2C34', borderBottomLeftRadius: 4 },
-  systemMessage: { alignSelf: 'center', backgroundColor: 'rgba(142, 142, 147, 0.1)', borderRadius: 12, maxWidth: '90%', flexDirection: 'row', alignItems: 'center' },
+  // FIXED: System message with proper padding
+  systemMessage: { alignSelf: 'center', backgroundColor: 'rgba(142, 142, 147, 0.15)', borderRadius: 12, maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 20, marginVertical: 6, borderWidth: 1, borderColor: 'rgba(142, 142, 147, 0.2)' },
   optimisticMessage: { opacity: 0.7 },
   failedMessage: { backgroundColor: '#5A2D3D' },
-  systemIndicator: { marginRight: 8 },
-  messageText: { fontSize: 16, lineHeight: 20 },
+  systemIndicator: { marginRight: 8, alignSelf: 'center' },
+  messageText: { fontSize: 16, lineHeight: 20, flexWrap: 'wrap' },
   supportMessageText: { color: '#fff' },
   customerMessageText: { color: '#fff' },
-  systemMessageText: { color: '#8E8E93', fontSize: 14, fontStyle: 'italic' },
+  // FIXED: System message text with proper wrapping
+  systemMessageText: { color: '#8E8E93', fontSize: 14, fontStyle: 'italic', textAlign: 'center', flexShrink: 1 },
   optimisticMessageText: { fontStyle: 'italic' },
   messageFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   messageTime: { fontSize: 11 },
