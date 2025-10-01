@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - FULLY FIXED: All improvements implemented
+// app/(support)/index.tsx - FIXED: All improvements implemented
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -95,6 +95,10 @@ const STATUS_FILTERS = [
 ];
 
 const BACKGROUND_SYNC_INTERVAL = 30000; // 30 seconds
+const MIN_SYNC_INTERVAL = 30000; // Minimum 30 seconds between syncs
+
+// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
+const normalizeId = (id: any): string => String(id);
 
 export default function SupportDashboard() {
   const { user } = useUser();
@@ -118,6 +122,9 @@ export default function SupportDashboard() {
   const appState = useRef(AppState.currentState);
   const backgroundSyncInterval = useRef<NodeJS.Timeout | null>(null);
   const lastSyncTime = useRef<number>(Date.now());
+  const isSyncing = useRef<boolean>(false);
+  const processingTickets = useRef<Set<string>>(new Set());
+  const syncFailureCount = useRef<number>(0);
 
   // ============= APP STATE MANAGEMENT =============
   
@@ -139,7 +146,7 @@ export default function SupportDashboard() {
       
       // Sync data that might have changed while app was in background
       const timeSinceLastSync = Date.now() - lastSyncTime.current;
-      if (timeSinceLastSync > BACKGROUND_SYNC_INTERVAL) {
+      if (timeSinceLastSync > MIN_SYNC_INTERVAL) {
         await Promise.all([
           loadTickets(true),
           loadDashboardData(),
@@ -172,11 +179,15 @@ export default function SupportDashboard() {
 
   const backgroundSync = useCallback(async () => {
     if (appState.current !== 'active') return;
+    if (isSyncing.current) return; // Prevent concurrent syncs
+    
+    const timeSinceLastSync = Date.now() - lastSyncTime.current;
+    if (timeSinceLastSync < MIN_SYNC_INTERVAL) return;
     
     try {
+      isSyncing.current = true;
       console.log('🔄 Background sync triggered');
       
-      // Light sync - only fetch new data, don't show loading indicators
       const response = await api.get('/api/v1/support/tickets', {
         params: {
           limit: 50,
@@ -189,9 +200,15 @@ export default function SupportDashboard() {
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
         
+        // Normalize all ticket IDs
+        const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
+          ...ticket,
+          id: normalizeId(ticket.id),
+        }));
+        
         // Update tickets while preserving typing indicators
         setTickets(prev => {
-          const updatedTickets = newTickets.map((newTicket: SupportTicket) => {
+          const updatedTickets = normalizedTickets.map((newTicket: SupportTicket) => {
             const existingTicket = prev.find(t => t.id === newTicket.id);
             return existingTicket?.typing_user 
               ? { ...newTicket, typing_user: existingTicket.typing_user }
@@ -201,9 +218,20 @@ export default function SupportDashboard() {
         });
         
         lastSyncTime.current = Date.now();
+        syncFailureCount.current = 0; // Reset failure count on success
       }
     } catch (error) {
       console.error('Background sync failed:', error);
+      syncFailureCount.current++;
+      
+      // Exponential backoff on repeated failures
+      if (syncFailureCount.current > 3 && backgroundSyncInterval.current) {
+        clearInterval(backgroundSyncInterval.current);
+        const backoffDelay = Math.min(BACKGROUND_SYNC_INTERVAL * Math.pow(2, syncFailureCount.current - 3), 300000);
+        backgroundSyncInterval.current = setInterval(backgroundSync, backoffDelay);
+      }
+    } finally {
+      isSyncing.current = false;
     }
   }, [activeFilter]);
 
@@ -314,7 +342,7 @@ export default function SupportDashboard() {
         await AsyncStorage.setItem('fcm_token_registered', 'true');
       }
       
-    } catch (error) {
+    } catch (error: any) {
       console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
     }
   };
@@ -326,17 +354,7 @@ export default function SupportDashboard() {
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
       console.log('🔥 FOREGROUND MESSAGE RECEIVED IN SUPPORT:', remoteMessage);
       
-      if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
-        Alert.alert(
-          remoteMessage.notification.title,
-          remoteMessage.notification.body,
-          [
-            { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
-            { text: 'Dismiss', style: 'cancel' }
-          ]
-        );
-      }
-      
+      // Silently refresh data without showing alert
       loadTickets(true);
       loadDashboardData();
     });
@@ -370,11 +388,11 @@ export default function SupportDashboard() {
     
     try {
       if (data?.conversation_id) {
-        router.push(`/(support)/chat/${data.conversation_id}`);
+        router.push(`/(support)/chat/${normalizeId(data.conversation_id)}`);
       } else if (data?.ticket_id) {
         const ticket = tickets.find(t => t.ticket_id === data.ticket_id);
         if (ticket) {
-          router.push(`/(support)/chat/${ticket.id}`);
+          router.push(`/(support)/chat/${normalizeId(ticket.id)}`);
         }
       }
     } catch (error) {
@@ -406,7 +424,7 @@ export default function SupportDashboard() {
       
       const connected = await actionCable.connect({
         token: currentAccount.token,
-        userId: currentAccount.id,
+        userId: normalizeId(currentAccount.id),
         autoReconnect: true,
       });
 
@@ -481,7 +499,11 @@ export default function SupportDashboard() {
     const unsubNewTicket = actionCable.subscribe('new_support_ticket', (data) => {
       console.log('🎫 New support ticket:', data);
       if (data.ticket) {
-        setTickets(prev => [data.ticket, ...prev]);
+        const normalizedTicket = {
+          ...data.ticket,
+          id: normalizeId(data.ticket.id),
+        };
+        setTickets(prev => [normalizedTicket, ...prev]);
         loadDashboardData();
       }
     });
@@ -490,8 +512,9 @@ export default function SupportDashboard() {
     const unsubTicketStatus = actionCable.subscribe('ticket_status_update', (data) => {
       console.log('🎫 Ticket status update:', data);
       if (data.ticket_id && data.status) {
+        const normalizedTicketId = normalizeId(data.ticket_id);
         setTickets(prev => prev.map(ticket => 
-          ticket.id === data.ticket_id 
+          ticket.id === normalizedTicketId 
             ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
             : ticket
         ));
@@ -500,13 +523,23 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTicketStatus);
 
-    // New message - update ticket preview and unread count
+    // New message with enhanced deduplication
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 New message received:', data);
       if (data.conversation_id && data.message) {
+        const normalizedConversationId = normalizeId(data.conversation_id);
+        
+        // Check if we're already processing this update
+        if (processingTickets.current.has(normalizedConversationId)) {
+          console.log('Skipping message update - already processing:', normalizedConversationId);
+          return;
+        }
+        
+        processingTickets.current.add(normalizedConversationId);
+        
         setTickets(prev => {
           const updatedTickets = prev.map(ticket => {
-            if (ticket.id === data.conversation_id) {
+            if (ticket.id === normalizedConversationId) {
               const updatedTicket = { ...ticket };
               updatedTicket.last_message = {
                 content: data.message.content,
@@ -533,11 +566,22 @@ export default function SupportDashboard() {
           });
           
           // Move updated ticket to top
-          const ticket = updatedTickets.find(t => t.id === data.conversation_id);
+          const ticket = updatedTickets.find(t => t.id === normalizedConversationId);
           if (ticket) {
-            const others = updatedTickets.filter(t => t.id !== data.conversation_id);
+            const others = updatedTickets.filter(t => t.id !== normalizedConversationId);
+            
+            // Clear processing flag after a delay
+            setTimeout(() => {
+              processingTickets.current.delete(normalizedConversationId);
+            }, 1000);
+            
             return [ticket, ...others];
           }
+          
+          // Clear processing flag
+          setTimeout(() => {
+            processingTickets.current.delete(normalizedConversationId);
+          }, 1000);
           
           return updatedTickets;
         });
@@ -545,23 +589,22 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
-    // Typing indicator - show in ticket list
+    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
       console.log('⌨️ Typing indicator:', data);
       if (data.conversation_id && data.user_id !== user?.id) {
+        const normalizedConversationId = normalizeId(data.conversation_id);
         setTickets(prev => prev.map(ticket => {
-          if (ticket.id === data.conversation_id) {
+          if (ticket.id === normalizedConversationId) {
             if (data.typing) {
-              // Set typing indicator
               return {
                 ...ticket,
                 typing_user: {
-                  id: data.user_id,
+                  id: normalizeId(data.user_id),
                   name: data.user_name
                 }
               };
             } else {
-              // Clear typing indicator
               const { typing_user, ...rest } = ticket;
               return rest;
             }
@@ -573,13 +616,16 @@ export default function SupportDashboard() {
         if (data.typing) {
           setTypingUsers(prev => {
             const newMap = new Map(prev);
-            newMap.set(data.conversation_id, { id: data.user_id, name: data.user_name });
+            newMap.set(normalizedConversationId, { 
+              id: normalizeId(data.user_id), 
+              name: data.user_name 
+            });
             return newMap;
           });
         } else {
           setTypingUsers(prev => {
             const newMap = new Map(prev);
-            newMap.delete(data.conversation_id);
+            newMap.delete(normalizedConversationId);
             return newMap;
           });
         }
@@ -587,12 +633,13 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
-    // Message read - decrement unread count
+    // Message read
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
       console.log('📖 Conversation read:', data);
-      if (data.conversation_id && data.reader_id === user?.id) {
+      if (data.conversation_id && data.reader_id === normalizeId(user?.id)) {
+        const normalizedConversationId = normalizeId(data.conversation_id);
         setTickets(prev => prev.map(ticket => 
-          ticket.id === data.conversation_id 
+          ticket.id === normalizedConversationId 
             ? { ...ticket, unread_count: 0 }
             : ticket
         ));
@@ -603,8 +650,9 @@ export default function SupportDashboard() {
     const unsubAgentAssignment = actionCable.subscribe('agent_assignment_update', (data) => {
       console.log('👤 Agent assignment update:', data);
       if (data.ticket_id && data.agent) {
+        const normalizedTicketId = normalizeId(data.ticket_id);
         setTickets(prev => prev.map(ticket => 
-          ticket.id === data.ticket_id 
+          ticket.id === normalizedTicketId 
             ? { ...ticket, assigned_agent: data.agent, status: 'assigned' }
             : ticket
         ));
@@ -615,8 +663,9 @@ export default function SupportDashboard() {
     const unsubTicketEscalated = actionCable.subscribe('ticket_escalated', (data) => {
       console.log('🚨 Ticket escalated:', data);
       if (data.ticket_id) {
+        const normalizedTicketId = normalizeId(data.ticket_id);
         setTickets(prev => prev.map(ticket => 
-          ticket.id === data.ticket_id 
+          ticket.id === normalizedTicketId 
             ? { ...ticket, escalated: true, priority: 'high' }
             : ticket
         ));
@@ -680,9 +729,15 @@ export default function SupportDashboard() {
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
         
+        // Normalize all ticket IDs
+        const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
+          ...ticket,
+          id: normalizeId(ticket.id),
+        }));
+        
         // Preserve typing indicators from current state
         setTickets(prevTickets => {
-          return newTickets.map((newTicket: SupportTicket) => {
+          return normalizedTickets.map((newTicket: SupportTicket) => {
             const existingTicket = prevTickets.find(t => t.id === newTicket.id);
             return existingTicket?.typing_user 
               ? { ...newTicket, typing_user: existingTicket.typing_user }
@@ -705,11 +760,14 @@ export default function SupportDashboard() {
     setupActionCableConnection();
     
     return () => {
-      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current.forEach(unsub => {
+        if (unsub) unsub();
+      });
       actionCableSubscriptions.current = [];
       
       if (backgroundSyncInterval.current) {
         clearInterval(backgroundSyncInterval.current);
+        backgroundSyncInterval.current = null;
       }
     };
   }, [setupActionCableConnection]);
@@ -726,17 +784,18 @@ export default function SupportDashboard() {
   
   const handleQuickAssign = async (ticketId: string) => {
     try {
-      const response = await api.post(`/api/v1/support/tickets/${ticketId}/assign`, {
-        agent_id: user?.id
+      const normalizedTicketId = normalizeId(ticketId);
+      const response = await api.post(`/api/v1/support/tickets/${normalizedTicketId}/assign`, {
+        agent_id: normalizeId(user?.id)
       });
       
       if (response.data.success) {
         setTickets(prev => prev.map(ticket => 
-          ticket.id === ticketId 
+          ticket.id === normalizedTicketId 
             ? { 
                 ...ticket, 
                 assigned_agent: { 
-                  id: user?.id || '', 
+                  id: normalizeId(user?.id) || '', 
                   name: user?.display_name || user?.first_name || 'Me',
                   email: user?.email || ''
                 },
@@ -756,15 +815,17 @@ export default function SupportDashboard() {
 
   const handleTicketRead = useCallback(async (ticketId: string) => {
     try {
+      const normalizedTicketId = normalizeId(ticketId);
+      
       // Optimistically clear unread count
       setTickets(prev => prev.map(ticket => 
-        ticket.id === ticketId 
+        ticket.id === normalizedTicketId 
           ? { ...ticket, unread_count: 0 }
           : ticket
       ));
 
       const actionCable = ActionCableService.getInstance();
-      await actionCable.markMessageRead(ticketId);
+      await actionCable.markMessageRead(normalizedTicketId);
       
     } catch (error) {
       console.error('Failed to mark ticket as read:', error);
@@ -843,7 +904,7 @@ export default function SupportDashboard() {
       onPress={() => {
         console.log('Navigating to chat with ID:', item.id);
         handleTicketRead(item.id);
-        router.push(`/(support)/chat/${item.id}`);
+        router.push(`/(support)/chat/${normalizeId(item.id)}`);
       }}
     >
       <View style={styles.ticketContent}>
@@ -1033,13 +1094,13 @@ export default function SupportDashboard() {
               >
                 {item.label}
               </Text>
-              {statusCounts[item.key] > 0 && (
+              {statusCounts[item.key as keyof typeof statusCounts] > 0 && (
                 <View style={[
                   styles.filterPillBadge,
                   isConnected && styles.filterPillBadgeLive
                 ]}>
                   <Text style={styles.filterPillBadgeText}>
-                    {statusCounts[item.key]}
+                    {statusCounts[item.key as keyof typeof statusCounts]}
                   </Text>
                 </View>
               )}
@@ -1057,7 +1118,7 @@ export default function SupportDashboard() {
         ) : (
           <FlatList
             data={tickets}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={renderTicketItem}
             refreshControl={
               <RefreshControl
