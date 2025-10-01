@@ -2410,7 +2410,6 @@ export default function SupportScreen() {
   );
 }
 
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -2439,7 +2438,7 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     color: '#fff',
-    fontSize: 16,
+fontSize: 16,
     fontWeight: '500',
   },
   header: {
@@ -2641,7 +2640,7 @@ const styles = StyleSheet.create({
   },
   messageFooter: {
     flexDirection: 'row',
-alignItems: 'center',
+    alignItems: 'center',
     justifyContent: 'flex-end',
     marginTop: 2,
   },
