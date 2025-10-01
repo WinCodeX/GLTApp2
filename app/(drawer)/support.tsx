@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - FULLY FIXED: All issues resolved
+// app/(drawer)/support.tsx - FIXED: AsyncStorage type mismatch, duplicate keys, and ID consistency
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -85,6 +85,9 @@ interface AgentPresence {
 
 type InquiryType = 'basic' | 'package';
 
+// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
+const normalizeMessageId = (id: any): string => String(id);
+
 export default function SupportScreen() {
   const params = useLocalSearchParams();
   const { user } = useUser();
@@ -167,13 +170,13 @@ export default function SupportScreen() {
   
   const saveConversationState = useCallback(async (convId: string, msgs: Message[]) => {
     try {
-      // Save conversation ID
-      await AsyncStorage.setItem(conversationIdStorageKey, convId);
+      // FIX 1: Always convert conversation ID to string for AsyncStorage
+      await AsyncStorage.setItem(conversationIdStorageKey, String(convId));
       
       // Save messages
       const messagesToSave = msgs.slice(0, 50); // Save last 50 messages
       await AsyncStorage.setItem(
-        `${conversationMessagesStorageKey}_${convId}`,
+        `${conversationMessagesStorageKey}_${String(convId)}`,
         JSON.stringify(messagesToSave)
       );
       
@@ -208,9 +211,9 @@ export default function SupportScreen() {
         setHasActiveTicket(true);
         setMessages(messages);
         
-        // Populate message IDs
+        // Populate message IDs with normalization
         messageIdsRef.current.clear();
-        messages.forEach(msg => messageIdsRef.current.add(msg.id));
+        messages.forEach(msg => messageIdsRef.current.add(normalizeMessageId(msg.id)));
         
         conversationLoadedRef.current = true;
         hasFetchedInitialMessages.current = true;
@@ -482,14 +485,15 @@ export default function SupportScreen() {
     actionCableSubscriptions.current.forEach(unsub => unsub());
     actionCableSubscriptions.current = [];
 
-    // New message with deduplication
+    // FIX 2: New message with enhanced deduplication
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
       if (data.conversation_id !== conversationId || !data.message) return;
       
       const messageData = data.message;
-      const messageId = String(messageData.id);
+      // FIX 2: Normalize message ID immediately
+      const messageId = normalizeMessageId(messageData.id);
       
       // Check if we're already processing this message
       if (processingMessages.current.has(messageId)) {
@@ -514,7 +518,7 @@ export default function SupportScreen() {
           updatedMessages = prev.filter(msg => msg.tempId !== messageData.temp_id);
         }
         
-        // Add new message
+        // Add new message with normalized ID
         const newMessage: Message = {
           id: messageId,
           text: messageData.content || '',
@@ -570,8 +574,9 @@ export default function SupportScreen() {
     // Message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
+        const normalizedId = normalizeMessageId(data.message_id);
         setMessages(prev => prev.map(msg => {
-          if (msg.id === data.message_id || msg.tempId === data.message_id) {
+          if (msg.id === normalizedId || msg.tempId === normalizedId) {
             if (data.status === 'delivered') {
               return { ...msg, delivered_at: data.timestamp, sendStatus: 'delivered' };
             } else if (data.status === 'read') {
@@ -737,8 +742,9 @@ export default function SupportScreen() {
         const apiMessages = response.data.messages;
         const pagination = response.data.pagination || {};
 
+        // FIX 4: Normalize IDs when loading messages
         const newMessages: Message[] = apiMessages.map((msg: any) => ({
-          id: String(msg.id),
+          id: normalizeMessageId(msg.id),
           text: msg.content,
           timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
             hour12: false,
@@ -798,7 +804,7 @@ export default function SupportScreen() {
         if (conversationData?.package) {
           const conversationPackage = conversationData.package;
           setSelectedPackage({
-            id: String(conversationPackage.id),
+            id: normalizeMessageId(conversationPackage.id),
             code: conversationPackage.code,
             state: conversationPackage.state,
             state_display: conversationPackage.state_display,
@@ -862,9 +868,9 @@ export default function SupportScreen() {
         setMessages(prev => {
           const existingIds = new Set(prev.map(m => m.id));
           const toAdd = newMessages
-            .filter((msg: any) => !existingIds.has(String(msg.id)))
+            .filter((msg: any) => !existingIds.has(normalizeMessageId(msg.id)))
             .map((msg: any) => ({
-              id: String(msg.id),
+              id: normalizeMessageId(msg.id),
               text: msg.content,
               timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
                 hour12: false,
@@ -920,7 +926,7 @@ export default function SupportScreen() {
       const response = await api.get('/api/v1/conversations/active_support');
       
       if (response.data.success && response.data.conversation_id) {
-        const activeConvId = response.data.conversation_id;
+        const activeConvId = normalizeMessageId(response.data.conversation_id);
         setConversationId(activeConvId);
         setHasActiveTicket(true);
         setTicketStatus('active');
@@ -1037,7 +1043,7 @@ export default function SupportScreen() {
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: String(response.data.message.id),
+            id: normalizeMessageId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || new Date().toLocaleTimeString('en-US', {
               hour12: false,
@@ -1160,7 +1166,7 @@ export default function SupportScreen() {
 
       if (response.data && response.data.success) {
         const packages = response.data.data.map((pkg: any) => ({
-          id: String(pkg.id || ''),
+          id: normalizeMessageId(pkg.id || ''),
           code: pkg.code || '',
           state: pkg.state || 'unknown',
           state_display: pkg.state_display || 'Unknown',
@@ -1256,7 +1262,7 @@ export default function SupportScreen() {
       const response = await api.post('/api/v1/conversations/support_ticket', payload);
       
       if (response.data.success && response.data.conversation_id) {
-        const newConversationId = response.data.conversation_id;
+        const newConversationId = normalizeMessageId(response.data.conversation_id);
         setConversationId(newConversationId);
         setTicketStatus('pending');
         setHasActiveTicket(true);
@@ -1416,7 +1422,7 @@ export default function SupportScreen() {
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: String(response.data.message.id),
+            id: normalizeMessageId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1499,7 +1505,7 @@ export default function SupportScreen() {
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: String(response.data.message.id),
+            id: normalizeMessageId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1589,7 +1595,7 @@ export default function SupportScreen() {
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: String(response.data.message.id),
+            id: normalizeMessageId(response.data.message.id),
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1797,8 +1803,9 @@ export default function SupportScreen() {
 
     dateKeys.forEach((dateKey) => {
       data.push({ type: 'date', dateKey, id: `date-${dateKey}` });
-      groupedMessages[dateKey].forEach(msg => {
-        data.push({ type: 'message', message: msg, id: msg.id });
+      groupedMessages[dateKey].forEach((msg, index) => {
+        // FIX 3: Add index-based fallback to ensure unique keys
+        data.push({ type: 'message', message: msg, id: `${msg.id}-${index}` });
       });
     });
 
@@ -2182,7 +2189,7 @@ export default function SupportScreen() {
             ref={flatListRef}
             data={renderFlatListData}
             renderItem={renderItem}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             contentContainerStyle={styles.messagesList}
             showsVerticalScrollIndicator={false}
             onScroll={handleScroll}
@@ -2438,7 +2445,7 @@ const styles = StyleSheet.create({
   },
   retryButtonText: {
     color: '#fff',
-fontSize: 16,
+    fontSize: 16,
     fontWeight: '500',
   },
   header: {
