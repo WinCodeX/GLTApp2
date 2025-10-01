@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: All improvements implemented
+// app/(support)/chat/[id].tsx - FIXED: Improved loading, persistence, and scroll behavior
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View,
@@ -12,7 +12,6 @@ import {
   Platform,
   Image,
   ActivityIndicator,
-  Alert,
   Modal,
   RefreshControl,
   AppState,
@@ -34,7 +33,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 20000;
-const SCROLL_THRESHOLD = 0.1;
+const LOAD_MORE_THRESHOLD = 3; // Load more when within 3 messages from top
 const CACHE_STALE_TIME = 5 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAYS = [5000, 15000, 30000];
@@ -106,6 +105,7 @@ export default function SupportChatScreen() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [shouldScrollToEnd, setShouldScrollToEnd] = useState(true);
   
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -121,6 +121,8 @@ export default function SupportChatScreen() {
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
   const processingMessages = useRef<Set<string>>(new Set());
+  const isLoadingMoreRef = useRef(false);
+  const hasScrolledToBottomRef = useRef(false);
 
   // ============= STORAGE PERSISTENCE =============
   
@@ -268,6 +270,15 @@ export default function SupportChatScreen() {
       setConversation(cachedData.conversation);
       setMessages(uiMessages);
       setHasMoreMessages(cachedData.hasMoreMessages);
+      
+      // Auto-scroll to bottom only on initial load or new messages
+      if (shouldScrollToEnd && !hasScrolledToBottomRef.current) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+          hasScrolledToBottomRef.current = true;
+          setShouldScrollToEnd(false);
+        }, 100);
+      }
     });
 
     return () => {
@@ -275,7 +286,7 @@ export default function SupportChatScreen() {
         cacheUnsubscribeRef.current();
       }
     };
-  }, [id]);
+  }, [id, shouldScrollToEnd]);
 
   // ============= ACTIONCABLE SETUP =============
   
@@ -613,6 +624,7 @@ export default function SupportChatScreen() {
     const currentOffset = contentOffset.y;
     const maxOffset = contentSize.height - layoutMeasurement.height;
     const distanceFromBottom = maxOffset - currentOffset;
+    const distanceFromTop = currentOffset;
     
     setIsNearBottom(distanceFromBottom < 100);
     setShowScrollButton(distanceFromBottom > SCROLL_BUTTON_THRESHOLD);
@@ -620,7 +632,13 @@ export default function SupportChatScreen() {
     if (distanceFromBottom < 50) {
       setUnreadCount(0);
     }
-  }, []);
+
+    // Check if user is near the top (within first 3 messages)
+    // This is approximate - each message is roughly 80-100px
+    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
+      loadOlderMessages();
+    }
+  }, [hasMoreMessages]);
 
   const scrollToBottom = useCallback((animated = true) => {
     flatListRef.current?.scrollToEnd({ animated });
@@ -690,9 +708,10 @@ export default function SupportChatScreen() {
       return;
     }
 
+    // Check cache first for initial load
     if (!isRefresh && !loadOlder && conversationLoadedRef.current) {
       const cachedData = cacheManager.current.getCachedConversation(id);
-      if (cachedData) {
+      if (cachedData && cachedData.messages.length > 0) {
         console.log(`📦 Loading conversation from cache: ${id}`);
         
         const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
@@ -707,10 +726,13 @@ export default function SupportChatScreen() {
         setLoading(false);
         setIsInitialLoad(false);
         
+        // Scroll to bottom after cache load
         setTimeout(() => {
           flatListRef.current?.scrollToEnd({ animated: false });
+          hasScrolledToBottomRef.current = true;
         }, 100);
         
+        // Background sync to check for new messages
         setTimeout(() => backgroundSyncMessages(id), 2000);
         return;
       }
@@ -732,6 +754,7 @@ export default function SupportChatScreen() {
         setRefreshing(true);
       } else if (loadOlder) {
         setLoadingOlder(true);
+        isLoadingMoreRef.current = true;
       } else {
         setLoading(true);
       }
@@ -780,8 +803,10 @@ export default function SupportChatScreen() {
           conversationLoadedRef.current = true;
           await saveConversationLoadedState();
 
+          // Scroll to bottom after API load
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
+            hasScrolledToBottomRef.current = true;
           }, 100);
         } else if (loadOlder) {
           cacheManager.current.prependOlderMessages(
@@ -811,18 +836,13 @@ export default function SupportChatScreen() {
       console.error('Failed to load conversation:', error);
       setConnectionError(true);
 
-      Alert.alert(
-        'Error', 
-        'Failed to load conversation. Please check your connection and try again.',
-        [
-          { text: 'Retry', onPress: () => loadConversation(isRefresh, loadOlder) },
-          { text: 'Cancel', style: 'cancel' }
-        ]
-      );
+      // Removed Alert.alert - just log the error
+      console.error('Connection error - please retry manually');
     } finally {
       setLoading(false);
       setLoadingOlder(false);
       setRefreshing(false);
+      isLoadingMoreRef.current = false;
     }
   }, [id]);
 
@@ -832,7 +852,7 @@ export default function SupportChatScreen() {
       
       const response = await api.get(`/api/v1/conversations/${conversationId}`, {
         params: { limit: 10 },
-        timeout: 10000,
+        timeout: 20000,
       });
 
       if (response.data.success && response.data.messages) {
@@ -855,17 +875,19 @@ export default function SupportChatScreen() {
   }, [messages]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (loadingOlder || !cacheManager.current.shouldLoadOlderMessages(id)) {
+    if (isLoadingMoreRef.current || !hasMoreMessages || loadingOlder) {
       return;
     }
     
     console.log('Loading older messages for conversation:', id);
     await loadConversation(false, true);
-  }, [loadConversation, id, loadingOlder]);
+  }, [loadConversation, id, loadingOlder, hasMoreMessages]);
 
   const handleRefresh = useCallback(async () => {
     cacheManager.current.clearConversationCache(id);
     await clearConversationLoadedState();
+    setShouldScrollToEnd(true);
+    hasScrolledToBottomRef.current = false;
     await loadConversation(true);
   }, [loadConversation, id]);
 
@@ -982,17 +1004,17 @@ export default function SupportChatScreen() {
           await api.post(`/api/v1/support/tickets/${id}/assign`, {
             agent_id: normalizeId(user?.id)
           });
-          Alert.alert('Success', 'Ticket assigned to you');
+          console.log('Ticket assigned successfully');
           loadConversation(true);
           break;
         
         case 'escalate':
-          Alert.alert('Escalate Ticket', 'Escalation feature coming soon');
+          console.log('Escalation feature coming soon');
           break;
         
         case 'close':
           await api.patch(`/api/v1/conversations/${id}/close`);
-          Alert.alert('Success', 'Ticket closed');
+          console.log('Ticket closed successfully');
           loadConversation(true);
           break;
         
@@ -1000,13 +1022,12 @@ export default function SupportChatScreen() {
           await api.patch(`/api/v1/support/tickets/${id}/priority`, {
             priority: 'high'
           });
-          Alert.alert('Success', 'Priority set to high');
+          console.log('Priority updated successfully');
           loadConversation(true);
           break;
       }
     } catch (error) {
       console.error('Quick action failed:', error);
-      Alert.alert('Error', 'Action failed');
     }
     setShowActions(false);
   };
@@ -1181,6 +1202,11 @@ export default function SupportChatScreen() {
       onRequestClose={() => setShowActions(false)}
     >
       <View style={styles.modalOverlay}>
+        <TouchableOpacity 
+          style={styles.modalBackdrop}
+          activeOpacity={1}
+          onPress={() => setShowActions(false)}
+        />
         <View style={styles.actionsModal}>
           <View style={styles.modalHeader}>
             <Text style={styles.modalTitle}>Quick Actions</Text>
@@ -1373,8 +1399,6 @@ export default function SupportChatScreen() {
           contentContainerStyle={{ paddingVertical: 8 }}
           onScroll={handleScroll}
           scrollEventThrottle={16}
-          onEndReached={loadOlderMessages}
-          onEndReachedThreshold={SCROLL_THRESHOLD}
           refreshControl={
             <RefreshControl
               refreshing={refreshing}
@@ -1553,6 +1577,7 @@ const styles = StyleSheet.create({
   sendButtonActive: { backgroundColor: '#7B3F98' },
   voiceButton: { backgroundColor: '#7B3F98' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
+  modalBackdrop: { flex: 1 },
   actionsModal: { backgroundColor: '#1F2C34', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#333' },
   modalTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
