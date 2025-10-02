@@ -1,4 +1,4 @@
-// components/AccountContent.tsx - Updated to use Stack Navigation
+// components/AccountContent.tsx - Updated with Account Switching
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Clipboard from 'expo-clipboard';
@@ -18,38 +18,30 @@ import {
 import { Avatar, Button, Dialog, Portal } from 'react-native-paper';
 import * as SplashScreen from 'expo-splash-screen';
 import Toast from 'react-native-toast-message';
+import * as Updates from 'expo-updates';
 
-// Lazy load heavy components to prevent blocking
 const AvatarPreviewModal = React.lazy(() => import('./AvatarPreviewModal'));
 const LoaderOverlay = React.lazy(() => import('./LoaderOverlay'));
 
 import { useUser } from '../context/UserContext';
 import api from '../lib/api';
-
-// Import from the updated api.ts file
 import { 
   getFullAvatarUrl, 
   getCurrentApiBaseUrl,
   getBaseDomain
 } from '../lib/api';
-
-// Import the fixed upload avatar helper
 import { uploadAvatar } from '../lib/helpers/uploadAvatar';
-
-// Import changelog version from ChangelogModal instead of defining locally
 import { CHANGELOG_VERSION } from './ChangelogModal';
-
-// Import Stack Navigation instead of NavigationHelper
 import { useStackNavigation, useAppNavigation } from '../lib/hooks/useStackNavigation';
+import { accountManager, AccountData } from '../lib/AccountManager';
 
-// Enhanced Safe Avatar Component with synchronization support
 interface SafeAvatarProps {
   size: number;
   avatarUrl?: string | null;
   fallbackSource?: any;
   style?: any;
   onPress?: () => void;
-  updateTrigger?: number; // New: Force refresh trigger
+  updateTrigger?: number;
 }
 
 const SafeAvatar: React.FC<SafeAvatarProps> = ({ 
@@ -64,7 +56,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
   const [imageKey, setImageKey] = useState(Date.now());
   const fullAvatarUrl = getFullAvatarUrl(avatarUrl);
   
-  // Reset error state and force reload when avatarUrl or updateTrigger changes
   useEffect(() => {
     console.log('🎭 AccountContent SafeAvatar: Update triggered', {
       avatarUrl,
@@ -73,10 +64,9 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     });
     
     setHasError(false);
-    setImageKey(Date.now()); // Force reload with new timestamp
+    setImageKey(Date.now());
   }, [avatarUrl, updateTrigger]);
   
-  // Debug avatar URL
   useEffect(() => {
     if (avatarUrl) {
       console.log('🎭 AccountContent Avatar Debug:', {
@@ -91,7 +81,6 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
     }
   }, [avatarUrl, fullAvatarUrl, hasError, imageKey, updateTrigger]);
   
-  // Use fallback if no URL or error occurred
   if (!fullAvatarUrl || hasError) {
     return (
       <TouchableOpacity onPress={onPress} disabled={!onPress}>
@@ -109,7 +98,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
       <Avatar.Image
         size={size}
         source={{ 
-          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`, // Enhanced cache busting
+          uri: `${fullAvatarUrl}?v=${imageKey}&t=${updateTrigger}`,
           headers: {
             'Cache-Control': 'no-cache, no-store, must-revalidate',
             'Pragma': 'no-cache',
@@ -135,7 +124,6 @@ interface AccountContentProps {
   title?: string;
 }
 
-// Centralized toast helper with consistent styling
 const showToast = {
   success: (text1: string, text2?: string) => {
     Toast.show({
@@ -179,16 +167,13 @@ const showToast = {
 };
 
 export default function AccountContent({ source, onBack, title = 'Account' }: AccountContentProps) {
-  // Stack Navigation hooks
   const { replace, push } = useStackNavigation();
   const navigation = useAppNavigation();
 
-  // Initialize component state
   const [isScreenReady, setIsScreenReady] = useState(false);
   const [screenError, setScreenError] = useState<string | null>(null);
   const [isRedirecting, setIsRedirecting] = useState(false);
   
-  // Enhanced UserContext methods with avatar synchronization
   const { 
     user, 
     refreshUser, 
@@ -197,16 +182,20 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     error: userError,
     logout,
     getDisplayName,
-    avatarUpdateTrigger, // New: Avatar sync trigger
-    triggerAvatarRefresh, // New: Force avatar refresh
+    avatarUpdateTrigger,
+    triggerAvatarRefresh,
   } = useUser();
 
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [previewUri, setPreviewUri] = useState(null);
   const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
+  
+  // Account switching state
+  const [allAccounts, setAllAccounts] = useState<AccountData[]>([]);
+  const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
+  const [showAccountSwitch, setShowAccountSwitch] = useState(false);
 
-  // Debug avatar URL whenever user changes with sync trigger
   useEffect(() => {
     if (user?.avatar_url) {
       const fullUrl = getFullAvatarUrl(user.avatar_url);
@@ -219,9 +208,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         baseDomain: getBaseDomain()
       });
     }
-  }, [user?.avatar_url, user?.id, avatarUpdateTrigger]); // Watch for avatar sync trigger
+  }, [user?.avatar_url, user?.id, avatarUpdateTrigger]);
 
-  // Component initialization with crash protection
   useEffect(() => {
     let isMounted = true;
     
@@ -234,6 +222,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         if (isMounted) {
           console.log(`🎭 AccountContent (${source}): Ready`);
           setIsScreenReady(true);
+          
+          // Load all accounts
+          await loadAccounts();
           
           if (source === 'admin') {
             setTimeout(async () => {
@@ -262,7 +253,25 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [source]);
 
-  // Updated navigation handlers using Stack Navigation
+  // Load all accounts from AccountManager
+  const loadAccounts = useCallback(async () => {
+    try {
+      const accounts = accountManager.getAllAccounts();
+      const currentId = accountManager.getCurrentUserId();
+      
+      console.log('📱 Loading accounts:', {
+        count: accounts.length,
+        currentId,
+        accounts: accounts.map(a => ({ email: a.email, role: a.role }))
+      });
+      
+      setAllAccounts(accounts);
+      setCurrentAccountId(currentId);
+    } catch (error) {
+      console.error('📱 Failed to load accounts:', error);
+    }
+  }, []);
+
   const navigateToLogin = useCallback(async () => {
     try {
       console.log('📱 AccountContent: Navigating to login...');
@@ -281,7 +290,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [push]);
 
-  // Check for user data and redirect if missing
   useEffect(() => {
     let isMounted = true;
     
@@ -293,7 +301,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         
         if (!isMounted) return;
 
-        // Check if UserContext has user data
         if (!userLoading && !user) {
           console.log('🎭 AccountContent: No user data in context, redirecting to login');
           setIsRedirecting(true);
@@ -302,7 +309,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           return;
         }
 
-        // If we have user data, proceed normally
         if (user) {
           console.log(`🎭 AccountContent: User data validated for ${source} screen:`, {
             id: user.id,
@@ -330,7 +336,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     };
   }, [isScreenReady, user, userLoading, source, isRedirecting, navigateToLogin]);
 
-  // Enhanced refresh handler with better avatar synchronization
   const onRefresh = useCallback(async () => {
     try {
       if (!user) {
@@ -341,11 +346,10 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setRefreshing(true);
       console.log('🎭 AccountContent: Manual refresh triggered - clearing cache and fetching fresh data');
       
-      // Force clear cache and refresh user data
       await clearUserCache();
-      await refreshUser(true); // Force refresh with cache clearing
+      await refreshUser(true);
+      await loadAccounts(); // Reload accounts
       
-      // Trigger avatar refresh to ensure UI sync
       triggerAvatarRefresh();
       
       showToast.success('Data refreshed');
@@ -355,9 +359,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     } finally {
       setRefreshing(false);
     }
-  }, [refreshUser, clearUserCache, triggerAvatarRefresh, user]);
+  }, [refreshUser, clearUserCache, triggerAvatarRefresh, user, loadAccounts]);
 
-  // Avatar picker with better validation
   const pickAndPreviewAvatar = useCallback(async () => {
     try {
       const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -390,7 +393,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, []);
 
-  // Enhanced avatar upload with comprehensive synchronization
   const confirmUploadAvatar = useCallback(async () => {
     try {
       if (!previewUri) return;
@@ -398,34 +400,26 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
       setLoading(true);
       console.log('🎭 AccountContent: Starting comprehensive avatar upload and sync process...');
       
-      // Step 1: Upload avatar using helper
       const result = await uploadAvatar(previewUri);
       console.log('🎭 AccountContent: Upload result:', result);
       
-      // Step 2: Check for success
       if (result?.avatar_url || result?.success) {
         console.log('🎭 AccountContent: Avatar uploaded successfully, starting comprehensive sync...');
         
-        // Step 3: Clear all caches thoroughly
         console.log('🎭 AccountContent: Clearing all caches...');
         await clearUserCache();
         
-        // Step 4: Wait for server processing
         console.log('🎭 AccountContent: Waiting for server processing...');
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Step 5: Force refresh user data from API
         console.log('🎭 AccountContent: Force refreshing user data...');
         await refreshUser(true);
         
-        // Step 6: Trigger avatar refresh across all components
         console.log('🎭 AccountContent: Triggering comprehensive avatar refresh...');
         triggerAvatarRefresh();
         
-        // Step 7: Additional delay to ensure all components update
         await new Promise(resolve => setTimeout(resolve, 500));
         
-        // Step 8: One more refresh to be absolutely sure
         console.log('🎭 AccountContent: Final sync refresh...');
         await refreshUser(true);
         
@@ -444,27 +438,88 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
-  // Use AccountManager-backed logout from UserContext with Stack Navigation
+  // Clear conversation storage on logout
+  const clearConversationStorage = useCallback(async () => {
+    try {
+      console.log('🗑️ Clearing conversation storage...');
+      const keys = await AsyncStorage.getAllKeys();
+      const conversationKeys = keys.filter(key => 
+        key.startsWith('conversation_') || 
+        key.startsWith('chat_') ||
+        key.includes('message')
+      );
+      
+      if (conversationKeys.length > 0) {
+        await AsyncStorage.multiRemove(conversationKeys);
+        console.log('🗑️ Cleared conversation keys:', conversationKeys);
+      }
+    } catch (error) {
+      console.error('🗑️ Failed to clear conversation storage:', error);
+    }
+  }, []);
+
   const confirmLogout = useCallback(async () => {
     try {
       console.log('🎭 AccountContent: Logging out through UserContext...');
       
-      // Use the logout method from UserContext which handles AccountManager
+      await clearConversationStorage();
       await logout();
       
       showToast.info('Logged out successfully');
       setShowLogoutConfirm(false);
       
-      // Navigate to login using Stack Navigation
       navigateToLogin();
       
     } catch (error) {
       console.error('🎭 AccountContent: Logout error:', error);
       showToast.error('Logout failed');
     }
-  }, [logout, navigateToLogin]);
+  }, [logout, navigateToLogin, clearConversationStorage]);
 
-  // Loading screen while initializing or redirecting
+  // Switch to different account and restart app
+  const switchAccount = useCallback(async (accountId: string) => {
+    try {
+      if (accountId === currentAccountId) {
+        showToast.info('Already on this account');
+        setShowAccountSwitch(false);
+        return;
+      }
+
+      setLoading(true);
+      console.log('🔄 Switching to account:', accountId);
+      
+      await accountManager.setCurrentAccount(accountId);
+      
+      showToast.success('Switching account...', 'App will restart');
+      setShowAccountSwitch(false);
+      
+      setTimeout(async () => {
+        try {
+          await Updates.reloadAsync();
+        } catch (error) {
+          console.error('Failed to reload app:', error);
+          showToast.error('Please restart the app manually');
+        }
+      }, 1000);
+      
+    } catch (error) {
+      console.error('Failed to switch account:', error);
+      showToast.error('Failed to switch account');
+      setLoading(false);
+    }
+  }, [currentAccountId]);
+
+  // Add new account - redirect to login
+  const addNewAccount = useCallback(() => {
+    if (allAccounts.length >= 3) {
+      showToast.error('Maximum 3 accounts allowed');
+      return;
+    }
+    
+    showToast.info('Opening login to add account...');
+    navigateToLogin();
+  }, [allAccounts, navigateToLogin]);
+
   if (!isScreenReady || isRedirecting) {
     return (
       <View style={styles.loadingContainer}>
@@ -484,7 +539,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // Error screen
   if (screenError || userError) {
     return (
       <View style={styles.container}>
@@ -527,7 +581,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // Show loading if user data is still loading
   if (userLoading || !user) {
     return (
       <View style={styles.loadingContainer}>
@@ -545,7 +598,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     );
   }
 
-  // Main content with synchronized avatar
+  const isAdmin = user?.primary_role === 'admin' || user?.roles?.includes('admin');
+
   return (
     <View style={styles.container}>
       <Suspense fallback={<View />}>
@@ -561,7 +615,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         )}
       </Suspense>
 
-      {/* Header with matching gradient */}
       <LinearGradient
         colors={['#667eea', '#764ba2']}
         start={{ x: 0, y: 0 }}
@@ -578,7 +631,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         <View style={styles.placeholder} />
       </LinearGradient>
 
-      {/* Content */}
       <ScrollView
         style={styles.scrollView}
         contentContainerStyle={{ paddingBottom: 32 }}
@@ -591,7 +643,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           />
         }
       >
-        {/* User Profile Card with synchronized avatar */}
         <View style={styles.identityCard}>
           <View style={styles.identityRow}>
             <View>
@@ -604,12 +655,49 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               avatarUrl={user?.avatar_url}
               fallbackSource={require('../assets/images/avatar_placeholder.png')}
               onPress={pickAndPreviewAvatar}
-              updateTrigger={avatarUpdateTrigger} // Pass sync trigger
+              updateTrigger={avatarUpdateTrigger}
             />
           </View>
         </View>
 
-        {/* Account Information Card */}
+        {/* Accounts Section - Only for Admin */}
+        {isAdmin && allAccounts.length > 0 && (
+          <View style={styles.accountsCard}>
+            <View style={styles.accountsHeader}>
+              <Text style={styles.sectionTitle}>My Accounts ({allAccounts.length}/3)</Text>
+              {allAccounts.length < 3 && (
+                <TouchableOpacity onPress={addNewAccount}>
+                  <MaterialCommunityIcons name="plus-circle" size={24} color="#764ba2" />
+                </TouchableOpacity>
+              )}
+            </View>
+            
+            {allAccounts.map((account) => (
+              <TouchableOpacity
+                key={account.id}
+                style={styles.accountItem}
+                onPress={() => switchAccount(account.id)}
+              >
+                <SafeAvatar
+                  size={40}
+                  avatarUrl={account.avatar_url}
+                  fallbackSource={require('../assets/images/avatar_placeholder.png')}
+                />
+                <View style={styles.accountInfo}>
+                  <Text style={styles.accountName}>{account.display_name}</Text>
+                  <Text style={styles.accountEmail}>{account.email}</Text>
+                  <Text style={styles.accountRole}>{account.role}</Text>
+                </View>
+                {account.id === currentAccountId && (
+                  <View style={styles.activeIndicator}>
+                    <MaterialCommunityIcons name="check-circle" size={20} color="#4CAF50" />
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
+
         <View style={styles.infoCard}>
           <Text style={styles.sectionTitle}>Account Information</Text>
 
@@ -646,7 +734,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           </TouchableOpacity>
         </View>
 
-        {/* Logout Card */}
         <View style={styles.logoutCard}>
           <TouchableOpacity style={styles.logoutButton} onPress={() => setShowLogoutConfirm(true)}>
             <MaterialCommunityIcons name="logout" size={22} color="#ff6b6b" />
@@ -655,7 +742,6 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
         </View>
       </ScrollView>
 
-      {/* Logout Confirmation Dialog */}
       <Portal>
         <Dialog
           visible={showLogoutConfirm}
@@ -674,8 +760,8 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
               Yes
             </Button>
           </Dialog.Actions>
-          </Dialog>
-        </Portal>
+        </Dialog>
+      </Portal>
     </View>
   );
 }
@@ -742,6 +828,90 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 20,
   },
+  identityCard: { 
+    backgroundColor: '#1a1a2e',
+    margin: 16, 
+    borderRadius: 16, 
+    padding: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  identityRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  userName: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  accountType: { 
+    color: '#888', 
+    fontSize: 14, 
+    marginTop: 4 
+  },
+  version: { 
+    color: '#999', 
+    marginTop: 4 
+  },
+  accountsCard: {
+    backgroundColor: '#1a1a2e',
+    marginHorizontal: 16,
+    marginBottom: 16,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 2,
+    borderColor: 'rgba(118, 75, 162, 0.6)',
+    shadowColor: '#764ba2',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.4,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  accountsHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  accountItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+    marginBottom: 8,
+    backgroundColor: 'rgba(118, 75, 162, 0.1)',
+  },
+  accountInfo: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  accountName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  accountEmail: {
+    color: '#888',
+    fontSize: 14,
+    marginTop: 2,
+  },
+  accountRole: {
+    color: '#764ba2',
+    fontSize: 12,
+    marginTop: 2,
+    textTransform: 'capitalize',
+  },
+  activeIndicator: {
+    marginLeft: 8,
+  },
   infoCard: {
     backgroundColor: '#1a1a2e',
     marginHorizontal: 16,
@@ -786,38 +956,6 @@ const styles = StyleSheet.create({
   infoValue: {
     color: '#ccc',
     fontSize: 15,
-  },
-  identityCard: { 
-    backgroundColor: '#1a1a2e',
-    margin: 16, 
-    borderRadius: 16, 
-    padding: 16,
-    borderWidth: 2,
-    borderColor: 'rgba(118, 75, 162, 0.6)',
-    shadowColor: '#764ba2',
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0.4,
-    shadowRadius: 8,
-    elevation: 8,
-  },
-  identityRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
-  },
-  userName: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: 'bold' 
-  },
-  accountType: { 
-    color: '#888', 
-    fontSize: 14, 
-    marginTop: 4 
-  },
-  version: { 
-    color: '#999', 
-    marginTop: 4 
   },
   logoutCard: { 
     backgroundColor: '#1a1a2e', 
