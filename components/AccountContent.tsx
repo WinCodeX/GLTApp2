@@ -34,6 +34,7 @@ import { uploadAvatar } from '../lib/helpers/uploadAvatar';
 import { CHANGELOG_VERSION } from './ChangelogModal';
 import { useStackNavigation, useAppNavigation } from '../lib/hooks/useStackNavigation';
 import { accountManager, AccountData } from '../lib/AccountManager';
+import AccountManagementModal from './AccountManagementModal';
 
 interface SafeAvatarProps {
   size: number;
@@ -195,6 +196,9 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
   const [allAccounts, setAllAccounts] = useState<AccountData[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
   const [showAccountSwitch, setShowAccountSwitch] = useState(false);
+  
+  // Modal state
+  const [showAccountModal, setShowAccountModal] = useState(false);
 
   useEffect(() => {
     if (user?.avatar_url) {
@@ -509,16 +513,16 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
     }
   }, [currentAccountId]);
 
-  // Add new account - redirect to login
+  // Add new account - show modal instead of redirecting
   const addNewAccount = useCallback(() => {
     if (allAccounts.length >= 3) {
       showToast.error('Maximum 3 accounts allowed');
       return;
     }
     
-    showToast.info('Opening login to add account...');
-    navigateToLogin();
-  }, [allAccounts, navigateToLogin]);
+    showToast.info('Opening account manager...');
+    setShowAccountModal(true);
+  }, [allAccounts]);
 
   if (!isScreenReady || isRedirecting) {
     return (
@@ -614,6 +618,18 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           />
         )}
       </Suspense>
+
+      {/* Account Management Modal */}
+      <AccountManagementModal
+        visible={showAccountModal}
+        onClose={async () => {
+          setShowAccountModal(false);
+          // Reload accounts after modal closes
+          await loadAccounts();
+          // Refresh user data
+          await refreshUser(true);
+        }}
+      />
 
       <LinearGradient
         colors={['#667eea', '#764ba2']}
