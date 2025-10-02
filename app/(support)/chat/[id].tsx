@@ -1,33 +1,33 @@
 // app/(support)/chat/[id].tsx - FIXED: Double messages & cache persistence
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
+import { Feather, MaterialIcons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { LinearGradient } from 'expo-linear-gradient';
+import { router, useLocalSearchParams } from 'expo-router';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  View,
-  Text,
-  StyleSheet,
-  SafeAreaView,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
   ActivityIndicator,
-  Modal,
-  RefreshControl,
   AppState,
   AppStateStatus,
   Dimensions,
+  FlatList,
+  Image,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  RefreshControl,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
 } from 'react-native';
-import { Feather, MaterialIcons } from '@expo/vector-icons';
-import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, router } from 'expo-router';
 import { useUser } from '../../../context/UserContext';
-import api from '../../../lib/api';
-import ActionCableService from '../../../lib/services/ActionCableService';
 import { accountManager } from '../../../lib/AccountManager';
-import ChatCacheManager, { CachedMessage, CachedConversation } from '../../../lib/cache/ChatCacheManager';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '../../../lib/api';
+import ChatCacheManager, { CachedConversation, CachedMessage } from '../../../lib/cache/ChatCacheManager';
+import ActionCableService from '../../../lib/services/ActionCableService';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -1013,92 +1013,99 @@ export default function SupportChatScreen() {
   // ============= FIXED: MESSAGE SENDING WITH PROPER DUPLICATE PREVENTION =============
   
   const sendMessage = useCallback(async () => {
-    if (!inputText.trim() || !subscriptionReady || !id) return;
+  if (!inputText.trim() || !subscriptionReady || !id) return;
 
-    const messageText = inputText.trim();
-    setInputText('');
-    
-    if (isTyping && actionCableRef.current) {
-      setIsTyping(false);
-      actionCableRef.current.stopTyping(id);
-    }
+  const messageText = inputText.trim();
+  setInputText('');
+  
+  if (isTyping && actionCableRef.current) {
+    setIsTyping(false);
+    actionCableRef.current.stopTyping(id);
+  }
 
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    // CRITICAL: Track this pending message
-    pendingMessageIds.current.add(tempId);
-    processedMessageIds.current.add(tempId);
+  const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  
+  // CRITICAL: Track this pending message
+  pendingMessageIds.current.add(tempId);
+  processedMessageIds.current.add(tempId);
 
-    const optimisticMessage: CachedMessage = {
-      id: tempId,
+  const optimisticMessage: CachedMessage = {
+    id: tempId,
+    content: messageText,
+    created_at: new Date().toISOString(),
+    is_system: false,
+    from_support: true,
+    message_type: 'text',
+    user: {
+      id: normalizeId(user?.id) || '',
+      name: user?.display_name || user?.first_name || 'Support',
+      role: 'support',
+      avatar_url: user?.avatar_url,
+    },
+    timestamp: new Date().toLocaleTimeString('en-US', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }),
+    metadata: { temp_id: tempId },
+    optimistic: true,
+  };
+
+  // Add optimistic message immediately
+  cacheManager.current.addOptimisticMessage(id, optimisticMessage);
+  
+  setTimeout(() => scrollToBottom(), 100);
+
+  try {
+    const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
       content: messageText,
-      created_at: new Date().toISOString(),
-      is_system: false,
-      from_support: true,
       message_type: 'text',
-      user: {
-        id: normalizeId(user?.id) || '',
-        name: user?.display_name || user?.first_name || 'Support',
-        role: 'support',
-        avatar_url: user?.avatar_url,
-      },
-      timestamp: new Date().toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }),
-      metadata: { temp_id: tempId },
-      optimistic: true,
-    };
+      temp_id: tempId,
+    }, {
+      timeout: REQUEST_TIMEOUT,
+    });
 
-    // FIXED: Add optimistic message to cache immediately
-    cacheManager.current.addOptimisticMessage(id, optimisticMessage);
-    
-    setTimeout(() => scrollToBottom(), 100);
+    if (response.data.success && response.data.message) {
+      const serverMessage = response.data.message;
+      const serverMessageId = normalizeId(serverMessage.id);
 
-    try {
-      const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
-        content: messageText,
-        message_type: 'text',
-        temp_id: tempId,
-      }, {
-        timeout: REQUEST_TIMEOUT,
+      // CRITICAL FIX: Prevent double messages if ActionCable already added it
+      if (processedMessageIds.current.has(serverMessageId)) {
+        console.log('⏭️ Message already processed by ActionCable, removing optimistic only');
+        cacheManager.current.removeOptimisticMessages(id);
+        pendingMessageIds.current.delete(tempId);
+        return;
+      }
+
+      // Otherwise, add server message now
+      processedMessageIds.current.add(serverMessageId);
+      pendingMessageIds.current.delete(tempId);
+
+      cacheManager.current.removeOptimisticMessages(id);
+      cacheManager.current.addMessageToCache(id, {
+        ...serverMessage,
+        id: serverMessageId,
       });
 
-      if (response.data.success) {
-        const serverMessage = response.data.message;
-        const serverMessageId = normalizeId(serverMessage.id);
-        
-        // CRITICAL: Track the real message ID
-        processedMessageIds.current.add(serverMessageId);
-        pendingMessageIds.current.delete(tempId);
-        
-        // Remove optimistic, add real message
-        cacheManager.current.removeOptimisticMessages(id);
-        cacheManager.current.addMessageToCache(id, {
-          ...serverMessage,
-          id: serverMessageId,
+      if (response.data.conversation) {
+        cacheManager.current.updateConversationMetadata(id, {
+          last_activity_at: response.data.conversation.last_activity_at,
+          status: response.data.conversation.status,
         });
-        
-        if (response.data.conversation) {
-          cacheManager.current.updateConversationMetadata(id, {
-            last_activity_at: response.data.conversation.last_activity_at,
-            status: response.data.conversation.status
-          });
-        }
-        
-        console.log('✅ Message sent successfully, ID:', serverMessageId);
       }
-    } catch (error: any) {
-      console.error('Failed to send message:', error);
-      
-      const cachedConv = cacheManager.current.getCachedConversation(id);
-      const optimisticMsg = cachedConv?.messages.find(m => m.id === tempId);
-      if (optimisticMsg) {
-        scheduleMessageRetry(tempId, optimisticMsg, 0);
-      }
+
+      console.log('✅ Message sent successfully, ID:', serverMessageId);
     }
-  }, [inputText, subscriptionReady, id, user, isTyping, scheduleMessageRetry, scrollToBottom]);
+  } catch (error: any) {
+    console.error('Failed to send message:', error);
+    
+    const cachedConv = cacheManager.current.getCachedConversation(id);
+    const optimisticMsg = cachedConv?.messages.find(m => m.id === tempId);
+    if (optimisticMsg) {
+      scheduleMessageRetry(tempId, optimisticMsg, 0);
+    }
+  }
+}, [inputText, subscriptionReady, id, user, isTyping, scheduleMessageRetry, scrollToBottom]);
 
   // ============= QUICK ACTIONS =============
   

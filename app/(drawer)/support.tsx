@@ -1,41 +1,41 @@
 // app/(drawer)/support.tsx - FIXED: Double messages & immediate cache persistence
 
-import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
-import {
-  View,
-  Text,
-  StyleSheet,
-  FlatList,
-  TextInput,
-  TouchableOpacity,
-  StatusBar,
-  SafeAreaView,
-  KeyboardAvoidingView,
-  Platform,
-  Image,
-  Keyboard,
-  Modal,
-  Animated,
-  Dimensions,
-  BackHandler,
-  ActivityIndicator,
-  RefreshControl,
-  AppState,
-  AppStateStatus,
-} from 'react-native';
 import {
   Feather,
   MaterialIcons,
 } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import api from '../../lib/api';
-import ActionCableService from '../../lib/services/ActionCableService';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Animated,
+  AppState,
+  AppStateStatus,
+  BackHandler,
+  Dimensions,
+  FlatList,
+  Image,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  RefreshControl,
+  SafeAreaView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { useUser } from '../../context/UserContext';
 import { accountManager } from '../../lib/AccountManager';
+import api from '../../lib/api';
+import ChatCacheManager from '../../lib/cache/ChatCacheManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
-import ChatCacheManager, { CachedMessage } from '../../lib/cache/ChatCacheManager';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import ActionCableService from '../../lib/services/ActionCableService';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -1632,104 +1632,111 @@ export default function SupportScreen() {
     }
   };
 
-  // FIXED: Improved sendMessage with duplicate prevention
-  const sendMessage = useCallback(async () => {
-    if (!inputText.trim()) return;
+ // CRITICAL FIX in sendMessage function
+const sendMessage = useCallback(async () => {
+  if (!inputText.trim()) return;
 
-    const messageContent = inputText.trim();
-    setInputText('');
+  const messageContent = inputText.trim();
+  setInputText('');
+  
+  if (isTyping) {
+    setIsTyping(false);
+    sendTypingIndicator(false);
+  }
+  
+  try {
+    const convId = await ensureConversation();
     
-    if (isTyping) {
-      setIsTyping(false);
-      sendTypingIndicator(false);
-    }
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
     
-    try {
-      const convId = await ensureConversation();
-      
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      // CRITICAL: Track pending message
-      pendingMessageIds.current.add(tempId);
-      processedMessageIds.current.add(tempId);
-      
-      const optimisticMessage: Message = {
-        id: tempId,
-        tempId: tempId,
-        text: messageContent,
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: false,
-        type: 'text',
-        packageCode: selectedPackage?.code,
-        isTagged: !!selectedPackage,
-        optimistic: true,
-        sendStatus: 'pending',
-        created_at: new Date().toISOString(),
-      };
+    pendingMessageIds.current.add(tempId);
+    processedMessageIds.current.add(tempId);
+    
+    const optimisticMessage: Message = {
+      id: tempId,
+      tempId: tempId,
+      text: messageContent,
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour12: false,
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      isSupport: false,
+      type: 'text',
+      packageCode: selectedPackage?.code,
+      isTagged: !!selectedPackage,
+      optimistic: true,
+      sendStatus: 'pending',
+      created_at: new Date().toISOString(),
+    };
 
-      setMessages(prev => [...prev, optimisticMessage]);
-      
-      setTimeout(() => scrollToBottom(), 100);
+    setMessages(prev => [...prev, optimisticMessage]);
+    
+    setTimeout(() => scrollToBottom(), 100);
 
-      const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
-      const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-        content: messageContent,
-        message_type: 'text',
-        metadata,
-        temp_id: tempId,
+    const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
+    const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
+      content: messageContent,
+      message_type: 'text',
+      metadata,
+      temp_id: tempId,
+    });
+    
+    if (response.data.success && response.data.message) {
+      const serverMessageId = normalizeId(response.data.message.id);
+      
+      // CRITICAL FIX: Check if ActionCable already added this message
+      if (processedMessageIds.current.has(serverMessageId)) {
+        console.log('⏭️ Message already processed by ActionCable, just removing optimistic');
+        // ActionCable already added it, just remove optimistic
+        setMessages(prev => prev.filter(m => m.tempId !== tempId));
+        pendingMessageIds.current.delete(tempId);
+        return;
+      }
+      
+      // ActionCable hasn't added it yet, add it now
+      processedMessageIds.current.add(serverMessageId);
+      pendingMessageIds.current.delete(tempId);
+      
+      setMessages(prev => {
+        const filtered = prev.filter(m => m.tempId !== tempId);
+        const realMessage: Message = {
+          id: serverMessageId,
+          text: response.data.message.content,
+          timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
+          isSupport: false,
+          type: 'text',
+          packageCode: selectedPackage?.code,
+          isTagged: !!selectedPackage,
+          delivered_at: response.data.message.delivered_at,
+          read_at: response.data.message.read_at,
+          sendStatus: 'sent',
+          created_at: response.data.message.created_at,
+        };
+        
+        const updated = [...filtered, realMessage];
+        messageIdsRef.current.add(realMessage.id);
+        saveConversationState(convId, updated);
+        return updated;
       });
       
-      if (response.data.success && response.data.message) {
-        const serverMessageId = normalizeId(response.data.message.id);
-        
-        // CRITICAL: Track real message ID
-        processedMessageIds.current.add(serverMessageId);
-        pendingMessageIds.current.delete(tempId);
-        
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.tempId !== tempId);
-          const realMessage: Message = {
-            id: serverMessageId,
-            text: response.data.message.content,
-            timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
-            isSupport: false,
-            type: 'text',
-            packageCode: selectedPackage?.code,
-            isTagged: !!selectedPackage,
-            delivered_at: response.data.message.delivered_at,
-            read_at: response.data.message.read_at,
-            sendStatus: 'sent',
-            created_at: response.data.message.created_at,
-          };
-          
-          const updated = [...filtered, realMessage];
-          messageIdsRef.current.add(realMessage.id);
-          saveConversationState(convId, updated);
-          return updated;
-        });
-        
-        setTicketStatus('pending');
-        setHasActiveTicket(true);
-        
-        console.log('✅ Message sent successfully, ID:', serverMessageId);
-      } else {
-        scheduleMessageRetry(tempId, optimisticMessage, 0);
-      }
+      setTicketStatus('pending');
+      setHasActiveTicket(true);
       
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      
-      const optimisticMsg = messages.find(m => m.tempId === tempId);
-      if (optimisticMsg && optimisticMsg.tempId) {
-        scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
-      }
+      console.log('✅ Message sent successfully, ID:', serverMessageId);
+    } else {
+      scheduleMessageRetry(tempId, optimisticMessage, 0);
     }
-  }, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, saveConversationState, scheduleMessageRetry, scrollToBottom]);
-
+    
+  } catch (error) {
+    console.error('Failed to send message:', error);
+    
+    const optimisticMsg = messages.find(m => m.tempId === tempId);
+    if (optimisticMsg && optimisticMsg.tempId) {
+      scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
+    }
+  }
+}, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, saveConversationState, scheduleMessageRetry, scrollToBottom, messages]);
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
     
