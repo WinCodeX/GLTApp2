@@ -25,6 +25,7 @@ import { SupportBottomTabs } from '../../components/support/SupportBottomTabs';
 import { accountManager, AccountData } from '../../lib/AccountManager';
 import { getFullAvatarUrl } from '../../lib/api';
 import { uploadAvatar } from '../../lib/helpers/uploadAvatar';
+import AccountManagementModal from '../../components/AccountManagementModal';
 
 // Lazy load components
 const AvatarPreviewModal = React.lazy(() => import('../../components/AvatarPreviewModal'));
@@ -140,6 +141,9 @@ export default function SupportAccountScreen() {
   // Account switching state
   const [allAccounts, setAllAccounts] = useState<AccountData[]>([]);
   const [currentAccountId, setCurrentAccountId] = useState<string | null>(null);
+  
+  // Modal state
+  const [showAccountModal, setShowAccountModal] = useState(false);
 
   // Load accounts on mount
   useEffect(() => {
@@ -303,15 +307,15 @@ export default function SupportAccountScreen() {
     }
   }, [currentAccountId]);
 
-  // Add new account - redirect to login
+  // Add new account - show modal instead of redirecting
   const addNewAccount = useCallback(() => {
     if (allAccounts.length >= 3) {
       showToast.error('Maximum 3 accounts allowed');
       return;
     }
     
-    showToast.info('Opening login to add account...');
-    router.replace('/(auth)/login');
+    showToast.info('Opening account manager...');
+    setShowAccountModal(true);
   }, [allAccounts]);
 
   const menuItems = [
@@ -378,6 +382,18 @@ export default function SupportAccountScreen() {
           />
         )}
       </Suspense>
+
+      {/* Account Management Modal */}
+      <AccountManagementModal
+        visible={showAccountModal}
+        onClose={async () => {
+          setShowAccountModal(false);
+          // Reload accounts after modal closes
+          await loadAccounts();
+          // Refresh user data
+          await refreshUser(true);
+        }}
+      />
 
       {/* Header */}
       <LinearGradient
