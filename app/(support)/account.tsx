@@ -365,8 +365,6 @@ export default function SupportAccountScreen() {
     },
   ];
 
-  const isSupport = user?.primary_role === 'support' || user?.roles?.includes('support');
-
   return (
     <SafeAreaView style={styles.container}>
       <Suspense fallback={<View />}>
@@ -387,10 +385,42 @@ export default function SupportAccountScreen() {
         visible={showAccountModal}
         onClose={async () => {
           setShowAccountModal(false);
-          // Reload accounts after modal closes
+          
+          console.log('📱 Support: Account modal closed - checking for new accounts...');
+          
+          // Small delay to ensure account is saved
+          await new Promise(resolve => setTimeout(resolve, 500));
+          
+          // Reload accounts
           await loadAccounts();
-          // Refresh user data
-          await refreshUser(true);
+          
+          // Check if we need to restart (new account was added)
+          const updatedAccounts = accountManager.getAllAccounts();
+          const newCurrentId = accountManager.getCurrentUserId();
+          
+          console.log('📱 Support: Accounts after modal:', {
+            count: updatedAccounts.length,
+            previousCurrent: currentAccountId,
+            newCurrent: newCurrentId,
+            needsRestart: currentAccountId !== newCurrentId
+          });
+          
+          // If current account changed, trigger restart
+          if (currentAccountId !== newCurrentId && newCurrentId) {
+            console.log('🔄 Support: New account detected - triggering app restart...');
+            showToast.success('Account added!', 'Restarting app...');
+            
+            // Trigger restart after short delay
+            setTimeout(() => {
+              Updates.reloadAsync().catch((error) => {
+                console.error('Failed to reload app:', error);
+                showToast.error('Please restart the app manually');
+              });
+            }, 1500);
+          } else {
+            // Just refresh if no new account
+            await refreshUser(true);
+          }
         }}
       />
 
@@ -429,8 +459,8 @@ export default function SupportAccountScreen() {
           </TouchableOpacity>
         </View>
 
-        {/* Accounts Section - Only for Support */}
-        {isSupport && allAccounts.length > 0 && (
+        {/* Accounts Section - Available for ALL users */}
+        {allAccounts.length > 0 && (
           <View style={styles.accountsSection}>
             <View style={styles.accountsHeader}>
               <Text style={styles.sectionTitle}>My Accounts ({allAccounts.length}/3)</Text>
