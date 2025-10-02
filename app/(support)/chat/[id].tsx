@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: Message duplication & persistent storage
+// app/(support)/chat/[id].tsx - FIXED: Double messages & cache persistence
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -26,6 +26,7 @@ import { useUser } from '../../../context/UserContext';
 import api from '../../../lib/api';
 import ActionCableService from '../../../lib/services/ActionCableService';
 import { accountManager } from '../../../lib/AccountManager';
+import ChatCacheManager, { CachedMessage, CachedConversation } from '../../../lib/cache/ChatCacheManager';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -33,30 +34,18 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const INITIAL_MESSAGE_LIMIT = 20;
 const PAGINATION_LIMIT = 15;
 const REQUEST_TIMEOUT = 20000;
+const LOAD_MORE_THRESHOLD = 3;
+const CACHE_STALE_TIME = 5 * 60 * 1000;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
 
 const normalizeId = (id: any): string => String(id);
 
-interface ChatMessage {
-  id: string;
-  content: string;
-  created_at: string;
-  timestamp: string;
-  is_system: boolean;
-  from_support: boolean;
-  message_type: string;
-  user: {
-    id: string;
-    name: string;
-    role: string;
-    avatar_url?: string;
-  };
-  metadata?: any;
-  delivered_at?: string;
-  read_at?: string;
+interface ChatMessage extends CachedMessage {
   sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
+  retryCount?: number;
   tempId?: string;
-  isOptimistic?: boolean;
 }
 
 interface ChatConversation {
@@ -89,21 +78,14 @@ interface CustomerPresence {
   is_typing?: boolean;
 }
 
-interface PersistedConversation {
-  conversation: ChatConversation;
-  messages: ChatMessage[];
-  hasMoreMessages: boolean;
-  lastUpdated: number;
-}
-
 export default function SupportChatScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = normalizeId(rawId);
   const { user } = useUser();
-  
-  const [conversation, setConversation] = useState<ChatConversation | null>(null);
+  const [conversation, setConversation] = useState<CachedConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
+  const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState('');
   const [showActions, setShowActions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -111,6 +93,7 @@ export default function SupportChatScreen() {
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
   
   const [isConnected, setIsConnected] = useState(false);
@@ -122,135 +105,132 @@ export default function SupportChatScreen() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNearBottom, setIsNearBottom] = useState(true);
+  const [shouldScrollToEnd, setShouldScrollToEnd] = useState(true);
   
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const cacheManager = useRef(ChatCacheManager.getInstance());
+  const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
+  const conversationLoadedRef = useRef(false);
+  const conversationLoadedStorageKey = `conversation_loaded_support_${id}`;
+  const cacheTimestampKey = `cache_timestamp_support_${id}`;
+  const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
   const isLoadingMoreRef = useRef(false);
   const hasScrolledToBottomRef = useRef(false);
-  const messageIdsRef = useRef<Set<string>>(new Set());
-  const pendingMessagesRef = useRef<Map<string, ChatMessage>>(new Map());
-  
   const isChatVisible = useRef(true);
   const isChatFocused = useRef(true);
-  const appState = useRef(AppState.currentState);
-
-  // ============= PERSISTENT STORAGE KEYS =============
   
-  const STORAGE_KEY = `support_conversation_${id}`;
-  const STORAGE_VERSION = 'v1';
+  // FIXED: Track pending messages to prevent duplicates
+  const pendingMessageIds = useRef<Set<string>>(new Set());
+  const processedMessageIds = useRef<Set<string>>(new Set());
 
-  // ============= PERSISTENT STORAGE FUNCTIONS =============
+  // ============= COMPREHENSIVE CLEANUP FUNCTION =============
   
-  const saveConversationToStorage = useCallback(async (
-    conv: ChatConversation,
-    msgs: ChatMessage[],
-    hasMore: boolean
-  ) => {
+  const clearAllChatData = useCallback(async () => {
     try {
-      const data: PersistedConversation = {
-        conversation: conv,
-        messages: msgs.filter(m => !m.isOptimistic), // Don't persist optimistic messages
-        hasMoreMessages: hasMore,
-        lastUpdated: Date.now(),
-      };
+      console.log('🧹 Clearing all support agent chat data...');
       
-      await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      console.log(`💾 Saved ${msgs.length} messages to storage`);
-    } catch (error) {
-      console.error('Failed to save conversation to storage:', error);
-    }
-  }, [STORAGE_KEY]);
-
-  const loadConversationFromStorage = useCallback(async (): Promise<PersistedConversation | null> => {
-    try {
-      const data = await AsyncStorage.getItem(STORAGE_KEY);
-      if (data) {
-        const parsed: PersistedConversation = JSON.parse(data);
-        console.log(`📦 Loaded ${parsed.messages.length} messages from storage`);
-        return parsed;
-      }
-    } catch (error) {
-      console.error('Failed to load conversation from storage:', error);
-    }
-    return null;
-  }, [STORAGE_KEY]);
-
-  const clearStoredConversation = useCallback(async () => {
-    try {
-      await AsyncStorage.removeItem(STORAGE_KEY);
-      console.log('🗑️ Cleared stored conversation');
-    } catch (error) {
-      console.error('Failed to clear stored conversation:', error);
-    }
-  }, [STORAGE_KEY]);
-
-  // ============= MESSAGE DEDUPLICATION =============
-  
-  const addMessageWithDedup = useCallback((newMessage: ChatMessage) => {
-    setMessages(prev => {
-      // Check if message already exists by ID
-      if (messageIdsRef.current.has(newMessage.id)) {
-        console.log('Skipping duplicate message:', newMessage.id);
-        return prev;
-      }
-      
-      // Check if this is a confirmation of an optimistic message
-      if (newMessage.tempId) {
-        const filtered = prev.filter(m => m.tempId !== newMessage.tempId);
-        messageIdsRef.current.add(newMessage.id);
-        pendingMessagesRef.current.delete(newMessage.tempId);
-        return [...filtered, newMessage].sort((a, b) => 
-          new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-        );
-      }
-      
-      // Check for duplicates by content and timestamp (for messages without tempId)
-      const isDuplicate = prev.some(m => 
-        m.content === newMessage.content &&
-        m.user.id === newMessage.user.id &&
-        Math.abs(new Date(m.created_at).getTime() - new Date(newMessage.created_at).getTime()) < 2000
+      const keys = await AsyncStorage.getAllKeys();
+      const supportKeys = keys.filter(k => 
+        k.startsWith('conversation_loaded_support_') ||
+        k.startsWith('cache_timestamp_support_') ||
+        k.includes('support_conversation')
       );
       
-      if (isDuplicate) {
-        console.log('Skipping duplicate message by content');
-        return prev;
+      if (supportKeys.length > 0) {
+        await AsyncStorage.multiRemove(supportKeys);
       }
       
-      messageIdsRef.current.add(newMessage.id);
-      return [...prev, newMessage].sort((a, b) => 
-        new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-      );
-    });
-  }, []);
+      if (id) {
+        cacheManager.current.clearConversationCache(id);
+      }
+      
+      conversationLoadedRef.current = false;
+      hasScrolledToBottomRef.current = false;
+      lastReadMessageIdRef.current = null;
+      pendingMessageIds.current.clear();
+      processedMessageIds.current.clear();
+      
+      setMessages([]);
+      setConversation(null);
+      
+      console.log('✅ All support agent chat data cleared');
+    } catch (error) {
+      console.error('Failed to clear chat data:', error);
+    }
+  }, [id]);
 
-  const updateMessageStatus = useCallback((messageId: string, updates: Partial<ChatMessage>) => {
-    setMessages(prev => prev.map(msg => 
-      msg.id === messageId ? { ...msg, ...updates } : msg
-    ));
-  }, []);
-
-  // ============= SAVE MESSAGES IMMEDIATELY AFTER STATE UPDATE =============
-  
   useEffect(() => {
-    if (conversation && messages.length > 0 && !loading) {
-      // Debounce saves to avoid too many writes
-      const timeoutId = setTimeout(() => {
-        saveConversationToStorage(conversation, messages, hasMoreMessages);
-      }, 500);
-      
-      return () => clearTimeout(timeoutId);
+    const checkAuthStatus = async () => {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount && id) {
+        await clearAllChatData();
+      }
+    };
+    
+    const interval = setInterval(checkAuthStatus, 1000);
+    return () => clearInterval(interval);
+  }, [id, clearAllChatData]);
+
+  // ============= STORAGE PERSISTENCE =============
+  
+  const saveConversationLoadedState = useCallback(async () => {
+    try {
+      await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
+      await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
+    } catch (error) {
+      console.error('Failed to save conversation loaded state:', error);
     }
-  }, [messages, conversation, hasMoreMessages, loading, saveConversationToStorage]);
+  }, [conversationLoadedStorageKey, cacheTimestampKey]);
+
+  const loadConversationLoadedState = useCallback(async () => {
+    try {
+      const [loaded, timestamp] = await Promise.all([
+        AsyncStorage.getItem(conversationLoadedStorageKey),
+        AsyncStorage.getItem(cacheTimestampKey),
+      ]);
+      
+      if (loaded === 'true' && timestamp) {
+        const cacheAge = Date.now() - parseInt(timestamp, 10);
+        if (cacheAge < CACHE_STALE_TIME) {
+          conversationLoadedRef.current = true;
+          return true;
+        } else {
+          await clearConversationLoadedState();
+        }
+      }
+      return false;
+    } catch (error) {
+      console.error('Failed to load conversation state:', error);
+      return false;
+    }
+  }, [conversationLoadedStorageKey, cacheTimestampKey]);
+
+  const clearConversationLoadedState = useCallback(async () => {
+    try {
+      await Promise.all([
+        AsyncStorage.removeItem(conversationLoadedStorageKey),
+        AsyncStorage.removeItem(cacheTimestampKey),
+      ]);
+      conversationLoadedRef.current = false;
+    } catch (error) {
+      console.error('Failed to clear conversation state:', error);
+    }
+  }, [conversationLoadedStorageKey, cacheTimestampKey]);
 
   // ============= APP STATE MANAGEMENT =============
   
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
+    
+    return () => {
+      subscription.remove();
+    };
   }, [id, isConnected]);
 
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
@@ -271,18 +251,13 @@ export default function SupportChatScreen() {
       isChatVisible.current = false;
       isChatFocused.current = false;
       
-      // Save before going to background
-      if (conversation && messages.length > 0) {
-        await saveConversationToStorage(conversation, messages, hasMoreMessages);
-      }
-      
       if (isConnected && actionCableRef.current) {
         await actionCableRef.current.updatePresence('away');
       }
     }
     
     appState.current = nextAppState;
-  }, [id, isConnected, conversation, messages, hasMoreMessages]);
+  }, [id, isConnected]);
 
   const reconnectActionCable = useCallback(async () => {
     try {
@@ -341,6 +316,43 @@ export default function SupportChatScreen() {
     }
   }, [messages, markCustomerMessagesAsReadIfVisible]);
 
+  // ============= FIXED: CACHE SUBSCRIPTION WITH PROPER PERSISTENCE =============
+  
+  useEffect(() => {
+    if (!id) return;
+
+    cacheUnsubscribeRef.current = cacheManager.current.subscribe(id, (conversationId, cachedData) => {
+      console.log(`📦 Cache updated for conversation ${conversationId}, messages: ${cachedData.messages.length}`);
+      
+      const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
+        ...msg,
+        id: normalizeId(msg.id),
+        sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
+      }));
+      
+      setConversation(cachedData.conversation);
+      setMessages(uiMessages);
+      setHasMoreMessages(cachedData.hasMoreMessages);
+      
+      // FIXED: Save to persistent storage whenever cache updates
+      saveConversationLoadedState();
+      
+      if (shouldScrollToEnd && !hasScrolledToBottomRef.current) {
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+          hasScrolledToBottomRef.current = true;
+          setShouldScrollToEnd(false);
+        }, 100);
+      }
+    });
+
+    return () => {
+      if (cacheUnsubscribeRef.current) {
+        cacheUnsubscribeRef.current();
+      }
+    };
+  }, [id, shouldScrollToEnd, saveConversationLoadedState]);
+
   // ============= ACTIONCABLE SETUP =============
   
   useEffect(() => {
@@ -361,13 +373,14 @@ export default function SupportChatScreen() {
 
         if (connected) {
           setIsConnected(true);
-          console.log('✅ ActionCable connected');
+          console.log('✅ ActionCable connected for support chat');
           
           await actionCableRef.current.joinConversation(id);
           await new Promise(resolve => setTimeout(resolve, 500));
           
           setSubscriptionReady(true);
           setupActionCableSubscriptions();
+          await requestCustomerPresence();
         }
       } catch (error) {
         console.error('Failed to initialize ActionCable:', error);
@@ -396,11 +409,29 @@ export default function SupportChatScreen() {
         clearTimeout(typingTimeoutRef.current);
       }
       
+      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      retryTimeoutsRef.current.clear();
+      
       setSubscriptionReady(false);
     };
   }, [user, id]);
 
-  // ============= ACTIONCABLE SUBSCRIPTIONS =============
+  const requestCustomerPresence = useCallback(async () => {
+    if (!id) return;
+
+    try {
+      const actionCable = actionCableRef.current;
+      if (actionCable) {
+        await actionCable.perform('get_user_presence', {
+          conversation_id: id,
+        });
+      }
+    } catch (error) {
+      console.error('Failed to request customer presence:', error);
+    }
+  }, [id]);
+
+  // ============= FIXED: IMPROVED DUPLICATE DETECTION =============
   
   const setupActionCableSubscriptions = () => {
     if (!actionCableRef.current || !id) return;
@@ -412,22 +443,55 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current = [];
 
-    // FIXED: Improved message handling with strict deduplication
+    // FIXED: Comprehensive duplicate detection
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
-      console.log('📨 New message received:', data.message?.id);
+      console.log('📨 ActionCable message received:', data);
       
       if (data.conversation_id !== id || !data.message) return;
       
       const messageData = data.message;
       const messageId = normalizeId(messageData.id);
+      const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // Skip if already exists
-      if (messageIdsRef.current.has(messageId)) {
-        console.log('Skipping existing message:', messageId);
+      // CRITICAL FIX: Check both message ID and temp ID for duplicates
+      if (processedMessageIds.current.has(messageId)) {
+        console.log('⏭️ Skipping duplicate message by ID:', messageId);
         return;
       }
       
-      const newMessage: ChatMessage = {
+      if (tempId && processedMessageIds.current.has(tempId)) {
+        console.log('⏭️ Skipping duplicate message by temp_id:', tempId);
+        return;
+      }
+      
+      // Check if message already exists in cache
+      const cachedConv = cacheManager.current.getCachedConversation(id);
+      if (cachedConv) {
+        const exists = cachedConv.messages.find(m => 
+          m.id === messageId || 
+          (tempId && m.id === tempId) ||
+          (tempId && m.metadata?.temp_id === tempId)
+        );
+        
+        if (exists) {
+          console.log('⏭️ Message already in cache:', messageId);
+          return;
+        }
+      }
+      
+      // Mark as processed
+      processedMessageIds.current.add(messageId);
+      if (tempId) {
+        processedMessageIds.current.add(tempId);
+        pendingMessageIds.current.delete(tempId);
+      }
+      
+      // Remove optimistic message if it exists
+      if (tempId) {
+        cacheManager.current.removeOptimisticMessages(id);
+      }
+      
+      const newMessage: CachedMessage = {
         id: messageId,
         content: messageData.content || '',
         created_at: messageData.created_at || new Date().toISOString(),
@@ -439,21 +503,19 @@ export default function SupportChatScreen() {
         is_system: messageData.is_system || false,
         from_support: messageData.from_support || false,
         message_type: messageData.message_type || 'text',
-        user: {
+        user: messageData.user || {
           id: normalizeId(messageData.user?.id) || '',
-          name: messageData.user?.name || messageData.user_name || 'Unknown',
-          role: messageData.user?.role || 'unknown',
-          avatar_url: messageData.user?.avatar_url
+          name: messageData.user?.name || 'Unknown',
+          role: messageData.user?.role || 'unknown'
         },
         metadata: messageData.metadata || {},
+        optimistic: false,
         delivered_at: messageData.delivered_at,
         read_at: messageData.read_at,
-        tempId: messageData.temp_id,
-        sendStatus: messageData.read_at ? 'read' : messageData.delivered_at ? 'delivered' : 'sent',
-        isOptimistic: false,
       };
 
-      addMessageWithDedup(newMessage);
+      // FIXED: Immediately save to cache
+      cacheManager.current.addMessageToCache(id, newMessage);
       
       if (messageData.user?.id !== normalizeId(user?.id)) {
         if (isNearBottom) {
@@ -474,25 +536,28 @@ export default function SupportChatScreen() {
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         const normalizedMessageId = normalizeId(data.message_id);
-        const updates: Partial<ChatMessage> = {};
-        
-        if (data.status === 'delivered') {
-          updates.delivered_at = data.timestamp;
-          updates.sendStatus = 'delivered';
-        } else if (data.status === 'read') {
-          updates.delivered_at = data.timestamp;
-          updates.read_at = data.timestamp;
-          updates.sendStatus = 'read';
-        }
-        
-        updateMessageStatus(normalizedMessageId, updates);
+        setMessages(prev => prev.map(msg => {
+          if (msg.id === normalizedMessageId) {
+            if (data.status === 'delivered') {
+              return { ...msg, delivered_at: data.timestamp, sendStatus: 'delivered' };
+            } else if (data.status === 'read') {
+              return { 
+                ...msg, 
+                delivered_at: msg.delivered_at || data.timestamp, 
+                read_at: data.timestamp,
+                sendStatus: 'read'
+              };
+            }
+          }
+          return msg;
+        }));
       }
     });
     actionCableSubscriptions.current.push(unsubAcknowledged);
 
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
       if (data.conversation_id === id) {
-        console.log(`📖 Conversation read by ${data.reader_name || 'Customer'}`);
+        console.log(`📖 ${data.reader_name || 'Customer'} read the conversation`);
         setMessages(prev => prev.map(msg => ({
           ...msg,
           read_at: msg.read_at || data.timestamp,
@@ -516,10 +581,10 @@ export default function SupportChatScreen() {
       if (data.conversation_id === id) {
         console.log('🎫 Ticket status changed:', data.new_status);
         
-        setConversation(prev => prev ? { ...prev, status: data.new_status } : null);
+        cacheManager.current.updateConversationMetadata(id, { status: data.new_status });
         
         if (data.system_message) {
-          const systemMessage: ChatMessage = {
+          const systemMessage: CachedMessage = {
             id: normalizeId(data.system_message.id),
             content: data.system_message.content,
             created_at: data.system_message.created_at,
@@ -529,10 +594,9 @@ export default function SupportChatScreen() {
             message_type: 'system',
             user: data.system_message.user,
             metadata: data.system_message.metadata || {},
-            sendStatus: 'sent',
-            isOptimistic: false,
+            optimistic: false,
           };
-          addMessageWithDedup(systemMessage);
+          cacheManager.current.addMessageToCache(id, systemMessage);
         }
       }
     });
@@ -542,16 +606,13 @@ export default function SupportChatScreen() {
       if (data.conversation_id === id) {
         console.log('🔄 Conversation updated:', data);
         
-        setConversation(prev => {
-          if (!prev) return null;
-          return {
-            ...prev,
-            status: data.status || prev.status,
-            priority: data.priority || prev.priority,
-            assigned_agent: data.assigned_agent || prev.assigned_agent,
-            escalated: data.escalated !== undefined ? data.escalated : prev.escalated,
-          };
-        });
+        const updates: any = {};
+        if (data.status) updates.status = data.status;
+        if (data.priority) updates.priority = data.priority;
+        if (data.assigned_agent) updates.assigned_agent = data.assigned_agent;
+        if (data.escalated !== undefined) updates.escalated = data.escalated;
+        
+        cacheManager.current.updateConversationMetadata(id, updates);
       }
     });
     actionCableSubscriptions.current.push(unsubUpdate);
@@ -581,216 +642,61 @@ export default function SupportChatScreen() {
     console.log('✅ ActionCable subscriptions configured');
   };
 
-  // ============= MESSAGE LOADING =============
+  // ============= MESSAGE RETRY LOGIC =============
   
-  const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
-    if (!id) {
-      setLoading(false);
+  const scheduleMessageRetry = useCallback((tempId: string, message: CachedMessage, retryCount: number) => {
+    if (retryCount >= MAX_RETRY_ATTEMPTS) {
+      console.error('Max retry attempts reached for message:', tempId);
+      
+      setMessages(prev => prev.map(msg => {
+        const chatMsg = msg as ChatMessage;
+        return chatMsg.tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg;
+      }));
       return;
     }
 
-    // FIXED: Always try to load from storage first
-    if (!isRefresh && !loadOlder) {
-      const stored = await loadConversationFromStorage();
-      if (stored && stored.messages.length > 0) {
-        console.log(`📦 Loading from persistent storage: ${stored.messages.length} messages`);
-        
-        setConversation(stored.conversation);
-        setMessages(stored.messages);
-        setHasMoreMessages(stored.hasMoreMessages);
-        setLoading(false);
-        
-        // Populate message IDs
-        messageIdsRef.current.clear();
-        stored.messages.forEach(msg => messageIdsRef.current.add(msg.id));
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-          hasScrolledToBottomRef.current = true;
-        }, 100);
-        
-        // Background sync after showing cached data
-        setTimeout(() => backgroundSyncMessages(), 2000);
-        return;
-      }
+    const delay = RETRY_DELAYS[retryCount] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
+    
+    console.log(`⏳ Scheduling retry ${retryCount + 1} for message in ${delay}ms`);
+    
+    const timeout = setTimeout(() => {
+      retryFailedMessage(tempId, message, retryCount + 1);
+    }, delay);
+
+    retryTimeoutsRef.current.set(tempId, timeout);
+  }, []);
+
+  const retryFailedMessage = useCallback(async (tempId: string, message: CachedMessage, retryCount: number) => {
+    if (!id || !isConnected) {
+      scheduleMessageRetry(tempId, message, retryCount);
+      return;
     }
-
-    console.log(`🌐 Loading from API: ${id}`, { isRefresh, loadOlder });
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    abortControllerRef.current = new AbortController();
-    const timeoutId = setTimeout(() => {
-      abortControllerRef.current?.abort();
-    }, REQUEST_TIMEOUT);
 
     try {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else if (loadOlder) {
-        setLoadingOlder(true);
-        isLoadingMoreRef.current = true;
-      } else {
-        setLoading(true);
-      }
-
-      setConnectionError(false);
-
-      const params: any = {
-        limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
-      };
-
-      if (loadOlder && messages.length > 0) {
-        const oldestMessage = messages.reduce((oldest, msg) => 
-          new Date(msg.created_at) < new Date(oldest.created_at) ? msg : oldest
-        );
-        params.older_than = oldestMessage.id;
-      }
-
-      const response = await api.get(`/api/v1/conversations/${id}`, {
-        params,
-        signal: abortControllerRef.current.signal,
-        timeout: REQUEST_TIMEOUT,
-      });
-
-      clearTimeout(timeoutId);
-
-      if (response.data.success) {
-        const conversationData = response.data.conversation;
-        const messagesData = response.data.messages || [];
-        const pagination = response.data.pagination || {};
-
-        const normalizedMessages: ChatMessage[] = messagesData.map((msg: any) => ({
-          id: normalizeId(msg.id),
-          content: msg.content,
-          created_at: msg.created_at,
-          timestamp: msg.timestamp,
-          is_system: msg.is_system || false,
-          from_support: msg.from_support || false,
-          message_type: msg.message_type || 'text',
-          user: msg.user,
-          metadata: msg.metadata,
-          delivered_at: msg.delivered_at,
-          read_at: msg.read_at,
-          sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
-          isOptimistic: false,
-        }));
-
-        if (isRefresh || (!loadOlder && messages.length === 0)) {
-          setConversation(conversationData);
-          setMessages(normalizedMessages);
-          setHasMoreMessages(pagination.has_more || false);
-          
-          messageIdsRef.current.clear();
-          normalizedMessages.forEach(msg => messageIdsRef.current.add(msg.id));
-          
-          // Save immediately after successful load
-          await saveConversationToStorage(conversationData, normalizedMessages, pagination.has_more || false);
-
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-            hasScrolledToBottomRef.current = true;
-          }, 100);
-        } else if (loadOlder) {
-          setMessages(prev => {
-            const combined = [...normalizedMessages, ...prev];
-            const unique = combined.filter((msg, index, self) =>
-              index === self.findIndex(m => m.id === msg.id)
-            );
-            return unique.sort((a, b) => 
-              new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
-            );
-          });
-          setHasMoreMessages(pagination.has_more || false);
-          
-          normalizedMessages.forEach(msg => messageIdsRef.current.add(msg.id));
-        }
-
-        if (conversationData?.customer?.presence) {
-          setCustomerPresence({
-            status: conversationData.customer.presence.status || 'offline',
-            last_seen: conversationData.customer.presence.last_seen,
-          });
-        }
-
-        console.log(`Loaded ${normalizedMessages.length} messages`);
-      }
+      console.log(`🔄 Retrying message (attempt ${retryCount}):`, tempId);
       
-    } catch (error: any) {
-      clearTimeout(timeoutId);
-      
-      if (error.name === 'AbortError') {
-        return;
-      }
-
-      console.error('Failed to load conversation:', error);
-      setConnectionError(true);
-    } finally {
-      setLoading(false);
-      setLoadingOlder(false);
-      setRefreshing(false);
-      isLoadingMoreRef.current = false;
-    }
-  }, [id, messages, saveConversationToStorage, loadConversationFromStorage]);
-
-  const backgroundSyncMessages = useCallback(async () => {
-    try {
-      console.log('🔄 Background syncing messages...');
-      
-      const response = await api.get(`/api/v1/conversations/${id}`, {
-        params: { limit: 10 },
-        timeout: 20000,
-      });
-
-      if (response.data.success && response.data.messages) {
-        const newMessages: ChatMessage[] = response.data.messages.map((msg: any) => ({
-          id: normalizeId(msg.id),
-          content: msg.content,
-          created_at: msg.created_at,
-          timestamp: msg.timestamp,
-          is_system: msg.is_system || false,
-          from_support: msg.from_support || false,
-          message_type: msg.message_type || 'text',
-          user: msg.user,
-          metadata: msg.metadata,
-          delivered_at: msg.delivered_at,
-          read_at: msg.read_at,
-          sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
-          isOptimistic: false,
-        }));
-        
-        newMessages.forEach(msg => {
-          if (!messageIdsRef.current.has(msg.id)) {
-            addMessageWithDedup(msg);
-          }
+      const actionCable = actionCableRef.current;
+      if (actionCable) {
+        const success = await actionCable.perform('send_message', {
+          conversation_id: id,
+          content: message.content,
+          message_type: message.message_type,
+          metadata: message.metadata,
+          temp_id: tempId,
         });
+
+        if (success) {
+          console.log('✅ Message retry successful');
+          retryTimeoutsRef.current.delete(tempId);
+        } else {
+          scheduleMessageRetry(tempId, message, retryCount);
+        }
       }
     } catch (error) {
-      console.error('Background sync failed:', error);
+      console.error('Message retry failed:', error);
+      scheduleMessageRetry(tempId, message, retryCount);
     }
-  }, [id, addMessageWithDedup]);
-
-  const loadOlderMessages = useCallback(async () => {
-    if (isLoadingMoreRef.current || !hasMoreMessages || loadingOlder) {
-      return;
-    }
-    
-    console.log('Loading older messages');
-    await loadConversation(false, true);
-  }, [loadConversation, loadingOlder, hasMoreMessages]);
-
-  const handleRefresh = useCallback(async () => {
-    await clearStoredConversation();
-    messageIdsRef.current.clear();
-    pendingMessagesRef.current.clear();
-    await loadConversation(true);
-  }, [loadConversation, clearStoredConversation]);
-
-  useEffect(() => {
-    loadConversation();
-  }, [loadConversation]);
+  }, [id, isConnected, scheduleMessageRetry]);
 
   // ============= SCROLL MANAGEMENT =============
   
@@ -811,7 +717,7 @@ export default function SupportChatScreen() {
     if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
       loadOlderMessages();
     }
-  }, [hasMoreMessages, loadOlderMessages]);
+  }, [hasMoreMessages]);
 
   const scrollToBottom = useCallback((animated = true) => {
     flatListRef.current?.scrollToEnd({ animated });
@@ -827,163 +733,6 @@ export default function SupportChatScreen() {
       });
     }
   }, [messages.length, isNearBottom]);
-
-  // ============= TYPING INDICATOR =============
-  
-  const handleTextChange = useCallback((text: string) => {
-    setInputText(text);
-    
-    if (!isTyping && text.trim() && actionCableRef.current && id) {
-      setIsTyping(true);
-      actionCableRef.current.startTyping({ conversationId: id });
-    }
-    
-    if (typingTimeoutRef.current) {
-      clearTimeout(typingTimeoutRef.current);
-    }
-    
-    typingTimeoutRef.current = setTimeout(() => {
-      if (isTyping && actionCableRef.current && id) {
-        setIsTyping(false);
-        actionCableRef.current.stopTyping(id);
-      }
-    }, 2000);
-  }, [isTyping, id]);
-
-  // ============= FIXED: MESSAGE SENDING =============
-  
-  const sendMessage = useCallback(async () => {
-    if (!inputText.trim() || !subscriptionReady || !id || !user) return;
-
-    const messageText = inputText.trim();
-    setInputText('');
-    
-    if (isTyping && actionCableRef.current) {
-      setIsTyping(false);
-      actionCableRef.current.stopTyping(id);
-    }
-
-    const tempId = `temp-${Date.now()}-${Math.random()}`;
-    const now = new Date();
-
-    const optimisticMessage: ChatMessage = {
-      id: tempId,
-      content: messageText,
-      created_at: now.toISOString(),
-      is_system: false,
-      from_support: true,
-      message_type: 'text',
-      user: {
-        id: normalizeId(user.id),
-        name: user.display_name || user.first_name || 'Support',
-        role: 'support',
-        avatar_url: user.avatar_url,
-      },
-      timestamp: now.toLocaleTimeString('en-US', {
-        hour: '2-digit',
-        minute: '2-digit',
-        hour12: false,
-      }),
-      tempId: tempId,
-      sendStatus: 'pending',
-      isOptimistic: true,
-    };
-
-    // Add optimistic message
-    pendingMessagesRef.current.set(tempId, optimisticMessage);
-    addMessageWithDedup(optimisticMessage);
-    
-    setTimeout(() => scrollToBottom(), 100);
-
-    try {
-      const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
-        content: messageText,
-        message_type: 'text',
-        temp_id: tempId,
-      }, {
-        timeout: REQUEST_TIMEOUT,
-      });
-
-      if (response.data.success) {
-        // Remove optimistic message
-        pendingMessagesRef.current.delete(tempId);
-        
-        // The real message will come via ActionCable broadcast
-        // No need to manually add it here
-        
-        console.log('✅ Message sent successfully');
-      }
-    } catch (error: any) {
-      console.error('Failed to send message:', error);
-      
-      // Mark as failed
-      updateMessageStatus(tempId, { sendStatus: 'failed' });
-      pendingMessagesRef.current.delete(tempId);
-    }
-  }, [inputText, subscriptionReady, id, user, isTyping, addMessageWithDedup, updateMessageStatus]);
-
-  // ============= QUICK ACTIONS =============
-  
-  const handleQuickAction = async (action: string) => {
-    if (!id || !conversation) return;
-
-    try {
-      switch (action) {
-        case 'assign_to_me':
-          await api.post(`/api/v1/support/tickets/${id}/assign`, {
-            agent_id: normalizeId(user?.id)
-          });
-          console.log('Ticket assigned successfully');
-          await loadConversation(true);
-          break;
-        
-        case 'escalate':
-          console.log('Escalation feature coming soon');
-          break;
-        
-        case 'close':
-          await api.patch(`/api/v1/conversations/${id}/close`);
-          console.log('Ticket closed successfully');
-          await loadConversation(true);
-          break;
-        
-        case 'priority_high':
-          await api.patch(`/api/v1/support/tickets/${id}/priority`, {
-            priority: 'high'
-          });
-          console.log('Priority updated successfully');
-          await loadConversation(true);
-          break;
-      }
-    } catch (error) {
-      console.error('Quick action failed:', error);
-    }
-    setShowActions(false);
-  };
-
-  // ============= HELPER FUNCTIONS =============
-  
-  const getConnectionStatusText = () => {
-    if (customerPresence.is_typing) {
-      return 'typing...';
-    }
-
-    if (!conversation) return 'Loading...';
-    if (!isConnected) return 'Connecting...';
-    if (customerPresence.status === 'online') return 'Online';
-    if (customerPresence.last_seen) {
-      const lastSeen = new Date(customerPresence.last_seen);
-      const now = new Date();
-      const diffMinutes = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
-      
-      if (diffMinutes < 1) return 'Last seen just now';
-      if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
-      const diffHours = Math.floor(diffMinutes / 60);
-      if (diffHours < 24) return `Last seen ${diffHours}h ago`;
-      return 'Last seen recently';
-    }
-    return 'Offline';
-  };
 
   // ============= DAY SEPARATORS =============
   
@@ -1032,6 +781,388 @@ export default function SupportChatScreen() {
     </View>
   ), [formatDateHeader]);
 
+  // ============= FIXED: MESSAGE LOADING WITH PROPER CACHE =============
+  
+  const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+
+    // FIXED: Only clear cache on explicit refresh, not on regular loads
+    if (!isRefresh && !loadOlder && conversationLoadedRef.current) {
+      const cachedData = cacheManager.current.getCachedConversation(id);
+      if (cachedData && cachedData.messages.length > 0) {
+        console.log(`📦 Loading conversation from persistent cache: ${id}, messages: ${cachedData.messages.length}`);
+        
+        const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
+          ...msg,
+          id: normalizeId(msg.id),
+          sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
+        }));
+        
+        // Rebuild processed IDs from cache
+        cachedData.messages.forEach(msg => {
+          processedMessageIds.current.add(msg.id);
+          if (msg.metadata?.temp_id) {
+            processedMessageIds.current.add(msg.metadata.temp_id);
+          }
+        });
+        
+        setConversation(cachedData.conversation);
+        setMessages(uiMessages);
+        setHasMoreMessages(cachedData.hasMoreMessages);
+        setLoading(false);
+        setIsInitialLoad(false);
+        
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: false });
+          hasScrolledToBottomRef.current = true;
+        }, 100);
+        
+        setTimeout(() => backgroundSyncMessages(id), 2000);
+        return;
+      }
+    }
+
+    console.log(`🌐 Loading conversation from API: ${id}`, { isRefresh, loadOlder });
+
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+    }
+
+    abortControllerRef.current = new AbortController();
+    const timeoutId = setTimeout(() => {
+      abortControllerRef.current?.abort();
+    }, REQUEST_TIMEOUT);
+
+    try {
+      if (isRefresh) {
+        setRefreshing(true);
+      } else if (loadOlder) {
+        setLoadingOlder(true);
+        isLoadingMoreRef.current = true;
+      } else {
+        setLoading(true);
+      }
+
+      setConnectionError(false);
+
+      const params: any = {
+        limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
+      };
+
+      if (loadOlder) {
+        const oldestMessageId = cacheManager.current.getOldestMessageId(id);
+        if (oldestMessageId) {
+          params.older_than = oldestMessageId;
+        }
+      }
+
+      const response = await api.get(`/api/v1/conversations/${id}`, {
+        params,
+        signal: abortControllerRef.current.signal,
+        timeout: REQUEST_TIMEOUT,
+      });
+
+      clearTimeout(timeoutId);
+
+      if (response.data.success) {
+        const conversationData = response.data.conversation;
+        const messagesData = response.data.messages || [];
+        const pagination = response.data.pagination || {};
+
+        const normalizedMessages = messagesData.map((msg: any) => ({
+          ...msg,
+          id: normalizeId(msg.id),
+        }));
+
+        // Track all message IDs from API
+        normalizedMessages.forEach((msg: any) => {
+          processedMessageIds.current.add(msg.id);
+          if (msg.metadata?.temp_id) {
+            processedMessageIds.current.add(msg.metadata.temp_id);
+          }
+        });
+
+        if (isRefresh || (!loadOlder && !conversationLoadedRef.current)) {
+          cacheManager.current.setCachedConversation(
+            id,
+            conversationData,
+            normalizedMessages,
+            pagination.has_more || false,
+            normalizedMessages.length > 0 ? normalizedMessages[0]?.id : null
+          );
+          setIsInitialLoad(false);
+          conversationLoadedRef.current = true;
+          await saveConversationLoadedState();
+
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: false });
+            hasScrolledToBottomRef.current = true;
+          }, 100);
+        } else if (loadOlder) {
+          cacheManager.current.prependOlderMessages(
+            id,
+            normalizedMessages,
+            pagination.has_more || false
+          );
+        }
+
+        if (conversationData?.customer?.presence) {
+          setCustomerPresence({
+            status: conversationData.customer.presence.status || 'offline',
+            last_seen: conversationData.customer.presence.last_seen,
+          });
+        }
+
+        console.log(`✅ Loaded ${normalizedMessages.length} messages, has_more: ${pagination.has_more}`);
+      }
+      
+    } catch (error: any) {
+      clearTimeout(timeoutId);
+      
+      if (error.name === 'AbortError') {
+        return;
+      }
+
+      console.error('Failed to load conversation:', error);
+      setConnectionError(true);
+    } finally {
+      setLoading(false);
+      setLoadingOlder(false);
+      setRefreshing(false);
+      isLoadingMoreRef.current = false;
+    }
+  }, [id, saveConversationLoadedState]);
+
+  const backgroundSyncMessages = useCallback(async (conversationId: string) => {
+    try {
+      console.log('🔄 Background syncing messages...');
+      
+      const response = await api.get(`/api/v1/conversations/${conversationId}`, {
+        params: { limit: 10 },
+        timeout: 20000,
+      });
+
+      if (response.data.success && response.data.messages) {
+        const newMessages = response.data.messages;
+        
+        newMessages.forEach((msg: any) => {
+          const messageId = normalizeId(msg.id);
+          if (!processedMessageIds.current.has(messageId)) {
+            cacheManager.current.addMessageToCache(conversationId, {
+              ...msg,
+              id: messageId,
+            });
+            processedMessageIds.current.add(messageId);
+          }
+        });
+      }
+    } catch (error) {
+      console.error('Background sync failed:', error);
+    }
+  }, []);
+
+  const loadOlderMessages = useCallback(async () => {
+    if (isLoadingMoreRef.current || !hasMoreMessages || loadingOlder) {
+      return;
+    }
+    
+    console.log('Loading older messages for conversation:', id);
+    await loadConversation(false, true);
+  }, [loadConversation, id, loadingOlder, hasMoreMessages]);
+
+  const handleRefresh = useCallback(async () => {
+    // FIXED: Only clear on explicit refresh
+    cacheManager.current.clearConversationCache(id);
+    await clearConversationLoadedState();
+    processedMessageIds.current.clear();
+    pendingMessageIds.current.clear();
+    setShouldScrollToEnd(true);
+    hasScrolledToBottomRef.current = false;
+    await loadConversation(true);
+  }, [loadConversation, id, clearConversationLoadedState]);
+
+  useEffect(() => {
+    loadConversation();
+  }, [loadConversation]);
+
+  // ============= TYPING INDICATOR =============
+  
+  const handleTextChange = useCallback((text: string) => {
+    setInputText(text);
+    
+    if (!isTyping && text.trim() && actionCableRef.current && id) {
+      setIsTyping(true);
+      actionCableRef.current.startTyping({ conversationId: id });
+    }
+    
+    if (typingTimeoutRef.current) {
+      clearTimeout(typingTimeoutRef.current);
+    }
+    
+    typingTimeoutRef.current = setTimeout(() => {
+      if (isTyping && actionCableRef.current && id) {
+        setIsTyping(false);
+        actionCableRef.current.stopTyping(id);
+      }
+    }, 2000);
+  }, [isTyping, id]);
+
+  // ============= FIXED: MESSAGE SENDING WITH PROPER DUPLICATE PREVENTION =============
+  
+  const sendMessage = useCallback(async () => {
+    if (!inputText.trim() || !subscriptionReady || !id) return;
+
+    const messageText = inputText.trim();
+    setInputText('');
+    
+    if (isTyping && actionCableRef.current) {
+      setIsTyping(false);
+      actionCableRef.current.stopTyping(id);
+    }
+
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
+    // CRITICAL: Track this pending message
+    pendingMessageIds.current.add(tempId);
+    processedMessageIds.current.add(tempId);
+
+    const optimisticMessage: CachedMessage = {
+      id: tempId,
+      content: messageText,
+      created_at: new Date().toISOString(),
+      is_system: false,
+      from_support: true,
+      message_type: 'text',
+      user: {
+        id: normalizeId(user?.id) || '',
+        name: user?.display_name || user?.first_name || 'Support',
+        role: 'support',
+        avatar_url: user?.avatar_url,
+      },
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      metadata: { temp_id: tempId },
+      optimistic: true,
+    };
+
+    // FIXED: Add optimistic message to cache immediately
+    cacheManager.current.addOptimisticMessage(id, optimisticMessage);
+    
+    setTimeout(() => scrollToBottom(), 100);
+
+    try {
+      const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
+        content: messageText,
+        message_type: 'text',
+        temp_id: tempId,
+      }, {
+        timeout: REQUEST_TIMEOUT,
+      });
+
+      if (response.data.success) {
+        const serverMessage = response.data.message;
+        const serverMessageId = normalizeId(serverMessage.id);
+        
+        // CRITICAL: Track the real message ID
+        processedMessageIds.current.add(serverMessageId);
+        pendingMessageIds.current.delete(tempId);
+        
+        // Remove optimistic, add real message
+        cacheManager.current.removeOptimisticMessages(id);
+        cacheManager.current.addMessageToCache(id, {
+          ...serverMessage,
+          id: serverMessageId,
+        });
+        
+        if (response.data.conversation) {
+          cacheManager.current.updateConversationMetadata(id, {
+            last_activity_at: response.data.conversation.last_activity_at,
+            status: response.data.conversation.status
+          });
+        }
+        
+        console.log('✅ Message sent successfully, ID:', serverMessageId);
+      }
+    } catch (error: any) {
+      console.error('Failed to send message:', error);
+      
+      const cachedConv = cacheManager.current.getCachedConversation(id);
+      const optimisticMsg = cachedConv?.messages.find(m => m.id === tempId);
+      if (optimisticMsg) {
+        scheduleMessageRetry(tempId, optimisticMsg, 0);
+      }
+    }
+  }, [inputText, subscriptionReady, id, user, isTyping, scheduleMessageRetry, scrollToBottom]);
+
+  // ============= QUICK ACTIONS =============
+  
+  const handleQuickAction = async (action: string) => {
+    if (!id || !conversation) return;
+
+    try {
+      switch (action) {
+        case 'assign_to_me':
+          await api.post(`/api/v1/support/tickets/${id}/assign`, {
+            agent_id: normalizeId(user?.id)
+          });
+          console.log('Ticket assigned successfully');
+          loadConversation(true);
+          break;
+        
+        case 'escalate':
+          console.log('Escalation feature coming soon');
+          break;
+        
+        case 'close':
+          await api.patch(`/api/v1/conversations/${id}/close`);
+          console.log('Ticket closed successfully');
+          loadConversation(true);
+          break;
+        
+        case 'priority_high':
+          await api.patch(`/api/v1/support/tickets/${id}/priority`, {
+            priority: 'high'
+          });
+          console.log('Priority updated successfully');
+          loadConversation(true);
+          break;
+      }
+    } catch (error) {
+      console.error('Quick action failed:', error);
+    }
+    setShowActions(false);
+  };
+
+  // ============= HELPER FUNCTIONS =============
+  
+  const getConnectionStatusText = () => {
+    if (customerPresence.is_typing) {
+      return 'typing...';
+    }
+
+    if (!conversation) return 'Loading...';
+    if (!isConnected) return 'Connecting...';
+    if (customerPresence.status === 'online') return 'Online';
+    if (customerPresence.last_seen) {
+      const lastSeen = new Date(customerPresence.last_seen);
+      const now = new Date();
+      const diffMinutes = Math.floor((now.getTime() - lastSeen.getTime()) / 60000);
+      
+      if (diffMinutes < 1) return 'Last seen just now';
+      if (diffMinutes < 60) return `Last seen ${diffMinutes}m ago`;
+      const diffHours = Math.floor(diffMinutes / 60);
+      if (diffHours < 24) return `Last seen ${diffHours}h ago`;
+      return 'Last seen recently';
+    }
+    return 'Offline';
+  };
+
   // ============= RENDER FUNCTIONS =============
   
   const renderMessageStatus = (message: ChatMessage) => {
@@ -1044,7 +1175,13 @@ export default function SupportChatScreen() {
         <TouchableOpacity
           style={styles.messageStatusContainer}
           onPress={() => {
-            // Retry logic can be added here
+            if (message.tempId) {
+              const cachedMsg = cacheManager.current.getCachedConversation(id)
+                ?.messages.find(m => m.id === message.tempId);
+              if (cachedMsg) {
+                retryFailedMessage(message.tempId, cachedMsg, message.retryCount || 0);
+              }
+            }
           }}
         >
           <MaterialIcons name="error-outline" size={16} color="#ef4444" />
@@ -1052,7 +1189,7 @@ export default function SupportChatScreen() {
       );
     }
 
-    if (message.isOptimistic || message.sendStatus === 'pending') {
+    if (message.optimistic || message.sendStatus === 'pending') {
       return (
         <View style={styles.messageStatusContainer}>
           <MaterialIcons name="schedule" size={16} color="rgba(255, 255, 255, 0.5)" />
@@ -1090,7 +1227,7 @@ export default function SupportChatScreen() {
           styles.messageBubble,
           item.from_support ? styles.supportMessage : styles.customerMessage,
           item.is_system && styles.systemMessage,
-          item.isOptimistic && styles.optimisticMessage,
+          item.optimistic && styles.optimisticMessage,
           item.sendStatus === 'failed' && styles.failedMessage,
         ]}
       >
@@ -1104,7 +1241,7 @@ export default function SupportChatScreen() {
             styles.messageText,
             item.from_support ? styles.supportMessageText : styles.customerMessageText,
             item.is_system && styles.systemMessageText,
-            item.isOptimistic && styles.optimisticMessageText,
+            item.optimistic && styles.optimisticMessageText,
           ]}
         >
           {item.content}
@@ -1123,7 +1260,7 @@ export default function SupportChatScreen() {
         </View>
       </View>
     </View>
-  ), [user?.id]);
+  ), [user?.id, retryFailedMessage, id]);
 
   const renderFlatListData = useMemo(() => {
     const data: any[] = [];
@@ -1223,7 +1360,7 @@ export default function SupportChatScreen() {
 
   // ============= MAIN RENDER =============
   
-  if (loading && messages.length === 0) {
+  if (loading && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
