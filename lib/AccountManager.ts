@@ -1,4 +1,4 @@
-// lib/AccountManager.ts - FIXED: Immediate persistence + better role handling
+// lib/AccountManager.ts - Updated with Account Selection Support
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -17,11 +17,13 @@ export interface AccountData {
 export interface AccountGroup {
   accounts: AccountData[];
   currentAccountId: string | null;
+  selectedAccountId: string | null; // NEW: Explicitly selected account
   version: number;
 }
 
 const STORAGE_KEY = 'account_groups';
 const CURRENT_ACCOUNT_KEY = 'current_account_id';
+const SELECTED_ACCOUNT_KEY = 'selected_account_id'; // NEW
 const BACKUP_KEY = 'account_groups_backup';
 const CURRENT_VERSION = 2;
 
@@ -30,6 +32,7 @@ export class AccountManager {
   private accountGroup: AccountGroup = {
     accounts: [],
     currentAccountId: null,
+    selectedAccountId: null, // NEW
     version: CURRENT_VERSION
   };
   private initialized = false;
@@ -54,17 +57,44 @@ export class AccountManager {
       
       const mainData = await this.loadStoredData(STORAGE_KEY);
       const currentAccountId = await this.loadCurrentAccountId();
+      const selectedAccountId = await this.loadSelectedAccountId(); // NEW
       
       if (mainData && this.validateAccountGroup(mainData)) {
         this.accountGroup = {
           accounts: mainData.accounts,
           currentAccountId: currentAccountId || mainData.currentAccountId || null,
+          selectedAccountId: selectedAccountId || mainData.selectedAccountId || null, // NEW
           version: mainData.version || CURRENT_VERSION
         };
+        
+        // NEW: If selectedAccountId exists and is valid, use it as current
+        if (this.accountGroup.selectedAccountId) {
+          const selectedAccount = this.accountGroup.accounts.find(
+            acc => acc.id === this.accountGroup.selectedAccountId
+          );
+          if (selectedAccount) {
+            this.accountGroup.currentAccountId = this.accountGroup.selectedAccountId;
+            console.log('AccountManager: Using selected account:', this.accountGroup.selectedAccountId);
+          }
+        }
+        
+        // NEW: If no selected account, default to first available or current
+        if (!this.accountGroup.selectedAccountId && this.accountGroup.accounts.length > 0) {
+          const accountToUse = this.accountGroup.currentAccountId 
+            ? this.accountGroup.accounts.find(acc => acc.id === this.accountGroup.currentAccountId)
+            : this.accountGroup.accounts[0];
+          
+          if (accountToUse) {
+            this.accountGroup.selectedAccountId = accountToUse.id;
+            this.accountGroup.currentAccountId = accountToUse.id;
+            console.log('AccountManager: Defaulting to account:', accountToUse.email);
+          }
+        }
         
         console.log('AccountManager: Loaded accounts:', {
           count: this.accountGroup.accounts.length,
           current: this.accountGroup.currentAccountId,
+          selected: this.accountGroup.selectedAccountId,
           roles: this.accountGroup.accounts.map(a => ({ email: a.email, role: a.role }))
         });
       } else if (mainData && !this.validateAccountGroup(mainData)) {
@@ -75,9 +105,10 @@ export class AccountManager {
           this.accountGroup = {
             accounts: backupData.accounts,
             currentAccountId: currentAccountId || backupData.currentAccountId || null,
+            selectedAccountId: selectedAccountId || backupData.selectedAccountId || null, // NEW
             version: backupData.version || CURRENT_VERSION
           };
-          await this.persistImmediate(); // Use immediate persist
+          await this.persistImmediate();
           console.log('AccountManager: Restored from backup');
         } else {
           console.error('AccountManager: Both main and backup invalid, resetting');
@@ -123,6 +154,7 @@ export class AccountManager {
           account.id && account.email && account.token
         ),
         currentAccountId: parsed.currentAccountId || null,
+        selectedAccountId: parsed.selectedAccountId || null, // NEW
         version: parseInt(parsed.version) || 1
       };
       
@@ -160,6 +192,17 @@ export class AccountManager {
     }
   }
 
+  // NEW: Load selected account ID
+  private async loadSelectedAccountId(): Promise<string | null> {
+    try {
+      const stored = await AsyncStorage.getItem(SELECTED_ACCOUNT_KEY);
+      return stored ? String(stored) : null;
+    } catch (error) {
+      console.error('AccountManager: Failed to load selected account ID:', error);
+      return null;
+    }
+  }
+
   private validateAccountGroup(data: any): boolean {
     if (!data || typeof data !== 'object' || !Array.isArray(data.accounts)) {
       return false;
@@ -191,12 +234,12 @@ export class AccountManager {
     this.accountGroup = {
       accounts: [],
       currentAccountId: null,
+      selectedAccountId: null, // NEW
       version: CURRENT_VERSION
     };
     await this.clearAllStorage();
   }
 
-  // FIXED: Immediate persist without debounce for critical operations
   private async persistImmediate(): Promise<void> {
     try {
       console.log('AccountManager: Starting immediate persistence...');
@@ -216,6 +259,7 @@ export class AccountManager {
           createdAt: String(account.createdAt)
         })),
         currentAccountId: this.accountGroup.currentAccountId ? String(this.accountGroup.currentAccountId) : null,
+        selectedAccountId: this.accountGroup.selectedAccountId ? String(this.accountGroup.selectedAccountId) : null, // NEW
         version: String(CURRENT_VERSION),
         persistedAt: String(Date.now())
       };
@@ -228,11 +272,19 @@ export class AccountManager {
         await AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY);
       }
       
+      // NEW: Persist selected account ID
+      if (this.accountGroup.selectedAccountId) {
+        await AsyncStorage.setItem(SELECTED_ACCOUNT_KEY, String(this.accountGroup.selectedAccountId));
+      } else {
+        await AsyncStorage.removeItem(SELECTED_ACCOUNT_KEY);
+      }
+      
       await this.syncWithSecureStore();
       
       console.log('AccountManager: Immediate persistence successful', {
         accounts: this.accountGroup.accounts.length,
         currentId: this.accountGroup.currentAccountId,
+        selectedId: this.accountGroup.selectedAccountId,
         roles: this.accountGroup.accounts.map(a => ({ email: a.email, role: a.role }))
       });
       
@@ -253,7 +305,6 @@ export class AccountManager {
     }
   }
 
-  // FIXED: Enhanced addAccount with immediate persistence and better logging
   async addAccount(userData: any, token: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
@@ -273,7 +324,6 @@ export class AccountManager {
       
       const existingIndex = this.accountGroup.accounts.findIndex(acc => acc.id === String(userData.id));
       
-      // FIXED: Determine role with priority: primary_role > roles array
       const roles = userData.roles || [];
       let role: 'admin' | 'client' | 'support' = 'client';
       
@@ -347,7 +397,7 @@ export class AccountManager {
       account.role = validatedRole;
       account.lastUsed = Date.now();
       
-      await this.persistImmediate(); // Use immediate persist
+      await this.persistImmediate();
       
       console.log('AccountManager: Account role updated:', {
         email: account.email,
@@ -378,8 +428,9 @@ export class AccountManager {
     try {
       account.lastUsed = Date.now();
       this.accountGroup.currentAccountId = accountId;
+      this.accountGroup.selectedAccountId = accountId; // NEW: Also set as selected
       
-      await this.persistImmediate(); // FIXED: Use immediate persist
+      await this.persistImmediate();
       
       console.log('AccountManager: Current account set:', {
         id: accountId,
@@ -390,6 +441,45 @@ export class AccountManager {
       console.error('AccountManager: Failed to set current account:', error);
       throw error;
     }
+  }
+
+  // NEW: Set selected account (for switching)
+  async setSelectedAccount(accountId: string): Promise<void> {
+    if (!this.initialized) {
+      await this.initialize();
+    }
+
+    const account = this.accountGroup.accounts.find(acc => acc.id === accountId);
+    if (!account) {
+      throw new Error(`Account not found: ${accountId}`);
+    }
+
+    console.log('AccountManager: Setting selected account:', {
+      email: account.email,
+      role: account.role
+    });
+    
+    try {
+      account.lastUsed = Date.now();
+      this.accountGroup.selectedAccountId = accountId;
+      this.accountGroup.currentAccountId = accountId;
+      
+      await this.persistImmediate();
+      
+      console.log('AccountManager: Selected account set:', {
+        id: accountId,
+        role: account.role
+      });
+      
+    } catch (error) {
+      console.error('AccountManager: Failed to set selected account:', error);
+      throw error;
+    }
+  }
+
+  // NEW: Get selected account ID
+  getSelectedAccountId(): string | null {
+    return this.accountGroup.selectedAccountId;
   }
 
   private async syncWithSecureStore(): Promise<void> {
@@ -512,7 +602,8 @@ export class AccountManager {
     
     this.accountGroup = { 
       accounts: [], 
-      currentAccountId: null, 
+      currentAccountId: null,
+      selectedAccountId: null, // NEW
       version: CURRENT_VERSION 
     };
     
@@ -531,6 +622,7 @@ export class AccountManager {
       await Promise.all([
         AsyncStorage.removeItem(STORAGE_KEY),
         AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY),
+        AsyncStorage.removeItem(SELECTED_ACCOUNT_KEY), // NEW
         AsyncStorage.removeItem(BACKUP_KEY)
       ]);
       
@@ -572,6 +664,7 @@ export class AccountManager {
       initialized: this.initialized,
       accountCount: this.accountGroup.accounts.length,
       currentAccountId: this.accountGroup.currentAccountId,
+      selectedAccountId: this.accountGroup.selectedAccountId, // NEW
       hasCurrentAccount: !!this.getCurrentAccount(),
       currentToken: !!this.getCurrentToken(),
       currentUserId: this.getCurrentUserId(),
