@@ -1,7 +1,7 @@
-// app/(drawer)/_layout.tsx - FIXED: Better role persistence and validation
+// app/(drawer)/_layout.tsx - Enhanced with better account switching
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
-import { useRouter } from 'expo-router';
+import { useRouter, useSegments } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 
 import { Drawer } from 'expo-router/drawer';
@@ -57,7 +57,36 @@ const getEffectiveRole = (userData: any): string => {
 export default function DrawerLayout() {
   const drawerWidth = Dimensions.get('window').width * 0.65;
   const [authState, setAuthState] = useState<AuthState>('loading');
+  const [lastAccountId, setLastAccountId] = useState<string | null>(null);
   const router = useRouter();
+  const segments = useSegments();
+
+  // Monitor for account changes
+  useEffect(() => {
+    const checkAccountChange = async () => {
+      const currentAccount = accountManager.getCurrentAccount();
+      const currentId = currentAccount?.id;
+      
+      if (currentId && lastAccountId && currentId !== lastAccountId) {
+        console.log('🔄 Account change detected:', {
+          previous: lastAccountId,
+          current: currentId,
+          role: currentAccount?.role
+        });
+        
+        // Account was switched, re-validate session
+        setAuthState('loading');
+        setLastAccountId(currentId);
+        await performSessionValidation();
+      } else if (currentId && !lastAccountId) {
+        // First load
+        setLastAccountId(currentId);
+      }
+    };
+
+    // Check every time the component updates
+    checkAccountChange();
+  }, [segments, lastAccountId]);
 
   useEffect(() => {
     const handleAppStateChange = (nextAppState: AppStateStatus) => {
@@ -85,6 +114,11 @@ export default function DrawerLayout() {
       await accountManager.initialize();
       
       const currentAccount = accountManager.getCurrentAccount();
+      
+      // Update last account ID
+      if (currentAccount?.id) {
+        setLastAccountId(currentAccount.id);
+      }
       
       // FIXED: Better logging of account state
       console.log('🔐 Account state:', {
