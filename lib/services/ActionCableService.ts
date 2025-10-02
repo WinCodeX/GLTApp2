@@ -1,4 +1,4 @@
-// lib/services/ActionCableService.ts - Updated with app update support
+// lib/services/ActionCableService.ts - FIXED: User presence broadcasting
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
@@ -124,7 +124,7 @@ class ActionCableService {
           clearTimeout(timeout);
         };
 
-        this.websocket!.onopen = () => {
+        this.websocket!.onopen = async () => {
           cleanup();
           console.log('✅ Connected to ActionCable');
           this.isConnected = true;
@@ -135,6 +135,14 @@ class ActionCableService {
           this.requestInitialState();
           this.startHeartbeat();
           this.startPing();
+          
+          // CRITICAL FIX: Set presence to online immediately after connection
+          try {
+            await this.updatePresence('online');
+            console.log('✅ Presence set to online after connection');
+          } catch (error) {
+            console.warn('⚠️ Failed to set initial presence:', error);
+          }
           
           this.triggerCallbacks('connection_established', { connected: true });
           
@@ -187,7 +195,7 @@ class ActionCableService {
               this.supportDashboardSubscribed = true;
               console.log('✅ Support dashboard subscription confirmed');
             } else if (identifier.channel === 'UserNotificationsChannel') {
-              console.log('✅ User notifications channel confirmed - now receiving app updates');
+              console.log('✅ User notifications channel confirmed');
             }
           } catch (e) {
             // Ignore parsing errors
@@ -234,6 +242,13 @@ class ActionCableService {
       
       this.isIntentionalDisconnect = true;
       this.stopReconnecting();
+      
+      // CRITICAL FIX: Set presence to offline before disconnecting
+      if (this.isConnected) {
+        this.updatePresence('offline').catch(error => 
+          console.warn('⚠️ Failed to set offline presence:', error)
+        );
+      }
       
       this.stopHeartbeat();
       this.stopPing();
@@ -298,6 +313,14 @@ class ActionCableService {
         this.reconnectAttempts = 0;
         
         await this.resubscribeToChannels();
+        
+        // CRITICAL FIX: Update presence after reconnection
+        try {
+          await this.updatePresence('online');
+          console.log('✅ Presence restored to online after reconnection');
+        } catch (error) {
+          console.warn('⚠️ Failed to restore presence after reconnection:', error);
+        }
       } else {
         console.warn('⚠️ Reconnection failed, will retry...');
         this.scheduleReconnection();
@@ -338,7 +361,7 @@ class ActionCableService {
       identifier: this.subscriptionIdentifier
     };
 
-    console.log('📡 Subscribing to UserNotificationsChannel (includes app updates)...');
+    console.log('📡 Subscribing to UserNotificationsChannel...');
     this.sendMessage(subscribeCommand);
   }
 
@@ -639,17 +662,16 @@ class ActionCableService {
 
         case 'app_update_available':
           console.log(`🔄 App update available: ${data.version}`);
-          console.log(`   Force update: ${data.force_update}`);
-          console.log(`   Download URL: ${data.download_url}`);
-          console.log(`   File size: ${data.file_size ? `${(data.file_size / 1024 / 1024).toFixed(2)}MB` : 'unknown'}`);
           break;
 
         case 'app_update_progress':
-          console.log(`📥 Download progress: ${data.progress}%`);
+          if (data.progress && data.progress % 10 === 0) {
+            console.log(`📥 Download progress: ${data.progress}%`);
+          }
           break;
 
         case 'app_update_downloaded':
-          console.log(`✅ Update ${data.version} downloaded and ready to install`);
+          console.log(`✅ Update ${data.version} downloaded`);
           break;
       }
     } catch (error) {
@@ -663,9 +685,7 @@ class ActionCableService {
         console.log('📊 Initial state received:', {
           counts: data.counts,
           conversations: data.recent_conversations?.length,
-          businesses: data.businesses?.length,
-          dashboard_stats: data.dashboard_stats,
-          agent_stats: data.agent_stats
+          businesses: data.businesses?.length
         });
         break;
         
@@ -682,7 +702,7 @@ class ActionCableService {
         break;
         
       case 'new_message':
-        console.log('💬 New message received in conversation:', data.conversation_id);
+        console.log('💬 New message in conversation:', data.conversation_id);
         break;
         
       case 'cart_count_update':
@@ -697,31 +717,12 @@ class ActionCableService {
         console.log('🏢 Business updated:', data.business?.id);
         break;
 
-      case 'dashboard_stats_update':
-        console.log('📊 Dashboard stats updated:', data.stats);
-        break;
-
       case 'new_support_ticket':
         console.log('🎫 New support ticket:', data.ticket?.id);
         break;
 
       case 'app_update_available':
-        console.log('🔄 App update broadcast received:', {
-          version: data.version,
-          force_update: data.force_update,
-          file_size: data.file_size,
-          changelog_items: data.changelog?.length || 0
-        });
-        break;
-
-      case 'app_update_progress':
-        if (data.progress && data.progress % 10 === 0) {
-          console.log(`📥 Update download: ${data.progress}% complete`);
-        }
-        break;
-
-      case 'app_update_downloaded':
-        console.log('✅ Update download complete:', data.version);
+        console.log('🔄 App update broadcast received:', data.version);
         break;
     }
   }
