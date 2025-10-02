@@ -631,29 +631,39 @@ export default function AccountContent({ source, onBack, title = 'Account' }: Ac
           // Reload accounts
           await loadAccounts();
           
-          // Check if we need to restart (new account was added)
+          // Check if we need to redirect (new account was added)
           const updatedAccounts = accountManager.getAllAccounts();
           const newCurrentId = accountManager.getCurrentUserId();
+          const newAccount = accountManager.getCurrentAccount();
           
           console.log('📱 Accounts after modal:', {
             count: updatedAccounts.length,
             previousCurrent: currentAccountId,
             newCurrent: newCurrentId,
-            needsRestart: currentAccountId !== newCurrentId
+            newRole: newAccount?.role,
+            needsRedirect: currentAccountId !== newCurrentId
           });
           
-          // If current account changed, trigger restart
-          if (currentAccountId !== newCurrentId && newCurrentId) {
-            console.log('🔄 New account detected - triggering app restart...');
-            showToast.success('Account added!', 'Restarting app...');
+          // If current account changed, navigate based on role
+          if (currentAccountId !== newCurrentId && newCurrentId && newAccount) {
+            console.log('🔄 New account detected - navigating based on role...');
+            showToast.success('Account added!', 'Redirecting...');
             
-            // Trigger restart after short delay
-            setTimeout(() => {
-              Updates.reloadAsync().catch((error) => {
-                console.error('Failed to reload app:', error);
-                showToast.error('Please restart the app manually');
-              });
-            }, 1500);
+            // Navigate after short delay
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+            const newRole = newAccount.role;
+            
+            if (newRole === 'admin') {
+              console.log('🔄 Navigating to admin panel...');
+              replace('/admin');
+            } else if (newRole === 'support') {
+              console.log('🔄 Navigating to support panel...');
+              replace('/(support)');
+            } else {
+              console.log('🔄 Navigating to home...');
+              replace('/');
+            }
           } else {
             // Just refresh if no new account
             await refreshUser(true);
