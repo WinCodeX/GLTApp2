@@ -276,7 +276,7 @@ export default function SupportAccountScreen() {
     }
   }, [previewUri, refreshUser, clearUserCache, triggerAvatarRefresh]);
 
-  // Switch account and restart app
+  // Switch account and navigate to trigger re-routing
   const switchAccount = useCallback(async (accountId: string) => {
     try {
       if (accountId === currentAccountId) {
@@ -287,17 +287,33 @@ export default function SupportAccountScreen() {
       setLoading(true);
       console.log('🔄 Support: Switching to account:', accountId);
       
+      // Update current account in AccountManager
       await accountManager.setCurrentAccount(accountId);
       
-      showToast.success('Switching account...', 'App will restart');
+      const newAccount = accountManager.getCurrentAccount();
+      console.log('🔄 Support: Account switched to:', {
+        email: newAccount?.email,
+        role: newAccount?.role
+      });
       
-      // Use setTimeout without async, then call reload
-      setTimeout(() => {
-        Updates.reloadAsync().catch((error) => {
-          console.error('Failed to reload app:', error);
-          showToast.error('Please restart the app manually');
-        });
-      }, 1000);
+      showToast.success('Switching account...', 'Redirecting...');
+      
+      // Small delay for toast visibility
+      await new Promise(resolve => setTimeout(resolve, 500));
+      
+      // Navigate based on new account role
+      const newRole = newAccount?.role;
+      
+      if (newRole === 'admin') {
+        console.log('🔄 Support: Navigating to admin panel...');
+        router.replace('/admin');
+      } else if (newRole === 'support') {
+        console.log('🔄 Support: Staying in support panel...');
+        router.replace('/(support)');
+      } else {
+        console.log('🔄 Support: Navigating to home...');
+        router.replace('/');
+      }
       
     } catch (error) {
       console.error('Failed to switch account:', error);
@@ -394,29 +410,39 @@ export default function SupportAccountScreen() {
           // Reload accounts
           await loadAccounts();
           
-          // Check if we need to restart (new account was added)
+          // Check if we need to redirect (new account was added)
           const updatedAccounts = accountManager.getAllAccounts();
           const newCurrentId = accountManager.getCurrentUserId();
+          const newAccount = accountManager.getCurrentAccount();
           
           console.log('📱 Support: Accounts after modal:', {
             count: updatedAccounts.length,
             previousCurrent: currentAccountId,
             newCurrent: newCurrentId,
-            needsRestart: currentAccountId !== newCurrentId
+            newRole: newAccount?.role,
+            needsRedirect: currentAccountId !== newCurrentId
           });
           
-          // If current account changed, trigger restart
-          if (currentAccountId !== newCurrentId && newCurrentId) {
-            console.log('🔄 Support: New account detected - triggering app restart...');
-            showToast.success('Account added!', 'Restarting app...');
+          // If current account changed, navigate based on role
+          if (currentAccountId !== newCurrentId && newCurrentId && newAccount) {
+            console.log('🔄 Support: New account detected - navigating based on role...');
+            showToast.success('Account added!', 'Redirecting...');
             
-            // Trigger restart after short delay
-            setTimeout(() => {
-              Updates.reloadAsync().catch((error) => {
-                console.error('Failed to reload app:', error);
-                showToast.error('Please restart the app manually');
-              });
-            }, 1500);
+            // Navigate after short delay
+            await new Promise(resolve => setTimeout(resolve, 800));
+            
+            const newRole = newAccount.role;
+            
+            if (newRole === 'admin') {
+              console.log('🔄 Support: Navigating to admin panel...');
+              router.replace('/admin');
+            } else if (newRole === 'support') {
+              console.log('🔄 Support: Staying in support panel...');
+              router.replace('/(support)');
+            } else {
+              console.log('🔄 Support: Navigating to home...');
+              router.replace('/');
+            }
           } else {
             // Just refresh if no new account
             await refreshUser(true);
