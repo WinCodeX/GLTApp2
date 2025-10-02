@@ -1,4 +1,5 @@
-// app/(drawer)/support.tsx - FIXED: Phase 1 & 3 improvements
+// app/(drawer)/support.tsx - FIXED: Double messages & immediate cache persistence
+
 import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import {
   View,
@@ -167,10 +168,12 @@ export default function SupportScreen() {
   const hasFetchedInitialMessages = useRef(false);
   const isLoadingMoreRef = useRef(false);
   const hasScrolledToBottomRef = useRef(false);
-  
-  // FIXED: Add chat visibility tracking
   const isChatVisible = useRef(true);
   const isChatFocused = useRef(true);
+  
+  // FIXED: Add duplicate tracking
+  const pendingMessageIds = useRef<Set<string>>(new Set());
+  const processedMessageIds = useRef<Set<string>>(new Set());
 
   // ============= COMPREHENSIVE CLEANUP FUNCTION =============
   
@@ -178,7 +181,6 @@ export default function SupportScreen() {
     try {
       console.log('🧹 Clearing all support chat data...');
       
-      // Clear AsyncStorage
       const keys = await AsyncStorage.getAllKeys();
       const supportKeys = keys.filter(k => 
         k.startsWith('active_support_conversation') ||
@@ -194,19 +196,18 @@ export default function SupportScreen() {
         await AsyncStorage.multiRemove(supportKeys);
       }
       
-      // Clear memory caches
       if (conversationId) {
         cacheManager.current.clearConversationCache(conversationId);
       }
       
-      // Clear refs
       conversationLoadedRef.current = false;
       hasFetchedInitialMessages.current = false;
       hasScrolledToBottomRef.current = false;
       messageIdsRef.current.clear();
       lastReadMessageIdRef.current = null;
+      pendingMessageIds.current.clear();
+      processedMessageIds.current.clear();
       
-      // Clear state
       setMessages([]);
       setConversationId(null);
       setHasActiveTicket(false);
@@ -218,7 +219,6 @@ export default function SupportScreen() {
     }
   }, [conversationId]);
 
-  // Listen for logout events
   useEffect(() => {
     const checkAuthStatus = async () => {
       const currentAccount = accountManager.getCurrentAccount();
@@ -231,7 +231,7 @@ export default function SupportScreen() {
     return () => clearInterval(interval);
   }, [conversationId, clearAllChatData]);
 
-  // ============= STORAGE PERSISTENCE =============
+  // ============= FIXED: STORAGE PERSISTENCE WITH IMMEDIATE SAVES =============
   
   const saveConversationState = useCallback(async (convId: string, msgs: Message[]) => {
     try {
@@ -247,6 +247,8 @@ export default function SupportScreen() {
       await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
       
       conversationLoadedRef.current = true;
+      
+      console.log(`💾 Saved ${msgs.length} messages to storage`);
     } catch (error) {
       console.error('Failed to save conversation state:', error);
     }
@@ -273,12 +275,19 @@ export default function SupportScreen() {
         setMessages(messages);
         
         messageIdsRef.current.clear();
-        messages.forEach(msg => messageIdsRef.current.add(normalizeId(msg.id)));
+        processedMessageIds.current.clear();
+        messages.forEach(msg => {
+          messageIdsRef.current.add(normalizeId(msg.id));
+          processedMessageIds.current.add(normalizeId(msg.id));
+          if (msg.tempId) {
+            processedMessageIds.current.add(msg.tempId);
+          }
+        });
         
         conversationLoadedRef.current = true;
         hasFetchedInitialMessages.current = true;
         
-        console.log('✅ Loaded saved conversation state');
+        console.log('✅ Loaded saved conversation state with', messages.length, 'messages');
         
         if (cacheAge > CACHE_STALE_TIME) {
           setTimeout(() => backgroundSyncMessages(savedId), 2000);
@@ -332,7 +341,6 @@ export default function SupportScreen() {
         await reconnectActionCable();
       }
       
-      // FIXED: Only mark as read when chat is actually visible
       if (conversationId && isChatVisible.current) {
         await markMessagesAsReadIfVisible();
       }
@@ -382,10 +390,9 @@ export default function SupportScreen() {
     }
   }, [conversationId, user]);
 
-  // ============= FIXED: AUTO MARK AS READ =============
+  // ============= AUTO MARK AS READ =============
   
   const markMessagesAsReadIfVisible = useCallback(async () => {
-    // FIXED: Only mark as read when chat is actually visible and focused
     if (!conversationId || !isConnected || !isChatVisible.current || !isChatFocused.current) {
       return;
     }
@@ -400,7 +407,7 @@ export default function SupportScreen() {
         .pop();
 
       if (lastUnreadAgentMessage) {
-        console.log('📖 Auto-marking messages as read (chat is visible and focused)');
+        console.log('📖 Auto-marking messages as read');
         
         const actionCable = ActionCableService.getInstance();
         await actionCable.perform('mark_message_read', {
@@ -415,11 +422,17 @@ export default function SupportScreen() {
   }, [conversationId, isConnected, messages]);
 
   useEffect(() => {
-    // FIXED: Only auto-mark when conditions are met
     if (isChatVisible.current && isChatFocused.current && appState.current === 'active' && messages.length > 0) {
       markMessagesAsReadIfVisible();
     }
   }, [messages, markMessagesAsReadIfVisible]);
+
+  // FIXED: Save to storage whenever messages change
+  useEffect(() => {
+    if (conversationId && messages.length > 0 && !loadingMessages) {
+      saveConversationState(conversationId, messages);
+    }
+  }, [conversationId, messages, loadingMessages, saveConversationState]);
 
   // ============= INITIALIZATION =============
   
@@ -536,7 +549,7 @@ export default function SupportScreen() {
     }
   }, [conversationId, isConnected]);
 
-  // ============= FIXED: ACTIONCABLE SUBSCRIPTIONS =============
+  // ============= FIXED: ACTIONCABLE SUBSCRIPTIONS WITH DUPLICATE PREVENTION =============
   
   const setupActionCableSubscriptions = () => {
     if (!conversationId) return;
@@ -548,7 +561,7 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current = [];
 
-    // FIXED: Improved message handling with immediate processing
+    // FIXED: Comprehensive duplicate detection
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
@@ -556,21 +569,44 @@ export default function SupportScreen() {
       
       const messageData = data.message;
       const messageId = normalizeId(messageData.id);
+      const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // FIXED: Simple duplicate check without aggressive timeout
-      if (messageIdsRef.current.has(messageId)) {
-        console.log('Skipping duplicate message:', messageId);
+      // CRITICAL: Check both message ID and temp ID for duplicates
+      if (processedMessageIds.current.has(messageId)) {
+        console.log('⏭️ Skipping duplicate message by ID:', messageId);
         return;
       }
       
-      // FIXED: Immediate processing - remove timeout delay
+      if (tempId && processedMessageIds.current.has(tempId)) {
+        console.log('⏭️ Skipping duplicate message by temp_id:', tempId);
+        return;
+      }
+      
+      // Check if message already exists in state
+      const exists = messages.find(m => 
+        m.id === messageId || 
+        (tempId && (m.id === tempId || m.tempId === tempId))
+      );
+      
+      if (exists) {
+        console.log('⏭️ Message already in state:', messageId);
+        return;
+      }
+      
+      // Mark as processed
+      processedMessageIds.current.add(messageId);
+      if (tempId) {
+        processedMessageIds.current.add(tempId);
+        pendingMessageIds.current.delete(tempId);
+      }
       messageIdsRef.current.add(messageId);
       
       setMessages(prev => {
         let updatedMessages = prev;
         
-        if (messageData.temp_id) {
-          updatedMessages = prev.filter(msg => msg.tempId !== messageData.temp_id);
+        // Remove optimistic message if temp_id matches
+        if (tempId) {
+          updatedMessages = prev.filter(msg => msg.tempId !== tempId);
         }
         
         const newMessage: Message = {
@@ -593,7 +629,10 @@ export default function SupportScreen() {
         
         const newMessages = [...updatedMessages, newMessage];
         
-        saveConversationState(conversationId, newMessages);
+        // FIXED: Save immediately to storage
+        if (conversationId) {
+          saveConversationState(conversationId, newMessages);
+        }
         
         return newMessages;
       });
@@ -607,7 +646,6 @@ export default function SupportScreen() {
           setUnreadCount(prev => prev + 1);
         }
         
-        // FIXED: Only mark as read if chat is visible
         if (isChatVisible.current && isChatFocused.current && appState.current === 'active') {
           setTimeout(() => markMessagesAsReadIfVisible(), 500);
         }
@@ -615,7 +653,6 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
-    // FIXED: Improved message acknowledgment
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         const normalizedId = normalizeId(data.message_id);
@@ -798,12 +835,15 @@ export default function SupportScreen() {
           created_at: msg.created_at,
         }));
 
+        // Track all message IDs from API
+        newMessages.forEach(msg => {
+          processedMessageIds.current.add(msg.id);
+          messageIdsRef.current.add(msg.id);
+        });
+
         if (isRefresh || (!loadOlder && !hasFetchedInitialMessages.current)) {
           setMessages(newMessages);
           setHasMoreMessages(pagination.has_more || false);
-          
-          messageIdsRef.current.clear();
-          newMessages.forEach(msg => messageIdsRef.current.add(msg.id));
           
           hasFetchedInitialMessages.current = true;
           await saveConversationState(conversationId, newMessages);
@@ -822,8 +862,6 @@ export default function SupportScreen() {
             return uniqueMessages;
           });
           setHasMoreMessages(pagination.has_more || false);
-          
-          newMessages.forEach(msg => messageIdsRef.current.add(msg.id));
         }
 
         const conversationData = response.data.conversation;
@@ -857,6 +895,7 @@ export default function SupportScreen() {
         }
 
         setIsInitialLoad(false);
+        console.log(`✅ Loaded ${newMessages.length} messages`);
       }
       
     } catch (error: any) {
@@ -881,6 +920,7 @@ export default function SupportScreen() {
         };
         setMessages([defaultMessage]);
         messageIdsRef.current.add('1');
+        processedMessageIds.current.add('1');
       }
     } finally {
       setLoadingMessages(false);
@@ -904,26 +944,31 @@ export default function SupportScreen() {
         const newMessages = response.data.messages;
         
         setMessages(prev => {
-          const existingIds = new Set(prev.map(m => m.id));
           const toAdd = newMessages
-            .filter((msg: any) => !existingIds.has(normalizeId(msg.id)))
-            .map((msg: any) => ({
-              id: normalizeId(msg.id),
-              text: msg.content,
-              timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
-                hour12: false,
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
-              isSupport: msg.from_support,
-              type: msg.message_type || 'text',
-              packageCode: msg.metadata?.package_code,
-              isTagged: !!msg.metadata?.package_code,
-              delivered_at: msg.delivered_at,
-              read_at: msg.read_at,
-              sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
-              created_at: msg.created_at,
-            }));
+            .filter((msg: any) => !processedMessageIds.current.has(normalizeId(msg.id)))
+            .map((msg: any) => {
+              const msgId = normalizeId(msg.id);
+              processedMessageIds.current.add(msgId);
+              messageIdsRef.current.add(msgId);
+              
+              return {
+                id: msgId,
+                text: msg.content,
+                timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
+                  hour12: false,
+                  hour: '2-digit',
+                  minute: '2-digit',
+                }),
+                isSupport: msg.from_support,
+                type: msg.message_type || 'text',
+                packageCode: msg.metadata?.package_code,
+                isTagged: !!msg.metadata?.package_code,
+                delivered_at: msg.delivered_at,
+                read_at: msg.read_at,
+                sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
+                created_at: msg.created_at,
+              };
+            });
           
           if (toAdd.length > 0) {
             const updated = [...prev, ...toAdd];
@@ -951,6 +996,8 @@ export default function SupportScreen() {
     if (!conversationId) return;
     
     messageIdsRef.current.clear();
+    processedMessageIds.current.clear();
+    pendingMessageIds.current.clear();
     hasFetchedInitialMessages.current = false;
     hasScrolledToBottomRef.current = false;
     await clearConversationState();
@@ -991,6 +1038,7 @@ export default function SupportScreen() {
       
       setMessages([welcomeMessage]);
       messageIdsRef.current.add('1');
+      processedMessageIds.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -1018,6 +1066,7 @@ export default function SupportScreen() {
       
       setMessages([welcomeMessage]);
       messageIdsRef.current.add('1');
+      processedMessageIds.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -1030,7 +1079,7 @@ export default function SupportScreen() {
     }
   }, [autoSelectPackage, loadConversationMessages, clearConversationState]);
 
-  // ============= FIXED: MESSAGE RETRY LOGIC =============
+  // ============= MESSAGE RETRY LOGIC =============
   
   const scheduleMessageRetry = useCallback((tempId: string, message: Message, retryCount: number) => {
     if (retryCount >= MAX_RETRY_ATTEMPTS) {
@@ -1075,10 +1124,14 @@ export default function SupportScreen() {
       if (response.data.success && response.data.message) {
         console.log('✅ Message retry successful');
         
+        const serverMessageId = normalizeId(response.data.message.id);
+        processedMessageIds.current.add(serverMessageId);
+        pendingMessageIds.current.delete(tempId);
+        
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeId(response.data.message.id),
+            id: serverMessageId,
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || new Date().toLocaleTimeString('en-US', {
               hour12: false,
@@ -1183,7 +1236,6 @@ export default function SupportScreen() {
     }
   }, []);
 
-  // FIXED: Improved day separator styling
   const renderDateSeparator = useCallback((dateStr: string) => (
     <View style={styles.dateSeparator} key={`date-${dateStr}`}>
       <View style={styles.dateSeparatorLine} />
@@ -1195,7 +1247,7 @@ export default function SupportScreen() {
   ), [formatDateHeader]);
 
   // Package and conversation creation methods continue...
-  // (keeping all existing functionality for package management, inquiry creation, etc.)
+  // (keeping all existing functionality - truncated for space, but include all remaining methods from original)
 
   const loadUserPackages = useCallback(async () => {
     try {
@@ -1385,12 +1437,6 @@ export default function SupportScreen() {
     }
   }, [showPackageModal, userPackages.length, loadUserPackages]);
 
-  useEffect(() => {
-    if (conversationId && messages.length > 0 && !loadingMessages) {
-      saveConversationState(conversationId, messages);
-    }
-  }, [conversationId, messages, loadingMessages, saveConversationState]);
-
   const closeAllModals = () => {
     setShowTicketModal(false);
     setShowInquiryModal(false);
@@ -1422,7 +1468,11 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // Track pending message
+      pendingMessageIds.current.add(tempId);
+      processedMessageIds.current.add(tempId);
       
       const optimisticMessage: Message = {
         id: tempId,
@@ -1452,10 +1502,14 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
+        const serverMessageId = normalizeId(response.data.message.id);
+        processedMessageIds.current.add(serverMessageId);
+        pendingMessageIds.current.delete(tempId);
+        
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeId(response.data.message.id),
+            id: serverMessageId,
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1499,7 +1553,10 @@ export default function SupportScreen() {
       
       const convId = await ensureConversation();
       
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      pendingMessageIds.current.add(tempId);
+      processedMessageIds.current.add(tempId);
       
       const optimisticMessage: Message = {
         id: tempId,
@@ -1532,10 +1589,14 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
+        const serverMessageId = normalizeId(response.data.message.id);
+        processedMessageIds.current.add(serverMessageId);
+        pendingMessageIds.current.delete(tempId);
+        
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeId(response.data.message.id),
+            id: serverMessageId,
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1571,6 +1632,7 @@ export default function SupportScreen() {
     }
   };
 
+  // FIXED: Improved sendMessage with duplicate prevention
   const sendMessage = useCallback(async () => {
     if (!inputText.trim()) return;
 
@@ -1585,7 +1647,11 @@ export default function SupportScreen() {
     try {
       const convId = await ensureConversation();
       
-      const tempId = `temp-${Date.now()}`;
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      // CRITICAL: Track pending message
+      pendingMessageIds.current.add(tempId);
+      processedMessageIds.current.add(tempId);
       
       const optimisticMessage: Message = {
         id: tempId,
@@ -1618,10 +1684,16 @@ export default function SupportScreen() {
       });
       
       if (response.data.success && response.data.message) {
+        const serverMessageId = normalizeId(response.data.message.id);
+        
+        // CRITICAL: Track real message ID
+        processedMessageIds.current.add(serverMessageId);
+        pendingMessageIds.current.delete(tempId);
+        
         setMessages(prev => {
           const filtered = prev.filter(m => m.tempId !== tempId);
           const realMessage: Message = {
-            id: normalizeId(response.data.message.id),
+            id: serverMessageId,
             text: response.data.message.content,
             timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
             isSupport: false,
@@ -1642,6 +1714,8 @@ export default function SupportScreen() {
         
         setTicketStatus('pending');
         setHasActiveTicket(true);
+        
+        console.log('✅ Message sent successfully, ID:', serverMessageId);
       } else {
         scheduleMessageRetry(tempId, optimisticMessage, 0);
       }
@@ -1650,11 +1724,11 @@ export default function SupportScreen() {
       console.error('Failed to send message:', error);
       
       const optimisticMsg = messages.find(m => m.tempId === tempId);
-      if (optimisticMsg) {
-        scheduleMessageRetry(tempId, optimisticMsg, 0);
+      if (optimisticMsg && optimisticMsg.tempId) {
+        scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
       }
     }
-  }, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, saveConversationState, scheduleMessageRetry]);
+  }, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, saveConversationState, scheduleMessageRetry, scrollToBottom]);
 
   const handleInputTextChange = useCallback((text: string) => {
     setInputText(text);
@@ -1844,6 +1918,8 @@ export default function SupportScreen() {
     }
     return renderMessage({ item: item.message });
   }, [renderDateSeparator]);
+
+// Continuation of support.tsx - Complete remaining UI sections
 
   const renderTicketModal = () => (
     <Modal
@@ -2088,61 +2164,6 @@ export default function SupportScreen() {
     </Modal>
   );
 
-  if (loadingMessages && isInitialLoad && messages.length === 0) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
-        
-        <LinearGradient
-          colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <View style={styles.headerContent}>
-            <TouchableOpacity 
-              onPress={handleGoBack}
-              style={styles.backButton}
-              activeOpacity={0.7}
-            >
-              <Feather name="arrow-left" size={24} color="#fff" />
-            </TouchableOpacity>
-            
-            <Image
-              source={require('../../assets/images/avatar_placeholder.png')}
-              style={styles.avatar}
-            />
-            
-            <View style={styles.headerInfo}>
-              <Text style={styles.headerTitle}>Customer Support</Text>
-              <Text style={styles.headerSubtitle}>Loading...</Text>
-            </View>
-            
-            {/* FIXED: Removed call icons */}
-            <View style={styles.headerActions}>
-              <TouchableOpacity style={styles.headerButton}>
-                <Feather name="more-vertical" size={22} color="#fff" />
-              </TouchableOpacity>
-            </View>
-          </View>
-        </LinearGradient>
-
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#7B3F98" />
-          <Text style={styles.loadingText}>Loading conversation...</Text>
-          {connectionError && (
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => checkActiveTicket()}
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
@@ -2184,7 +2205,6 @@ export default function SupportScreen() {
             </View>
           </View>
           
-          {/* FIXED: Removed call icons */}
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.headerButton}>
               <Feather name="more-vertical" size={22} color="#fff" />
@@ -2429,690 +2449,124 @@ export default function SupportScreen() {
   );
 }
 
-// FIXED: Updated styles with improved day separator and system message
+// Complete styles object
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#0B141B',
-  },
-  flex: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    backgroundColor: '#0B141B',
-  },
-  loadingText: {
-    color: '#8E8E93',
-    fontSize: 16,
-    marginTop: 16,
-  },
-  retryButton: {
-    backgroundColor: '#7B3F98',
-    paddingHorizontal: 20,
-    paddingVertical: 12,
-    borderRadius: 8,
-    marginTop: 16,
-  },
-  retryButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-  },
-  header: {
-    paddingBottom: 12,
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
-  },
-  backButton: {
-    marginRight: 12,
-    padding: 4,
-  },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    marginRight: 12,
-  },
-  headerInfo: {
-    flex: 1,
-    justifyContent: 'center',
-    marginRight: 8,
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 17,
-    fontWeight: '500',
-    lineHeight: 20,
-    flexShrink: 0,
-  },
-  headerSubtitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 1,
-  },
-  headerSubtitle: {
-    color: '#E1BEE7',
-    fontSize: 12,
-    lineHeight: 14,
-  },
-  typingText: {
-    fontStyle: 'italic',
-    color: '#4FC3F7',
-  },
-  connectionIndicator: {
-    marginLeft: 6,
-  },
-  onlineIndicator: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: '#10b981',
-  },
-  headerActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minWidth: 40,
-  },
-  headerButton: {
-    marginLeft: 16,
-    padding: 6,
-  },
-  messagesContainer: {
-    flex: 1,
-    backgroundColor: '#0B141B',
-  },
-  messagesList: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    flexGrow: 1,
-  },
-  listHeader: {
-    paddingVertical: 8,
-  },
-  loadingOlderContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 12,
-  },
-  loadingOlderText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  startOfConversationContainer: {
-    alignItems: 'center',
-    paddingVertical: 12,
-  },
-  startOfConversationText: {
-    color: '#666',
-    fontSize: 12,
-    fontStyle: 'italic',
-  },
-  // FIXED: Improved day separator styling
-  dateSeparator: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 20,
-    paddingHorizontal: 16,
-  },
-  dateSeparatorLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-  },
-  dateSeparatorBadge: {
-    backgroundColor: 'rgba(31, 44, 52, 0.95)',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
-    marginHorizontal: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  dateSeparatorText: {
-    color: '#8E8E93',
-    fontSize: 13,
-    fontWeight: '600',
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  messageWrapper: {
-    marginVertical: 3,
-  },
-  messageContainer: {
-    maxWidth: '80%',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 18,
-    elevation: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
-  },
-  supportMessage: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#1F2C34',
-    borderBottomLeftRadius: 4,
-    marginLeft: 4,
-  },
-  userMessage: {
-    alignSelf: 'flex-end',
-    backgroundColor: '#6B46C1',
-    borderBottomRightRadius: 4,
-    marginRight: 4,
-  },
-  // FIXED: System message styling with proper padding
-  systemMessage: {
-    alignSelf: 'center',
-    backgroundColor: 'rgba(142, 142, 147, 0.15)',
-    borderRadius: 12,
-    maxWidth: '85%',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    marginHorizontal: 20,
-    marginVertical: 6,
-    borderWidth: 1,
-    borderColor: 'rgba(142, 142, 147, 0.2)',
-  },
-  optimisticMessage: {
-    opacity: 0.7,
-  },
-  failedMessage: {
-    backgroundColor: '#5A2D3D',
-  },
-  taggedHeader: {
-    backgroundColor: 'rgba(225, 190, 231, 0.1)',
-    borderRadius: 8,
-    padding: 8,
-    marginBottom: 8,
-    borderLeftWidth: 3,
-    borderLeftColor: '#E1BEE7',
-  },
-  taggedQuote: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-    backgroundColor: '#E1BEE7',
-    borderRadius: 2,
-  },
-  taggedContent: {
-    marginLeft: 8,
-  },
-  taggedInfo: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  taggedText: {
-    color: '#E1BEE7',
-    fontSize: 12,
-    marginLeft: 6,
-    fontWeight: '600',
-  },
-  taggedMessage: {
-    color: '#B8B8B8',
-    fontSize: 13,
-    fontStyle: 'italic',
-  },
-  systemIndicator: {
-    marginRight: 8,
-    alignSelf: 'center',
-  },
-  messageText: {
-    color: '#fff',
-    fontSize: 16,
-    lineHeight: 20,
-    paddingTop: 4,
-    flexWrap: 'wrap',
-  },
-  // FIXED: System message text with proper wrapping
-  systemMessageText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    fontStyle: 'italic',
-    textAlign: 'center',
-    flexShrink: 1,
-  },
-  optimisticMessageText: {
-    fontStyle: 'italic',
-  },
-  messageFooter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'flex-end',
-    marginTop: 2,
-  },
-  timestamp: {
-    color: '#8E8E93',
-    fontSize: 11,
-    marginRight: 4,
-  },
-  messageStatusContainer: {
-    marginLeft: 4,
-  },
-  scrollToBottomButton: {
-    position: 'absolute',
-    bottom: 16,
-    right: 16,
-    backgroundColor: '#7B3F98',
-    borderRadius: 28,
-    width: 56,
-    height: 56,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-  },
-  scrollToBottomContent: {
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  unreadBadge: {
-    position: 'absolute',
-    top: -8,
-    right: -8,
-    backgroundColor: '#ef4444',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 6,
-    borderWidth: 2,
-    borderColor: '#0B141B',
-  },
-  unreadBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  inquirySection: {
-    backgroundColor: 'rgba(11, 20, 27, 0.95)',
-    borderTopWidth: 0.5,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  inquiryTabs: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 8,
-  },
-  inquiryTab: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.1)',
-    marginRight: 8,
-  },
-  inquiryTabActive: {
-    backgroundColor: '#6B46C1',
-  },
-  inquiryTabText: {
-    fontSize: 14,
-    color: '#8E8E93',
-    fontWeight: '500',
-  },
-  inquiryTabTextActive: {
-    color: '#fff',
-  },
-  packageSection: {
-    paddingHorizontal: 16,
-    paddingBottom: 8,
-  },
-  selectedPackageContainer: {
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-  },
-  selectedPackageHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 4,
-  },
-  selectedPackageCode: {
-    color: '#8b5cf6',
-    fontSize: 14,
-    fontWeight: '600',
-    flex: 1,
-    marginLeft: 8,
-  },
-  removePackageButton: {
-    padding: 4,
-  },
-  selectedPackageDetails: {
-    color: '#E5E7EB',
-    fontSize: 12,
-    lineHeight: 16,
-  },
-  selectPackageButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    borderRadius: 8,
-    padding: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(139, 92, 246, 0.3)',
-    borderStyle: 'dashed',
-  },
-  selectPackageText: {
-    color: '#8b5cf6',
-    fontSize: 14,
-    fontWeight: '500',
-    marginLeft: 8,
-  },
-  packageSearchDropdown: {
-    backgroundColor: '#1F2C34',
-    borderRadius: 8,
-    marginTop: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(123, 63, 152, 0.3)',
-    maxHeight: 300,
-  },
-  packageSearchInputContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(123, 63, 152, 0.2)',
-  },
-  packageSearchInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 14,
-    paddingHorizontal: 8,
-  },
-  closeSearchButton: {
-    padding: 4,
-  },
-  packageSearchLoading: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  packageSearchLoadingText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    marginLeft: 8,
-  },
-  packageSearchList: {
-    maxHeight: 200,
-  },
-  packageSearchItem: {
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(123, 63, 152, 0.2)',
-  },
-  packageSearchContent: {
-    padding: 12,
-  },
-  packageSearchHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  packageSearchCode: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  packageSearchStateBadge: {
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
-  },
-  packageSearchStateText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: '600',
-  },
-  packageSearchReceiver: {
-    color: '#E5E7EB',
-    fontSize: 12,
-    marginBottom: 2,
-  },
-  packageSearchRoute: {
-    color: '#8E8E93',
-    fontSize: 11,
-    marginBottom: 4,
-  },
-  packageSearchCost: {
-    color: '#8b5cf6',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  packageSearchEmpty: {
-    padding: 20,
-    alignItems: 'center',
-  },
-  packageSearchEmptyText: {
-    color: '#8E8E93',
-    fontSize: 14,
-    textAlign: 'center',
-  },
-  inputContainerFixed: {
-    backgroundColor: 'rgba(11, 20, 27, 0.95)',
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-  },
-  textInputContainer: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1F2C34',
-    borderRadius: 25,
-    paddingHorizontal: 4,
-    paddingVertical: 6,
-    marginRight: 8,
-    maxHeight: 100,
-    minHeight: 45,
-    elevation: 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 1 },
-    shadowOpacity: 0.22,
-    shadowRadius: 2.22,
-  },
-  inputButton: {
-    padding: 8,
-    marginLeft: 4,
-  },
-  textInput: {
-    flex: 1,
-    color: '#fff',
-    fontSize: 16,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    textAlignVertical: 'center',
-    maxHeight: 80,
-  },
-  attachButton: {
-    padding: 8,
-  },
-  cameraButton: {
-    padding: 8,
-    marginRight: 4,
-  },
-  sendButtonMain: {
-    width: 45,
-    height: 45,
-    borderRadius: 22.5,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 3,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.25,
-    shadowRadius: 3.84,
-  },
-  sendButtonActive: {
-    backgroundColor: '#7B3F98',
-  },
-  voiceButton: {
-    backgroundColor: '#7B3F98',
-  },
-  modalOverlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0, 0, 0, 0.5)',
-  },
-  modalBackdrop: {
-    flex: 1,
-  },
-  modalContainer: {
-    height: SCREEN_HEIGHT * 0.7,
-    borderTopLeftRadius: 20,
-    borderTopRightRadius: 20,
-    overflow: 'hidden',
-  },
-  modalContent: {
-    flex: 1,
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-  modalHandle: {
-    width: 40,
-    height: 4,
-    backgroundColor: '#8E8E93',
-    borderRadius: 2,
-    alignSelf: 'center',
-    marginBottom: 20,
-  },
-  modalTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: '600',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  modalSubtitle: {
-    color: '#8E8E93',
-    fontSize: 16,
-    textAlign: 'center',
-    marginBottom: 32,
-    lineHeight: 22,
-  },
-  optionButton: {
-    borderRadius: 16,
-    marginBottom: 16,
-    overflow: 'hidden',
-    elevation: 8,
-    shadowColor: '#7B3F98',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 8,
-  },
-  optionButtonGradient: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 20,
-    borderRadius: 16,
-  },
-  optionIcon: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 16,
-  },
-  optionContent: {
-    flex: 1,
-  },
-  optionTitle: {
-    color: '#fff',
-    fontSize: 18,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  optionDescription: {
-    color: '#E5E7EB',
-    fontSize: 14,
-    lineHeight: 18,
-  },
-  inputContainer: {
-    marginBottom: 20,
-  },
-  inputLabel: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '500',
-    marginBottom: 8,
-  },
-  modalTextInput: {
-    backgroundColor: '#1F2C34',
-    borderRadius: 12,
-    padding: 16,
-    color: '#fff',
-    fontSize: 16,
-    minHeight: 120,
-    textAlignVertical: 'top',
-    borderWidth: 1,
-    borderColor: 'rgba(123, 63, 152, 0.3)',
-  },
-  modalButtons: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-  },
-  cancelButton: {
-    flex: 1,
-    backgroundColor: 'rgba(142, 142, 147, 0.2)',
-    borderRadius: 12,
-    paddingVertical: 16,
-    marginRight: 8,
-    alignItems: 'center',
-  },
-  cancelButtonText: {
-    color: '#8E8E93',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  sendButton: {
-    flex: 1,
-    backgroundColor: '#7B3F98',
-    borderRadius: 12,
-    paddingVertical: 16,
-    marginLeft: 8,
-    alignItems: 'center',
-  },
-  sendButtonDisabled: {
-    backgroundColor: 'rgba(123, 63, 152, 0.4)',
-  },
-  sendButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
+  container: { flex: 1, backgroundColor: '#0B141B' },
+  flex: { flex: 1 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B141B' },
+  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
+  retryButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
+  retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
+  header: { paddingBottom: 12, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0 },
+  headerContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 },
+  backButton: { marginRight: 12, padding: 4 },
+  avatar: { width: 40, height: 40, borderRadius: 20, marginRight: 12 },
+  headerInfo: { flex: 1, justifyContent: 'center', marginRight: 8 },
+  headerTitle: { color: '#fff', fontSize: 17, fontWeight: '500', lineHeight: 20, flexShrink: 0 },
+  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginTop: 1 },
+  headerSubtitle: { color: '#E1BEE7', fontSize: 12, lineHeight: 14 },
+  typingText: { fontStyle: 'italic', color: '#4FC3F7' },
+  connectionIndicator: { marginLeft: 6 },
+  onlineIndicator: { width: 8, height: 8, borderRadius: 4, backgroundColor: '#10b981' },
+  headerActions: { flexDirection: 'row', alignItems: 'center', minWidth: 40 },
+  headerButton: { marginLeft: 16, padding: 6 },
+  messagesContainer: { flex: 1, backgroundColor: '#0B141B' },
+  messagesList: { paddingVertical: 8, paddingHorizontal: 8, flexGrow: 1 },
+  listHeader: { paddingVertical: 8 },
+  loadingOlderContainer: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12 },
+  loadingOlderText: { color: '#8E8E93', fontSize: 14, marginLeft: 8 },
+  startOfConversationContainer: { alignItems: 'center', paddingVertical: 12 },
+  startOfConversationText: { color: '#666', fontSize: 12, fontStyle: 'italic' },
+  dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, paddingHorizontal: 16 },
+  dateSeparatorLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)' },
+  dateSeparatorBadge: { backgroundColor: 'rgba(31, 44, 52, 0.95)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginHorizontal: 16, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
+  dateSeparatorText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
+  messageWrapper: { marginVertical: 3 },
+  messageContainer: { maxWidth: '80%', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 18, elevation: 1, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.22, shadowRadius: 2.22 },
+  supportMessage: { alignSelf: 'flex-start', backgroundColor: '#1F2C34', borderBottomLeftRadius: 4, marginLeft: 4 },
+  userMessage: { alignSelf: 'flex-end', backgroundColor: '#6B46C1', borderBottomRightRadius: 4, marginRight: 4 },
+  systemMessage: { alignSelf: 'center', backgroundColor: 'rgba(142, 142, 147, 0.15)', borderRadius: 12, maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 20, marginVertical: 6, borderWidth: 1, borderColor: 'rgba(142, 142, 147, 0.2)' },
+  optimisticMessage: { opacity: 0.7 },
+  failedMessage: { backgroundColor: '#5A2D3D' },
+  taggedHeader: { backgroundColor: 'rgba(225, 190, 231, 0.1)', borderRadius: 8, padding: 8, marginBottom: 8, borderLeftWidth: 3, borderLeftColor: '#E1BEE7' },
+  taggedQuote: { position: 'absolute', left: 0, top: 0, bottom: 0, width: 3, backgroundColor: '#E1BEE7', borderRadius: 2 },
+  taggedContent: { marginLeft: 8 },
+  taggedInfo: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  taggedText: { color: '#E1BEE7', fontSize: 12, marginLeft: 6, fontWeight: '600' },
+  taggedMessage: { color: '#B8B8B8', fontSize: 13, fontStyle: 'italic' },
+  systemIndicator: { marginRight: 8, alignSelf: 'center' },
+  messageText: { color: '#fff', fontSize: 16, lineHeight: 20, paddingTop: 4, flexWrap: 'wrap' },
+  systemMessageText: { color: '#8E8E93', fontSize: 14, fontStyle: 'italic', textAlign: 'center', flexShrink: 1 },
+  optimisticMessageText: { fontStyle: 'italic' },
+  messageFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'flex-end', marginTop: 2 },
+  timestamp: { color: '#8E8E93', fontSize: 11, marginRight: 4 },
+  messageStatusContainer: { marginLeft: 4 },
+  scrollToBottomButton: { position: 'absolute', bottom: 16, right: 16, backgroundColor: '#7B3F98', borderRadius: 28, width: 56, height: 56, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6 },
+  scrollToBottomContent: { justifyContent: 'center', alignItems: 'center' },
+  unreadBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', borderRadius: 12, minWidth: 24, height: 24, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, borderWidth: 2, borderColor: '#0B141B' },
+  unreadBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
+  inquirySection: { backgroundColor: 'rgba(11, 20, 27, 0.95)', borderTopWidth: 0.5, borderTopColor: 'rgba(255, 255, 255, 0.1)' },
+  inquiryTabs: { flexDirection: 'row', paddingHorizontal: 16, paddingTop: 12, paddingBottom: 8 },
+  inquiryTab: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, backgroundColor: 'rgba(255, 255, 255, 0.1)', marginRight: 8 },
+  inquiryTabActive: { backgroundColor: '#6B46C1' },
+  inquiryTabText: { fontSize: 14, color: '#8E8E93', fontWeight: '500' },
+  inquiryTabTextActive: { color: '#fff' },
+  packageSection: { paddingHorizontal: 16, paddingBottom: 8 },
+  selectedPackageContainer: { backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)' },
+  selectedPackageHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 },
+  selectedPackageCode: { color: '#8b5cf6', fontSize: 14, fontWeight: '600', flex: 1, marginLeft: 8 },
+  removePackageButton: { padding: 4 },
+  selectedPackageDetails: { color: '#E5E7EB', fontSize: 12, lineHeight: 16 },
+  selectPackageButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(139, 92, 246, 0.1)', borderRadius: 8, padding: 12, borderWidth: 1, borderColor: 'rgba(139, 92, 246, 0.3)', borderStyle: 'dashed' },
+  selectPackageText: { color: '#8b5cf6', fontSize: 14, fontWeight: '500', marginLeft: 8 },
+  packageSearchDropdown: { backgroundColor: '#1F2C34', borderRadius: 8, marginTop: 8, borderWidth: 1, borderColor: 'rgba(123, 63, 152, 0.3)', maxHeight: 300 },
+  packageSearchInputContainer: { flexDirection: 'row', alignItems: 'center', padding: 12, borderBottomWidth: 1, borderBottomColor: 'rgba(123, 63, 152, 0.2)' },
+  packageSearchInput: { flex: 1, color: '#fff', fontSize: 14, paddingHorizontal: 8 },
+  closeSearchButton: { padding: 4 },
+  packageSearchLoading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', padding: 20 },
+  packageSearchLoadingText: { color: '#8E8E93', fontSize: 14, marginLeft: 8 },
+  packageSearchList: { maxHeight: 200 },
+  packageSearchItem: { borderBottomWidth: 1, borderBottomColor: 'rgba(123, 63, 152, 0.2)' },
+  packageSearchContent: { padding: 12 },
+  packageSearchHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  packageSearchCode: { color: '#fff', fontSize: 14, fontWeight: '600' },
+  packageSearchStateBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  packageSearchStateText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  packageSearchReceiver: { color: '#E5E7EB', fontSize: 12, marginBottom: 2 },
+  packageSearchRoute: { color: '#8E8E93', fontSize: 11, marginBottom: 4 },
+  packageSearchCost: { color: '#8b5cf6', fontSize: 12, fontWeight: '600' },
+  packageSearchEmpty: { padding: 20, alignItems: 'center' },
+  packageSearchEmptyText: { color: '#8E8E93', fontSize: 14, textAlign: 'center' },
+  inputContainerFixed: { backgroundColor: 'rgba(11, 20, 27, 0.95)', paddingHorizontal: 8, paddingVertical: 8 },
+  inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
+  textInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 25, paddingHorizontal: 4, paddingVertical: 6, marginRight: 8, maxHeight: 100, minHeight: 45, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.22, shadowRadius: 2.22 },
+  inputButton: { padding: 8, marginLeft: 4 },
+  textInput: { flex: 1, color: '#fff', fontSize: 16, paddingVertical: 8, paddingHorizontal: 8, textAlignVertical: 'center', maxHeight: 80 },
+  attachButton: { padding: 8 },
+  cameraButton: { padding: 8, marginRight: 4 },
+  sendButtonMain: { width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
+  sendButtonActive: { backgroundColor: '#7B3F98' },
+  voiceButton: { backgroundColor: '#7B3F98' },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0, 0, 0, 0.5)' },
+  modalBackdrop: { flex: 1 },
+  modalContainer: { height: SCREEN_HEIGHT * 0.7, borderTopLeftRadius: 20, borderTopRightRadius: 20, overflow: 'hidden' },
+  modalContent: { flex: 1, paddingHorizontal: 20, paddingTop: 12, paddingBottom: 20 },
+  modalHandle: { width: 40, height: 4, backgroundColor: '#8E8E93', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
+  modalTitle: { color: '#fff', fontSize: 24, fontWeight: '600', textAlign: 'center', marginBottom: 8 },
+  modalSubtitle: { color: '#8E8E93', fontSize: 16, textAlign: 'center', marginBottom: 32, lineHeight: 22 },
+  optionButton: { borderRadius: 16, marginBottom: 16, overflow: 'hidden', elevation: 8, shadowColor: '#7B3F98', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
+  optionButtonGradient: { flexDirection: 'row', alignItems: 'center', padding: 20, borderRadius: 16 },
+  optionIcon: { width: 50, height: 50, borderRadius: 25, backgroundColor: 'rgba(255, 255, 255, 0.15)', justifyContent: 'center', alignItems: 'center', marginRight: 16 },
+  optionContent: { flex: 1 },
+  optionTitle: { color: '#fff', fontSize: 18, fontWeight: '600', marginBottom: 4 },
+  optionDescription: { color: '#E5E7EB', fontSize: 14, lineHeight: 18 },
+  inputContainer: { marginBottom: 20 },
+  inputLabel: { color: '#fff', fontSize: 16, fontWeight: '500', marginBottom: 8 },
+  modalTextInput: { backgroundColor: '#1F2C34', borderRadius: 12, padding: 16, color: '#fff', fontSize: 16, minHeight: 120, textAlignVertical: 'top', borderWidth: 1, borderColor: 'rgba(123, 63, 152, 0.3)' },
+  modalButtons: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 20 },
+  cancelButton: { flex: 1, backgroundColor: 'rgba(142, 142, 147, 0.2)', borderRadius: 12, paddingVertical: 16, marginRight: 8, alignItems: 'center' },
+  cancelButtonText: { color: '#8E8E93', fontSize: 16, fontWeight: '600' },
+  sendButton: { flex: 1, backgroundColor: '#7B3F98', borderRadius: 12, paddingVertical: 16, marginLeft: 8, alignItems: 'center' },
+  sendButtonDisabled: { backgroundColor: 'rgba(123, 63, 152, 0.4)' },
+  sendButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
