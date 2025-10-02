@@ -291,13 +291,12 @@ export default function SupportAccountScreen() {
       
       showToast.success('Switching account...', 'App will restart');
       
-      setTimeout(async () => {
-        try {
-          await Updates.reloadAsync();
-        } catch (error) {
+      // Use setTimeout without async, then call reload
+      setTimeout(() => {
+        Updates.reloadAsync().catch((error) => {
           console.error('Failed to reload app:', error);
           showToast.error('Please restart the app manually');
-        }
+        });
       }, 1000);
       
     } catch (error) {
