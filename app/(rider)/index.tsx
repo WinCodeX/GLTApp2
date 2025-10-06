@@ -1,4 +1,4 @@
-// app/(rider)/index.tsx - With purple modals instead of alerts
+// app/(rider)/index.tsx - Fixed version
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -28,7 +28,7 @@ import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
 
-const HEADER_MAX_HEIGHT = 180;
+const HEADER_MAX_HEIGHT = 400;
 const HEADER_MIN_HEIGHT = 90;
 const HEADER_SCROLL_DISTANCE = HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT;
 
@@ -612,7 +612,7 @@ export default function RiderHomeScreen() {
             <Animated.View style={[styles.headerLeft, { opacity: headerOpacity, transform: [{ scale: titleScale }] }]}>
               <Text style={styles.headerGreeting}>Welcome back,</Text>
               <Text style={styles.headerName}>
-                {user?.display_name || user?.first_name || 'Rider'}
+                {user?.display_name || user?.first_name || 'Glen Rider'}
               </Text>
               <Text style={styles.headerTagline}>
                 Ready to deliver excellence today
@@ -633,10 +633,10 @@ export default function RiderHomeScreen() {
 
           <Animated.View style={[styles.onlineToggleContainer, { opacity: headerOpacity }]}>
             <View style={styles.onlineToggle}>
-              <View style={styles.onlineToggleLeft}>
+              <View style={styles.onlineToggleContent}>
                 <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
                 <Text style={styles.onlineToggleLabel}>
-                  {isOnline ? 'Online - Accepting Orders' : 'Offline'}
+                  {isOnline ? 'Online' : 'Offline'}
                 </Text>
               </View>
               <Switch
@@ -645,6 +645,7 @@ export default function RiderHomeScreen() {
                 trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
                 thumbColor={isOnline ? '#fff' : '#f4f3f4'}
                 ios_backgroundColor="#3E3E3E"
+                style={styles.switch}
               />
             </View>
           </Animated.View>
@@ -822,15 +823,15 @@ const styles = StyleSheet.create({
   },
   headerGradient: {
     flex: 1,
-    paddingTop: Platform.OS === 'ios' ? 50 : 20,
-    paddingHorizontal: 16,
-    paddingBottom: 16,
+    paddingTop: Platform.OS === 'ios' ? 58 : 28,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
   },
   headerTop: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
+    marginBottom: 24,
   },
   headerLeft: {
     flex: 1,
@@ -842,7 +843,7 @@ const styles = StyleSheet.create({
   },
   headerName: {
     color: '#fff',
-    fontSize: 28,
+    fontSize: 32,
     fontWeight: 'bold',
     marginTop: 4,
     marginBottom: 4,
@@ -863,31 +864,38 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255, 255, 255, 0.3)',
   },
   onlineToggleContainer: {
-    marginTop: 8,
+    marginTop: 16,
+    alignItems: 'center',
   },
   onlineToggle: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
-    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 24,
+    alignSelf: 'center',
+    minWidth: 140,
   },
-  onlineToggleLeft: {
+  onlineToggleContent: {
     flexDirection: 'row',
     alignItems: 'center',
+    marginRight: 8,
   },
   statusDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    marginRight: 8,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
   },
   onlineToggleLabel: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 14,
     fontWeight: '600',
+  },
+  switch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
   },
   scrollView: {
     flex: 1,
