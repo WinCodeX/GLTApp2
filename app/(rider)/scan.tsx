@@ -7,15 +7,68 @@ import {
   SafeAreaView,
   TouchableOpacity,
   Dimensions,
+  ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { RiderBottomTabs } from '../../components/rider/RiderBottomTabs';
+import QRScanner from '../../components/QRScanner';
 
 const { width } = Dimensions.get('window');
 
 export default function RiderScanScreen() {
-  const [flashOn, setFlashOn] = useState(false);
+  const [scannerVisible, setScannerVisible] = useState(false);
+  const [selectedAction, setSelectedAction] = useState<string | null>(null);
+  const [recentScans, setRecentScans] = useState<any[]>([]);
+
+  const handleScanSuccess = (result: any) => {
+    // Add to recent scans
+    const newScan = {
+      id: Date.now(),
+      code: result.package?.code || 'Unknown',
+      action: selectedAction,
+      timestamp: new Date(),
+    };
+    setRecentScans(prev => [newScan, ...prev.slice(0, 9)]);
+    
+    // Close scanner
+    setScannerVisible(false);
+    setSelectedAction(null);
+  };
+
+  const openScanner = (action: string) => {
+    setSelectedAction(action);
+    setScannerVisible(true);
+  };
+
+  const formatTimeAgo = (date: Date) => {
+    const seconds = Math.floor((new Date().getTime() - date.getTime()) / 1000);
+    if (seconds < 60) return 'Just now';
+    const minutes = Math.floor(seconds / 60);
+    if (minutes < 60) return `${minutes} min${minutes > 1 ? 's' : ''} ago`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
+    const days = Math.floor(hours / 24);
+    return `${days} day${days > 1 ? 's' : ''} ago`;
+  };
+
+  const getActionLabel = (action: string) => {
+    switch (action) {
+      case 'collect': return 'Collected from Agent';
+      case 'deliver': return 'Delivered';
+      case 'give_to_receiver': return 'Given to Customer';
+      default: return action;
+    }
+  };
+
+  const getActionIcon = (action: string) => {
+    switch (action) {
+      case 'collect': return 'truck';
+      case 'deliver': return 'check-circle';
+      case 'give_to_receiver': return 'user-check';
+      default: return 'package';
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -27,65 +80,129 @@ export default function RiderScanScreen() {
         style={styles.header}
       >
         <Text style={styles.headerTitle}>Scan Package</Text>
-        <TouchableOpacity 
-          style={styles.flashButton}
-          onPress={() => setFlashOn(!flashOn)}
-        >
-          <Feather 
-            name={flashOn ? 'zap' : 'zap-off'} 
-            size={22} 
-            color="#fff" 
-          />
-        </TouchableOpacity>
       </LinearGradient>
 
-      <View style={styles.content}>
-        {/* Scanner Area */}
-        <View style={styles.scannerContainer}>
-          <View style={styles.scannerFrame}>
-            <View style={[styles.corner, styles.topLeft]} />
-            <View style={[styles.corner, styles.topRight]} />
-            <View style={[styles.corner, styles.bottomLeft]} />
-            <View style={[styles.corner, styles.bottomRight]} />
-            
-            <View style={styles.scanLine} />
-          </View>
+      <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+        {/* Action Cards */}
+        <View style={styles.actionsSection}>
+          <Text style={styles.sectionTitle}>Select Action</Text>
           
-          <Text style={styles.scanText}>
-            Position QR code or barcode within the frame
-          </Text>
-        </View>
-
-        {/* Actions */}
-        <View style={styles.actionsContainer}>
-          <TouchableOpacity style={styles.actionButton}>
-            <Feather name="image" size={24} color="#7B3F98" />
-            <Text style={styles.actionButtonText}>Upload QR</Text>
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => openScanner('collect')}
+          >
+            <LinearGradient
+              colors={['#9C27B0', '#7B1FA2']}
+              style={styles.actionGradient}
+            >
+              <View style={styles.actionIconContainer}>
+                <Feather name="truck" size={28} color="#fff" />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle}>Collect from Agent</Text>
+                <Text style={styles.actionDescription}>
+                  Pick up packages from collection point
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={24} color="#fff" />
+            </LinearGradient>
           </TouchableOpacity>
-          
-          <TouchableOpacity style={styles.actionButton}>
-            <Feather name="edit" size={24} color="#7B3F98" />
-            <Text style={styles.actionButtonText}>Enter Code</Text>
+
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => openScanner('deliver')}
+          >
+            <LinearGradient
+              colors={['#34C759', '#28A745']}
+              style={styles.actionGradient}
+            >
+              <View style={styles.actionIconContainer}>
+                <Feather name="check-circle" size={28} color="#fff" />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle}>Deliver Package</Text>
+                <Text style={styles.actionDescription}>
+                  Mark package as delivered to destination
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={24} color="#fff" />
+            </LinearGradient>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={styles.actionCard}
+            onPress={() => openScanner('give_to_receiver')}
+          >
+            <LinearGradient
+              colors={['#FF6B35', '#E85D2F']}
+              style={styles.actionGradient}
+            >
+              <View style={styles.actionIconContainer}>
+                <Feather name="user-check" size={28} color="#fff" />
+              </View>
+              <View style={styles.actionContent}>
+                <Text style={styles.actionTitle}>Give to Customer</Text>
+                <Text style={styles.actionDescription}>
+                  Hand over package to final receiver
+                </Text>
+              </View>
+              <Feather name="chevron-right" size={24} color="#fff" />
+            </LinearGradient>
           </TouchableOpacity>
         </View>
 
         {/* Recent Scans */}
-        <View style={styles.recentSection}>
-          <Text style={styles.recentTitle}>Recent Scans</Text>
-          {[1, 2, 3].map((item) => (
-            <TouchableOpacity key={item} style={styles.recentItem}>
-              <View style={styles.recentIcon}>
-                <Feather name="package" size={18} color="#7B3F98" />
+        {recentScans.length > 0 && (
+          <View style={styles.recentSection}>
+            <Text style={styles.sectionTitle}>Recent Scans</Text>
+            {recentScans.map((scan) => (
+              <View key={scan.id} style={styles.recentItem}>
+                <View style={[
+                  styles.recentIconContainer,
+                  { backgroundColor: 'rgba(123, 63, 152, 0.1)' }
+                ]}>
+                  <Feather 
+                    name={getActionIcon(scan.action)} 
+                    size={18} 
+                    color="#7B3F98" 
+                  />
+                </View>
+                <View style={styles.recentContent}>
+                  <Text style={styles.recentCode}>{scan.code}</Text>
+                  <Text style={styles.recentAction}>
+                    {getActionLabel(scan.action)}
+                  </Text>
+                  <Text style={styles.recentTime}>
+                    {formatTimeAgo(scan.timestamp)}
+                  </Text>
+                </View>
               </View>
-              <View style={styles.recentContent}>
-                <Text style={styles.recentCode}>GLT-{12345 - item}</Text>
-                <Text style={styles.recentTime}>{item} hour{item > 1 ? 's' : ''} ago</Text>
-              </View>
-              <Feather name="chevron-right" size={20} color="#8E8E93" />
-            </TouchableOpacity>
-          ))}
-        </View>
-      </View>
+            ))}
+          </View>
+        )}
+
+        {recentScans.length === 0 && (
+          <View style={styles.emptyState}>
+            <Feather name="scan" size={64} color="#4A5568" />
+            <Text style={styles.emptyTitle}>No Scans Yet</Text>
+            <Text style={styles.emptyDescription}>
+              Select an action above to start scanning packages
+            </Text>
+          </View>
+        )}
+      </ScrollView>
+
+      {/* QR Scanner Modal */}
+      <QRScanner
+        visible={scannerVisible}
+        onClose={() => {
+          setScannerVisible(false);
+          setSelectedAction(null);
+        }}
+        userRole="rider"
+        defaultAction={selectedAction || undefined}
+        onScanSuccess={handleScanSuccess}
+      />
 
       <RiderBottomTabs currentTab="scan" />
     </SafeAreaView>
@@ -98,9 +215,6 @@ const styles = StyleSheet.create({
     backgroundColor: '#111B21',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
     paddingTop: 28,
     paddingBottom: 16,
     paddingHorizontal: 16,
@@ -110,124 +224,110 @@ const styles = StyleSheet.create({
     fontSize: 24,
     fontWeight: 'bold',
   },
-  flashButton: {
-    padding: 8,
-  },
   content: {
     flex: 1,
   },
-  scannerContainer: {
-    alignItems: 'center',
-    paddingVertical: 40,
-  },
-  scannerFrame: {
-    width: width * 0.7,
-    height: width * 0.7,
-    position: 'relative',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 20,
-  },
-  corner: {
-    position: 'absolute',
-    width: 40,
-    height: 40,
-    borderColor: '#7B3F98',
-  },
-  topLeft: {
-    top: 0,
-    left: 0,
-    borderTopWidth: 4,
-    borderLeftWidth: 4,
-  },
-  topRight: {
-    top: 0,
-    right: 0,
-    borderTopWidth: 4,
-    borderRightWidth: 4,
-  },
-  bottomLeft: {
-    bottom: 0,
-    left: 0,
-    borderBottomWidth: 4,
-    borderLeftWidth: 4,
-  },
-  bottomRight: {
-    bottom: 0,
-    right: 0,
-    borderBottomWidth: 4,
-    borderRightWidth: 4,
-  },
-  scanLine: {
-    width: '100%',
-    height: 2,
-    backgroundColor: '#7B3F98',
-    opacity: 0.7,
-  },
-  scanText: {
-    color: '#B8B8B8',
-    fontSize: 14,
-    textAlign: 'center',
-    paddingHorizontal: 40,
-  },
-  actionsContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 12,
-    marginBottom: 24,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: '#1F2C34',
+  actionsSection: {
     padding: 16,
-    borderRadius: 12,
   },
-  actionButtonText: {
+  sectionTitle: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 16,
   },
-  recentSection: {
-    paddingHorizontal: 16,
+  actionCard: {
+    marginBottom: 12,
+    borderRadius: 16,
+    overflow: 'hidden',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.25,
+    shadowRadius: 3.84,
   },
-  recentTitle: {
+  actionGradient: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+  actionIconContainer: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 16,
+  },
+  actionContent: {
+    flex: 1,
+  },
+  actionTitle: {
     color: '#fff',
     fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 12,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  actionDescription: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 13,
+  },
+  recentSection: {
+    padding: 16,
+    paddingTop: 8,
   },
   recentItem: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#1F2C34',
-    padding: 12,
+    padding: 14,
     borderRadius: 12,
-    marginBottom: 8,
+    marginBottom: 10,
   },
-  recentIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+  recentIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
+    marginRight: 14,
   },
   recentContent: {
     flex: 1,
   },
   recentCode: {
     color: '#fff',
-    fontSize: 14,
-    fontWeight: '500',
+    fontSize: 15,
+    fontWeight: '600',
+    marginBottom: 2,
+  },
+  recentAction: {
+    color: '#B8B8B8',
+    fontSize: 13,
     marginBottom: 2,
   },
   recentTime: {
     color: '#8E8E93',
     fontSize: 12,
+  },
+  emptyState: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 60,
+    paddingHorizontal: 40,
+  },
+  emptyTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 16,
+    marginBottom: 8,
+  },
+  emptyDescription: {
+    color: '#B8B8B8',
+    fontSize: 14,
+    textAlign: 'center',
+    lineHeight: 20,
   },
 });
