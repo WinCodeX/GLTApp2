@@ -1,5 +1,4 @@
-// app/(drawer)/notifications.tsx - Fixed Enhanced Purple-themed notifications screen
-
+// app/(drawer)/notifications.tsx - Complete rewrite with ActionCable
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -8,26 +7,19 @@ import {
   TouchableOpacity,
   StyleSheet,
   RefreshControl,
-  Alert,
   ActivityIndicator,
-  Dimensions,
   Animated,
   Platform,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import AsyncStorage from '@react-native-async-storage/async-storage';
 import GLTHeader from '../../components/GLTHeader';
-import colors from '../../theme/colors';
 import api from '../../lib/api';
 import { NavigationHelper } from '../../lib/helpers/navigation';
-
-// Import Firebase using the same pattern as header
-import firebase from '../../config/firebase';
-
-const { width: screenWidth } = Dimensions.get('window');
+import ActionCableService from '../../lib/services/ActionCableService';
+import { accountManager } from '../../lib/AccountManager';
 
 interface NotificationData {
   id: number;
@@ -36,13 +28,10 @@ interface NotificationData {
   notification_type: string;
   priority: string;
   read: boolean;
-  delivered: boolean;
   created_at: string;
   time_since_creation: string;
-  formatted_created_at: string;
   icon: string;
   action_url?: string;
-  expires_at?: string;
   expired: boolean;
   package?: {
     id: number;
@@ -59,16 +48,55 @@ interface NotificationsPagination {
   per_page: number;
 }
 
-interface NotificationsResponse {
-  success: boolean;
-  data: NotificationData[];
-  pagination: NotificationsPagination;
-  unread_count: number;
+interface CustomModalProps {
+  visible: boolean;
+  title: string;
+  message: string;
+  type?: 'success' | 'error' | 'info';
+  onClose: () => void;
 }
+
+const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type = 'info', onClose }) => {
+  const getIcon = () => {
+    switch (type) {
+      case 'success': return 'check-circle';
+      case 'error': return 'x-circle';
+      default: return 'info';
+    }
+  };
+
+  const getIconColor = () => {
+    switch (type) {
+      case 'success': return '#10b981';
+      case 'error': return '#ef4444';
+      default: return '#8b5cf6';
+    }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.container}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={modalStyles.gradient}>
+            <View style={modalStyles.iconContainer}>
+              <View style={[modalStyles.iconCircle, { backgroundColor: getIconColor() + '20' }]}>
+                <Feather name={getIcon()} size={32} color={getIconColor()} />
+              </View>
+            </View>
+            <Text style={modalStyles.title}>{title}</Text>
+            <Text style={modalStyles.message}>{message}</Text>
+            <TouchableOpacity style={modalStyles.button} onPress={onClose}>
+              <Text style={modalStyles.buttonText}>OK</Text>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+};
 
 export default function NotificationsScreen() {
   const router = useRouter();
-  const insets = useSafeAreaInsets();
 
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [loading, setLoading] = useState(true);
@@ -78,245 +106,34 @@ export default function NotificationsScreen() {
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
-  const [fcmToken, setFcmToken] = useState<string | null>(null);
   
-  // FIXED: Track pressed notifications to prevent blank states
-  const [pressedNotifications, setPressedNotifications] = useState<Set<number>>(new Set());
-  
-  // FIXED: Track read operations in progress to prevent race conditions
-  const [markingAsRead, setMarkingAsRead] = useState<Set<number>>(new Set());
+  const [isConnected, setIsConnected] = useState(false);
+  const actionCableRef = useRef<ActionCableService | null>(null);
+  const subscriptionsSetup = useRef(false);
+  const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
-  // Toast animation
+  const [customModal, setCustomModal] = useState<CustomModalProps>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+    onClose: () => {},
+  });
+
   const toastAnim = useRef(new Animated.Value(-100)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
 
-  // Firebase messaging listeners refs
-  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
-  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
-  const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
-
-  // FIXED: Helper function to check if notification is read
-  const isNotificationRead = (notification: NotificationData) => {
-    return notification.read;
-  };
-
-  // FIXED: Helper function to check if notification is being processed
-  const isNotificationPressed = (notificationId: number) => {
-    return pressedNotifications.has(notificationId);
-  };
-
-  // Purple gradient colors
-  const getGradientColors = () => {
-    return ['#1a1b3d', '#2d1b4e', '#4c1d95'];
-  };
-
-  // ============================================
-  // FIREBASE SETUP - Same as original
-  // ============================================
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      setupFirebaseMessaging();
-    }, 2000);
-    
-    return () => {
-      clearTimeout(timer);
-      if (unsubscribeOnMessage.current) {
-        unsubscribeOnMessage.current();
-      }
-      if (unsubscribeOnNotificationOpenedApp.current) {
-        unsubscribeOnNotificationOpenedApp.current();
-      }
-      if (unsubscribeTokenRefresh.current) {
-        unsubscribeTokenRefresh.current();
-      }
-    };
-  }, []);
-
-  const setupFirebaseMessaging = async () => {
-    try {
-      console.log('🔥 NOTIFICATIONS SCREEN: Setting up Firebase messaging...');
-      console.log('🔥 Platform detection:', {
-        isNative: firebase.isNative,
-        platform: Platform.OS,
-        hasMessaging: !!firebase.messaging()
-      });
-      
-      const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available, skipping setup');
-        return;
-      }
-
-      const permissionGranted = await requestFirebasePermissions();
-      if (!permissionGranted) {
-        return;
-      }
-
-      await getFirebaseToken();
-      setupFirebaseListeners();
-      
-      console.log('✅ NOTIFICATIONS SCREEN: Firebase messaging setup complete');
-      
-    } catch (error) {
-      console.error('❌ NOTIFICATIONS SCREEN: Failed to setup Firebase messaging:', error);
-    }
-  };
-
-  const requestFirebasePermissions = async (): Promise<boolean> => {
-    try {
-      console.log('🔥 NOTIFICATIONS SCREEN: Requesting Firebase permissions...');
-      
-      const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available');
-        return false;
-      }
-      
-      const authStatus = await messaging.requestPermission();
-      const enabled = authStatus === 1 || authStatus === 2;
-
-      if (enabled) {
-        console.log('✅ NOTIFICATIONS SCREEN: Firebase authorization granted:', authStatus);
-        return true;
-      } else {
-        console.log('❌ NOTIFICATIONS SCREEN: Firebase permissions denied');
-        showToast('Push notification permissions denied', 'error');
-        return false;
-      }
-    } catch (error) {
-      console.error('❌ NOTIFICATIONS SCREEN: Error requesting Firebase permissions:', error);
-      return false;
-    }
-  };
-
-  const getFirebaseToken = async () => {
-    try {
-      console.log('🔥 NOTIFICATIONS SCREEN: Getting Firebase FCM token...');
-      
-      const messaging = firebase.messaging();
-      if (!messaging) {
-        console.log('🔥 Firebase messaging not available for token generation');
-        return;
-      }
-      
-      const token = await messaging.getToken();
-      
-      console.log('🔥 NOTIFICATIONS SCREEN: FCM token received:', token?.substring(0, 50) + '...');
-      setFcmToken(token);
-
-      await registerFCMTokenWithBackend(token);
-      
-      unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
-        console.log('🔥 NOTIFICATIONS SCREEN: FCM token refreshed:', newToken?.substring(0, 50) + '...');
-        setFcmToken(newToken);
-        await registerFCMTokenWithBackend(newToken);
-      });
-      
-    } catch (error) {
-      console.error('❌ NOTIFICATIONS SCREEN: FCM token error:', error);
-    }
-  };
-
-  const registerFCMTokenWithBackend = async (token: string) => {
-    try {
-      console.log('🔥 NOTIFICATIONS SCREEN: Registering FCM token with backend...');
-      
-      const authToken = await AsyncStorage.getItem('authToken');
-      if (!authToken) {
-        console.log('No auth token available, skipping push token registration');
-        return;
-      }
-      
-      const response = await api.post('/api/v1/push_tokens', {
-        push_token: token,
-        platform: 'fcm',
-        device_info: {
-          platform: Platform.OS,
-          version: Platform.Version,
-          isDevice: true,
-          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
-        }
-      });
-      
-      console.log('🔥 NOTIFICATIONS SCREEN: Backend response:', response.data);
-      
-      if (response.data?.success) {
-        console.log('✅ NOTIFICATIONS SCREEN: FCM token registered successfully');
-        await AsyncStorage.setItem('fcm_token', token);
-        await AsyncStorage.setItem('fcm_token_registered', 'true');
-        showToast('Push notifications enabled', 'success');
-      } else {
-        console.error('❌ NOTIFICATIONS SCREEN: Backend rejected FCM token registration:', response.data);
-      }
-      
-    } catch (error) {
-      console.error('❌ NOTIFICATIONS SCREEN: FCM token backend registration failed:', error);
-      
-      if (error.response?.status === 401) {
-        console.log('Authentication required for push token registration');
-        return;
-      }
-      
-      showToast('Failed to register for push notifications', 'error');
-    }
-  };
-
-  const setupFirebaseListeners = () => {
-    const messaging = firebase.messaging();
-    if (!messaging) return;
-
-    unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
-      console.log('🔥 NOTIFICATIONS SCREEN: Foreground message received:', remoteMessage);
-      
-      fetchNotifications(1, true);
-      showToast('New notification received', 'success');
-    });
-
-    unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
-      console.log('🔥 NOTIFICATIONS SCREEN: Notification opened app from background:', remoteMessage);
-      handleNotificationData(remoteMessage.data);
+  const showCustomModal = (title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
+    setCustomModal({
+      visible: true,
+      title,
+      message,
+      type,
+      onClose: () => setCustomModal(prev => ({ ...prev, visible: false })),
     });
   };
 
-  const handleNotificationData = async (data: any) => {
-    console.log('🔥 NOTIFICATIONS SCREEN: Handling notification data:', data);
-    
-    try {
-      if (data?.type === 'package_update' && data?.package_id) {
-        await NavigationHelper.navigateTo('/(drawer)/track', {
-          params: { packageId: data.package_id },
-          trackInHistory: true
-        });
-      } else if (data?.package_code) {
-        await NavigationHelper.navigateTo('/(drawer)/track', {
-          params: { code: data.package_code },
-          trackInHistory: true
-        });
-      }
-      
-      if (data?.notification_id) {
-        markNotificationAsRead(data.notification_id);
-      }
-      
-    } catch (error) {
-      console.error('🔥 NOTIFICATIONS SCREEN: Error handling notification data:', error);
-    }
-  };
-
-  const markNotificationAsRead = async (notificationId: string) => {
-    try {
-      await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
-      console.log('✅ NOTIFICATIONS SCREEN: Notification marked as read');
-      
-      fetchNotifications(1, true);
-      
-    } catch (error) {
-      console.error('❌ NOTIFICATIONS SCREEN: Failed to mark notification as read:', error);
-    }
-  };
-
-  // Toast functionality
   const showToast = (message: string, type: 'success' | 'error' = 'success') => {
     setToastMessage(message);
     setToastType(type);
@@ -336,10 +153,115 @@ export default function NotificationsScreen() {
     ]).start();
   };
 
-  // Fetch notifications from API
+  // ============================================
+  // ACTIONCABLE SETUP
+  // ============================================
+
+  const setupActionCable = useCallback(async () => {
+    if (subscriptionsSetup.current) return;
+
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount) return;
+
+      console.log('📡 Notifications: Setting up ActionCable...');
+
+      actionCableRef.current = ActionCableService.getInstance();
+      
+      const connected = await actionCableRef.current.connect({
+        token: currentAccount.token,
+        userId: currentAccount.id,
+        autoReconnect: true,
+      });
+
+      if (connected) {
+        setIsConnected(true);
+        setupSubscriptions();
+        subscriptionsSetup.current = true;
+      }
+    } catch (error) {
+      console.error('❌ Notifications: Failed to setup ActionCable:', error);
+      setIsConnected(false);
+    }
+  }, []);
+
+  const setupSubscriptions = () => {
+    if (!actionCableRef.current) return;
+
+    console.log('📡 Notifications: Setting up subscriptions...');
+
+    actionCableSubscriptions.current.forEach(unsub => unsub());
+    actionCableSubscriptions.current = [];
+
+    const actionCable = actionCableRef.current;
+
+    const unsubConnected = actionCable.subscribe('connection_established', () => {
+      console.log('✅ Notifications: Connected');
+      setIsConnected(true);
+    });
+    actionCableSubscriptions.current.push(unsubConnected);
+
+    const unsubLost = actionCable.subscribe('connection_lost', () => {
+      console.log('❌ Notifications: Disconnected');
+      setIsConnected(false);
+    });
+    actionCableSubscriptions.current.push(unsubLost);
+
+    // New notification received
+    const unsubNewNotification = actionCable.subscribe('new_notification', (data) => {
+      console.log('🔔 New notification received:', data);
+      
+      if (data.notification) {
+        setNotifications(prev => [data.notification, ...prev]);
+        showToast('New notification received', 'success');
+      }
+    });
+    actionCableSubscriptions.current.push(unsubNewNotification);
+
+    // Notification count update
+    const unsubNotificationCount = actionCable.subscribe('notification_count_update', (data) => {
+      console.log('📊 Notification count updated:', data.notification_count);
+    });
+    actionCableSubscriptions.current.push(unsubNotificationCount);
+
+    // Notification marked as read
+    const unsubNotificationRead = actionCable.subscribe('notification_read', (data) => {
+      if (data.notification_id) {
+        console.log('✅ Notification marked as read:', data.notification_id);
+        setNotifications(prev =>
+          prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
+        );
+      }
+    });
+    actionCableSubscriptions.current.push(unsubNotificationRead);
+
+    // All notifications marked as read
+    const unsubAllRead = actionCable.subscribe('all_notifications_read', () => {
+      console.log('✅ All notifications marked as read');
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    });
+    actionCableSubscriptions.current.push(unsubAllRead);
+
+    console.log('✅ Notifications: Subscriptions configured');
+  };
+
+  useEffect(() => {
+    setupActionCable();
+    
+    return () => {
+      subscriptionsSetup.current = false;
+      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current = [];
+    };
+  }, [setupActionCable]);
+
+  // ============================================
+  // FETCH NOTIFICATIONS
+  // ============================================
+
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
-      console.log('🔔 Fetching notifications, page:', page, 'refresh:', refresh);
+      console.log('🔔 Fetching notifications, page:', page);
       
       if (refresh) {
         setRefreshing(true);
@@ -364,21 +286,13 @@ export default function NotificationsScreen() {
         timeout: 15000,
       });
 
-      console.log('🔔 Notifications response:', response.data);
-
-      if (response.data && response.data.success) {
+      if (response.data?.success) {
         const newNotifications = response.data.data || [];
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
-          // FIXED: Clear pressed states on refresh
-          setPressedNotifications(new Set());
-          setMarkingAsRead(new Set());
         } else {
-          setNotifications(prev => {
-            if (!Array.isArray(prev)) return newNotifications;
-            return [...prev, ...newNotifications];
-          });
+          setNotifications(prev => [...prev, ...newNotifications]);
         }
         
         setPagination(response.data.pagination || null);
@@ -396,86 +310,71 @@ export default function NotificationsScreen() {
     }
   }, [filter]);
 
-  // FIXED: Mark notification as read with proper state management
+  useEffect(() => {
+    fetchNotifications(1);
+  }, [fetchNotifications]);
+
+  // ============================================
+  // MARK AS READ
+  // ============================================
+
   const markAsRead = async (notificationId: number) => {
     try {
       console.log('🔔 Marking notification as read:', notificationId);
       
-      // Prevent duplicate calls
-      if (markingAsRead.has(notificationId)) {
-        console.log('🔔 Already marking notification as read, skipping:', notificationId);
-        return;
-      }
-      
-      // Add to marking set
-      setMarkingAsRead(prev => new Set(prev).add(notificationId));
-      
-      const response = await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
-      
-      if (response.data && response.data.success) {
-        console.log('✅ Notification marked as read successfully');
-        
-        // Update notifications state
-        setNotifications(prev => {
-          if (!Array.isArray(prev)) return prev;
-          return prev.map(notification =>
-            notification.id === notificationId
-              ? { ...notification, read: true }
-              : notification
-          );
-        });
+      // Optimistic update
+      setNotifications(prev =>
+        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
+      );
+
+      if (isConnected && actionCableRef.current) {
+        await actionCableRef.current.markNotificationRead(notificationId);
       } else {
-        console.error('🔔 API returned unsuccessful response:', response.data);
+        await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       }
+      
+      console.log('✅ Notification marked as read successfully');
     } catch (error) {
       console.error('🔔 Failed to mark notification as read:', error);
-    } finally {
-      // Remove from marking set
-      setMarkingAsRead(prev => {
-        const newSet = new Set(prev);
-        newSet.delete(notificationId);
-        return newSet;
-      });
+      
+      // Revert optimistic update on error
+      setNotifications(prev =>
+        prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
+      );
     }
   };
 
-  // FIXED: Mark all notifications as read
   const markAllAsRead = async () => {
     try {
       console.log('🔔 Marking all notifications as read');
       
+      // Optimistic update
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
       
-      if (response.data && response.data.success) {
-        setNotifications(prev => {
-          if (!Array.isArray(prev)) return prev;
-          return prev.map(notification => ({ ...notification, read: true }));
-        });
+      if (response.data?.success) {
         showToast('All notifications marked as read', 'success');
       } else {
-        showToast('Failed to mark all as read', 'error');
+        // Revert on error
+        fetchNotifications(1, true);
+        showCustomModal('Error', 'Failed to mark all as read', 'error');
       }
     } catch (error) {
       console.error('🔔 Failed to mark all notifications as read:', error);
-      showToast('Failed to mark all as read', 'error');
+      fetchNotifications(1, true);
+      showCustomModal('Error', 'Failed to mark all as read', 'error');
     }
   };
 
-  // FIXED: Handle notification press with proper state management
+  // ============================================
+  // HANDLE NOTIFICATION PRESS
+  // ============================================
+
   const handleNotificationPress = (notification: NotificationData) => {
-    console.log('🔔 Notification pressed:', notification.id, 'read:', notification.read);
-    
-    // Prevent multiple presses
-    if (isNotificationPressed(notification.id)) {
-      console.log('🔔 Notification already being processed, ignoring press');
-      return;
-    }
-    
-    // FIXED: Add immediate visual feedback
-    setPressedNotifications(prev => new Set(prev).add(notification.id));
+    console.log('🔔 Notification pressed:', notification.id);
     
     try {
-      // FIXED: Consistent navigation handling
       let navigationParams: any = null;
       
       if (notification.action_url) {
@@ -483,13 +382,12 @@ export default function NotificationsScreen() {
         
         if (url.includes('/track/')) {
           const packageCode = url.split('/track/')[1];
-          navigationParams = { code: packageCode }; // FIXED: Use consistent 'code' parameter
+          navigationParams = { code: packageCode };
         }
       } else if (notification.package?.code) {
-        navigationParams = { code: notification.package.code }; // FIXED: Use consistent 'code' parameter
+        navigationParams = { code: notification.package.code };
       }
       
-      // Navigate if we have parameters
       if (navigationParams) {
         NavigationHelper.navigateTo('/(drawer)/track', {
           params: navigationParams,
@@ -497,27 +395,20 @@ export default function NotificationsScreen() {
         });
       }
       
-      // FIXED: Mark as read without delay if not already read
       if (!notification.read) {
         markAsRead(notification.id);
       }
       
     } catch (error) {
       console.error('🔔 Navigation error:', error);
-      showToast('Failed to navigate', 'error');
-    } finally {
-      // FIXED: Remove pressed state after a short delay
-      setTimeout(() => {
-        setPressedNotifications(prev => {
-          const newSet = new Set(prev);
-          newSet.delete(notification.id);
-          return newSet;
-        });
-      }, 1000);
+      showCustomModal('Error', 'Failed to navigate', 'error');
     }
   };
 
-  // Enhanced icon mapping with proper general notification support
+  // ============================================
+  // RENDER HELPERS
+  // ============================================
+
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -538,14 +429,11 @@ export default function NotificationsScreen() {
       case 'final_warning':
       case 'resubmission_available':
         return 'alert-triangle';
-      case 'general':
-        return 'bell';
       default:
         return 'bell';
     }
   };
 
-  // Get notification color based on type and read status
   const getNotificationColor = (type: string, read: boolean) => {
     if (read) return '#a78bfa';
 
@@ -562,14 +450,11 @@ export default function NotificationsScreen() {
       case 'payment_received':
       case 'payment_reminder':
         return '#c084fc';
-      case 'general':
-        return '#8b5cf6';
       default:
         return '#8b5cf6';
     }
   };
 
-  // Format time display
   const formatTime = (timeString: string) => {
     try {
       const date = new Date(timeString);
@@ -590,45 +475,30 @@ export default function NotificationsScreen() {
     }
   };
 
-  // Handle load more
   const handleLoadMore = () => {
     if (pagination && currentPage < pagination.total_pages && !loadingMore) {
       fetchNotifications(currentPage + 1);
     }
   };
 
-  // Handle refresh
   const handleRefresh = () => {
     setCurrentPage(1);
     fetchNotifications(1, true);
   };
 
-  // Handle filter change
   const handleFilterChange = (newFilter: 'all' | 'unread') => {
     setFilter(newFilter);
     setCurrentPage(1);
   };
 
-  // Load notifications on mount and filter change
-  useEffect(() => {
-    fetchNotifications(1);
-  }, [fetchNotifications]);
-
-  // FIXED: Render notification item with proper state management
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
-    // FIXED: Extra safety checks with better error handling
     if (!item || typeof item.id === 'undefined') {
-      console.warn('🔔 Invalid notification item detected, skipping render');
       return null;
     }
 
-    // FIXED: Ensure required fields exist with fallbacks
     const title = item.title || 'No Title';
     const message = item.message || 'No Message';
-    
-    const isRead = isNotificationRead(item);
-    const isPressed = isNotificationPressed(item.id);
-    const isBeingMarkedAsRead = markingAsRead.has(item.id);
+    const isRead = item.read;
 
     return (
       <TouchableOpacity
@@ -636,14 +506,11 @@ export default function NotificationsScreen() {
           styles.notificationCard,
           !isRead && styles.unreadCard,
           item.expired && styles.expiredCard,
-          isPressed && styles.pressedCard, // FIXED: Add pressed state visual feedback
         ]}
         onPress={() => handleNotificationPress(item)}
         activeOpacity={0.7}
-        disabled={isPressed || isBeingMarkedAsRead} // FIXED: Prevent multiple presses
       >
         <View style={styles.notificationContent}>
-          {/* Icon and status indicator */}
           <View style={styles.iconContainer}>
             <View
               style={[
@@ -658,15 +525,8 @@ export default function NotificationsScreen() {
               />
             </View>
             {!isRead && <View style={styles.unreadIndicator} />}
-            {/* FIXED: Add loading indicator for marking as read */}
-            {isBeingMarkedAsRead && (
-              <View style={styles.loadingIndicator}>
-                <ActivityIndicator size={12} color="#c084fc" />
-              </View>
-            )}
           </View>
 
-          {/* Content */}
           <View style={styles.contentContainer}>
             <Text style={[styles.title, !isRead && styles.unreadTitle]}>
               {title}
@@ -675,7 +535,6 @@ export default function NotificationsScreen() {
               {message}
             </Text>
             
-            {/* Package info if available */}
             {item.package && (
               <View style={styles.packageInfo}>
                 <Feather name="package" size={12} color="#c4b5fd" />
@@ -686,7 +545,6 @@ export default function NotificationsScreen() {
               </View>
             )}
 
-            {/* Time and priority */}
             <View style={styles.metaContainer}>
               <Text style={styles.timeText}>
                 {item.time_since_creation || formatTime(item.created_at)}
@@ -713,7 +571,6 @@ export default function NotificationsScreen() {
     );
   };
 
-  // Render empty state
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -731,7 +588,6 @@ export default function NotificationsScreen() {
     </View>
   );
 
-  // Render error state
   const renderErrorState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -745,7 +601,6 @@ export default function NotificationsScreen() {
     </View>
   );
 
-  // Render footer for loading more
   const renderFooter = () => {
     if (!loadingMore) return null;
     
@@ -757,7 +612,6 @@ export default function NotificationsScreen() {
     );
   };
 
-  // Render toast
   const renderToast = () => (
     <Animated.View
       style={[
@@ -777,9 +631,7 @@ export default function NotificationsScreen() {
     </Animated.View>
   );
 
-  const unreadCount = Array.isArray(notifications) 
-    ? notifications.filter(n => !isNotificationRead(n)).length 
-    : 0;
+  const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
     <View style={styles.container}>
@@ -789,8 +641,7 @@ export default function NotificationsScreen() {
         onBackPress={() => NavigationHelper.goBack()}
       />
       
-      <LinearGradient colors={getGradientColors()} style={styles.gradient}>
-        {/* Filter and Actions Bar */}
+      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
         <View style={styles.filterContainer}>
           <View style={styles.filterButtons}>
             <TouchableOpacity
@@ -819,15 +670,13 @@ export default function NotificationsScreen() {
           )}
         </View>
 
-        {/* Firebase Token Status */}
-        {fcmToken && (
-          <View style={styles.pushTokenStatus}>
-            <Feather name="bell" size={12} color="#10b981" />
-            <Text style={styles.pushTokenText}>Push notifications enabled</Text>
+        {isConnected && (
+          <View style={styles.connectionStatus}>
+            <Feather name="wifi" size={12} color="#10b981" />
+            <Text style={styles.connectionText}>Live updates enabled</Text>
           </View>
         )}
 
-        {/* Notifications List */}
         {loading && notifications.length === 0 ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#c084fc" />
@@ -857,18 +706,12 @@ export default function NotificationsScreen() {
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
             showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
-            initialNumToRender={10}
-            maxToRenderPerBatch={10}
-            windowSize={10}
-            // FIXED: Add key prop to force re-render when notifications change
-            key={`notifications-${filter}-${notifications.length}`}
           />
         )}
       </LinearGradient>
 
-      {/* Toast */}
       {renderToast()}
+      <CustomModal {...customModal} />
     </View>
   );
 }
@@ -929,7 +772,7 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#c084fc',
   },
-  pushTokenStatus: {
+  connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
@@ -937,7 +780,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
     backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
-  pushTokenText: {
+  connectionText: {
     fontSize: 12,
     color: '#10b981',
   },
@@ -982,11 +825,6 @@ const styles = StyleSheet.create({
   expiredCard: {
     opacity: 0.6,
   },
-  // FIXED: Add pressed card style for visual feedback
-  pressedCard: {
-    backgroundColor: 'rgba(139, 92, 246, 0.35)',
-    transform: [{ scale: 0.98 }],
-  },
   notificationContent: {
     flexDirection: 'row',
     padding: 16,
@@ -1010,18 +848,6 @@ const styles = StyleSheet.create({
     height: 8,
     borderRadius: 4,
     backgroundColor: '#c084fc',
-  },
-  // FIXED: Add loading indicator for marking as read
-  loadingIndicator: {
-    position: 'absolute',
-    top: -4,
-    right: -4,
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    backgroundColor: 'rgba(192, 132, 252, 0.9)',
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   contentContainer: {
     flex: 1,
@@ -1159,5 +985,61 @@ const styles = StyleSheet.create({
     color: 'white',
     fontSize: 14,
     fontWeight: '500',
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  container: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  gradient: {
+    padding: 24,
+  },
+  iconContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  message: {
+    fontSize: 15,
+    color: '#c4b5fd',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  button: {
+    backgroundColor: '#8b5cf6',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
