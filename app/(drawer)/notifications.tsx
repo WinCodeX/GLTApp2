@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Complete rewrite with ActionCable
+// app/(drawer)/notifications.tsx - Fixed with proper state management
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -153,18 +153,12 @@ export default function NotificationsScreen() {
     ]).start();
   };
 
-  // ============================================
-  // ACTIONCABLE SETUP
-  // ============================================
-
   const setupActionCable = useCallback(async () => {
     if (subscriptionsSetup.current) return;
 
     try {
       const currentAccount = accountManager.getCurrentAccount();
       if (!currentAccount) return;
-
-      console.log('📡 Notifications: Setting up ActionCable...');
 
       actionCableRef.current = ActionCableService.getInstance();
       
@@ -180,7 +174,7 @@ export default function NotificationsScreen() {
         subscriptionsSetup.current = true;
       }
     } catch (error) {
-      console.error('❌ Notifications: Failed to setup ActionCable:', error);
+      console.error('Failed to setup ActionCable:', error);
       setIsConnected(false);
     }
   }, []);
@@ -188,46 +182,35 @@ export default function NotificationsScreen() {
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
-    console.log('📡 Notifications: Setting up subscriptions...');
-
     actionCableSubscriptions.current.forEach(unsub => unsub());
     actionCableSubscriptions.current = [];
 
     const actionCable = actionCableRef.current;
 
     const unsubConnected = actionCable.subscribe('connection_established', () => {
-      console.log('✅ Notifications: Connected');
       setIsConnected(true);
     });
     actionCableSubscriptions.current.push(unsubConnected);
 
     const unsubLost = actionCable.subscribe('connection_lost', () => {
-      console.log('❌ Notifications: Disconnected');
       setIsConnected(false);
     });
     actionCableSubscriptions.current.push(unsubLost);
 
-    // New notification received
     const unsubNewNotification = actionCable.subscribe('new_notification', (data) => {
-      console.log('🔔 New notification received:', data);
-      
       if (data.notification) {
-        setNotifications(prev => [data.notification, ...prev]);
+        setNotifications(prev => {
+          const exists = prev.some(n => n.id === data.notification.id);
+          if (exists) return prev;
+          return [data.notification, ...prev];
+        });
         showToast('New notification received', 'success');
       }
     });
     actionCableSubscriptions.current.push(unsubNewNotification);
 
-    // Notification count update
-    const unsubNotificationCount = actionCable.subscribe('notification_count_update', (data) => {
-      console.log('📊 Notification count updated:', data.notification_count);
-    });
-    actionCableSubscriptions.current.push(unsubNotificationCount);
-
-    // Notification marked as read
     const unsubNotificationRead = actionCable.subscribe('notification_read', (data) => {
       if (data.notification_id) {
-        console.log('✅ Notification marked as read:', data.notification_id);
         setNotifications(prev =>
           prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
         );
@@ -235,14 +218,10 @@ export default function NotificationsScreen() {
     });
     actionCableSubscriptions.current.push(unsubNotificationRead);
 
-    // All notifications marked as read
     const unsubAllRead = actionCable.subscribe('all_notifications_read', () => {
-      console.log('✅ All notifications marked as read');
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     });
     actionCableSubscriptions.current.push(unsubAllRead);
-
-    console.log('✅ Notifications: Subscriptions configured');
   };
 
   useEffect(() => {
@@ -255,14 +234,8 @@ export default function NotificationsScreen() {
     };
   }, [setupActionCable]);
 
-  // ============================================
-  // FETCH NOTIFICATIONS
-  // ============================================
-
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
-      console.log('🔔 Fetching notifications, page:', page);
-      
       if (refresh) {
         setRefreshing(true);
         setError(null);
@@ -292,7 +265,11 @@ export default function NotificationsScreen() {
         if (refresh || page === 1) {
           setNotifications(newNotifications);
         } else {
-          setNotifications(prev => [...prev, ...newNotifications]);
+          setNotifications(prev => {
+            const existingIds = new Set(prev.map(n => n.id));
+            const uniqueNew = newNotifications.filter(n => !existingIds.has(n.id));
+            return [...prev, ...uniqueNew];
+          });
         }
         
         setPagination(response.data.pagination || null);
@@ -301,7 +278,7 @@ export default function NotificationsScreen() {
         setError('Failed to load notifications');
       }
     } catch (error) {
-      console.error('🔔 Failed to fetch notifications:', error);
+      console.error('Failed to fetch notifications:', error);
       setError('Unable to load notifications. Please try again.');
     } finally {
       setLoading(false);
@@ -312,17 +289,13 @@ export default function NotificationsScreen() {
 
   useEffect(() => {
     fetchNotifications(1);
-  }, [fetchNotifications]);
-
-  // ============================================
-  // MARK AS READ
-  // ============================================
+  }, [filter]);
 
   const markAsRead = async (notificationId: number) => {
     try {
-      console.log('🔔 Marking notification as read:', notificationId);
-      
-      // Optimistic update
+      const notificationToUpdate = notifications.find(n => n.id === notificationId);
+      if (!notificationToUpdate || notificationToUpdate.read) return;
+
       setNotifications(prev =>
         prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
       );
@@ -332,12 +305,9 @@ export default function NotificationsScreen() {
       } else {
         await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
       }
-      
-      console.log('✅ Notification marked as read successfully');
     } catch (error) {
-      console.error('🔔 Failed to mark notification as read:', error);
+      console.error('Failed to mark notification as read:', error);
       
-      // Revert optimistic update on error
       setNotifications(prev =>
         prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
       );
@@ -346,9 +316,8 @@ export default function NotificationsScreen() {
 
   const markAllAsRead = async () => {
     try {
-      console.log('🔔 Marking all notifications as read');
+      const previousNotifications = [...notifications];
       
-      // Optimistic update
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
 
       const response = await api.patch('/api/v1/notifications/mark_all_as_read');
@@ -356,24 +325,16 @@ export default function NotificationsScreen() {
       if (response.data?.success) {
         showToast('All notifications marked as read', 'success');
       } else {
-        // Revert on error
-        fetchNotifications(1, true);
+        setNotifications(previousNotifications);
         showCustomModal('Error', 'Failed to mark all as read', 'error');
       }
     } catch (error) {
-      console.error('🔔 Failed to mark all notifications as read:', error);
-      fetchNotifications(1, true);
+      console.error('Failed to mark all notifications as read:', error);
       showCustomModal('Error', 'Failed to mark all as read', 'error');
     }
   };
 
-  // ============================================
-  // HANDLE NOTIFICATION PRESS
-  // ============================================
-
   const handleNotificationPress = (notification: NotificationData) => {
-    console.log('🔔 Notification pressed:', notification.id);
-    
     try {
       let navigationParams: any = null;
       
@@ -400,14 +361,10 @@ export default function NotificationsScreen() {
       }
       
     } catch (error) {
-      console.error('🔔 Navigation error:', error);
+      console.error('Navigation error:', error);
       showCustomModal('Error', 'Failed to navigate', 'error');
     }
   };
-
-  // ============================================
-  // RENDER HELPERS
-  // ============================================
 
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
@@ -706,6 +663,8 @@ export default function NotificationsScreen() {
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
             showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            windowSize={10}
           />
         )}
       </LinearGradient>
