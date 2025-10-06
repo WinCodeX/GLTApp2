@@ -603,7 +603,7 @@ export default function RiderHomeScreen() {
                       styles.liveText,
                       { color: isOnline ? '#4CAF50' : '#8E8E93' }
                     ]}>
-                      {isOnline ? 'LIVE' : 'OFFLINE'}
+                      {isOnline ? 'ONLINE' : 'OFFLINE'}
                     </Text>
                   </View>
                   <Switch
