@@ -7,7 +7,6 @@ import {
   SafeAreaView,
   ScrollView,
   TouchableOpacity,
-  Animated,
   Modal,
   TextInput,
   Image,
@@ -27,10 +26,6 @@ import firebase from '../../config/firebase';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
-
-const HEADER_MAX_HEIGHT = 400;
-const HEADER_MIN_HEIGHT = 90;
-const HEADER_SCROLL_DISTANCE = HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT;
 
 type ReportIssue = 'mechanical' | 'weather' | 'fuel' | 'accident' | 'other';
 
@@ -157,83 +152,6 @@ export default function RiderHomeScreen() {
     title: '',
     message: '',
     type: 'info',
-  });
-
-  const scrollY = useRef(new Animated.Value(0)).current;
-
-  const headerHeight = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [HEADER_MAX_HEIGHT, HEADER_MIN_HEIGHT],
-    extrapolate: 'clamp',
-  });
-
-  const companyNameOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 3],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  // Fixed avatar animations
-  const avatarSize = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [120, 40],
-    extrapolate: 'clamp',
-  });
-
-  const avatarTranslateX = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -120],
-    extrapolate: 'clamp',
-  });
-
-  const avatarTranslateY = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -120],
-    extrapolate: 'clamp',
-  });
-
-  // Fixed name animations
-  const nameTranslateX = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, 35],
-    extrapolate: 'clamp',
-  });
-
-  const nameTranslateY = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -140],
-    extrapolate: 'clamp',
-  });
-
-  const nameScale = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.7],
-    extrapolate: 'clamp',
-  });
-
-  // Fixed toggle animations
-  const toggleTranslateY = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -50],
-    extrapolate: 'clamp',
-  });
-
-  const toggleScale = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.85],
-    extrapolate: 'clamp',
-  });
-
-  const welcomeTextOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 2],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
-  });
-
-  const subtextOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 4],
-    outputRange: [1, 0],
-    extrapolate: 'clamp',
   });
 
   const recentOrders = [
@@ -658,96 +576,62 @@ export default function RiderHomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <Animated.View style={[styles.headerContainer, { height: headerHeight }]}>
+      <View style={styles.headerContainer}>
         <LinearGradient
           colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
           start={{ x: 0, y: 0 }}
           end={{ x: 1, y: 1 }}
           style={styles.headerGradient}
         >
-          <Animated.Text style={[styles.companyName, { opacity: companyNameOpacity }]}>
-            GLT Logistics
-          </Animated.Text>
+          <Text style={styles.companyName}>GLT Logistics</Text>
 
           <View style={styles.headerContent}>
-            <Animated.View style={[styles.avatarContainer, { 
-              transform: [
-                { translateX: avatarTranslateX },
-                { translateY: avatarTranslateY }
-              ]
-            }]}>
-              <Animated.Image
-                source={
-                  user?.avatar_url
-                    ? { uri: user.avatar_url }
-                    : require('../../assets/images/avatar_placeholder.png')
-                }
-                style={[styles.headerAvatar, {
-                  width: avatarSize,
-                  height: avatarSize,
-                  borderRadius: scrollY.interpolate({
-                    inputRange: [0, HEADER_SCROLL_DISTANCE],
-                    outputRange: [60, 20],
-                    extrapolate: 'clamp',
-                  }),
-                }]}
-              />
-            </Animated.View>
+            <Image
+              source={
+                user?.avatar_url
+                  ? { uri: user.avatar_url }
+                  : require('../../assets/images/avatar_placeholder.png')
+              }
+              style={styles.headerAvatar}
+            />
 
-            <Animated.View style={[styles.nameContainer, {
-              transform: [
-                { translateX: nameTranslateX },
-                { translateY: nameTranslateY },
-                { scale: nameScale }
-              ]
-            }]}>
-              <Animated.Text style={[styles.welcomeText, { opacity: welcomeTextOpacity }]}>
-                Welcome,
-              </Animated.Text>
+            <View style={styles.onlineToggleContainer}>
+              <View style={[
+                styles.onlineToggle,
+                { backgroundColor: isOnline ? '#2D5016' : 'rgba(255, 255, 255, 0.15)' }
+              ]}>
+                <View style={styles.onlineToggleContent}>
+                  <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
+                  <Text style={[
+                    styles.onlineToggleLabel,
+                    { color: isOnline ? '#4CAF50' : '#fff' }
+                  ]}>
+                    {isOnline ? 'online' : 'offline'}
+                  </Text>
+                </View>
+                <Switch
+                  value={isOnline}
+                  onValueChange={handleOnlineToggle}
+                  trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
+                  thumbColor={isOnline ? '#fff' : '#f4f3f4'}
+                  ios_backgroundColor="#3E3E3E"
+                  style={styles.switch}
+                />
+              </View>
+            </View>
+
+            <View style={styles.nameContainer}>
+              <Text style={styles.welcomeText}>Welcome,</Text>
               <Text style={styles.userName}>
                 {user?.display_name || user?.first_name || 'Glen Rider'}
               </Text>
-              <Animated.Text style={[styles.userSubtext, { opacity: subtextOpacity }]}>
-                Here are your packages today.
-              </Animated.Text>
-            </Animated.View>
-          </View>
-
-          <Animated.View style={[styles.onlineToggleContainer, {
-            transform: [
-              { translateY: toggleTranslateY },
-              { scale: toggleScale }
-            ]
-          }]}>
-            <View style={styles.onlineToggle}>
-              <View style={styles.onlineToggleContent}>
-                <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
-                <Text style={styles.onlineToggleLabel}>
-                  {isOnline ? 'online' : 'offline'}
-                </Text>
-              </View>
-              <Switch
-                value={isOnline}
-                onValueChange={handleOnlineToggle}
-                trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
-                thumbColor={isOnline ? '#fff' : '#f4f3f4'}
-                ios_backgroundColor="#3E3E3E"
-                style={styles.switch}
-              />
+              <Text style={styles.userSubtext}>Here are your packages today.</Text>
             </View>
-          </Animated.View>
+          </View>
         </LinearGradient>
-      </Animated.View>
+      </View>
 
-      <Animated.ScrollView
-        style={styles.scrollView}
-        contentContainerStyle={styles.scrollContent}
-        onScroll={Animated.event(
-          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
-          { useNativeDriver: false }
-        )}
-        scrollEventThrottle={16}
-      >
+      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
@@ -808,7 +692,7 @@ export default function RiderHomeScreen() {
             </View>
           </LinearGradient>
         </TouchableOpacity>
-      </Animated.ScrollView>
+      </ScrollView>
 
       <Modal
         visible={showReportModal}
@@ -901,42 +785,63 @@ const styles = StyleSheet.create({
     backgroundColor: '#111B21',
   },
   headerContainer: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    zIndex: 10,
-    overflow: 'hidden',
+    width: '100%',
   },
   headerGradient: {
-    flex: 1,
     paddingTop: Platform.OS === 'ios' ? 58 : 28,
     paddingHorizontal: 20,
-    paddingBottom: 20,
+    paddingBottom: 24,
   },
   companyName: {
     color: '#fff',
     fontSize: 24,
     fontWeight: '700',
     letterSpacing: 1,
-    marginBottom: 16,
+    marginBottom: 24,
   },
   headerContent: {
     alignItems: 'center',
-    justifyContent: 'center',
-    flex: 1,
-  },
-  avatarContainer: {
-    alignItems: 'center',
-    marginBottom: 12,
   },
   headerAvatar: {
+    width: 120,
+    height: 120,
+    borderRadius: 60,
     borderWidth: 4,
     borderColor: 'rgba(255, 255, 255, 0.3)',
+    marginBottom: 16,
+  },
+  onlineToggleContainer: {
+    marginBottom: 16,
+  },
+  onlineToggle: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 24,
+    minWidth: 150,
+  },
+  onlineToggleContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  statusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  onlineToggleLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  switch: {
+    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
   },
   nameContainer: {
     alignItems: 'center',
-    marginBottom: 16,
   },
   welcomeText: {
     color: 'rgba(255, 255, 255, 0.8)',
@@ -955,45 +860,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
   },
-  onlineToggleContainer: {
-    width: '100%',
-    alignItems: 'center',
-    marginTop: 12,
-  },
-  onlineToggle: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    minWidth: 150,
-  },
-  onlineToggleContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginRight: 8,
-  },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  onlineToggleLabel: {
-    color: '#fff',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  switch: {
-    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
-  },
   scrollView: {
     flex: 1,
   },
   scrollContent: {
-    paddingTop: HEADER_MAX_HEIGHT + 16,
     paddingBottom: 100,
   },
   section: {
