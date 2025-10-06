@@ -175,49 +175,61 @@ export default function RiderHomeScreen() {
 
   const avatarSize = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [120, 50],
+    outputRange: [120, 45],
     extrapolate: 'clamp',
   });
 
   const avatarTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, 80],
+    outputRange: [0, 140],
     extrapolate: 'clamp',
   });
 
   const avatarTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -120],
+    outputRange: [0, -180],
     extrapolate: 'clamp',
   });
 
   const nameTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -130],
+    outputRange: [0, -160],
     extrapolate: 'clamp',
   });
 
   const nameTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -100],
+    outputRange: [0, -180],
     extrapolate: 'clamp',
   });
 
   const nameScale = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.6],
+    outputRange: [1, 0.5],
     extrapolate: 'clamp',
   });
 
   const toggleTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -80],
+    outputRange: [0, -200],
     extrapolate: 'clamp',
   });
 
   const toggleScale = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.85],
+    outputRange: [1, 0.75],
+    extrapolate: 'clamp',
+  });
+
+  const welcomeTextOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE / 2, HEADER_SCROLL_DISTANCE],
+    outputRange: [1, 1, 0],
+    extrapolate: 'clamp',
+  });
+
+  const subtextOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE / 4],
+    outputRange: [1, 0],
     extrapolate: 'clamp',
   });
 
@@ -686,11 +698,15 @@ export default function RiderHomeScreen() {
                 { scale: nameScale }
               ]
             }]}>
-              <Text style={styles.welcomeText}>Welcome,</Text>
+              <Animated.Text style={[styles.welcomeText, { opacity: welcomeTextOpacity }]}>
+                Welcome,
+              </Animated.Text>
               <Text style={styles.userName}>
                 {user?.display_name || user?.first_name || 'Glen Rider'}
               </Text>
-              <Text style={styles.userSubtext}>Here are your packages today.</Text>
+              <Animated.Text style={[styles.userSubtext, { opacity: subtextOpacity }]}>
+                Here are your packages today.
+              </Animated.Text>
             </Animated.View>
           </View>
 
