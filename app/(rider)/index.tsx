@@ -167,15 +167,33 @@ export default function RiderHomeScreen() {
     extrapolate: 'clamp',
   });
 
-  const headerOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 2, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.5, 0],
+  const companyNameOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE / 3],
+    outputRange: [1, 0],
     extrapolate: 'clamp',
   });
 
-  const titleScale = scrollY.interpolate({
+  const avatarSize = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.8],
+    outputRange: [120, 50],
+    extrapolate: 'clamp',
+  });
+
+  const avatarTranslateX = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [0, 120],
+    extrapolate: 'clamp',
+  });
+
+  const nameTranslateX = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [0, -80],
+    extrapolate: 'clamp',
+  });
+
+  const contentOpacity = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE / 2, HEADER_SCROLL_DISTANCE],
+    outputRange: [1, 0.7, 0],
     extrapolate: 'clamp',
   });
 
@@ -608,35 +626,50 @@ export default function RiderHomeScreen() {
           end={{ x: 1, y: 1 }}
           style={styles.headerGradient}
         >
-          <View style={styles.headerTop}>
-            <Animated.View style={[styles.headerLeft, { opacity: headerOpacity, transform: [{ scale: titleScale }] }]}>
-              <Text style={styles.headerGreeting}>Welcome back,</Text>
-              <Text style={styles.headerName}>
-                {user?.display_name || user?.first_name || 'Glen Rider'}
-              </Text>
-              <Text style={styles.headerTagline}>
-                Ready to deliver excellence today
-              </Text>
-            </Animated.View>
+          <Animated.Text style={[styles.companyName, { opacity: companyNameOpacity }]}>
+            GLT Logistics
+          </Animated.Text>
 
-            <View style={styles.headerRight}>
-              <Image
+          <View style={styles.headerContent}>
+            <Animated.View style={[styles.avatarContainer, { 
+              transform: [{ translateX: avatarTranslateX }]
+            }]}>
+              <Animated.Image
                 source={
                   user?.avatar_url
                     ? { uri: user.avatar_url }
                     : require('../../assets/images/avatar_placeholder.png')
                 }
-                style={styles.headerAvatar}
+                style={[styles.headerAvatar, {
+                  width: avatarSize,
+                  height: avatarSize,
+                  borderRadius: scrollY.interpolate({
+                    inputRange: [0, HEADER_SCROLL_DISTANCE],
+                    outputRange: [60, 25],
+                    extrapolate: 'clamp',
+                  }),
+                }]}
               />
-            </View>
+            </Animated.View>
+
+            <Animated.View style={[styles.nameContainer, {
+              transform: [{ translateX: nameTranslateX }],
+              opacity: contentOpacity,
+            }]}>
+              <Text style={styles.welcomeText}>Welcome,</Text>
+              <Text style={styles.userName}>
+                {user?.display_name || user?.first_name || 'Kanana Joy'}
+              </Text>
+              <Text style={styles.userSubtext}>Here are your packages today.</Text>
+            </Animated.View>
           </View>
 
-          <Animated.View style={[styles.onlineToggleContainer, { opacity: headerOpacity }]}>
+          <Animated.View style={[styles.onlineToggleContainer, { opacity: contentOpacity }]}>
             <View style={styles.onlineToggle}>
               <View style={styles.onlineToggleContent}>
                 <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
                 <Text style={styles.onlineToggleLabel}>
-                  {isOnline ? 'Online' : 'Offline'}
+                  {isOnline ? 'online' : 'offline'}
                 </Text>
               </View>
               <Switch
@@ -826,6 +859,51 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 58 : 28,
     paddingHorizontal: 20,
     paddingBottom: 20,
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  companyName: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 1,
+    textAlign: 'center',
+    marginBottom: 20,
+  },
+  headerContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
+    width: '100%',
+  },
+  avatarContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  headerAvatar: {
+    borderWidth: 4,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  nameContainer: {
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  welcomeText: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 14,
+    fontWeight: '500',
+    marginBottom: 4,
+  },
+  userName: {
+    color: '#fff',
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 4,
+  },
+  userSubtext: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    fontWeight: '400',
   },
   headerTop: {
     flexDirection: 'row',
@@ -856,15 +934,8 @@ const styles = StyleSheet.create({
   headerRight: {
     marginLeft: 12,
   },
-  headerAvatar: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    borderWidth: 3,
-    borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
   onlineToggleContainer: {
-    marginTop: 16,
+    width: '100%',
     alignItems: 'center',
   },
   onlineToggle: {
@@ -872,11 +943,10 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
     borderRadius: 24,
-    alignSelf: 'center',
-    minWidth: 140,
+    minWidth: 150,
   },
   onlineToggleContent: {
     flexDirection: 'row',
