@@ -181,19 +181,43 @@ export default function RiderHomeScreen() {
 
   const avatarTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, 120],
+    outputRange: [0, 80],
+    extrapolate: 'clamp',
+  });
+
+  const avatarTranslateY = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [0, -120],
     extrapolate: 'clamp',
   });
 
   const nameTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [0, -130],
+    extrapolate: 'clamp',
+  });
+
+  const nameTranslateY = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [0, -100],
+    extrapolate: 'clamp',
+  });
+
+  const nameScale = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [1, 0.6],
+    extrapolate: 'clamp',
+  });
+
+  const toggleTranslateY = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
     outputRange: [0, -80],
     extrapolate: 'clamp',
   });
 
-  const contentOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 2, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.7, 0],
+  const toggleScale = scrollY.interpolate({
+    inputRange: [0, HEADER_SCROLL_DISTANCE],
+    outputRange: [1, 0.85],
     extrapolate: 'clamp',
   });
 
@@ -632,7 +656,10 @@ export default function RiderHomeScreen() {
 
           <View style={styles.headerContent}>
             <Animated.View style={[styles.avatarContainer, { 
-              transform: [{ translateX: avatarTranslateX }]
+              transform: [
+                { translateX: avatarTranslateX },
+                { translateY: avatarTranslateY }
+              ]
             }]}>
               <Animated.Image
                 source={
@@ -653,18 +680,26 @@ export default function RiderHomeScreen() {
             </Animated.View>
 
             <Animated.View style={[styles.nameContainer, {
-              transform: [{ translateX: nameTranslateX }],
-              opacity: contentOpacity,
+              transform: [
+                { translateX: nameTranslateX },
+                { translateY: nameTranslateY },
+                { scale: nameScale }
+              ]
             }]}>
               <Text style={styles.welcomeText}>Welcome,</Text>
               <Text style={styles.userName}>
-                {user?.display_name || user?.first_name || 'Kanana Joy'}
+                {user?.display_name || user?.first_name || 'Glen Rider'}
               </Text>
               <Text style={styles.userSubtext}>Here are your packages today.</Text>
             </Animated.View>
           </View>
 
-          <Animated.View style={[styles.onlineToggleContainer, { opacity: contentOpacity }]}>
+          <Animated.View style={[styles.onlineToggleContainer, {
+            transform: [
+              { translateY: toggleTranslateY },
+              { scale: toggleScale }
+            ]
+          }]}>
             <View style={styles.onlineToggle}>
               <View style={styles.onlineToggleContent}>
                 <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
@@ -864,11 +899,11 @@ const styles = StyleSheet.create({
   },
   companyName: {
     color: '#fff',
-    fontSize: 16,
+    fontSize: 24,
     fontWeight: '700',
     letterSpacing: 1,
-    textAlign: 'center',
-    marginBottom: 20,
+    alignSelf: 'flex-start',
+    marginBottom: 24,
   },
   headerContent: {
     alignItems: 'center',
