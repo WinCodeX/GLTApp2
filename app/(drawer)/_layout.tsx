@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Enhanced with better account switching
+// app/(drawer)/_layout.tsx - Enhanced with Agent and Rider role support
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter, useSegments } from 'expo-router';
@@ -34,7 +34,7 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
   cart: { name: 'shopping-cart', lib: Feather },
 };
 
-type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_support' | 'redirect_login';
+type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_support' | 'redirect_agent' | 'redirect_rider' | 'redirect_login';
 
 // Helper function to determine effective role from user data
 const getEffectiveRole = (userData: any): string => {
@@ -43,11 +43,18 @@ const getEffectiveRole = (userData: any): string => {
   }
   
   if (userData.roles && Array.isArray(userData.roles)) {
+    // Priority order: admin > support > agent > rider > client
     if (userData.roles.includes('admin')) {
       return 'admin';
     }
     if (userData.roles.includes('support')) {
       return 'support';
+    }
+    if (userData.roles.includes('agent')) {
+      return 'agent';
+    }
+    if (userData.roles.includes('rider')) {
+      return 'rider';
     }
   }
   
@@ -84,7 +91,6 @@ export default function DrawerLayout() {
       }
     };
 
-    // Check every time the component updates
     checkAccountChange();
   }, [segments, lastAccountId]);
 
@@ -120,7 +126,6 @@ export default function DrawerLayout() {
         setLastAccountId(currentAccount.id);
       }
       
-      // FIXED: Better logging of account state
       console.log('🔐 Account state:', {
         hasAccount: !!currentAccount,
         accountId: currentAccount?.id,
@@ -135,7 +140,6 @@ export default function DrawerLayout() {
         return;
       }
 
-      // FIXED: Get role directly from account (it's already validated)
       const storedRole = currentAccount.role;
       console.log('🔐 Stored role from account:', storedRole);
 
@@ -145,9 +149,6 @@ export default function DrawerLayout() {
       try {
         const response = await api.get('/api/v1/me');
         
-        // FIXED: Handle both possible response structures
-        // Login endpoint: response.data = { status, user: {...}, token }
-        // Me endpoint: response.data = { user: {...} } OR response.data = {...user fields}
         const userData = response.data?.user || response.data;
         
         console.log('🔐 Server verification successful:', {
@@ -159,7 +160,7 @@ export default function DrawerLayout() {
         const effectiveRole = getEffectiveRole(userData);
         console.log('🔐 Effective role from server:', effectiveRole);
         
-        // FIXED: Update account if server role differs
+        // Update account if server role differs
         if (storedRole !== effectiveRole) {
           console.log('🔐 Role mismatch - updating:', {
             stored: storedRole,
@@ -170,11 +171,9 @@ export default function DrawerLayout() {
             await accountManager.updateAccountRole(currentAccount.id, effectiveRole);
             console.log('✅ Account role updated successfully');
             
-            // Use the updated role for routing
             routeBasedOnRole(effectiveRole);
           } catch (updateError) {
             console.error('❌ Failed to update account role:', updateError);
-            // Use server role anyway for routing
             routeBasedOnRole(effectiveRole);
           }
         } else {
@@ -231,7 +230,7 @@ export default function DrawerLayout() {
     }
   }, []);
 
-  // FIXED: Separate routing logic for clarity
+  // Routing logic based on role
   const routeBasedOnRole = (role: string) => {
     console.log('🧭 Routing based on role:', role);
     
@@ -241,6 +240,12 @@ export default function DrawerLayout() {
     } else if (role === 'support') {
       console.log('🧭 Support role - redirecting to support panel');
       setAuthState('redirect_support');
+    } else if (role === 'agent') {
+      console.log('🧭 Agent role - redirecting to agent panel');
+      setAuthState('redirect_agent');
+    } else if (role === 'rider') {
+      console.log('🧭 Rider role - redirecting to rider panel');
+      setAuthState('redirect_rider');
     } else {
       console.log('🧭 Client role - entering drawer layout');
       setAuthState('authenticated');
@@ -286,6 +291,26 @@ export default function DrawerLayout() {
           console.error('❌ Support redirect failed:', error);
           setAuthState('redirect_login');
         }
+      } else if (authState === 'redirect_agent') {
+        try {
+          console.log('🧭 Redirecting to agent panel...');
+          await new Promise(resolve => setTimeout(resolve, 200));
+          router.replace('/(agent)');
+          console.log('✅ Redirected to agent panel');
+        } catch (error) {
+          console.error('❌ Agent redirect failed:', error);
+          setAuthState('redirect_login');
+        }
+      } else if (authState === 'redirect_rider') {
+        try {
+          console.log('🧭 Redirecting to rider panel...');
+          await new Promise(resolve => setTimeout(resolve, 200));
+          router.replace('/(rider)');
+          console.log('✅ Redirected to rider panel');
+        } catch (error) {
+          console.error('❌ Rider redirect failed:', error);
+          setAuthState('redirect_login');
+        }
       } else if (authState === 'redirect_login') {
         try {
           console.log('🧭 Redirecting to login...');
@@ -303,7 +328,7 @@ export default function DrawerLayout() {
       }
     };
 
-    if (authState === 'redirect_admin' || authState === 'redirect_support' || authState === 'redirect_login') {
+    if (authState.startsWith('redirect_')) {
       handleRedirection();
     }
   }, [authState, router]);
@@ -326,7 +351,7 @@ export default function DrawerLayout() {
     }, [authState])
   );
 
-  if (authState === 'loading' || authState === 'redirect_admin' || authState === 'redirect_support' || authState === 'redirect_login') {
+  if (authState === 'loading' || authState.startsWith('redirect_')) {
     return <LoadingSplashScreen backgroundColor={colors.background} />;
   }
 
