@@ -583,49 +583,59 @@ export default function RiderHomeScreen() {
           end={{ x: 1, y: 1 }}
           style={styles.headerGradient}
         >
-          <Text style={styles.companyName}>GLT Logistics</Text>
-
-          <View style={styles.headerContent}>
-            <Image
-              source={
-                user?.avatar_url
-                  ? { uri: user.avatar_url }
-                  : require('../../assets/images/avatar_placeholder.png')
-              }
-              style={styles.headerAvatar}
-            />
-
-            <View style={styles.onlineToggleContainer}>
-              <View style={[
-                styles.onlineToggle,
-                { backgroundColor: isOnline ? '#2D5016' : 'rgba(255, 255, 255, 0.15)' }
-              ]}>
-                <View style={styles.onlineToggleContent}>
-                  <View style={[styles.statusDot, { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }]} />
-                  <Text style={[
-                    styles.onlineToggleLabel,
-                    { color: isOnline ? '#4CAF50' : '#fff' }
-                  ]}>
-                    {isOnline ? 'online' : 'offline'}
+          <View style={styles.headerTop}>
+            <View style={styles.headerLeft}>
+              <Text style={styles.headerTitle}>GLT Logistics</Text>
+              <View style={styles.welcomeRow}>
+                <Text style={styles.welcomeText}>
+                  Welcome back, {user?.first_name || 'Glen'}
+                </Text>
+                <View style={[
+                  styles.statusBadge,
+                  { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }
+                ]}>
+                  <Text style={styles.statusBadgeText}>
+                    {isOnline ? 'ONLINE' : 'OFFLINE'}
                   </Text>
                 </View>
-                <Switch
-                  value={isOnline}
-                  onValueChange={handleOnlineToggle}
-                  trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
-                  thumbColor={isOnline ? '#fff' : '#f4f3f4'}
-                  ios_backgroundColor="#3E3E3E"
-                  style={styles.switch}
-                />
               </View>
-            </View>
-
-            <View style={styles.nameContainer}>
-              <Text style={styles.welcomeText}>Welcome,</Text>
-              <Text style={styles.userName}>
-                {user?.display_name || user?.first_name || 'Glen Rider'}
+              <Text style={styles.statsText}>
+                {recentOrders.filter(o => o.status === 'In Transit').length} active • {recentOrders.length} total deliveries
               </Text>
-              <Text style={styles.userSubtext}>Here are your packages today.</Text>
+            </View>
+            
+            <View style={styles.headerRight}>
+              <TouchableOpacity style={styles.iconButton}>
+                <Feather name="eye" size={24} color="#fff" />
+              </TouchableOpacity>
+              <Image
+                source={
+                  user?.avatar_url
+                    ? { uri: user.avatar_url }
+                    : require('../../assets/images/avatar_placeholder.png')
+                }
+                style={styles.headerAvatar}
+              />
+            </View>
+          </View>
+
+          <View style={styles.toggleRow}>
+            <Text style={styles.toggleLabel}>Status:</Text>
+            <View style={styles.toggleContainer}>
+              <Text style={[
+                styles.toggleText,
+                { color: isOnline ? '#4CAF50' : 'rgba(255, 255, 255, 0.6)' }
+              ]}>
+                {isOnline ? 'Online' : 'Offline'}
+              </Text>
+              <Switch
+                value={isOnline}
+                onValueChange={handleOnlineToggle}
+                trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
+                thumbColor={isOnline ? '#fff' : '#f4f3f4'}
+                ios_backgroundColor="#3E3E3E"
+                style={styles.switch}
+              />
             </View>
           </View>
         </LinearGradient>
@@ -666,7 +676,7 @@ export default function RiderHomeScreen() {
                 <Text style={styles.orderLocation}>{order.location}</Text>
               </View>
               <View style={[
-                styles.statusBadge,
+                styles.deliveryStatusBadge,
                 { backgroundColor: order.status === 'Delivered' ? '#4CAF50' : '#FF9800' }
               ]}>
                 <Text style={styles.statusText}>{order.status}</Text>
@@ -790,75 +800,94 @@ const styles = StyleSheet.create({
   headerGradient: {
     paddingTop: Platform.OS === 'ios' ? 58 : 28,
     paddingHorizontal: 20,
-    paddingBottom: 24,
+    paddingBottom: 20,
   },
-  companyName: {
+  headerTop: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: 16,
+  },
+  headerLeft: {
+    flex: 1,
+  },
+  headerTitle: {
     color: '#fff',
-    fontSize: 24,
-    fontWeight: '700',
-    letterSpacing: 1,
-    marginBottom: 24,
+    fontSize: 28,
+    fontWeight: 'bold',
+    marginBottom: 8,
   },
-  headerContent: {
+  welcomeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  welcomeText: {
+    color: 'rgba(255, 255, 255, 0.9)',
+    fontSize: 16,
+    fontWeight: '500',
+    marginRight: 8,
+  },
+  statusBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 4,
+  },
+  statusBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
+    letterSpacing: 0.5,
+  },
+  statsText: {
+    color: 'rgba(255, 255, 255, 0.7)',
+    fontSize: 14,
+    fontWeight: '400',
+  },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  iconButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
     alignItems: 'center',
   },
   headerAvatar: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    borderWidth: 4,
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
-    marginBottom: 16,
   },
-  onlineToggleContainer: {
-    marginBottom: 16,
-  },
-  onlineToggle: {
+  toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 24,
-    minWidth: 150,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
   },
-  onlineToggleContent: {
+  toggleLabel: {
+    color: 'rgba(255, 255, 255, 0.8)',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  toggleContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    marginRight: 8,
+    gap: 8,
   },
-  statusDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginRight: 6,
-  },
-  onlineToggleLabel: {
-    fontSize: 14,
+  toggleText: {
+    fontSize: 16,
     fontWeight: '600',
   },
   switch: {
     transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
-  },
-  nameContainer: {
-    alignItems: 'center',
-  },
-  welcomeText: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-    marginBottom: 4,
-  },
-  userName: {
-    color: '#fff',
-    fontSize: 28,
-    fontWeight: 'bold',
-    marginBottom: 4,
-  },
-  userSubtext: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '400',
   },
   scrollView: {
     flex: 1,
@@ -930,7 +959,7 @@ const styles = StyleSheet.create({
     color: '#8E8E93',
     fontSize: 12,
   },
-  statusBadge: {
+  deliveryStatusBadge: {
     paddingHorizontal: 10,
     paddingVertical: 4,
     borderRadius: 12,
