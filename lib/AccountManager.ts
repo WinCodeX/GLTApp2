@@ -1,4 +1,4 @@
-// lib/AccountManager.ts - Updated with Account Selection Support
+// lib/AccountManager.ts - Updated with Agent and Rider Role Support
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 
@@ -8,7 +8,7 @@ export interface AccountData {
   display_name: string;
   avatar_url?: string | null;
   token: string;
-  role: 'admin' | 'client' | 'support';
+  role: 'admin' | 'client' | 'support' | 'agent' | 'rider';
   userData: any;
   lastUsed: number;
   createdAt: number;
@@ -17,13 +17,13 @@ export interface AccountData {
 export interface AccountGroup {
   accounts: AccountData[];
   currentAccountId: string | null;
-  selectedAccountId: string | null; // NEW: Explicitly selected account
+  selectedAccountId: string | null;
   version: number;
 }
 
 const STORAGE_KEY = 'account_groups';
 const CURRENT_ACCOUNT_KEY = 'current_account_id';
-const SELECTED_ACCOUNT_KEY = 'selected_account_id'; // NEW
+const SELECTED_ACCOUNT_KEY = 'selected_account_id';
 const BACKUP_KEY = 'account_groups_backup';
 const CURRENT_VERSION = 2;
 
@@ -32,7 +32,7 @@ export class AccountManager {
   private accountGroup: AccountGroup = {
     accounts: [],
     currentAccountId: null,
-    selectedAccountId: null, // NEW
+    selectedAccountId: null,
     version: CURRENT_VERSION
   };
   private initialized = false;
@@ -57,17 +57,16 @@ export class AccountManager {
       
       const mainData = await this.loadStoredData(STORAGE_KEY);
       const currentAccountId = await this.loadCurrentAccountId();
-      const selectedAccountId = await this.loadSelectedAccountId(); // NEW
+      const selectedAccountId = await this.loadSelectedAccountId();
       
       if (mainData && this.validateAccountGroup(mainData)) {
         this.accountGroup = {
           accounts: mainData.accounts,
           currentAccountId: currentAccountId || mainData.currentAccountId || null,
-          selectedAccountId: selectedAccountId || mainData.selectedAccountId || null, // NEW
+          selectedAccountId: selectedAccountId || mainData.selectedAccountId || null,
           version: mainData.version || CURRENT_VERSION
         };
         
-        // NEW: If selectedAccountId exists and is valid, use it as current
         if (this.accountGroup.selectedAccountId) {
           const selectedAccount = this.accountGroup.accounts.find(
             acc => acc.id === this.accountGroup.selectedAccountId
@@ -78,7 +77,6 @@ export class AccountManager {
           }
         }
         
-        // NEW: If no selected account, default to first available or current
         if (!this.accountGroup.selectedAccountId && this.accountGroup.accounts.length > 0) {
           const accountToUse = this.accountGroup.currentAccountId 
             ? this.accountGroup.accounts.find(acc => acc.id === this.accountGroup.currentAccountId)
@@ -105,7 +103,7 @@ export class AccountManager {
           this.accountGroup = {
             accounts: backupData.accounts,
             currentAccountId: currentAccountId || backupData.currentAccountId || null,
-            selectedAccountId: selectedAccountId || backupData.selectedAccountId || null, // NEW
+            selectedAccountId: selectedAccountId || backupData.selectedAccountId || null,
             version: backupData.version || CURRENT_VERSION
           };
           await this.persistImmediate();
@@ -154,7 +152,7 @@ export class AccountManager {
           account.id && account.email && account.token
         ),
         currentAccountId: parsed.currentAccountId || null,
-        selectedAccountId: parsed.selectedAccountId || null, // NEW
+        selectedAccountId: parsed.selectedAccountId || null,
         version: parseInt(parsed.version) || 1
       };
       
@@ -165,8 +163,8 @@ export class AccountManager {
     }
   }
 
-  private validateRole(role: any): 'admin' | 'client' | 'support' {
-    if (role === 'admin' || role === 'support' || role === 'client') {
+  private validateRole(role: any): 'admin' | 'client' | 'support' | 'agent' | 'rider' {
+    if (role === 'admin' || role === 'support' || role === 'agent' || role === 'rider' || role === 'client') {
       return role;
     }
     console.warn('AccountManager: Invalid role, defaulting to client:', role);
@@ -192,7 +190,6 @@ export class AccountManager {
     }
   }
 
-  // NEW: Load selected account ID
   private async loadSelectedAccountId(): Promise<string | null> {
     try {
       const stored = await AsyncStorage.getItem(SELECTED_ACCOUNT_KEY);
@@ -224,7 +221,8 @@ export class AccountManager {
       account.email &&
       account.token &&
       account.display_name &&
-      (account.role === 'admin' || account.role === 'client' || account.role === 'support') &&
+      (account.role === 'admin' || account.role === 'client' || account.role === 'support' || 
+       account.role === 'agent' || account.role === 'rider') &&
       account.lastUsed &&
       account.createdAt
     );
@@ -234,7 +232,7 @@ export class AccountManager {
     this.accountGroup = {
       accounts: [],
       currentAccountId: null,
-      selectedAccountId: null, // NEW
+      selectedAccountId: null,
       version: CURRENT_VERSION
     };
     await this.clearAllStorage();
@@ -259,7 +257,7 @@ export class AccountManager {
           createdAt: String(account.createdAt)
         })),
         currentAccountId: this.accountGroup.currentAccountId ? String(this.accountGroup.currentAccountId) : null,
-        selectedAccountId: this.accountGroup.selectedAccountId ? String(this.accountGroup.selectedAccountId) : null, // NEW
+        selectedAccountId: this.accountGroup.selectedAccountId ? String(this.accountGroup.selectedAccountId) : null,
         version: String(CURRENT_VERSION),
         persistedAt: String(Date.now())
       };
@@ -272,7 +270,6 @@ export class AccountManager {
         await AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY);
       }
       
-      // NEW: Persist selected account ID
       if (this.accountGroup.selectedAccountId) {
         await AsyncStorage.setItem(SELECTED_ACCOUNT_KEY, String(this.accountGroup.selectedAccountId));
       } else {
@@ -325,7 +322,7 @@ export class AccountManager {
       const existingIndex = this.accountGroup.accounts.findIndex(acc => acc.id === String(userData.id));
       
       const roles = userData.roles || [];
-      let role: 'admin' | 'client' | 'support' = 'client';
+      let role: 'admin' | 'client' | 'support' | 'agent' | 'rider' = 'client';
       
       if (userData.primary_role && userData.primary_role !== 'client') {
         role = this.validateRole(userData.primary_role);
@@ -336,6 +333,12 @@ export class AccountManager {
       } else if (roles.includes('support')) {
         role = 'support';
         console.log('AccountManager: Found support in roles array');
+      } else if (roles.includes('agent')) {
+        role = 'agent';
+        console.log('AccountManager: Found agent in roles array');
+      } else if (roles.includes('rider')) {
+        role = 'rider';
+        console.log('AccountManager: Found rider in roles array');
       } else if (userData.role && userData.role !== 'client') {
         role = this.validateRole(userData.role);
         console.log('AccountManager: Using role field:', role);
@@ -428,7 +431,7 @@ export class AccountManager {
     try {
       account.lastUsed = Date.now();
       this.accountGroup.currentAccountId = accountId;
-      this.accountGroup.selectedAccountId = accountId; // NEW: Also set as selected
+      this.accountGroup.selectedAccountId = accountId;
       
       await this.persistImmediate();
       
@@ -443,7 +446,6 @@ export class AccountManager {
     }
   }
 
-  // NEW: Set selected account (for switching)
   async setSelectedAccount(accountId: string): Promise<void> {
     if (!this.initialized) {
       await this.initialize();
@@ -477,7 +479,6 @@ export class AccountManager {
     }
   }
 
-  // NEW: Get selected account ID
   getSelectedAccountId(): string | null {
     return this.accountGroup.selectedAccountId;
   }
@@ -603,7 +604,7 @@ export class AccountManager {
     this.accountGroup = { 
       accounts: [], 
       currentAccountId: null,
-      selectedAccountId: null, // NEW
+      selectedAccountId: null,
       version: CURRENT_VERSION 
     };
     
@@ -622,7 +623,7 @@ export class AccountManager {
       await Promise.all([
         AsyncStorage.removeItem(STORAGE_KEY),
         AsyncStorage.removeItem(CURRENT_ACCOUNT_KEY),
-        AsyncStorage.removeItem(SELECTED_ACCOUNT_KEY), // NEW
+        AsyncStorage.removeItem(SELECTED_ACCOUNT_KEY),
         AsyncStorage.removeItem(BACKUP_KEY)
       ]);
       
@@ -664,7 +665,7 @@ export class AccountManager {
       initialized: this.initialized,
       accountCount: this.accountGroup.accounts.length,
       currentAccountId: this.accountGroup.currentAccountId,
-      selectedAccountId: this.accountGroup.selectedAccountId, // NEW
+      selectedAccountId: this.accountGroup.selectedAccountId,
       hasCurrentAccount: !!this.getCurrentAccount(),
       currentToken: !!this.getCurrentToken(),
       currentUserId: this.getCurrentUserId(),
