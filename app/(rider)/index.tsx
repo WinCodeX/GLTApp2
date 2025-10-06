@@ -173,57 +173,60 @@ export default function RiderHomeScreen() {
     extrapolate: 'clamp',
   });
 
+  // Fixed avatar animations
   const avatarSize = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [120, 45],
+    outputRange: [120, 40],
     extrapolate: 'clamp',
   });
 
   const avatarTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, 140],
+    outputRange: [0, -120],
     extrapolate: 'clamp',
   });
 
   const avatarTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -180],
+    outputRange: [0, -120],
     extrapolate: 'clamp',
   });
 
+  // Fixed name animations
   const nameTranslateX = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -160],
+    outputRange: [0, 35],
     extrapolate: 'clamp',
   });
 
   const nameTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -180],
+    outputRange: [0, -140],
     extrapolate: 'clamp',
   });
 
   const nameScale = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.5],
+    outputRange: [1, 0.7],
     extrapolate: 'clamp',
   });
 
+  // Fixed toggle animations
   const toggleTranslateY = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [0, -200],
+    outputRange: [0, -50],
     extrapolate: 'clamp',
   });
 
   const toggleScale = scrollY.interpolate({
     inputRange: [0, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 0.75],
+    outputRange: [1, 0.85],
     extrapolate: 'clamp',
   });
 
   const welcomeTextOpacity = scrollY.interpolate({
-    inputRange: [0, HEADER_SCROLL_DISTANCE / 2, HEADER_SCROLL_DISTANCE],
-    outputRange: [1, 1, 0],
+    inputRange: [0, HEADER_SCROLL_DISTANCE / 2],
+    outputRange: [1, 0],
     extrapolate: 'clamp',
   });
 
@@ -684,7 +687,7 @@ export default function RiderHomeScreen() {
                   height: avatarSize,
                   borderRadius: scrollY.interpolate({
                     inputRange: [0, HEADER_SCROLL_DISTANCE],
-                    outputRange: [60, 25],
+                    outputRange: [60, 20],
                     extrapolate: 'clamp',
                   }),
                 }]}
@@ -910,26 +913,22 @@ const styles = StyleSheet.create({
     paddingTop: Platform.OS === 'ios' ? 58 : 28,
     paddingHorizontal: 20,
     paddingBottom: 20,
-    alignItems: 'center',
-    justifyContent: 'space-between',
   },
   companyName: {
     color: '#fff',
     fontSize: 24,
     fontWeight: '700',
     letterSpacing: 1,
-    alignSelf: 'flex-start',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   headerContent: {
     alignItems: 'center',
     justifyContent: 'center',
     flex: 1,
-    width: '100%',
   },
   avatarContainer: {
     alignItems: 'center',
-    marginBottom: 16,
+    marginBottom: 12,
   },
   headerAvatar: {
     borderWidth: 4,
@@ -937,7 +936,7 @@ const styles = StyleSheet.create({
   },
   nameContainer: {
     alignItems: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   welcomeText: {
     color: 'rgba(255, 255, 255, 0.8)',
@@ -956,38 +955,10 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '400',
   },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 24,
-  },
-  headerLeft: {
-    flex: 1,
-  },
-  headerGreeting: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 14,
-    fontWeight: '500',
-  },
-  headerName: {
-    color: '#fff',
-    fontSize: 32,
-    fontWeight: 'bold',
-    marginTop: 4,
-    marginBottom: 4,
-  },
-  headerTagline: {
-    color: 'rgba(255, 255, 255, 0.7)',
-    fontSize: 14,
-    fontWeight: '400',
-  },
-  headerRight: {
-    marginLeft: 12,
-  },
   onlineToggleContainer: {
     width: '100%',
     alignItems: 'center',
+    marginTop: 12,
   },
   onlineToggle: {
     flexDirection: 'row',
