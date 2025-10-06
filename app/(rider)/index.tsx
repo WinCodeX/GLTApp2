@@ -1,5 +1,5 @@
-// app/(rider)/index.tsx - Updated with collapsing header and online toggle
-import React, { useState, useRef, useEffect } from 'react';
+// app/(rider)/index.tsx - With purple modals instead of alerts
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,23 +11,122 @@ import {
   Modal,
   TextInput,
   Image,
-  Alert,
   Switch,
   Platform,
+  Linking,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RiderBottomTabs } from '../../components/rider/RiderBottomTabs';
 import { useUser } from '../../context/UserContext';
 import QRScanner from '../../components/QRScanner';
 import api from '../../lib/api';
+import firebase from '../../config/firebase';
+import ActionCableService from '../../lib/services/ActionCableService';
+import { accountManager } from '../../lib/AccountManager';
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
 const HEADER_MAX_HEIGHT = 180;
 const HEADER_MIN_HEIGHT = 90;
 const HEADER_SCROLL_DISTANCE = HEADER_MAX_HEIGHT - HEADER_MIN_HEIGHT;
 
 type ReportIssue = 'mechanical' | 'weather' | 'fuel' | 'accident' | 'other';
+
+interface CustomModalProps {
+  visible: boolean;
+  title: string;
+  message: string;
+  type?: 'success' | 'error' | 'info' | 'warning';
+  buttons?: Array<{
+    text: string;
+    onPress?: () => void;
+    style?: 'default' | 'cancel' | 'destructive';
+  }>;
+  onClose?: () => void;
+}
+
+const CustomModal: React.FC<CustomModalProps> = ({
+  visible,
+  title,
+  message,
+  type = 'info',
+  buttons = [{ text: 'OK', style: 'default' }],
+  onClose,
+}) => {
+  const getIcon = () => {
+    switch (type) {
+      case 'success': return 'check-circle';
+      case 'error': return 'x-circle';
+      case 'warning': return 'alert-triangle';
+      default: return 'info';
+    }
+  };
+
+  const getIconColor = () => {
+    switch (type) {
+      case 'success': return '#10b981';
+      case 'error': return '#ef4444';
+      case 'warning': return '#f59e0b';
+      default: return '#8b5cf6';
+    }
+  };
+
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      onRequestClose={onClose}
+    >
+      <View style={modalStyles.overlay}>
+        <View style={modalStyles.container}>
+          <LinearGradient
+            colors={['#2d1b4e', '#1a1b3d']}
+            style={modalStyles.gradient}
+          >
+            <View style={modalStyles.iconContainer}>
+              <View style={[modalStyles.iconCircle, { backgroundColor: getIconColor() + '20' }]}>
+                <Feather name={getIcon()} size={32} color={getIconColor()} />
+              </View>
+            </View>
+
+            <Text style={modalStyles.title}>{title}</Text>
+            <Text style={modalStyles.message}>{message}</Text>
+
+            <View style={modalStyles.buttonContainer}>
+              {buttons.map((button, index) => (
+                <TouchableOpacity
+                  key={index}
+                  style={[
+                    modalStyles.button,
+                    button.style === 'cancel' && modalStyles.cancelButton,
+                    button.style === 'destructive' && modalStyles.destructiveButton,
+                  ]}
+                  onPress={() => {
+                    button.onPress?.();
+                    onClose?.();
+                  }}
+                >
+                  <Text
+                    style={[
+                      modalStyles.buttonText,
+                      button.style === 'cancel' && modalStyles.cancelButtonText,
+                      button.style === 'destructive' && modalStyles.destructiveButtonText,
+                    ]}
+                  >
+                    {button.text}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </LinearGradient>
+        </View>
+      </View>
+    </Modal>
+  );
+};
 
 export default function RiderHomeScreen() {
   const { user } = useUser();
@@ -38,11 +137,27 @@ export default function RiderHomeScreen() {
   const [showScanner, setShowScanner] = useState(false);
   const [scannerAction, setScannerAction] = useState<string>('');
   
-  // Online toggle state
   const [isOnline, setIsOnline] = useState(false);
   const [locationPermission, setLocationPermission] = useState(false);
   const [currentLocation, setCurrentLocation] = useState<Location.LocationObject | null>(null);
   const locationInterval = useRef<NodeJS.Timeout | null>(null);
+
+  const [isConnected, setIsConnected] = useState(false);
+  const actionCableRef = useRef<ActionCableService | null>(null);
+  const subscriptionsSetup = useRef(false);
+  const actionCableSubscriptions = useRef<Array<() => void>>([]);
+
+  const [fcmToken, setFcmToken] = useState<string>('');
+  const unsubscribeOnMessage = useRef<(() => void) | null>(null);
+  const unsubscribeOnNotificationOpenedApp = useRef<(() => void) | null>(null);
+  const unsubscribeTokenRefresh = useRef<(() => void) | null>(null);
+
+  const [customModal, setCustomModal] = useState<CustomModalProps>({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'info',
+  });
 
   const scrollY = useRef(new Animated.Value(0)).current;
 
@@ -76,15 +191,222 @@ export default function RiderHomeScreen() {
     { key: 'accident' as ReportIssue, label: 'Accident', icon: 'alert-triangle' },
   ];
 
+  const showCustomModal = (config: Omit<CustomModalProps, 'visible'>) => {
+    setCustomModal({
+      ...config,
+      visible: true,
+      onClose: () => setCustomModal(prev => ({ ...prev, visible: false })),
+    });
+  };
+
   useEffect(() => {
     checkLocationPermission();
+    setupActionCable();
+    setupFirebaseMessaging();
     
     return () => {
       if (locationInterval.current) {
         clearInterval(locationInterval.current);
       }
+      
+      subscriptionsSetup.current = false;
+      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current = [];
+      
+      if (unsubscribeOnMessage.current) unsubscribeOnMessage.current();
+      if (unsubscribeOnNotificationOpenedApp.current) unsubscribeOnNotificationOpenedApp.current();
+      if (unsubscribeTokenRefresh.current) unsubscribeTokenRefresh.current();
     };
   }, []);
+
+  const setupActionCable = useCallback(async () => {
+    if (!user || subscriptionsSetup.current) return;
+
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount) return;
+
+      actionCableRef.current = ActionCableService.getInstance();
+      
+      const connected = await actionCableRef.current.connect({
+        token: currentAccount.token,
+        userId: currentAccount.id,
+        autoReconnect: true,
+      });
+
+      if (connected) {
+        setIsConnected(true);
+        setupSubscriptions();
+        subscriptionsSetup.current = true;
+      }
+    } catch (error) {
+      console.error('Failed to setup ActionCable:', error);
+      setIsConnected(false);
+    }
+  }, [user]);
+
+  const setupSubscriptions = () => {
+    if (!actionCableRef.current) return;
+
+    actionCableSubscriptions.current.forEach(unsub => unsub());
+    actionCableSubscriptions.current = [];
+
+    const actionCable = actionCableRef.current;
+
+    const unsubConnected = actionCable.subscribe('connection_established', () => {
+      setIsConnected(true);
+    });
+    actionCableSubscriptions.current.push(unsubConnected);
+
+    const unsubLost = actionCable.subscribe('connection_lost', () => {
+      setIsConnected(false);
+    });
+    actionCableSubscriptions.current.push(unsubLost);
+  };
+
+  const setupFirebaseMessaging = async () => {
+    try {
+      if (!firebase.isNative || !firebase.messaging()) {
+        return;
+      }
+
+      const permissionGranted = await requestFirebasePermissions();
+      if (!permissionGranted) return;
+
+      await getFirebaseToken();
+      setupFirebaseListeners();
+      handleInitialNotification();
+    } catch (error) {
+      console.error('Firebase setup failed:', error);
+    }
+  };
+
+  const requestFirebasePermissions = async (): Promise<boolean> => {
+    try {
+      const messaging = firebase.messaging();
+      if (!messaging) return false;
+      
+      const authStatus = await messaging.requestPermission();
+      const enabled = authStatus === 1 || authStatus === 2;
+
+      if (enabled) {
+        return true;
+      } else {
+        showCustomModal({
+          title: 'Notifications Required',
+          message: 'GLT needs notification permissions to send you important delivery updates.',
+          type: 'warning',
+          buttons: [
+            { text: 'Maybe Later', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
+          ],
+        });
+        return false;
+      }
+    } catch (error) {
+      console.error('Firebase permissions error:', error);
+      return false;
+    }
+  };
+
+  const getFirebaseToken = async () => {
+    try {
+      const messaging = firebase.messaging();
+      if (!messaging) return;
+      
+      const token = await messaging.getToken();
+      setFcmToken(token);
+
+      await registerFCMTokenWithBackend(token);
+      
+      unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
+        setFcmToken(newToken);
+        await registerFCMTokenWithBackend(newToken);
+      });
+    } catch (error) {
+      console.error('FCM token error:', error);
+    }
+  };
+
+  const registerFCMTokenWithBackend = async (token: string) => {
+    try {
+      const response = await api.post('/api/v1/push_tokens', {
+        push_token: token,
+        platform: 'fcm',
+        device_info: {
+          platform: Platform.OS,
+          version: Platform.Version,
+          isDevice: true,
+          deviceType: Platform.OS === 'ios' ? 'ios' : 'android',
+        }
+      });
+      
+      if (response.data?.success) {
+        await AsyncStorage.setItem('fcm_token', token);
+        await AsyncStorage.setItem('fcm_token_registered', 'true');
+      }
+    } catch (error) {
+      console.error('FCM token registration failed:', error);
+    }
+  };
+
+  const setupFirebaseListeners = () => {
+    const messaging = firebase.messaging();
+    if (!messaging) return;
+
+    unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
+      if (remoteMessage.notification?.title && remoteMessage.notification?.body) {
+        showCustomModal({
+          title: remoteMessage.notification.title,
+          message: remoteMessage.notification.body,
+          type: 'info',
+          buttons: [
+            { text: 'Dismiss', style: 'cancel' },
+            { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
+          ],
+        });
+      }
+    });
+
+    unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
+      handleNotificationData(remoteMessage.data);
+    });
+  };
+
+  const handleInitialNotification = async () => {
+    try {
+      const messaging = firebase.messaging();
+      if (!messaging) return;
+
+      const initialNotification = await messaging.getInitialNotification();
+      
+      if (initialNotification) {
+        setTimeout(() => {
+          handleNotificationData(initialNotification.data);
+        }, 2000);
+      }
+    } catch (error) {
+      console.error('Initial notification error:', error);
+    }
+  };
+
+  const handleNotificationData = async (data: any) => {
+    try {
+      if (data?.type === 'package_update' && data?.package_id) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { packageId: data.package_id },
+          trackInHistory: true
+        });
+      } else if (data?.package_code) {
+        await NavigationHelper.navigateTo('/(drawer)/track', {
+          params: { code: data.package_code },
+          trackInHistory: true
+        });
+      }
+    } catch (error) {
+      console.error('Notification handling error:', error);
+    }
+  };
 
   const checkLocationPermission = async () => {
     const { status } = await Location.getForegroundPermissionsAsync();
@@ -97,27 +419,26 @@ export default function RiderHomeScreen() {
       setLocationPermission(true);
       return true;
     } else {
-      Alert.alert(
-        'Location Required',
-        'Location permission is needed to go online and receive delivery assignments.',
-        [
+      showCustomModal({
+        title: 'Location Required',
+        message: 'Location permission is needed to go online and receive delivery assignments.',
+        type: 'warning',
+        buttons: [
           { text: 'Cancel', style: 'cancel' },
           { text: 'Settings', onPress: () => Location.requestForegroundPermissionsAsync() }
-        ]
-      );
+        ],
+      });
       return false;
     }
   };
 
   const startLocationBroadcast = async () => {
     try {
-      // Get initial location
       const location = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.High,
       });
       setCurrentLocation(location);
 
-      // Broadcast to server
       await api.post('/api/v1/riders/location', {
         latitude: location.coords.latitude,
         longitude: location.coords.longitude,
@@ -127,7 +448,6 @@ export default function RiderHomeScreen() {
         timestamp: location.timestamp,
       });
 
-      // Start periodic updates (every 30 seconds)
       locationInterval.current = setInterval(async () => {
         try {
           const newLocation = await Location.getCurrentPositionAsync({
@@ -150,7 +470,11 @@ export default function RiderHomeScreen() {
 
     } catch (error) {
       console.error('Failed to start location broadcast:', error);
-      Alert.alert('Error', 'Failed to start location tracking');
+      showCustomModal({
+        title: 'Error',
+        message: 'Failed to start location tracking',
+        type: 'error',
+      });
       setIsOnline(false);
     }
   };
@@ -172,7 +496,6 @@ export default function RiderHomeScreen() {
 
   const handleOnlineToggle = async (value: boolean) => {
     if (value) {
-      // Going online
       if (!locationPermission) {
         const granted = await requestLocationPermission();
         if (!granted) return;
@@ -180,17 +503,38 @@ export default function RiderHomeScreen() {
 
       try {
         await startLocationBroadcast();
+        
+        if (actionCableRef.current && isConnected) {
+          await actionCableRef.current.updatePresence('online');
+        }
+        
         setIsOnline(true);
-        Alert.alert('Online', 'You are now online and ready to receive deliveries');
+        showCustomModal({
+          title: 'Online',
+          message: 'You are now online and ready to receive deliveries',
+          type: 'success',
+        });
       } catch (error) {
-        Alert.alert('Error', 'Failed to go online');
+        showCustomModal({
+          title: 'Error',
+          message: 'Failed to go online',
+          type: 'error',
+        });
         setIsOnline(false);
       }
     } else {
-      // Going offline
       await stopLocationBroadcast();
+      
+      if (actionCableRef.current && isConnected) {
+        await actionCableRef.current.updatePresence('offline');
+      }
+      
       setIsOnline(false);
-      Alert.alert('Offline', 'You are now offline and will not receive new deliveries');
+      showCustomModal({
+        title: 'Offline',
+        message: 'You are now offline and will not receive new deliveries',
+        type: 'info',
+      });
     }
   };
 
@@ -199,14 +543,27 @@ export default function RiderHomeScreen() {
     setShowScanner(true);
   };
 
+  const handleScanSuccess = (result: any) => {
+    setShowScanner(false);
+    setScannerAction('');
+  };
+
   const handleSubmitReport = async () => {
     if (!selectedIssue) {
-      Alert.alert('Error', 'Please select an issue type');
+      showCustomModal({
+        title: 'Error',
+        message: 'Please select an issue type',
+        type: 'error',
+      });
       return;
     }
 
     if (selectedIssue === 'mechanical' && !issueDescription.trim()) {
-      Alert.alert('Error', 'Please describe the issue');
+      showCustomModal({
+        title: 'Error',
+        message: 'Please describe the issue',
+        type: 'error',
+      });
       return;
     }
 
@@ -222,13 +579,21 @@ export default function RiderHomeScreen() {
         } : null,
       });
 
-      Alert.alert('Success', 'Issue reported successfully. Support will contact you shortly.');
+      showCustomModal({
+        title: 'Success',
+        message: 'Issue reported successfully. Support will contact you shortly.',
+        type: 'success',
+      });
       setShowReportModal(false);
       setSelectedIssue(null);
       setIssueDescription('');
     } catch (error) {
       console.error('Failed to submit report:', error);
-      Alert.alert('Error', 'Failed to submit report. Please try again.');
+      showCustomModal({
+        title: 'Error',
+        message: 'Failed to submit report. Please try again.',
+        type: 'error',
+      });
     } finally {
       setSubmittingReport(false);
     }
@@ -236,7 +601,6 @@ export default function RiderHomeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Animated Header */}
       <Animated.View style={[styles.headerContainer, { height: headerHeight }]}>
         <LinearGradient
           colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
@@ -267,7 +631,6 @@ export default function RiderHomeScreen() {
             </View>
           </View>
 
-          {/* Online Toggle */}
           <Animated.View style={[styles.onlineToggleContainer, { opacity: headerOpacity }]}>
             <View style={styles.onlineToggle}>
               <View style={styles.onlineToggleLeft}>
@@ -297,7 +660,6 @@ export default function RiderHomeScreen() {
         )}
         scrollEventThrottle={16}
       >
-        {/* Quick Actions */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
@@ -320,7 +682,6 @@ export default function RiderHomeScreen() {
           </View>
         </View>
 
-        {/* Recent Orders */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Active Deliveries</Text>
           {recentOrders.map((order) => (
@@ -342,7 +703,6 @@ export default function RiderHomeScreen() {
           ))}
         </View>
 
-        {/* Report Issues Card */}
         <TouchableOpacity 
           style={styles.reportCard}
           onPress={() => setShowReportModal(true)}
@@ -362,7 +722,6 @@ export default function RiderHomeScreen() {
         </TouchableOpacity>
       </Animated.ScrollView>
 
-      {/* Report Issues Modal */}
       <Modal
         visible={showReportModal}
         animationType="slide"
@@ -430,17 +789,18 @@ export default function RiderHomeScreen() {
         </View>
       </Modal>
 
-      {/* QR Scanner */}
       <QRScanner
         visible={showScanner}
-        onClose={() => setShowScanner(false)}
-        userRole="rider"
-        defaultAction={scannerAction}
-        onScanSuccess={(result) => {
-          console.log('Scan result:', result);
+        onClose={() => {
           setShowScanner(false);
+          setScannerAction('');
         }}
+        userRole="rider"
+        defaultAction={scannerAction || undefined}
+        onScanSuccess={handleScanSuccess}
       />
+
+      <CustomModal {...customModal} />
 
       <RiderBottomTabs currentTab="home" />
     </SafeAreaView>
@@ -741,5 +1101,80 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 16,
     fontWeight: 'bold',
+  },
+});
+
+const modalStyles = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  container: {
+    width: '100%',
+    maxWidth: 380,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  gradient: {
+    padding: 24,
+  },
+  iconContainer: {
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  iconCircle: {
+    width: 64,
+    height: 64,
+    borderRadius: 32,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  title: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  message: {
+    fontSize: 15,
+    color: '#c4b5fd',
+    textAlign: 'center',
+    lineHeight: 22,
+    marginBottom: 24,
+  },
+  buttonContainer: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  button: {
+    flex: 1,
+    backgroundColor: '#8b5cf6',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  cancelButton: {
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: 'rgba(255, 255, 255, 0.3)',
+  },
+  destructiveButton: {
+    backgroundColor: '#ef4444',
+  },
+  buttonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  cancelButtonText: {
+    color: '#c4b5fd',
+  },
+  destructiveButtonText: {
+    color: '#fff',
   },
 });
