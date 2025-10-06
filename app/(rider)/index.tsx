@@ -590,24 +590,38 @@ export default function RiderHomeScreen() {
                 <Text style={styles.welcomeText}>
                   Welcome back, {user?.first_name || 'Glen'}
                 </Text>
-                <View style={[
-                  styles.statusBadge,
-                  { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }
-                ]}>
-                  <Text style={styles.statusBadgeText}>
-                    {isOnline ? 'ONLINE' : 'OFFLINE'}
-                  </Text>
+                <View style={styles.statusContainer}>
+                  <View style={[
+                    styles.liveBadge,
+                    { backgroundColor: isOnline ? 'rgba(76, 175, 80, 0.15)' : 'rgba(142, 142, 147, 0.15)' }
+                  ]}>
+                    <View style={[
+                      styles.statusDot,
+                      { backgroundColor: isOnline ? '#4CAF50' : '#8E8E93' }
+                    ]} />
+                    <Text style={[
+                      styles.liveText,
+                      { color: isOnline ? '#4CAF50' : '#8E8E93' }
+                    ]}>
+                      {isOnline ? 'LIVE' : 'OFFLINE'}
+                    </Text>
+                  </View>
+                  <Switch
+                    value={isOnline}
+                    onValueChange={handleOnlineToggle}
+                    trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
+                    thumbColor={isOnline ? '#fff' : '#f4f3f4'}
+                    ios_backgroundColor="#3E3E3E"
+                    style={styles.switch}
+                  />
                 </View>
               </View>
               <Text style={styles.statsText}>
-                {recentOrders.filter(o => o.status === 'In Transit').length} active • {recentOrders.length} total deliveries
+                {recentOrders.filter(o => o.status === 'In Transit').length} pending • {recentOrders.length} total deliveries
               </Text>
             </View>
             
             <View style={styles.headerRight}>
-              <TouchableOpacity style={styles.iconButton}>
-                <Feather name="eye" size={24} color="#fff" />
-              </TouchableOpacity>
               <Image
                 source={
                   user?.avatar_url
@@ -615,26 +629,6 @@ export default function RiderHomeScreen() {
                     : require('../../assets/images/avatar_placeholder.png')
                 }
                 style={styles.headerAvatar}
-              />
-            </View>
-          </View>
-
-          <View style={styles.toggleRow}>
-            <Text style={styles.toggleLabel}>Status:</Text>
-            <View style={styles.toggleContainer}>
-              <Text style={[
-                styles.toggleText,
-                { color: isOnline ? '#4CAF50' : 'rgba(255, 255, 255, 0.6)' }
-              ]}>
-                {isOnline ? 'Online' : 'Offline'}
-              </Text>
-              <Switch
-                value={isOnline}
-                onValueChange={handleOnlineToggle}
-                trackColor={{ false: '#3E3E3E', true: '#4CAF50' }}
-                thumbColor={isOnline ? '#fff' : '#f4f3f4'}
-                ios_backgroundColor="#3E3E3E"
-                style={styles.switch}
               />
             </View>
           </View>
@@ -806,7 +800,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 16,
   },
   headerLeft: {
     flex: 1,
@@ -821,23 +814,40 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: 4,
+    flexWrap: 'wrap',
   },
   welcomeText: {
     color: 'rgba(255, 255, 255, 0.9)',
     fontSize: 16,
-    fontWeight: '500',
+    fontWeight: '400',
     marginRight: 8,
   },
-  statusBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
+  statusContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
-  statusBadgeText: {
-    color: '#fff',
-    fontSize: 11,
+  liveBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    gap: 4,
+  },
+  statusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  liveText: {
+    fontSize: 12,
     fontWeight: 'bold',
     letterSpacing: 0.5,
+  },
+  switch: {
+    transform: [{ scaleX: 0.75 }, { scaleY: 0.75 }],
+    marginLeft: -4,
   },
   statsText: {
     color: 'rgba(255, 255, 255, 0.7)',
@@ -845,17 +855,7 @@ const styles = StyleSheet.create({
     fontWeight: '400',
   },
   headerRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  iconButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: 'rgba(255, 255, 255, 0.15)',
-    justifyContent: 'center',
-    alignItems: 'center',
+    marginLeft: 12,
   },
   headerAvatar: {
     width: 50,
@@ -863,31 +863,6 @@ const styles = StyleSheet.create({
     borderRadius: 25,
     borderWidth: 2,
     borderColor: 'rgba(255, 255, 255, 0.3)',
-  },
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(255, 255, 255, 0.1)',
-  },
-  toggleLabel: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  toggleContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  toggleText: {
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  switch: {
-    transform: [{ scaleX: 0.8 }, { scaleY: 0.8 }],
   },
   scrollView: {
     flex: 1,
