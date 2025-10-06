@@ -1,4 +1,4 @@
-// Updated Login Screen with proper role detection for admin and support users
+// app/(auth)/login.tsx - Updated with Agent and Rider role support
 import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -21,7 +21,7 @@ import { accountManager } from '../../lib/AccountManager';
 import { useUser } from '../../context/UserContext';
 
 // Helper function to determine effective role from user data
-const getEffectiveRole = (userData) => {
+const getEffectiveRole = (userData: any): string => {
   // First priority: use primary_role if available
   if (userData.primary_role && userData.primary_role !== 'client') {
     return userData.primary_role;
@@ -29,12 +29,18 @@ const getEffectiveRole = (userData) => {
   
   // Second priority: check roles array for non-client roles
   if (userData.roles && Array.isArray(userData.roles)) {
-    // Priority order: admin > support > client
+    // Priority order: admin > support > agent > rider > client
     if (userData.roles.includes('admin')) {
       return 'admin';
     }
     if (userData.roles.includes('support')) {
       return 'support';
+    }
+    if (userData.roles.includes('agent')) {
+      return 'agent';
+    }
+    if (userData.roles.includes('rider')) {
+      return 'rider';
     }
   }
   
@@ -43,12 +49,16 @@ const getEffectiveRole = (userData) => {
 };
 
 // Helper function to get redirect route based on role
-const getRedirectRoute = (role) => {
+const getRedirectRoute = (role: string): string => {
   switch (role) {
     case 'admin':
       return '/admin';
     case 'support':
       return '/(support)';
+    case 'agent':
+      return '/(agent)';
+    case 'rider':
+      return '/(rider)';
     default:
       return '/';
   }
@@ -69,7 +79,7 @@ export default function LoginScreen() {
   const googleLoginInProgress = useRef(false);
 
   // Handle Rails OAuth success
-  const handleGoogleAuthSuccess = useCallback(async (railsUser, isNewUser) => {
+  const handleGoogleAuthSuccess = useCallback(async (railsUser: any, isNewUser: boolean) => {
     if (googleLoginInProgress.current) {
       console.log('Google login already in progress, skipping...');
       return;
@@ -105,7 +115,7 @@ export default function LoginScreen() {
         router.push(redirectRoute);
       }, 1500);
 
-    } catch (err) {
+    } catch (err: any) {
       console.error('Google login error:', err);
       const errorMessage = err?.message || 'OAuth processing error';
       Toast.show({ 
@@ -255,7 +265,7 @@ export default function LoginScreen() {
           text2: 'Server response incomplete',
         });
       }
-    } catch (err) {
+    } catch (err: any) {
       console.error('Login error:', err?.response?.data || err?.message);
       
       let errorMessage = 'Please try again';
@@ -328,7 +338,7 @@ export default function LoginScreen() {
           text2: result.error?.message || 'OAuth failed',
         });
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Google login prompt error:', error);
       Toast.show({
         type: 'error',
