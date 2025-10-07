@@ -49,7 +49,6 @@ type PaymentMethodType = 'mpesa' | 'airtel' | string; // string for card IDs
 const WalletScreen = () => {
   const router = useRouter();
   const { user } = useUser();
-  const isClient = user?.role === 'client';
   
   const [walletData, setWalletData] = useState<WalletData>({
     balance: 0,
@@ -153,11 +152,6 @@ const WalletScreen = () => {
   const handleTopUpSuccess = () => {
     setShowTopUpModal(false);
     loadWalletData();
-  };
-
-  const handleWithdraw = () => {
-    // TODO: Implement withdraw functionality
-    console.log('Withdraw tapped');
   };
 
   const renderPaymentMethod = (method: 'mpesa' | 'airtel' | SavedCard) => {
@@ -268,37 +262,14 @@ const WalletScreen = () => {
             style={styles.balanceCard}
           >
             <View style={styles.balanceHeader}>
-              <Text style={styles.balanceLabel}>
-                {isClient ? 'Wallet Balance' : 'Total Earnings'}
-              </Text>
-              <View style={styles.balanceActions}>
-                {isClient ? (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={() => setShowTopUpModal(true)}
-                  >
-                    <Ionicons name="add-circle" size={20} color="#fff" />
-                    <Text style={styles.actionButtonText}>Top Up</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View style={styles.driverActionsColumn}>
-                    <TouchableOpacity 
-                      style={styles.actionButton}
-                      onPress={() => setShowTopUpModal(true)}
-                    >
-                      <Ionicons name="add" size={20} color="#fff" />
-                      <Text style={styles.actionButtonText}>Top Up Wallet</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity 
-                      style={styles.actionButton}
-                      onPress={handleWithdraw}
-                    >
-                      <Ionicons name="cash-outline" size={20} color="#fff" />
-                      <Text style={styles.actionButtonText}>Withdraw</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-              </View>
+              <Text style={styles.balanceLabel}>Wallet Balance</Text>
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={() => setShowTopUpModal(true)}
+              >
+                <Ionicons name="add-circle" size={20} color="#fff" />
+                <Text style={styles.actionButtonText}>Top Up</Text>
+              </TouchableOpacity>
             </View>
             
             <Text style={styles.balanceAmount}>
@@ -308,9 +279,7 @@ const WalletScreen = () => {
             <View style={styles.balanceFooter}>
               <View style={styles.balanceInfo}>
                 <Ionicons name="information-circle-outline" size={16} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.balanceInfoText}>
-                  {isClient ? 'Available for package payments' : 'Withdraw to M-Pesa'}
-                </Text>
+                <Text style={styles.balanceInfoText}>Available for package payments</Text>
               </View>
             </View>
           </LinearGradient>
@@ -393,9 +362,7 @@ const WalletScreen = () => {
                 </View>
                 <Text style={styles.emptyTitle}>No transactions yet</Text>
                 <Text style={styles.emptySubtitle}>
-                  {isClient 
-                    ? 'Top up your wallet to start using GLT services and earn bonuses' 
-                    : 'Send packages and get discounts straight to your wallet'}
+                  Top up your wallet to start using GLT services and earn bonuses
                 </Text>
               </View>
             ) : (
@@ -513,14 +480,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
-  },
-  balanceActions: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  driverActionsColumn: {
-    flexDirection: 'column',
-    gap: 8,
   },
   actionButton: {
     flexDirection: 'row',
