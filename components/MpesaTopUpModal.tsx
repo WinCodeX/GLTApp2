@@ -1,4 +1,4 @@
-// components/MpesaTopUpModal.tsx
+// components/MpesaTopUpModal.tsx - Fixed keyboard and sizing issues
 import React, { useState, useEffect } from 'react';
 import {
   View,
@@ -12,11 +12,14 @@ import {
   KeyboardAvoidingView,
   Platform,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
 import { useUser } from '@/context/UserContext';
 import api from '../lib/api';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface MpesaTopUpModalProps {
   visible: boolean;
@@ -44,16 +47,13 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
 
   useEffect(() => {
     if (visible) {
-      // Initialize with user's phone number
       const userPhone = getUserPhone();
       let cleanPhone = userPhone.replace(/\D/g, '');
       
-      // Remove 254 prefix if exists
       if (cleanPhone.startsWith('254')) {
         cleanPhone = cleanPhone.substring(3);
       }
       
-      // Remove leading 0 if exists
       if (cleanPhone.startsWith('0')) {
         cleanPhone = cleanPhone.substring(1);
       }
@@ -148,7 +148,7 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
 
   const startPollingPaymentStatus = (requestId: string) => {
     let pollCount = 0;
-    const maxPolls = 40; // Poll for up to 2 minutes
+    const maxPolls = 40;
     
     const interval = setInterval(async () => {
       pollCount++;
@@ -166,7 +166,6 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
             setPollingInterval(null);
             setStep('success');
             
-            // Wait 2 seconds then close and refresh
             setTimeout(() => {
               onSuccess();
               resetModal();
@@ -233,12 +232,13 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
         />
         
         <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.keyboardView}
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
           <View style={styles.modalContainer}>
             <LinearGradient
-              colors={['#1a1b3d', '#2d1b4e', '#4c1d95']}
+              colors={['rgba(26, 26, 46, 0.98)', 'rgba(22, 33, 62, 0.98)']}
               style={styles.modal}
             >
               {/* Header */}
@@ -248,20 +248,25 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
                   <View style={styles.headerIcon}>
                     <Ionicons name="phone-portrait" size={24} color="#10b981" />
                   </View>
-                  <Text style={styles.title}>Top Up Wallet</Text>
+                  <View style={styles.headerText}>
+                    <Text style={styles.title}>Top Up Wallet</Text>
+                    <Text style={styles.subtitle}>Add funds via M-Pesa</Text>
+                  </View>
                   <TouchableOpacity 
                     style={styles.closeButton}
                     onPress={handleClose}
                   >
-                    <Ionicons name="close" size={24} color="#c4b5fd" />
+                    <Ionicons name="close" size={20} color="#888" />
                   </TouchableOpacity>
                 </View>
               </View>
 
               <ScrollView 
                 style={styles.content}
+                contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                bounces={false}
               >
                 {step === 'input' && (
                   <>
@@ -420,34 +425,37 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
   backdrop: {
     flex: 1,
   },
   keyboardView: {
-    flex: 1,
+    flex: 0,
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    maxHeight: '85%',
+    maxHeight: SCREEN_HEIGHT * 0.95,
   },
   modal: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    minHeight: SCREEN_HEIGHT * 0.85,
   },
   
   // Header
   header: {
-    padding: 16,
+    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
     borderBottomWidth: 1,
-    borderBottomColor: 'rgba(168, 123, 250, 0.2)',
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
   },
   dragIndicator: {
     width: 40,
     height: 4,
-    backgroundColor: '#a78bfa',
+    backgroundColor: '#444',
     borderRadius: 2,
     alignSelf: 'center',
     marginBottom: 16,
@@ -455,38 +463,51 @@ const styles = StyleSheet.create({
   headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
   },
   headerIcon: {
-    position: 'absolute',
-    left: 0,
     width: 40,
     height: 40,
     borderRadius: 20,
     backgroundColor: 'rgba(16, 185, 129, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
+  },
+  headerText: {
+    flex: 1,
   },
   title: {
-    color: '#e5e7eb',
-    fontSize: 20,
+    color: '#fff',
+    fontSize: 18,
     fontWeight: '700',
+    marginBottom: 2,
+  },
+  subtitle: {
+    color: '#888',
+    fontSize: 13,
   },
   closeButton: {
-    position: 'absolute',
-    right: 0,
-    padding: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   
   // Content
   content: {
-    maxHeight: '65%',
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 32,
   },
   section: {
-    padding: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
   },
   sectionTitle: {
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 14,
     fontWeight: '600',
     marginBottom: 12,
@@ -511,7 +532,7 @@ const styles = StyleSheet.create({
   },
   amountInput: {
     flex: 1,
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 36,
     fontWeight: '700',
   },
@@ -540,7 +561,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   quickAmountTextActive: {
-    color: '#e5e7eb',
+    color: '#fff',
   },
   
   // Phone Input
@@ -561,7 +582,7 @@ const styles = StyleSheet.create({
   },
   phoneInput: {
     flex: 1,
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 16,
     paddingVertical: 14,
     paddingRight: 16,
@@ -572,8 +593,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
-    padding: 16,
-    marginHorizontal: 16,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    marginHorizontal: 20,
     backgroundColor: 'rgba(192, 132, 252, 0.1)',
     borderRadius: 12,
     borderWidth: 1,
@@ -599,7 +621,7 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   statusTitle: {
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
@@ -633,16 +655,16 @@ const styles = StyleSheet.create({
     borderColor: '#8b5cf6',
   },
   retryButtonText: {
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
   },
   
   // Footer
   footer: {
-    padding: 16,
+    padding: 20,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(168, 123, 250, 0.2)',
+    borderTopColor: 'rgba(124, 58, 237, 0.2)',
   },
   payButton: {
     borderRadius: 12,
