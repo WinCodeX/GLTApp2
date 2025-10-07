@@ -13,6 +13,7 @@ import {
   Platform,
   ScrollView,
   Dimensions,
+  Keyboard,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -44,6 +45,7 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
   const [checkoutRequestId, setCheckoutRequestId] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
+  const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   useEffect(() => {
     if (visible) {
@@ -64,6 +66,22 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
       setErrorMessage('');
     }
   }, [visible, getUserPhone]);
+
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      () => setKeyboardVisible(true)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardVisible(false)
+    );
+
+    return () => {
+      keyboardDidShowListener?.remove();
+      keyboardDidHideListener?.remove();
+    };
+  }, []);
 
   useEffect(() => {
     return () => {
@@ -233,10 +251,13 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
         
         <KeyboardAvoidingView
           style={styles.keyboardView}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={0}
         >
-          <View style={styles.modalContainer}>
+          <View style={[
+            styles.modalContainer,
+            keyboardVisible && styles.modalContainerKeyboard
+          ]}>
             <LinearGradient
               colors={['rgba(26, 26, 46, 0.98)', 'rgba(22, 33, 62, 0.98)']}
               style={styles.modal}
@@ -432,11 +453,13 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   keyboardView: {
-    flex: 0,
     justifyContent: 'flex-end',
   },
   modalContainer: {
     maxHeight: SCREEN_HEIGHT * 0.95,
+  },
+  modalContainerKeyboard: {
+    maxHeight: SCREEN_HEIGHT * 0.70,
   },
   modal: {
     borderTopLeftRadius: 24,
