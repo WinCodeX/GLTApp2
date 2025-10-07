@@ -261,25 +261,36 @@ const WalletScreen = () => {
             colors={['#8b5cf6', '#6d28d9', '#5b21b6']}
             style={styles.balanceCard}
           >
-            <View style={styles.balanceHeader}>
-              <Text style={styles.balanceLabel}>Wallet Balance</Text>
+            <View style={styles.balanceRow}>
+              <Text style={styles.balanceLabel}>Total Earnings</Text>
               <TouchableOpacity 
                 style={styles.actionButton}
                 onPress={() => setShowTopUpModal(true)}
               >
-                <Ionicons name="add-circle" size={20} color="#fff" />
-                <Text style={styles.actionButtonText}>Top Up</Text>
+                <Ionicons name="add" size={20} color="#fff" />
+                <Text style={styles.actionButtonText}>Top Up Wallet</Text>
               </TouchableOpacity>
             </View>
             
-            <Text style={styles.balanceAmount}>
-              {walletData.currency} {walletData.balance.toLocaleString()}
-            </Text>
+            <View style={styles.balanceRow}>
+              <Text style={styles.balanceAmount}>
+                {walletData.currency} {walletData.balance.toLocaleString()}
+              </Text>
+              <TouchableOpacity 
+                style={styles.actionButton}
+                onPress={() => {}}
+              >
+                <Ionicons name="cash-outline" size={20} color="#fff" />
+                <Text style={styles.actionButtonText}>Withdraw</Text>
+              </TouchableOpacity>
+            </View>
             
             <View style={styles.balanceFooter}>
               <View style={styles.balanceInfo}>
                 <Ionicons name="information-circle-outline" size={16} color="rgba(255,255,255,0.8)" />
-                <Text style={styles.balanceInfoText}>Available for package payments</Text>
+                <Text style={styles.balanceInfoText}>
+                  Available for package payments
+                </Text>
               </View>
             </View>
           </LinearGradient>
@@ -468,7 +479,7 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 8,
   },
-  balanceHeader: {
+  balanceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
@@ -499,9 +510,10 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 36,
     fontWeight: 'bold',
-    marginBottom: 8,
   },
   balanceFooter: {
+    marginTop: 8,
+  },
     marginTop: 8,
   },
   balanceInfo: {
