@@ -1,4 +1,4 @@
-// app/(rider)/index.tsx - Fixed version
+// app/(rider)/index.tsx - Updated with Riders Controller Integration
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -13,6 +13,7 @@ import {
   Switch,
   Platform,
   Linking,
+  RefreshControl,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -154,10 +155,15 @@ export default function RiderHomeScreen() {
     type: 'info',
   });
 
-  const recentOrders = [
-    { id: 1, status: 'In Transit', location: 'Lekki Phase 1', tracking: 'GLT-12345' },
-    { id: 2, status: 'Delivered', location: 'Victoria Island', tracking: 'GLT-12344' },
-  ];
+  // NEW: State for active deliveries and stats
+  const [activeDeliveries, setActiveDeliveries] = useState<any[]>([]);
+  const [deliveryStats, setDeliveryStats] = useState({
+    total: 0,
+    in_transit: 0,
+    submitted: 0,
+    delivered_today: 0
+  });
+  const [refreshing, setRefreshing] = useState(false);
 
   const issueOptions = [
     { key: 'mechanical' as ReportIssue, label: 'Mechanical Problems', icon: 'tool' },
@@ -178,6 +184,7 @@ export default function RiderHomeScreen() {
     checkLocationPermission();
     setupActionCable();
     setupFirebaseMessaging();
+    loadActiveDeliveries();
     
     return () => {
       if (locationInterval.current) {
@@ -192,6 +199,26 @@ export default function RiderHomeScreen() {
       if (unsubscribeOnNotificationOpenedApp.current) unsubscribeOnNotificationOpenedApp.current();
       if (unsubscribeTokenRefresh.current) unsubscribeTokenRefresh.current();
     };
+  }, []);
+
+  // NEW: Load active deliveries from riders controller
+  const loadActiveDeliveries = async () => {
+    try {
+      const response = await api.get('/api/v1/riders/active_deliveries');
+      
+      if (response.data.success) {
+        setActiveDeliveries(response.data.data || []);
+        setDeliveryStats(response.data.stats || {});
+      }
+    } catch (error) {
+      console.error('Failed to load active deliveries:', error);
+    }
+  };
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadActiveDeliveries();
+    setRefreshing(false);
   }, []);
 
   const setupActionCable = useCallback(async () => {
@@ -237,6 +264,22 @@ export default function RiderHomeScreen() {
       setIsConnected(false);
     });
     actionCableSubscriptions.current.push(unsubLost);
+
+    // NEW: Subscribe to rider-specific updates
+    if (user?.id) {
+      const unsubRiderUpdates = actionCable.subscribe(`rider_${user.id}_status`, (data: any) => {
+        console.log('Rider status update:', data);
+        if (data.type === 'new_assignment') {
+          loadActiveDeliveries();
+          showCustomModal({
+            title: 'New Delivery',
+            message: 'You have been assigned a new delivery',
+            type: 'info',
+          });
+        }
+      });
+      actionCableSubscriptions.current.push(unsubRiderUpdates);
+    }
   };
 
   const setupFirebaseMessaging = async () => {
@@ -340,6 +383,11 @@ export default function RiderHomeScreen() {
             { text: 'View', onPress: () => handleNotificationData(remoteMessage.data) },
           ],
         });
+        
+        // Reload deliveries on new assignment
+        if (remoteMessage.data?.type === 'new_assignment') {
+          loadActiveDeliveries();
+        }
       }
     });
 
@@ -407,6 +455,7 @@ export default function RiderHomeScreen() {
     }
   };
 
+  // NEW: Updated location broadcast using riders controller
   const startLocationBroadcast = async () => {
     try {
       const location = await Location.getCurrentPositionAsync({
@@ -415,12 +464,14 @@ export default function RiderHomeScreen() {
       setCurrentLocation(location);
 
       await api.post('/api/v1/riders/location', {
-        latitude: location.coords.latitude,
-        longitude: location.coords.longitude,
-        accuracy: location.coords.accuracy,
-        heading: location.coords.heading,
-        speed: location.coords.speed,
-        timestamp: location.timestamp,
+        rider: {
+          latitude: location.coords.latitude,
+          longitude: location.coords.longitude,
+          accuracy: location.coords.accuracy,
+          heading: location.coords.heading,
+          speed: location.coords.speed,
+          timestamp: location.timestamp,
+        }
       });
 
       locationInterval.current = setInterval(async () => {
@@ -431,12 +482,14 @@ export default function RiderHomeScreen() {
           setCurrentLocation(newLocation);
 
           await api.post('/api/v1/riders/location', {
-            latitude: newLocation.coords.latitude,
-            longitude: newLocation.coords.longitude,
-            accuracy: newLocation.coords.accuracy,
-            heading: newLocation.coords.heading,
-            speed: newLocation.coords.speed,
-            timestamp: newLocation.timestamp,
+            rider: {
+              latitude: newLocation.coords.latitude,
+              longitude: newLocation.coords.longitude,
+              accuracy: newLocation.coords.accuracy,
+              heading: newLocation.coords.heading,
+              speed: newLocation.coords.speed,
+              timestamp: newLocation.timestamp,
+            }
           });
         } catch (error) {
           console.error('Failed to update location:', error);
@@ -454,6 +507,7 @@ export default function RiderHomeScreen() {
     }
   };
 
+  // NEW: Updated offline status using riders controller
   const stopLocationBroadcast = async () => {
     if (locationInterval.current) {
       clearInterval(locationInterval.current);
@@ -484,6 +538,8 @@ export default function RiderHomeScreen() {
         }
         
         setIsOnline(true);
+        loadActiveDeliveries(); // Reload deliveries when going online
+        
         showCustomModal({
           title: 'Online',
           message: 'You are now online and ready to receive deliveries',
@@ -521,8 +577,10 @@ export default function RiderHomeScreen() {
   const handleScanSuccess = (result: any) => {
     setShowScanner(false);
     setScannerAction('');
+    loadActiveDeliveries(); // Reload after scan
   };
 
+  // NEW: Updated report submission using riders controller
   const handleSubmitReport = async () => {
     if (!selectedIssue) {
       showCustomModal({
@@ -533,7 +591,7 @@ export default function RiderHomeScreen() {
       return;
     }
 
-    if (selectedIssue === 'mechanical' && !issueDescription.trim()) {
+    if (!issueDescription.trim()) {
       showCustomModal({
         title: 'Error',
         message: 'Please describe the issue',
@@ -545,14 +603,21 @@ export default function RiderHomeScreen() {
     setSubmittingReport(true);
 
     try {
-      await api.post('/api/v1/riders/reports', {
-        issue_type: selectedIssue,
-        description: issueDescription.trim() || selectedIssue,
-        location: currentLocation ? {
+      const reportData: any = {
+        report: {
+          issue_type: selectedIssue,
+          description: issueDescription.trim(),
+        }
+      };
+
+      if (currentLocation) {
+        reportData.report.location = {
           latitude: currentLocation.coords.latitude,
           longitude: currentLocation.coords.longitude,
-        } : null,
-      });
+        };
+      }
+
+      await api.post('/api/v1/riders/reports', reportData);
 
       showCustomModal({
         title: 'Success',
@@ -603,7 +668,7 @@ export default function RiderHomeScreen() {
                       styles.liveText,
                       { color: isOnline ? '#4CAF50' : '#8E8E93' }
                     ]}>
-                      {isOnline ? 'ONLINE' : 'OFFLINE'}
+                      {isOnline ? 'LIVE' : 'OFFLINE'}
                     </Text>
                   </View>
                   <Switch
@@ -617,7 +682,7 @@ export default function RiderHomeScreen() {
                 </View>
               </View>
               <Text style={styles.statsText}>
-                {recentOrders.filter(o => o.status === 'In Transit').length} pending • {recentOrders.length} total deliveries
+                {deliveryStats.submitted} pending • {deliveryStats.total} total deliveries
               </Text>
             </View>
             
@@ -635,7 +700,13 @@ export default function RiderHomeScreen() {
         </LinearGradient>
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.scrollContent}>
+      <ScrollView 
+        style={styles.scrollView} 
+        contentContainerStyle={styles.scrollContent}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
+        }
+      >
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Quick Actions</Text>
           <View style={styles.actionsGrid}>
@@ -660,23 +731,33 @@ export default function RiderHomeScreen() {
 
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Active Deliveries</Text>
-          {recentOrders.map((order) => (
-            <TouchableOpacity key={order.id} style={styles.orderCard}>
-              <View style={styles.orderIcon}>
-                <Feather name="package" size={20} color="#7B3F98" />
-              </View>
-              <View style={styles.orderContent}>
-                <Text style={styles.orderTracking}>{order.tracking}</Text>
-                <Text style={styles.orderLocation}>{order.location}</Text>
-              </View>
-              <View style={[
-                styles.deliveryStatusBadge,
-                { backgroundColor: order.status === 'Delivered' ? '#4CAF50' : '#FF9800' }
-              ]}>
-                <Text style={styles.statusText}>{order.status}</Text>
-              </View>
-            </TouchableOpacity>
-          ))}
+          {activeDeliveries.length === 0 ? (
+            <View style={styles.emptyState}>
+              <Feather name="package" size={48} color="#8E8E93" />
+              <Text style={styles.emptyStateText}>No active deliveries</Text>
+              <Text style={styles.emptyStateSubtext}>
+                {isOnline ? 'Waiting for assignments...' : 'Go online to receive deliveries'}
+              </Text>
+            </View>
+          ) : (
+            activeDeliveries.map((order) => (
+              <TouchableOpacity key={order.id} style={styles.orderCard}>
+                <View style={styles.orderIcon}>
+                  <Feather name="package" size={20} color="#7B3F98" />
+                </View>
+                <View style={styles.orderContent}>
+                  <Text style={styles.orderTracking}>{order.code}</Text>
+                  <Text style={styles.orderLocation}>{order.route_description}</Text>
+                </View>
+                <View style={[
+                  styles.deliveryStatusBadge,
+                  { backgroundColor: order.state === 'delivered' ? '#4CAF50' : '#FF9800' }
+                ]}>
+                  <Text style={styles.statusText}>{order.state}</Text>
+                </View>
+              </TouchableOpacity>
+            ))
+          )}
         </View>
 
         <TouchableOpacity 
@@ -709,8 +790,8 @@ export default function RiderHomeScreen() {
             <View style={styles.modalHandle} />
             
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Report</Text>
-              <Text style={styles.modalSubtitle}>Latest update</Text>
+              <Text style={styles.modalTitle}>Report Issue</Text>
+              <Text style={styles.modalSubtitle}>Select issue type and describe</Text>
               <TouchableOpacity 
                 style={styles.modalClose}
                 onPress={() => setShowReportModal(false)}
@@ -743,7 +824,7 @@ export default function RiderHomeScreen() {
 
               <TextInput
                 style={styles.issueInput}
-                placeholder={selectedIssue ? selectedIssue.charAt(0).toUpperCase() + selectedIssue.slice(1) : "Describe the issue"}
+                placeholder={selectedIssue ? `Describe the ${selectedIssue} issue` : "Describe the issue"}
                 placeholderTextColor="#8E8E93"
                 multiline
                 numberOfLines={4}
@@ -757,7 +838,7 @@ export default function RiderHomeScreen() {
                 disabled={submittingReport}
               >
                 <Text style={styles.submitButtonText}>
-                  {submittingReport ? 'SUBMITTING...' : 'REPORT'}
+                  {submittingReport ? 'SUBMITTING...' : 'SUBMIT REPORT'}
                 </Text>
               </TouchableOpacity>
             </ScrollView>
@@ -903,6 +984,21 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '500',
     textAlign: 'center',
+  },
+  emptyState: {
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyStateText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginTop: 12,
+  },
+  emptyStateSubtext: {
+    color: '#8E8E93',
+    fontSize: 14,
+    marginTop: 4,
   },
   orderCard: {
     flexDirection: 'row',
