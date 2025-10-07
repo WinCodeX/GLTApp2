@@ -59,7 +59,7 @@ const getRedirectRoute = (role: string): string => {
     case 'rider':
       return '/(rider)';
     default:
-      return '/';
+      return '/(drawer)';
   }
 };
     
