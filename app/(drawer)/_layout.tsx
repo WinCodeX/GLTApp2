@@ -1,4 +1,4 @@
-// app/(drawer)/_layout.tsx - Enhanced with Agent and Rider role support
+// app/(drawer)/_layout.tsx - Fixed role detection logic
 import React, { useEffect, useState, useCallback } from 'react';
 import { Dimensions, AppState, AppStateStatus } from 'react-native';
 import { useRouter, useSegments } from 'expo-router';
@@ -36,9 +36,10 @@ const drawerIcons: Record<string, { name: string; lib: any }> = {
 
 type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_support' | 'redirect_agent' | 'redirect_rider' | 'redirect_login';
 
-// Helper function to determine effective role from user data
+// Helper function to determine effective role from user data - FIXED
 const getEffectiveRole = (userData: any): string => {
-  if (userData.primary_role && userData.primary_role !== 'client') {
+  // First priority: use primary_role if it exists (removed the !== 'client' condition)
+  if (userData.primary_role) {
     return userData.primary_role;
   }
   
