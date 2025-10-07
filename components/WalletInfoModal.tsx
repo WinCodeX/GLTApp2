@@ -1,4 +1,4 @@
-// components/WalletInfoModal.tsx
+// components/WalletInfoModal.tsx - Fixed rendering issues
 import React from 'react';
 import {
   View,
@@ -7,9 +7,12 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 interface WalletInfoModalProps {
   visible: boolean;
@@ -17,6 +20,8 @@ interface WalletInfoModalProps {
 }
 
 const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) => {
+  if (!visible) return null;
+
   return (
     <Modal
       visible={visible}
@@ -25,28 +30,40 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
+        <TouchableOpacity 
+          style={styles.backdrop}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+        
         <View style={styles.modalContainer}>
-          <LinearGradient
-            colors={['#1a1b3d', '#2d1b4e', '#4c1d95']}
-            style={styles.modal}
-          >
+          <View style={styles.modal}>
             {/* Header */}
             <View style={styles.header}>
-              <View style={styles.headerLeft}>
+              <View style={styles.dragIndicator} />
+              <View style={styles.headerContent}>
                 <View style={styles.headerIcon}>
-                  <Ionicons name="wallet" size={28} color="#c084fc" />
+                  <Ionicons name="wallet" size={24} color="#c084fc" />
                 </View>
-                <Text style={styles.headerTitle}>GLT Wallet</Text>
+                <View style={styles.headerText}>
+                  <Text style={styles.headerTitle}>GLT Wallet</Text>
+                  <Text style={styles.headerSubtitle}>About your digital wallet</Text>
+                </View>
+                <TouchableOpacity 
+                  style={styles.closeButton}
+                  onPress={onClose}
+                >
+                  <Ionicons name="close" size={20} color="#888" />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity 
-                style={styles.closeButton}
-                onPress={onClose}
-              >
-                <Ionicons name="close" size={24} color="#c4b5fd" />
-              </TouchableOpacity>
             </View>
 
-            <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
+            <ScrollView 
+              style={styles.content} 
+              contentContainerStyle={styles.scrollContent}
+              showsVerticalScrollIndicator={false}
+              bounces={false}
+            >
               <Text style={styles.title}>What is GLT Wallet?</Text>
               
               <Text style={styles.description}>
@@ -56,7 +73,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
 
               <View style={styles.featuresList}>
                 <View style={styles.featureItem}>
-                  <View style={[styles.featureIcon, { backgroundColor: '#10b98120' }]}>
+                  <View style={[styles.featureIcon, styles.greenIcon]}>
                     <Ionicons name="flash" size={24} color="#10b981" />
                   </View>
                   <View style={styles.featureContent}>
@@ -68,7 +85,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={[styles.featureIcon, { backgroundColor: '#8b5cf620' }]}>
+                  <View style={[styles.featureIcon, styles.purpleIcon]}>
                     <Ionicons name="shield-checkmark" size={24} color="#8b5cf6" />
                   </View>
                   <View style={styles.featureContent}>
@@ -80,7 +97,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={[styles.featureIcon, { backgroundColor: '#f59e0b20' }]}>
+                  <View style={[styles.featureIcon, styles.orangeIcon]}>
                     <Ionicons name="cash" size={24} color="#f59e0b" />
                   </View>
                   <View style={styles.featureContent}>
@@ -93,7 +110,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={[styles.featureIcon, { backgroundColor: '#ec489920' }]}>
+                  <View style={[styles.featureIcon, styles.pinkIcon]}>
                     <Ionicons name="gift" size={24} color="#ec4899" />
                   </View>
                   <View style={styles.featureContent}>
@@ -119,15 +136,10 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 style={styles.gotItButton}
                 onPress={onClose}
               >
-                <LinearGradient
-                  colors={['#8b5cf6', '#6d28d9']}
-                  style={styles.buttonGradient}
-                >
-                  <Text style={styles.buttonText}>Got it</Text>
-                </LinearGradient>
+                <Text style={styles.buttonText}>Got it</Text>
               </TouchableOpacity>
             </View>
-          </LinearGradient>
+          </View>
         </View>
       </View>
     </Modal>
@@ -137,53 +149,83 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    backgroundColor: 'rgba(0, 0, 0, 0.5)',
     justifyContent: 'flex-end',
   },
-  modalContainer: {
-    maxHeight: '90%',
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
-    overflow: 'hidden',
-  },
-  modal: {
+  backdrop: {
     flex: 1,
   },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(168, 123, 250, 0.2)',
+  modalContainer: {
+    maxHeight: SCREEN_HEIGHT * 0.90,
   },
-  headerLeft: {
+  modal: {
+    backgroundColor: '#1a1a2e',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    minHeight: SCREEN_HEIGHT * 0.75,
+  },
+  
+  // Header
+  header: {
+    paddingTop: 16,
+    paddingHorizontal: 20,
+    paddingBottom: 20,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(124, 58, 237, 0.2)',
+  },
+  dragIndicator: {
+    width: 40,
+    height: 4,
+    backgroundColor: '#444',
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  headerContent: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
   },
   headerIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     backgroundColor: 'rgba(192, 132, 252, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+    marginRight: 12,
+  },
+  headerText: {
+    flex: 1,
   },
   headerTitle: {
-    color: '#e5e7eb',
-    fontSize: 20,
+    color: '#fff',
+    fontSize: 18,
     fontWeight: '700',
+    marginBottom: 2,
+  },
+  headerSubtitle: {
+    color: '#888',
+    fontSize: 13,
   },
   closeButton: {
-    padding: 8,
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
+  
+  // Content
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 20,
+    paddingBottom: 32,
   },
   title: {
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 24,
     fontWeight: '700',
     marginBottom: 12,
@@ -194,6 +236,8 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     marginBottom: 24,
   },
+  
+  // Features List
   featuresList: {
     gap: 20,
     marginBottom: 24,
@@ -209,11 +253,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  greenIcon: {
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+  },
+  purpleIcon: {
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+  },
+  orangeIcon: {
+    backgroundColor: 'rgba(245, 158, 11, 0.2)',
+  },
+  pinkIcon: {
+    backgroundColor: 'rgba(236, 72, 153, 0.2)',
+  },
   featureContent: {
     flex: 1,
   },
   featureTitle: {
-    color: '#e5e7eb',
+    color: '#fff',
     fontSize: 16,
     fontWeight: '600',
     marginBottom: 4,
@@ -223,6 +279,8 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
+  
+  // Info Box
   infoBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -239,16 +297,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  
+  // Footer
   footer: {
     padding: 20,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(168, 123, 250, 0.2)',
+    borderTopColor: 'rgba(124, 58, 237, 0.2)',
   },
   gotItButton: {
+    backgroundColor: '#8b5cf6',
     borderRadius: 12,
-    overflow: 'hidden',
-  },
-  buttonGradient: {
     paddingVertical: 16,
     alignItems: 'center',
   },
