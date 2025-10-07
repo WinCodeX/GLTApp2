@@ -1,4 +1,4 @@
-// lib/services/ActionCableService.ts - FIXED: User presence broadcasting
+// lib/services/ActionCableService.ts - COMPLETE with Wallet Channel Support
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getCurrentApiBaseUrl } from '../api';
@@ -15,6 +15,14 @@ interface ActionCableMessage {
   package?: any;
   business?: any;
   user?: any;
+  // NEW: Wallet-related fields
+  balance?: number;
+  pending_balance?: number;
+  available_balance?: number;
+  transaction?: any;
+  withdrawal?: any;
+  wallet?: any;
+  // END NEW
   counts?: {
     notifications: number;
     cart: number;
@@ -136,7 +144,7 @@ class ActionCableService {
           this.startHeartbeat();
           this.startPing();
           
-          // CRITICAL FIX: Set presence to online immediately after connection
+          // Set presence to online immediately after connection
           try {
             await this.updatePresence('online');
             console.log('✅ Presence set to online after connection');
@@ -243,7 +251,7 @@ class ActionCableService {
       this.isIntentionalDisconnect = true;
       this.stopReconnecting();
       
-      // CRITICAL FIX: Set presence to offline before disconnecting
+      // Set presence to offline before disconnecting
       if (this.isConnected) {
         this.updatePresence('offline').catch(error => 
           console.warn('⚠️ Failed to set offline presence:', error)
@@ -314,7 +322,7 @@ class ActionCableService {
         
         await this.resubscribeToChannels();
         
-        // CRITICAL FIX: Update presence after reconnection
+        // Update presence after reconnection
         try {
           await this.updatePresence('online');
           console.log('✅ Presence restored to online after reconnection');
@@ -673,6 +681,31 @@ class ActionCableService {
         case 'app_update_downloaded':
           console.log(`✅ Update ${data.version} downloaded`);
           break;
+
+        // NEW: Wallet event handlers
+        case 'balance_update':
+          console.log(`💰 Wallet balance updated: ${data.balance}`);
+          break;
+
+        case 'new_transaction':
+          console.log(`💳 New wallet transaction: ${data.transaction?.transaction_type}`);
+          break;
+
+        case 'withdrawal_completed':
+          console.log(`🏦 Withdrawal completed: ${data.withdrawal?.reference}`);
+          break;
+
+        case 'withdrawal_failed':
+          console.log(`❌ Withdrawal failed: ${data.withdrawal?.reason}`);
+          break;
+
+        case 'withdrawal_cancelled':
+          console.log(`ℹ️ Withdrawal cancelled: ${data.withdrawal?.reference}`);
+          break;
+
+        case 'status_update':
+          console.log(`🔄 Wallet status: ${data.status}`);
+          break;
       }
     } catch (error) {
       console.error('❌ Error processing special message type:', error);
@@ -723,6 +756,23 @@ class ActionCableService {
 
       case 'app_update_available':
         console.log('🔄 App update broadcast received:', data.version);
+        break;
+
+      // NEW: Wallet log messages
+      case 'balance_update':
+        console.log('💰 Wallet balance:', {
+          balance: data.balance,
+          pending: data.pending_balance,
+          available: data.available_balance
+        });
+        break;
+
+      case 'new_transaction':
+        console.log('💳 Transaction:', {
+          type: data.transaction?.transaction_type,
+          amount: data.transaction?.amount,
+          balance: data.balance
+        });
         break;
     }
   }
