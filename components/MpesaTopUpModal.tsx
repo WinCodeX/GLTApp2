@@ -8,12 +8,12 @@ import {
   TextInput,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Dimensions,
   Keyboard,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
@@ -46,6 +46,30 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
   const [errorMessage, setErrorMessage] = useState('');
   const [pollingInterval, setPollingInterval] = useState<NodeJS.Timeout | null>(null);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const [warningVisible, setWarningVisible] = useState(false);
+  const [warningMessage, setWarningMessage] = useState({ title: '', message: '' });
+  const warningOpacity = useState(new Animated.Value(0))[0];
+
+  const showWarning = (title: string, message: string) => {
+    setWarningMessage({ title, message });
+    setWarningVisible(true);
+    
+    Animated.sequence([
+      Animated.timing(warningOpacity, {
+        toValue: 1,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+      Animated.delay(2500),
+      Animated.timing(warningOpacity, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }),
+    ]).start(() => {
+      setWarningVisible(false);
+    });
+  };
 
   useEffect(() => {
     if (visible) {
@@ -107,22 +131,22 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
     const numAmount = parseFloat(amount);
     
     if (!amount || isNaN(numAmount) || numAmount <= 0) {
-      Alert.alert('Invalid Amount', 'Please enter a valid amount');
+      showWarning('Invalid Amount', 'Please enter a valid amount');
       return false;
     }
     
     if (numAmount < 10) {
-      Alert.alert('Minimum Amount', 'Minimum top-up amount is KES 10');
+      showWarning('Minimum Amount', 'Minimum top-up amount is KES 10');
       return false;
     }
     
     if (numAmount > 150000) {
-      Alert.alert('Maximum Amount', 'Maximum top-up amount is KES 150,000');
+      showWarning('Maximum Amount', 'Maximum top-up amount is KES 150,000');
       return false;
     }
     
     if (!phoneNumber || phoneNumber.length !== 9) {
-      Alert.alert('Invalid Phone', 'Please enter a valid M-Pesa phone number');
+      showWarning('Invalid Phone', 'Please enter a valid M-Pesa phone number');
       return false;
     }
     
@@ -438,6 +462,29 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
             </LinearGradient>
           </View>
         </KeyboardAvoidingView>
+
+        {/* Warning Modal */}
+        {warningVisible && (
+          <Animated.View 
+            style={[
+              styles.warningContainer,
+              { opacity: warningOpacity }
+            ]}
+          >
+            <LinearGradient
+              colors={['rgba(239, 68, 68, 0.95)', 'rgba(220, 38, 38, 0.95)']}
+              style={styles.warningBox}
+            >
+              <View style={styles.warningIconContainer}>
+                <Ionicons name="warning" size={24} color="#fff" />
+              </View>
+              <View style={styles.warningContent}>
+                <Text style={styles.warningTitle}>{warningMessage.title}</Text>
+                <Text style={styles.warningText}>{warningMessage.message}</Text>
+              </View>
+            </LinearGradient>
+          </Animated.View>
+        )}
       </View>
     </Modal>
   );
@@ -707,6 +754,49 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: '700',
+  },
+
+  // Warning Modal
+  warningContainer: {
+    position: 'absolute',
+    top: 60,
+    left: 20,
+    right: 20,
+    zIndex: 9999,
+  },
+  warningBox: {
+    borderRadius: 12,
+    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
+    elevation: 8,
+  },
+  warningIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  warningContent: {
+    flex: 1,
+  },
+  warningTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  warningText: {
+    color: '#fff',
+    fontSize: 14,
+    opacity: 0.9,
   },
 });
 
