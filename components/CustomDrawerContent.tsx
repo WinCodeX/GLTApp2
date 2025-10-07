@@ -92,6 +92,7 @@ const SafeAvatar: React.FC<SafeAvatarProps> = ({
 export default function CustomDrawerContent(props: any) {
   const [showTrackDropdown, setShowTrackDropdown] = useState(false);
   const [showBusinessDropdown, setShowBusinessDropdown] = useState(false);
+  const [showFaqsDropdown, setShowFaqsDropdown] = useState(false); // NEW
   
   const { 
     user, 
@@ -181,7 +182,7 @@ export default function CustomDrawerContent(props: any) {
 
   // Updated tracking statuses with "All" button at the top
   const trackingStatuses = [
-    { label: 'All', key: 'all', icon: 'package' }, // NEW: All packages option
+    { label: 'All', key: 'all', icon: 'package' },
     { label: 'Pending', key: 'pending', icon: 'clock' },
     { label: 'Paid', key: 'paid', icon: 'check-circle' },
     { label: 'Submitted', key: 'submitted', icon: 'upload' },
@@ -189,6 +190,12 @@ export default function CustomDrawerContent(props: any) {
     { label: 'Delivered', key: 'delivered', icon: 'box' },
     { label: 'Collected', key: 'collected', icon: 'archive' },
     { label: 'Rejected', key: 'rejected', icon: 'x-circle' },
+  ];
+
+  // NEW: FAQs and Terms options
+  const faqsOptions = [
+    { label: 'FAQs', route: 'faqs', icon: 'help-circle' },
+    { label: 'Terms and Conditions', route: 'terms', icon: 'file-text' },
   ];
 
   // Enhanced business switching
@@ -293,6 +300,18 @@ export default function CustomDrawerContent(props: any) {
       }
     } catch (error) {
       console.error('Track navigation failed:', error);
+    }
+  };
+
+  // NEW: Handle FAQs/Terms navigation
+  const handleFaqsNavigation = async (route: string) => {
+    try {
+      await NavigationHelper.navigateTo(route, {
+        params: {},
+        trackInHistory: true
+      });
+    } catch (error) {
+      console.error(`Navigation to ${route} failed:`, error);
     }
   };
 
@@ -509,21 +528,55 @@ export default function CustomDrawerContent(props: any) {
               }
             }}    
           />    
+
+          {/* Wallet Navigation */}
           <DrawerItem    
-            label="FAQs"    
+            label="Wallet"    
             labelStyle={styles.label}    
-            icon={() => <Feather name="help-circle" size={24} color={colors.primary} />}    
+            icon={() => <Ionicons name="wallet-outline" size={24} color={colors.primary} />}    
             onPress={async () => {
               try {
-                await NavigationHelper.navigateTo('faqs', {
+                await NavigationHelper.navigateTo('wallet', {
                   params: {},
                   trackInHistory: true
                 });
               } catch (error) {
-                console.error('Navigation to FAQs failed:', error);
+                console.error('Navigation to wallet failed:', error);
               }
             }}    
-          />    
+          />
+
+          {/* NEW: FAQs and Our Terms - Dropdown */}
+          <TouchableOpacity
+            style={styles.customItem}
+            onPress={() => setShowFaqsDropdown((prev) => !prev)}
+            activeOpacity={0.7}
+          >
+            <View style={styles.trackHeader}>
+              <Feather name="info" size={20} color={colors.primary} style={styles.trackIcon} />
+              <Text style={styles.trackLabel}>FAQs and Our Terms</Text>
+              <Feather
+                name={showFaqsDropdown ? 'chevron-up' : 'chevron-down'}
+                size={20}
+                color={colors.primary}
+              />
+            </View>
+          </TouchableOpacity>
+          
+          {showFaqsDropdown &&    
+            faqsOptions.map((item) => (    
+              <DrawerItem    
+                key={item.route}    
+                label={item.label}    
+                labelStyle={styles.subLabel}    
+                icon={() => (    
+                  <Feather name={item.icon as any} size={20} color={colors.primary} />    
+                )}    
+                style={styles.subItem}    
+                onPress={() => handleFaqsNavigation(item.route)}
+              />    
+            ))}
+
           <DrawerItem    
             label="Find us"    
             labelStyle={styles.label}    
