@@ -28,7 +28,7 @@ interface MpesaTopUpModalProps {
   onSuccess: () => void;
 }
 
-type PaymentStep = 'input' | 'processing' | 'success' | 'failed';
+type PaymentStep = 'input' | 'processing' | 'success' | 'failed' | 'manual_verify';
 
 const QUICK_AMOUNTS = [100, 500, 1000, 2000, 5000];
 
@@ -48,6 +48,7 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [warningVisible, setWarningVisible] = useState(false);
   const [warningMessage, setWarningMessage] = useState({ title: '', message: '' });
+  const [transactionCode, setTransactionCode] = useState('');
   const warningOpacity = useState(new Animated.Value(0))[0];
 
   const showWarning = (title: string, message: string) => {
@@ -243,6 +244,7 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
     setStep('input');
     setErrorMessage('');
     setCheckoutRequestId('');
+    setTransactionCode('');
     if (pollingInterval) {
       clearInterval(pollingInterval);
       setPollingInterval(null);
@@ -257,6 +259,56 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
   const handleRetry = () => {
     setStep('input');
     setErrorMessage('');
+    setTransactionCode('');
+  };
+
+  const goToManualVerify = () => {
+    setStep('manual_verify');
+    setErrorMessage('');
+    setTransactionCode('');
+  };
+
+  const verifyManualTransaction = async () => {
+    if (!transactionCode.trim()) {
+      showWarning('Transaction Code Required', 'Please enter the M-Pesa transaction code');
+      return;
+    }
+
+    if (!amount || parseFloat(amount) <= 0) {
+      showWarning('Invalid Amount', 'Please enter a valid amount');
+      return;
+    }
+
+    try {
+      setLoading(true);
+      console.log('🔍 Verifying manual transaction code:', transactionCode);
+      
+      const response = await api.post('/api/v1/mpesa/topup_manual', {
+        transaction_code: transactionCode,
+        amount: parseFloat(amount)
+      });
+
+      console.log('📡 Manual verification response:', response.data);
+
+      if (response.data.status === 'success') {
+        setStep('success');
+        
+        setTimeout(() => {
+          onSuccess();
+          resetModal();
+        }, 2000);
+      } else {
+        showWarning('Verification Failed', response.data.message || 'Invalid transaction code');
+      }
+      
+    } catch (error: any) {
+      console.error('🔍 Manual verification error:', error);
+      
+      const errorMsg = error.response?.data?.message || 'Could not verify the transaction code';
+      showWarning('Verification Failed', errorMsg);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -380,6 +432,17 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
                         You will receive an M-Pesa prompt on your phone. Enter your PIN to complete the transaction.
                       </Text>
                     </View>
+
+                    {/* Manual Verify Button */}
+                    <View style={styles.section}>
+                      <TouchableOpacity 
+                        style={styles.manualVerifyButton}
+                        onPress={goToManualVerify}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#c084fc" />
+                        <Text style={styles.manualVerifyText}>Already paid? Verify manually</Text>
+                      </TouchableOpacity>
+                    </View>
                   </>
                 )}
 
@@ -422,13 +485,86 @@ const MpesaTopUpModal: React.FC<MpesaTopUpModalProps> = ({
                     <Text style={styles.statusMessage}>
                       {errorMessage || 'The payment could not be processed'}
                     </Text>
-                    <TouchableOpacity 
-                      style={styles.retryButton}
-                      onPress={handleRetry}
-                    >
-                      <Ionicons name="refresh" size={20} color="#fff" />
-                      <Text style={styles.retryButtonText}>Try Again</Text>
-                    </TouchableOpacity>
+                    <View style={styles.failedActions}>
+                      <TouchableOpacity 
+                        style={styles.retryButton}
+                        onPress={handleRetry}
+                      >
+                        <Ionicons name="refresh" size={20} color="#fff" />
+                        <Text style={styles.retryButtonText}>Try Again</Text>
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={styles.manualButton}
+                        onPress={() => setStep('manual_verify')}
+                      >
+                        <Ionicons name="create-outline" size={18} color="#c084fc" />
+                        <Text style={styles.manualButtonText}>Enter Transaction Code</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                )}
+
+                {step === 'manual_verify' && (
+                  <View style={styles.statusContainer}>
+                    <View style={styles.manualIcon}>
+                      <Ionicons name="create-outline" size={48} color="#c084fc" />
+                    </View>
+                    <Text style={styles.statusTitle}>Manual Verification</Text>
+                    <Text style={styles.statusMessage}>
+                      If you completed the payment, enter the M-Pesa transaction code from your SMS
+                    </Text>
+                    
+                    <View style={styles.manualInputSection}>
+                      <Text style={styles.inputLabel}>M-Pesa Transaction Code</Text>
+                      <TextInput
+                        style={styles.transactionInput}
+                        value={transactionCode}
+                        onChangeText={setTransactionCode}
+                        placeholder="e.g. TJ7P76Q8GV"
+                        placeholderTextColor="#666"
+                        autoCapitalize="characters"
+                        maxLength={15}
+                      />
+                      
+                      <Text style={styles.inputLabel} style={{ marginTop: 16 }}>Confirm Amount</Text>
+                      <View style={styles.amountInputContainer} style={{ marginTop: 8 }}>
+                        <Text style={styles.currencySymbol}>KES</Text>
+                        <TextInput
+                          style={styles.amountInput}
+                          placeholder="0"
+                          placeholderTextColor="#666"
+                          value={amount}
+                          onChangeText={setAmount}
+                          keyboardType="numeric"
+                          maxLength={6}
+                        />
+                      </View>
+                    </View>
+
+                    <View style={styles.manualActions}>
+                      <TouchableOpacity 
+                        style={[styles.verifyButton, loading && styles.verifyButtonDisabled]} 
+                        onPress={verifyManualTransaction}
+                        disabled={loading}
+                      >
+                        {loading ? (
+                          <ActivityIndicator color="#fff" />
+                        ) : (
+                          <>
+                            <Ionicons name="checkmark" size={20} color="#fff" />
+                            <Text style={styles.verifyButtonText}>Verify Payment</Text>
+                          </>
+                        )}
+                      </TouchableOpacity>
+                      
+                      <TouchableOpacity 
+                        style={styles.backButton}
+                        onPress={handleRetry}
+                      >
+                        <Text style={styles.backButtonText}>Back to Top-up</Text>
+                      </TouchableOpacity>
+                    </View>
                   </View>
                 )}
               </ScrollView>
@@ -727,6 +863,104 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: '#fff',
     fontSize: 16,
+    fontWeight: '600',
+  },
+
+  // Manual Verify Button (on input screen)
+  manualVerifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    backgroundColor: 'rgba(192, 132, 252, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(192, 132, 252, 0.3)',
+  },
+  manualVerifyText: {
+    color: '#c084fc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Failed Actions
+  failedActions: {
+    width: '100%',
+    gap: 12,
+    marginTop: 16,
+  },
+  manualButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 12,
+    backgroundColor: 'transparent',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: '#c084fc',
+  },
+  manualButtonText: {
+    color: '#c084fc',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+
+  // Manual Verification Step
+  manualIcon: {
+    marginBottom: 8,
+  },
+  manualInputSection: {
+    width: '100%',
+    marginTop: 16,
+  },
+  transactionInput: {
+    backgroundColor: 'rgba(139, 92, 246, 0.1)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(168, 123, 250, 0.3)',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontSize: 16,
+    color: '#fff',
+    textTransform: 'uppercase',
+  },
+  inputLabel: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  manualActions: {
+    width: '100%',
+    gap: 12,
+    marginTop: 24,
+  },
+  verifyButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    paddingVertical: 14,
+    backgroundColor: '#10b981',
+    borderRadius: 12,
+  },
+  verifyButtonDisabled: {
+    opacity: 0.6,
+  },
+  verifyButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  backButton: {
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  backButtonText: {
+    color: '#c084fc',
+    fontSize: 14,
     fontWeight: '600',
   },
   
