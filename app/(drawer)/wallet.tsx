@@ -514,6 +514,7 @@ const styles = StyleSheet.create({
   balanceFooter: {
     marginTop: 8,
   },
+  balanceInfo: {
     marginTop: 8,
   },
   balanceInfo: {
