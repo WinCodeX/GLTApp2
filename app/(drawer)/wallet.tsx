@@ -281,13 +281,22 @@ const WalletScreen = () => {
                     <Text style={styles.actionButtonText}>Top Up</Text>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={handleWithdraw}
-                  >
-                    <Ionicons name="cash-outline" size={20} color="#fff" />
-                    <Text style={styles.actionButtonText}>Withdraw</Text>
-                  </TouchableOpacity>
+                  <View style={styles.driverActionsColumn}>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => setShowTopUpModal(true)}
+                    >
+                      <Ionicons name="add" size={20} color="#fff" />
+                      <Text style={styles.actionButtonText}>Top Up Wallet</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={handleWithdraw}
+                    >
+                      <Ionicons name="cash-outline" size={20} color="#fff" />
+                      <Text style={styles.actionButtonText}>Withdraw</Text>
+                    </TouchableOpacity>
+                  </View>
                 )}
               </View>
             </View>
@@ -316,7 +325,7 @@ const WalletScreen = () => {
                 <Ionicons name="help-circle-outline" size={24} color="#c084fc" />
               </View>
               <View style={styles.quickActionContent}>
-                <Text style={styles.quickActionTitle}>What is Bolt balance?</Text>
+                <Text style={styles.quickActionTitle}>What is GLT wallet?</Text>
                 <Text style={styles.quickActionSubtext}>Learn about your wallet</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#a78bfa" />
@@ -324,13 +333,13 @@ const WalletScreen = () => {
 
             <TouchableOpacity 
               style={styles.quickActionCard}
-              onPress={() => router.push('/transactions')}
+              onPress={() => router.push('/(drawer)/transactions')}
             >
               <View style={styles.quickActionIcon}>
                 <Ionicons name="receipt-outline" size={24} color="#c084fc" />
               </View>
               <View style={styles.quickActionContent}>
-                <Text style={styles.quickActionTitle}>See Bolt balance transactions</Text>
+                <Text style={styles.quickActionTitle}>See GLT wallet transactions</Text>
                 <Text style={styles.quickActionSubtext}>View all activity</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#a78bfa" />
@@ -372,7 +381,7 @@ const WalletScreen = () => {
           <View style={styles.section}>
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Recent Transactions</Text>
-              <TouchableOpacity onPress={() => router.push('/transactions')}>
+              <TouchableOpacity onPress={() => router.push('/(drawer)/transactions')}>
                 <Text style={styles.seeAllText}>See all</Text>
               </TouchableOpacity>
             </View>
@@ -386,7 +395,7 @@ const WalletScreen = () => {
                 <Text style={styles.emptySubtitle}>
                   {isClient 
                     ? 'Top up your wallet to start using GLT services and earn bonuses' 
-                    : 'Complete deliveries to start earning'}
+                    : 'Send packages and get discounts straight to your wallet'}
                 </Text>
               </View>
             ) : (
@@ -445,13 +454,11 @@ const WalletScreen = () => {
         onAddCard={handleAddCard}
       />
 
-      {isClient && (
-        <MpesaTopUpModal
-          visible={showTopUpModal}
-          onClose={() => setShowTopUpModal(false)}
-          onSuccess={handleTopUpSuccess}
-        />
-      )}
+      <MpesaTopUpModal
+        visible={showTopUpModal}
+        onClose={() => setShowTopUpModal(false)}
+        onSuccess={handleTopUpSuccess}
+      />
 
       <WalletInfoModal
         visible={showWalletInfoModal}
@@ -509,6 +516,10 @@ const styles = StyleSheet.create({
   },
   balanceActions: {
     flexDirection: 'row',
+    gap: 8,
+  },
+  driverActionsColumn: {
+    flexDirection: 'column',
     gap: 8,
   },
   actionButton: {
@@ -773,615 +784,3 @@ const styles = StyleSheet.create({
 });
 
 export default WalletScreen;
-
-
-// components/WalletInfoModal.tsx
-import React from 'react';
-import {
-  View,
-  Text,
-  Modal,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-
-interface WalletInfoModalProps {
-  visible: boolean;
-  onClose: () => void;
-}
-
-const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) => {
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="fade"
-      onRequestClose={onClose}
-    >
-      <View style={infoStyles.overlay}>
-        <TouchableOpacity 
-          style={infoStyles.backdrop}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        
-        <View style={infoStyles.modalContainer}>
-          <LinearGradient
-            colors={['#1a1b3d', '#2d1b4e', '#4c1d95']}
-            style={infoStyles.modal}
-          >
-            {/* Header */}
-            <View style={infoStyles.header}>
-              <View style={infoStyles.headerIcon}>
-                <Ionicons name="wallet" size={28} color="#c084fc" />
-              </View>
-              <TouchableOpacity 
-                style={infoStyles.closeButton}
-                onPress={onClose}
-              >
-                <Ionicons name="close" size={24} color="#c4b5fd" />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView style={infoStyles.content} showsVerticalScrollIndicator={false}>
-              <Text style={infoStyles.title}>What is GLT Wallet?</Text>
-              
-              <View style={infoStyles.section}>
-                <Text style={infoStyles.description}>
-                  GLT Wallet is a convenient feature that allows you to top up and pay for packages 
-                  easily, streamlining your delivery experience.
-                </Text>
-              </View>
-
-              <View style={infoStyles.featureSection}>
-                <View style={infoStyles.featureItem}>
-                  <View style={infoStyles.featureIconContainer}>
-                    <Ionicons name="flash" size={24} color="#10b981" />
-                  </View>
-                  <View style={infoStyles.featureContent}>
-                    <Text style={infoStyles.featureTitle}>Quick Payments</Text>
-                    <Text style={infoStyles.featureText}>
-                      Pay for your packages instantly without entering card details every time
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={infoStyles.featureItem}>
-                  <View style={infoStyles.featureIconContainer}>
-                    <Ionicons name="shield-checkmark" size={24} color="#8b5cf6" />
-                  </View>
-                  <View style={infoStyles.featureContent}>
-                    <Text style={infoStyles.featureTitle}>Secure Transactions</Text>
-                    <Text style={infoStyles.featureText}>
-                      Your funds are protected with bank-level security and encryption
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={infoStyles.featureItem}>
-                  <View style={infoStyles.featureIconContainer}>
-                    <Ionicons name="cash" size={24} color="#f59e0b" />
-                  </View>
-                  <View style={infoStyles.featureContent}>
-                    <Text style={infoStyles.featureTitle}>Receive Payments</Text>
-                    <Text style={infoStyles.featureText}>
-                      Receive payments from receivers who opt for the Pay on Delivery option, 
-                      primarily for Home Delivery
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={infoStyles.featureItem}>
-                  <View style={infoStyles.featureIconContainer}>
-                    <Ionicons name="gift" size={24} color="#ec4899" />
-                  </View>
-                  <View style={infoStyles.featureContent}>
-                    <Text style={infoStyles.featureTitle}>Flexible Payment Options</Text>
-                    <Text style={infoStyles.featureText}>
-                      Place an amount on packages for payment on collection, extending beyond 
-                      standard Home Delivery
-                    </Text>
-                  </View>
-                </View>
-              </View>
-
-              <View style={infoStyles.noteSection}>
-                <Ionicons name="information-circle" size={20} color="#c084fc" />
-                <Text style={infoStyles.noteText}>
-                  Top up your wallet using M-Pesa, Airtel Money, or your debit/credit card
-                </Text>
-              </View>
-            </ScrollView>
-
-            <View style={infoStyles.footer}>
-              <TouchableOpacity
-                style={infoStyles.gotItButton}
-                onPress={onClose}
-              >
-                <LinearGradient
-                  colors={['#8b5cf6', '#6d28d9']}
-                  style={infoStyles.gotItButtonGradient}
-                >
-                  <Text style={infoStyles.gotItButtonText}>Got it</Text>
-                </LinearGradient>
-              </TouchableOpacity>
-            </View>
-          </LinearGradient>
-        </View>
-      </View>
-    </Modal>
-  );
-};
-
-const infoStyles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-  },
-  modalContainer: {
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '85%',
-    borderRadius: 24,
-    overflow: 'hidden',
-  },
-  modal: {
-    flex: 1,
-  },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: 20,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(168, 123, 250, 0.2)',
-  },
-  headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(192, 132, 252, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  closeButton: {
-    padding: 8,
-  },
-  content: {
-    flex: 1,
-    padding: 20,
-  },
-  title: {
-    color: '#e5e7eb',
-    fontSize: 24,
-    fontWeight: '700',
-    marginBottom: 16,
-  },
-  section: {
-    marginBottom: 24,
-  },
-  description: {
-    color: '#c4b5fd',
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  featureSection: {
-    gap: 16,
-    marginBottom: 24,
-  },
-  featureItem: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  featureIconContainer: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  featureContent: {
-    flex: 1,
-  },
-  featureTitle: {
-    color: '#e5e7eb',
-    fontSize: 16,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  featureText: {
-    color: '#c4b5fd',
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  noteSection: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 12,
-    padding: 16,
-    backgroundColor: 'rgba(192, 132, 252, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(192, 132, 252, 0.3)',
-  },
-  noteText: {
-    flex: 1,
-    color: '#c4b5fd',
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  footer: {
-    padding: 20,
-    borderTopWidth: 1,
-    borderTopColor: 'rgba(168, 123, 250, 0.2)',
-  },
-  gotItButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  gotItButtonGradient: {
-    paddingVertical: 16,
-    alignItems: 'center',
-  },
-  gotItButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-});
-
-export { WalletInfoModal };
-
-
-// app/transactions.tsx
-import React, { useState, useEffect } from 'react';
-import {
-  View,
-  Text,
-  FlatList,
-  StyleSheet,
-  RefreshControl,
-  ActivityIndicator,
-  TouchableOpacity,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Ionicons } from '@expo/vector-icons';
-import GLTHeader from '../components/GLTHeader';
-import { NavigationHelper } from '../lib/helpers/navigation';
-import { useUser } from '@/context/UserContext';
-import api from '../lib/api';
-
-interface Transaction {
-  id: string;
-  type: 'credit' | 'debit';
-  amount: number;
-  description: string;
-  date: string;
-  status: 'completed' | 'pending' | 'failed';
-  reference?: string;
-}
-
-const TransactionsScreen = () => {
-  const { user } = useUser();
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [filterType, setFilterType] = useState<'all' | 'credit' | 'debit'>('all');
-
-  useEffect(() => {
-    loadTransactions();
-  }, []);
-
-  const loadTransactions = async () => {
-    try {
-      setLoading(true);
-      const response = await api.get('/api/v1/wallet/transactions');
-      if (response.data.success) {
-        setTransactions(response.data.data || []);
-      }
-    } catch (error) {
-      console.error('Error loading transactions:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const onRefresh = async () => {
-    setRefreshing(true);
-    await loadTransactions();
-    setRefreshing(false);
-  };
-
-  const filteredTransactions = transactions.filter(transaction => {
-    if (filterType === 'all') return true;
-    return transaction.type === filterType;
-  });
-
-  const renderTransaction = ({ item }: { item: Transaction }) => {
-    const isCredit = item.type === 'credit';
-    const statusColor = item.status === 'completed' ? '#10b981' : 
-                       item.status === 'pending' ? '#f59e0b' : '#ef4444';
-    
-    return (
-      <TouchableOpacity style={txStyles.transactionCard}>
-        <View style={[
-          txStyles.transactionIcon,
-          { backgroundColor: isCredit ? '#10b98120' : '#ef444420' }
-        ]}>
-          <Ionicons 
-            name={isCredit ? 'arrow-down' : 'arrow-up'} 
-            size={24} 
-            color={isCredit ? '#10b981' : '#ef4444'} 
-          />
-        </View>
-        
-        <View style={txStyles.transactionInfo}>
-          <Text style={txStyles.transactionDescription}>{item.description}</Text>
-          <Text style={txStyles.transactionDate}>{item.date}</Text>
-          {item.reference && (
-            <Text style={txStyles.transactionReference}>Ref: {item.reference}</Text>
-          )}
-        </View>
-        
-        <View style={txStyles.transactionRight}>
-          <Text style={[
-            txStyles.transactionAmount,
-            { color: isCredit ? '#10b981' : '#ef4444' }
-          ]}>
-            {isCredit ? '+' : '-'}KES {item.amount.toLocaleString()}
-          </Text>
-          <View style={[txStyles.statusBadge, { backgroundColor: `${statusColor}20` }]}>
-            <Text style={[txStyles.statusText, { color: statusColor }]}>
-              {item.status}
-            </Text>
-          </View>
-        </View>
-      </TouchableOpacity>
-    );
-  };
-
-  if (loading) {
-    return (
-      <View style={txStyles.container}>
-        <GLTHeader 
-          title="Transactions" 
-          showBackButton={true}
-          onBackPress={() => NavigationHelper.goBack()}
-        />
-        <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={txStyles.gradient}>
-          <View style={txStyles.loadingContainer}>
-            <ActivityIndicator size="large" color="#c084fc" />
-            <Text style={txStyles.loadingText}>Loading transactions...</Text>
-          </View>
-        </LinearGradient>
-      </View>
-    );
-  }
-
-  return (
-    <View style={txStyles.container}>
-      <GLTHeader 
-        title="Transactions" 
-        showBackButton={true}
-        onBackPress={() => NavigationHelper.goBack()}
-      />
-      
-      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={txStyles.gradient}>
-        {/* Filter Section */}
-        <View style={txStyles.filterContainer}>
-          <TouchableOpacity
-            style={[txStyles.filterButton, filterType === 'all' && txStyles.filterButtonActive]}
-            onPress={() => setFilterType('all')}
-          >
-            <Text style={[txStyles.filterText, filterType === 'all' && txStyles.filterTextActive]}>
-              All
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[txStyles.filterButton, filterType === 'credit' && txStyles.filterButtonActive]}
-            onPress={() => setFilterType('credit')}
-          >
-            <Text style={[txStyles.filterText, filterType === 'credit' && txStyles.filterTextActive]}>
-              Income
-            </Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[txStyles.filterButton, filterType === 'debit' && txStyles.filterButtonActive]}
-            onPress={() => setFilterType('debit')}
-          >
-            <Text style={[txStyles.filterText, filterType === 'debit' && txStyles.filterTextActive]}>
-              Expenses
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        {/* Transactions List */}
-        {filteredTransactions.length === 0 ? (
-          <View style={txStyles.emptyContainer}>
-            <View style={txStyles.emptyIconContainer}>
-              <Ionicons name="receipt-outline" size={64} color="#a78bfa" />
-            </View>
-            <Text style={txStyles.emptyTitle}>No transactions found</Text>
-            <Text style={txStyles.emptySubtitle}>
-              {filterType === 'all' 
-                ? 'Your transaction history will appear here'
-                : `No ${filterType === 'credit' ? 'income' : 'expense'} transactions yet`}
-            </Text>
-          </View>
-        ) : (
-          <FlatList
-            data={filteredTransactions}
-            renderItem={renderTransaction}
-            keyExtractor={(item) => item.id}
-            contentContainerStyle={txStyles.listContent}
-            refreshControl={
-              <RefreshControl
-                refreshing={refreshing}
-                onRefresh={onRefresh}
-                tintColor="#c084fc"
-                colors={['#c084fc']}
-              />
-            }
-          />
-        )}
-      </LinearGradient>
-    </View>
-  );
-};
-
-const txStyles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: '#1a1b3d',
-  },
-  gradient: {
-    flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    gap: 12,
-  },
-  loadingText: {
-    color: '#c4b5fd',
-    fontSize: 16,
-  },
-  
-  // Filter Section
-  filterContainer: {
-    flexDirection: 'row',
-    padding: 16,
-    gap: 12,
-  },
-  filterButton: {
-    flex: 1,
-    paddingVertical: 12,
-    paddingHorizontal: 16,
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(168, 123, 250, 0.3)',
-    alignItems: 'center',
-  },
-  filterButtonActive: {
-    backgroundColor: 'rgba(139, 92, 246, 0.3)',
-    borderColor: '#8b5cf6',
-  },
-  filterText: {
-    color: '#c4b5fd',
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  filterTextActive: {
-    color: '#e5e7eb',
-  },
-  
-  // Transactions List
-  listContent: {
-    padding: 16,
-    gap: 12,
-  },
-  transactionCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'rgba(168, 123, 250, 0.2)',
-  },
-  transactionIcon: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  transactionInfo: {
-    flex: 1,
-  },
-  transactionDescription: {
-    color: '#e5e7eb',
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 4,
-  },
-  transactionDate: {
-    color: '#c4b5fd',
-    fontSize: 13,
-    marginBottom: 2,
-  },
-  transactionReference: {
-    color: '#a78bfa',
-    fontSize: 11,
-    fontStyle: 'italic',
-  },
-  transactionRight: {
-    alignItems: 'flex-end',
-  },
-  transactionAmount: {
-    fontSize: 17,
-    fontWeight: '700',
-    marginBottom: 6,
-  },
-  statusBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
-  statusText: {
-    fontSize: 11,
-    fontWeight: '600',
-    textTransform: 'capitalize',
-  },
-  
-  // Empty State
-  emptyContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 32,
-  },
-  emptyIconContainer: {
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: 'rgba(139, 92, 246, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginBottom: 24,
-  },
-  emptyTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: '#e5e7eb',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  emptySubtitle: {
-    fontSize: 15,
-    color: '#c4b5fd',
-    textAlign: 'center',
-    lineHeight: 22,
-  },
-});
-
-export default TransactionsScreen;
