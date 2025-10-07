@@ -21,16 +21,10 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
     <Modal
       visible={visible}
       transparent
-      animationType="fade"
+      animationType="slide"
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
-        <TouchableOpacity 
-          style={styles.backdrop}
-          activeOpacity={1}
-          onPress={onClose}
-        />
-        
         <View style={styles.modalContainer}>
           <LinearGradient
             colors={['#1a1b3d', '#2d1b4e', '#4c1d95']}
@@ -38,8 +32,11 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
           >
             {/* Header */}
             <View style={styles.header}>
-              <View style={styles.headerIcon}>
-                <Ionicons name="wallet" size={28} color="#c084fc" />
+              <View style={styles.headerLeft}>
+                <View style={styles.headerIcon}>
+                  <Ionicons name="wallet" size={28} color="#c084fc" />
+                </View>
+                <Text style={styles.headerTitle}>GLT Wallet</Text>
               </View>
               <TouchableOpacity 
                 style={styles.closeButton}
@@ -52,16 +49,14 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
             <ScrollView style={styles.content} showsVerticalScrollIndicator={false}>
               <Text style={styles.title}>What is GLT Wallet?</Text>
               
-              <View style={styles.section}>
-                <Text style={styles.description}>
-                  GLT Wallet is a convenient feature that allows you to top up and pay for packages 
-                  easily, streamlining your delivery experience.
-                </Text>
-              </View>
+              <Text style={styles.description}>
+                GLT Wallet is a convenient feature that allows you to top up and pay for packages 
+                easily, streamlining your delivery experience.
+              </Text>
 
-              <View style={styles.featureSection}>
+              <View style={styles.featuresList}>
                 <View style={styles.featureItem}>
-                  <View style={styles.featureIconContainer}>
+                  <View style={[styles.featureIcon, { backgroundColor: '#10b98120' }]}>
                     <Ionicons name="flash" size={24} color="#10b981" />
                   </View>
                   <View style={styles.featureContent}>
@@ -73,7 +68,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={styles.featureIconContainer}>
+                  <View style={[styles.featureIcon, { backgroundColor: '#8b5cf620' }]}>
                     <Ionicons name="shield-checkmark" size={24} color="#8b5cf6" />
                   </View>
                   <View style={styles.featureContent}>
@@ -85,7 +80,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={styles.featureIconContainer}>
+                  <View style={[styles.featureIcon, { backgroundColor: '#f59e0b20' }]}>
                     <Ionicons name="cash" size={24} color="#f59e0b" />
                   </View>
                   <View style={styles.featureContent}>
@@ -98,7 +93,7 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
 
                 <View style={styles.featureItem}>
-                  <View style={styles.featureIconContainer}>
+                  <View style={[styles.featureIcon, { backgroundColor: '#ec489920' }]}>
                     <Ionicons name="gift" size={24} color="#ec4899" />
                   </View>
                   <View style={styles.featureContent}>
@@ -111,9 +106,9 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
                 </View>
               </View>
 
-              <View style={styles.noteSection}>
+              <View style={styles.infoBox}>
                 <Ionicons name="information-circle" size={20} color="#c084fc" />
-                <Text style={styles.noteText}>
+                <Text style={styles.infoText}>
                   Top up your wallet using M-Pesa, Airtel Money, or your debit/credit card
                 </Text>
               </View>
@@ -126,9 +121,9 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
               >
                 <LinearGradient
                   colors={['#8b5cf6', '#6d28d9']}
-                  style={styles.gotItButtonGradient}
+                  style={styles.buttonGradient}
                 >
-                  <Text style={styles.gotItButtonText}>Got it</Text>
+                  <Text style={styles.buttonText}>Got it</Text>
                 </LinearGradient>
               </TouchableOpacity>
             </View>
@@ -142,23 +137,13 @@ const WalletInfoModal: React.FC<WalletInfoModalProps> = ({ visible, onClose }) =
 const styles = StyleSheet.create({
   overlay: {
     flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
+    backgroundColor: 'rgba(0, 0, 0, 0.75)',
+    justifyContent: 'flex-end',
   },
   modalContainer: {
-    width: '100%',
-    maxWidth: 500,
-    maxHeight: '85%',
-    borderRadius: 24,
+    maxHeight: '90%',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
     overflow: 'hidden',
   },
   modal: {
@@ -172,13 +157,23 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(168, 123, 250, 0.2)',
   },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
   headerIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     backgroundColor: 'rgba(192, 132, 252, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  headerTitle: {
+    color: '#e5e7eb',
+    fontSize: 20,
+    fontWeight: '700',
   },
   closeButton: {
     padding: 8,
@@ -191,29 +186,26 @@ const styles = StyleSheet.create({
     color: '#e5e7eb',
     fontSize: 24,
     fontWeight: '700',
-    marginBottom: 16,
-  },
-  section: {
-    marginBottom: 24,
+    marginBottom: 12,
   },
   description: {
     color: '#c4b5fd',
     fontSize: 15,
     lineHeight: 22,
+    marginBottom: 24,
   },
-  featureSection: {
-    gap: 16,
+  featuresList: {
+    gap: 20,
     marginBottom: 24,
   },
   featureItem: {
     flexDirection: 'row',
     gap: 12,
   },
-  featureIconContainer: {
+  featureIcon: {
     width: 48,
     height: 48,
     borderRadius: 24,
-    backgroundColor: 'rgba(139, 92, 246, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -231,7 +223,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
   },
-  noteSection: {
+  infoBox: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 12,
@@ -241,7 +233,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(192, 132, 252, 0.3)',
   },
-  noteText: {
+  infoText: {
     flex: 1,
     color: '#c4b5fd',
     fontSize: 13,
@@ -256,11 +248,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
-  gotItButtonGradient: {
+  buttonGradient: {
     paddingVertical: 16,
     alignItems: 'center',
   },
-  gotItButtonText: {
+  buttonText: {
     color: '#fff',
     fontSize: 16,
     fontWeight: '700',
