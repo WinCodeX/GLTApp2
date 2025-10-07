@@ -1,5 +1,5 @@
 // components/AddCardModal.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,14 +7,18 @@ import {
   TouchableOpacity,
   TextInput,
   StyleSheet,
-  Animated,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   Alert,
+  Dimensions,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const CARDS_STORAGE_KEY = '@saved_cards';
 
 interface SavedCard {
   id: string;
@@ -37,6 +41,44 @@ const AddCardModal: React.FC<AddCardModalProps> = ({ visible, onClose, onAddCard
   const [expiryDate, setExpiryDate] = useState('');
   const [cvv, setCvv] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // Load saved cards on mount
+  useEffect(() => {
+    if (visible) {
+      loadSavedCards();
+    }
+  }, [visible]);
+
+  // Load cards from AsyncStorage
+  const loadSavedCards = async () => {
+    try {
+      const cardsJson = await AsyncStorage.getItem(CARDS_STORAGE_KEY);
+      if (cardsJson) {
+        const cards = JSON.parse(cardsJson);
+        console.log('Loaded saved cards:', cards.length);
+      }
+    } catch (error) {
+      console.error('Error loading saved cards:', error);
+    }
+  };
+
+  // Save card to AsyncStorage
+  const saveCardToStorage = async (card: SavedCard) => {
+    try {
+      const cardsJson = await AsyncStorage.getItem(CARDS_STORAGE_KEY);
+      const existingCards: SavedCard[] = cardsJson ? JSON.parse(cardsJson) : [];
+      
+      // Add new card
+      const updatedCards = [...existingCards, card];
+      
+      // Save back to storage
+      await AsyncStorage.setItem(CARDS_STORAGE_KEY, JSON.stringify(updatedCards));
+      console.log('Card saved to storage:', card.id);
+    } catch (error) {
+      console.error('Error saving card to storage:', error);
+      Alert.alert('Storage Error', 'Failed to save card information');
+    }
+  };
 
   const detectCardType = (number: string): 'visa' | 'mastercard' | 'amex' => {
     const cleaned = number.replace(/\s/g, '');
@@ -93,7 +135,7 @@ const AddCardModal: React.FC<AddCardModalProps> = ({ visible, onClose, onAddCard
     return true;
   };
 
-  const handleAddCard = () => {
+  const handleAddCard = async () => {
     if (!validateCard()) return;
     
     setLoading(true);
@@ -109,6 +151,9 @@ const AddCardModal: React.FC<AddCardModalProps> = ({ visible, onClose, onAddCard
       cvv,
       cardType,
     };
+    
+    // Save to AsyncStorage
+    await saveCardToStorage(newCard);
     
     setTimeout(() => {
       onAddCard(newCard);
@@ -171,8 +216,10 @@ const AddCardModal: React.FC<AddCardModalProps> = ({ visible, onClose, onAddCard
 
               <ScrollView 
                 style={styles.content}
+                contentContainerStyle={styles.scrollContent}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                bounces={false}
               >
                 {/* Card Preview */}
                 <View style={styles.cardPreview}>
@@ -224,7 +271,7 @@ const AddCardModal: React.FC<AddCardModalProps> = ({ visible, onClose, onAddCard
                           }
                         }}
                         keyboardType="numeric"
-                        maxLength={23} // 16 digits + 3 spaces
+                        maxLength={23}
                       />
                     </View>
                   </View>
@@ -338,11 +385,14 @@ const styles = StyleSheet.create({
     justifyContent: 'flex-end',
   },
   modalContainer: {
-    maxHeight: '90%',
+    flex: 1,
+    justifyContent: 'flex-end',
   },
   modal: {
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
+    minHeight: SCREEN_HEIGHT * 0.85,
+    maxHeight: SCREEN_HEIGHT * 0.95,
   },
   
   // Header
@@ -387,7 +437,10 @@ const styles = StyleSheet.create({
   
   // Content
   content: {
-    maxHeight: '70%',
+    flex: 1,
+  },
+  scrollContent: {
+    paddingBottom: 32,
   },
   
   // Card Preview
