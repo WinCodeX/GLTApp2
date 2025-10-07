@@ -281,13 +281,22 @@ const WalletScreen = () => {
                     <Text style={styles.actionButtonText}>Top Up</Text>
                   </TouchableOpacity>
                 ) : (
-                  <TouchableOpacity 
-                    style={styles.actionButton}
-                    onPress={handleWithdraw}
-                  >
-                    <Ionicons name="cash-outline" size={20} color="#fff" />
-                    <Text style={styles.actionButtonText}>Withdraw</Text>
-                  </TouchableOpacity>
+                  <>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={handleWithdraw}
+                    >
+                      <Ionicons name="cash-outline" size={20} color="#fff" />
+                      <Text style={styles.actionButtonText}>Withdraw</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity 
+                      style={styles.actionButton}
+                      onPress={() => setShowWalletInfoModal(true)}
+                    >
+                      <Ionicons name="information-circle-outline" size={20} color="#fff" />
+                      <Text style={styles.actionButtonText}>Top Up Wallet</Text>
+                    </TouchableOpacity>
+                  </>
                 )}
               </View>
             </View>
@@ -316,7 +325,7 @@ const WalletScreen = () => {
                 <Ionicons name="help-circle-outline" size={24} color="#c084fc" />
               </View>
               <View style={styles.quickActionContent}>
-                <Text style={styles.quickActionTitle}>What is Bolt balance?</Text>
+                <Text style={styles.quickActionTitle}>What is GLT wallet?</Text>
                 <Text style={styles.quickActionSubtext}>Learn about your wallet</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#a78bfa" />
@@ -330,7 +339,7 @@ const WalletScreen = () => {
                 <Ionicons name="receipt-outline" size={24} color="#c084fc" />
               </View>
               <View style={styles.quickActionContent}>
-                <Text style={styles.quickActionTitle}>See Bolt balance transactions</Text>
+                <Text style={styles.quickActionTitle}>See GLT wallet transactions</Text>
                 <Text style={styles.quickActionSubtext}>View all activity</Text>
               </View>
               <Ionicons name="chevron-forward" size={20} color="#a78bfa" />
@@ -386,7 +395,7 @@ const WalletScreen = () => {
                 <Text style={styles.emptySubtitle}>
                   {isClient 
                     ? 'Top up your wallet to start using GLT services and earn bonuses' 
-                    : 'Complete deliveries to start earning'}
+                    : 'Send packages and get discounts straight to your wallet'}
                 </Text>
               </View>
             ) : (
