@@ -1,3 +1,4 @@
+// app/(auth)/signup.tsx - Fixed role detection logic
 import React, { useState } from 'react';    
 import {    
   StyleSheet,    
@@ -15,12 +16,56 @@ import { AntDesign } from '@expo/vector-icons';
 import Toast from 'react-native-toast-message';    
 import api from '../../lib/api';    
 import { useGoogleAuth } from '../../lib/useGoogleAuth';    
-import { useUser } from '../../context/UserContext';  // Add this import
-import TermsModal from '../../components/TermsModal';    
+import { useUser } from '../../context/UserContext';
+import TermsModal from '../../components/TermsModal';
+
+// Helper function to determine effective role from user data - FIXED
+const getEffectiveRole = (userData: any): string => {
+  // First priority: use primary_role if it exists (removed the !== 'client' condition)
+  if (userData.primary_role) {
+    return userData.primary_role;
+  }
+  
+  // Second priority: check roles array for non-client roles
+  if (userData.roles && Array.isArray(userData.roles)) {
+    // Priority order: admin > support > agent > rider > client
+    if (userData.roles.includes('admin')) {
+      return 'admin';
+    }
+    if (userData.roles.includes('support')) {
+      return 'support';
+    }
+    if (userData.roles.includes('agent')) {
+      return 'agent';
+    }
+    if (userData.roles.includes('rider')) {
+      return 'rider';
+    }
+  }
+  
+  // Fallback: use role field or default to client
+  return userData.role || 'client';
+};
+
+// Helper function to get redirect route based on role
+const getRedirectRoute = (role: string): string => {
+  switch (role) {
+    case 'admin':
+      return '/admin';
+    case 'support':
+      return '/(support)';
+    case 'agent':
+      return '/(agent)';
+    case 'rider':
+      return '/(rider)';
+    default:
+      return '/';
+  }
+};
     
 export default function SignupScreen() {    
   const router = useRouter();
-  const { addAccount } = useUser(); // Add this hook
+  const { addAccount } = useUser();
     
   const [email, setEmail] = useState('');    
   const [phone, setPhone] = useState('');    
@@ -46,10 +91,17 @@ export default function SignupScreen() {
     terms: false,    
   });    
     
-  // Google Auth handler - updated to use addAccount
+  // Google Auth handler - updated to use addAccount and fixed role logic
   const { promptAsync, request } = useGoogleAuth(async (googleUser, isNewUser) => {    
     try {    
       setIsLoading(true);
+      
+      console.log('Google signup - user roles:', googleUser.roles);
+      console.log('Google signup - user primary_role:', googleUser.primary_role);
+
+      // Get effective role using fixed logic
+      const effectiveRole = getEffectiveRole(googleUser);
+      console.log('Effective role determined:', effectiveRole);
       
       // Add account through UserContext (which uses AccountManager)
       await addAccount(googleUser, googleUser.token || 'temp_token');
@@ -60,10 +112,11 @@ export default function SignupScreen() {
         text2: isNewUser ? 'Signed up with Google successfully' : 'Signed in with Google'
       });    
     
-      const role = googleUser.roles?.includes('admin') ? 'admin' : 'client';
+      const redirectRoute = getRedirectRoute(effectiveRole);
+      console.log('Google signup successful, redirecting to:', redirectRoute);
       
       setTimeout(() => {
-        router.replace(role === 'admin' ? '/admin' : '/');
+        router.replace(redirectRoute);
       }, 1500);
       
     } catch (err: any) {    
@@ -143,7 +196,12 @@ export default function SignupScreen() {
       const user = response?.data?.user;    
     
       if (token && user) {    
-        console.log('Signup successful, adding account...');
+        console.log('Signup response user roles:', user?.roles);
+        console.log('Signup response user primary_role:', user?.primary_role);
+
+        // Get effective role using fixed logic
+        const effectiveRole = getEffectiveRole(user);
+        console.log('Effective role determined:', effectiveRole);
         
         // Add account through UserContext (which uses AccountManager)
         await addAccount(user, token);
@@ -154,12 +212,11 @@ export default function SignupScreen() {
           text2: 'Welcome to the platform!',    
         });    
     
-        const role = user.roles?.includes('admin') ? 'admin' : 'client';
-        
-        console.log('Signup successful, redirecting to:', role === 'admin' ? '/admin' : '/');
+        const redirectRoute = getRedirectRoute(effectiveRole);
+        console.log('Signup successful, redirecting to:', redirectRoute);
         
         setTimeout(() => {
-          router.replace(role === 'admin' ? '/admin' : '/');
+          router.replace(redirectRoute);
         }, 1500);
       } else {    
         console.error('Signup failed: Missing token or user data', { hasToken: !!token, hasUser: !!user });
