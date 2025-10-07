@@ -1,4 +1,4 @@
-// app/(auth)/login.tsx - Updated with Agent and Rider role support
+// app/(auth)/login.tsx - Fixed role detection logic
 import { AntDesign } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useRouter } from 'expo-router';
@@ -20,10 +20,10 @@ import LoadingSplashScreen from '../../components/LoadingSplashScreen';
 import { accountManager } from '../../lib/AccountManager';
 import { useUser } from '../../context/UserContext';
 
-// Helper function to determine effective role from user data
+// Helper function to determine effective role from user data - FIXED
 const getEffectiveRole = (userData: any): string => {
-  // First priority: use primary_role if available
-  if (userData.primary_role && userData.primary_role !== 'client') {
+  // First priority: use primary_role if it exists (removed the !== 'client' condition)
+  if (userData.primary_role) {
     return userData.primary_role;
   }
   
