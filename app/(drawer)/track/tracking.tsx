@@ -1,4 +1,4 @@
-// app/(drawer)/track/tracking.tsx - Enhanced tracking with real-time journey and NavigationHelper
+// app/(drawer)/track/tracking.tsx - Enhanced tracking with proper location display
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   StyleSheet,
@@ -80,31 +80,33 @@ export default function PackageTracking() {
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const updateIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // UPDATED: Get delivery type badge color (matching track.tsx exactly)
+  // Get delivery type badge color (matching track.tsx exactly)
   const getDeliveryTypeBadgeColor = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
-      case 'doorstep': return '#8b5cf6';
+      case 'doorstep':
+      case 'home': return '#8b5cf6';
+      case 'office':
       case 'agent': return '#3b82f6';
       case 'fragile': return '#f97316';
       case 'collection': return '#10b981';
-      case 'mixed': return '#10b981';
       default: return '#8b5cf6';
     }
   }, []);
 
-  // UPDATED: Get delivery type display name (matching track.tsx exactly)
+  // Get delivery type display name (matching track.tsx exactly)
   const getDeliveryTypeDisplay = useCallback((deliveryType: string): string => {
     switch (deliveryType) {
-      case 'doorstep': return 'Home';
+      case 'doorstep':
+      case 'home': return 'Home';
+      case 'office':
       case 'agent': return 'Office';
       case 'fragile': return 'Fragile';
       case 'collection': return 'Collection';
-      case 'mixed': return 'Mixed';
       default: return 'Office';
     }
   }, []);
 
-  // UPDATED: Get state badge color (matching track.tsx exactly)
+  // Get state badge color (matching track.tsx exactly)
   const getStateBadgeColor = useCallback((state: string): string => {
     switch (state) {
       case 'pending_unpaid': return '#ef4444';
@@ -123,10 +125,45 @@ export default function PackageTracking() {
     switch (deliveryType) {
       case 'collection': return 'shopping-bag';
       case 'fragile': return 'shield-alert';
-      case 'doorstep': return 'home';
-      case 'office': return 'building';
-      case 'agent': return 'building';
+      case 'doorstep':
+      case 'home': return 'home';
+      case 'office':
+      case 'agent': return 'briefcase';
       default: return 'package';
+    }
+  }, []);
+
+  // ENHANCED: Get proper delivery location display
+  const getDeliveryLocationDisplay = useCallback((pkg: Package | null): string => {
+    if (!pkg) return 'Location not available';
+    
+    // Priority order for location display
+    if (pkg.delivery_location) {
+      return pkg.delivery_location;
+    }
+    
+    if (pkg.pickup_location) {
+      return pkg.pickup_location;
+    }
+    
+    if (pkg.destination_area) {
+      const area = pkg.destination_area_name || pkg.destination_area;
+      const location = pkg.destination_location_name;
+      return location ? `${area}, ${location}` : area;
+    }
+    
+    if (pkg.destination_agent_name) {
+      return `Agent: ${pkg.destination_agent_name}`;
+    }
+    
+    // Fallback based on delivery type
+    switch (pkg.delivery_type) {
+      case 'agent':
+        return 'Agent Pickup';
+      case 'collection':
+        return 'Collection Service';
+      default:
+        return 'To be confirmed';
     }
   }, []);
 
@@ -820,7 +857,7 @@ export default function PackageTracking() {
                 <View style={styles.summaryItem}>
                   <Text style={styles.summaryLabel}>Delivery Location</Text>
                   <Text style={styles.summaryValue}>
-                    {package_.delivery_location || 'Standard delivery'}
+                    {getDeliveryLocationDisplay(package_)}
                   </Text>
                 </View>
               </View>
@@ -930,7 +967,7 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: colors.background,
   },
-  
+
   // Header styles
   headerContainer: {
     borderBottomWidth: 1,
@@ -982,7 +1019,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  
+
   // Real-time indicator
   realTimeIndicator: {
     flexDirection: 'row',
@@ -1003,12 +1040,12 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontWeight: '500',
   },
-  
+
   // Content
   content: {
     flex: 1,
   },
-  
+
   // Status card
   statusCard: {
     margin: 20,
@@ -1082,7 +1119,7 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     fontWeight: '500',
   },
-  
+
   // Summary card
   summaryCard: {
     marginHorizontal: 20,
@@ -1180,7 +1217,7 @@ const styles = StyleSheet.create({
     color: '#10b981',
     fontWeight: '600',
   },
-  
+
   // Timeline card
   timelineCard: {
     marginHorizontal: 20,
@@ -1321,7 +1358,7 @@ const styles = StyleSheet.create({
     color: '#f59e0b',
     fontWeight: '500',
   },
-  
+
   // QR Code card
   qrCodeCard: {
     marginHorizontal: 20,
@@ -1409,7 +1446,7 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: '500',
   },
-  
+
   // QR Code fallback
   qrCodeFallback: {
     alignItems: 'center',
@@ -1442,7 +1479,7 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '600',
   },
-  
+
   // QR Code error
   qrCodeError: {
     alignItems: 'center',
@@ -1454,7 +1491,7 @@ const styles = StyleSheet.create({
     color: '#ef4444',
     textAlign: 'center',
   },
-  
+
   // Loading states
   loadingContainer: {
     flex: 1,
@@ -1468,7 +1505,7 @@ const styles = StyleSheet.create({
     marginTop: 16,
     textAlign: 'center',
   },
-  
+
   // Error states
   errorContainer: {
     flex: 1,
