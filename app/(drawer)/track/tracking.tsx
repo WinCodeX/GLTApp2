@@ -278,7 +278,7 @@ export default function PackageTracking() {
         console.warn('⚠️ Failed to load QR code, creating fallback:', qrError);
         setQrData({
           qr_code_base64: null,
-          tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/track/${packageCode}`,
+          tracking_url: `${process.env.EXPO_PUBLIC_API_URL || 'http://localhost:3000'}/public/track/${packageCode}`,
           package_code: packageCode,
           package_state: packageData.state,
           route_description: packageData.route_description
