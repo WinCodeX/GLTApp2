@@ -688,6 +688,26 @@ export default function RiderHomeScreen() {
             </View>
             
             <View style={styles.headerRight}>
+              <TouchableOpacity 
+                style={styles.notificationButton}
+                onPress={() => {
+                  // Navigate to notifications screen
+                  Toast.show({
+                    type: 'info',
+                    text1: 'Notifications',
+                    text2: 'No new notifications',
+                    position: 'top',
+                    visibilityTime: 2000,
+                  });
+                }}
+              >
+                <Feather name="bell" size={22} color="#fff" />
+                {/* Optional: Add badge for unread notifications */}
+                {/* <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>3</Text>
+                </View> */}
+              </TouchableOpacity>
+              
               <Image
                 source={
                   user?.avatar_url
@@ -871,7 +891,7 @@ const styles = StyleSheet.create({
     width: '100%',
   },
   headerGradient: {
-    paddingTop: Platform.OS === 'ios' ? 58 : 28,
+    paddingTop: Platform.OS === 'ios' ? 70 : 40,
     paddingHorizontal: 20,
     paddingBottom: 20,
   },
@@ -935,6 +955,36 @@ const styles = StyleSheet.create({
   },
   headerRight: {
     marginLeft: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
+  notificationButton: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255, 255, 255, 0.15)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  notificationBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    minWidth: 20,
+    height: 20,
+    justifyContent: 'center',
+    alignItems: 'center',
+    borderWidth: 2,
+    borderColor: '#7B3F98',
+  },
+  notificationBadgeText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: 'bold',
   },
   headerAvatar: {
     width: 50,
