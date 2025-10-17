@@ -1,29 +1,27 @@
-// app/(rider)/notifications.tsx - Updated with ActionCable real-time updates
-
+// app/(drawer)/notifications.tsx - Fixed with proper state management
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
-  StyleSheet,
-  SafeAreaView,
   FlatList,
   TouchableOpacity,
+  StyleSheet,
   RefreshControl,
-  Platform,
   ActivityIndicator,
   Animated,
+  Platform,
   Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
+import GLTHeader from '../../components/GLTHeader';
 import api from '../../lib/api';
-import Toast from 'react-native-toast-message';
+import { NavigationHelper } from '../../lib/helpers/navigation';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
-import { NavigationHelper } from '../../lib/helpers/navigation';
 
-interface Notification {
+interface NotificationData {
   id: number;
   title: string;
   message: string;
@@ -35,7 +33,6 @@ interface Notification {
   icon: string;
   action_url?: string;
   expired: boolean;
-  data?: any;
   package?: {
     id: number;
     code: string;
@@ -98,25 +95,23 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
   );
 };
 
-export default function RiderNotificationsScreen() {
+export default function NotificationsScreen() {
   const router = useRouter();
-  
-  const [notifications, setNotifications] = useState<Notification[]>([]);
-  const [refreshing, setRefreshing] = useState(false);
+
+  const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<NotificationsPagination | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [filter, setFilter] = useState<'all' | 'unread'>('all');
   const [error, setError] = useState<string | null>(null);
-
-  // ActionCable state
+  
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
-  // Modal state
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
     title: '',
@@ -125,7 +120,6 @@ export default function RiderNotificationsScreen() {
     onClose: () => {},
   });
 
-  // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -159,7 +153,6 @@ export default function RiderNotificationsScreen() {
     ]).start();
   };
 
-  // Setup ActionCable connection
   const setupActionCable = useCallback(async () => {
     if (subscriptionsSetup.current) return;
 
@@ -186,7 +179,6 @@ export default function RiderNotificationsScreen() {
     }
   }, []);
 
-  // Setup ActionCable subscriptions
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
@@ -242,7 +234,6 @@ export default function RiderNotificationsScreen() {
     };
   }, [setupActionCable]);
 
-  // Fetch notifications with pagination
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
       if (refresh) {
@@ -300,7 +291,6 @@ export default function RiderNotificationsScreen() {
     fetchNotifications(1);
   }, [filter]);
 
-  // Mark notification as read
   const markAsRead = async (notificationId: number) => {
     try {
       const notificationToUpdate = notifications.find(n => n.id === notificationId);
@@ -324,7 +314,6 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Mark all notifications as read
   const markAllAsRead = async () => {
     try {
       const previousNotifications = [...notifications];
@@ -345,22 +334,7 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Clear all notifications
-  const clearAll = async () => {
-    try {
-      await api.delete('/api/v1/notifications/clear_all');
-      
-      setNotifications([]);
-      
-      showToast('All notifications cleared', 'success');
-    } catch (error) {
-      console.error('Failed to clear notifications:', error);
-      showCustomModal('Error', 'Failed to clear notifications', 'error');
-    }
-  };
-
-  // Handle notification press
-  const handleNotificationPress = (notification: Notification) => {
+  const handleNotificationPress = (notification: NotificationData) => {
     try {
       let navigationParams: any = null;
       
@@ -373,8 +347,6 @@ export default function RiderNotificationsScreen() {
         }
       } else if (notification.package?.code) {
         navigationParams = { code: notification.package.code };
-      } else if (notification.data?.package_code) {
-        navigationParams = { code: notification.data.package_code };
       }
       
       if (navigationParams) {
@@ -382,8 +354,6 @@ export default function RiderNotificationsScreen() {
           params: navigationParams,
           trackInHistory: true
         });
-      } else if (notification.notification_type === 'assignment') {
-        router.push('/(rider)/');
       }
       
       if (!notification.read) {
@@ -396,26 +366,6 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Handle load more
-  const handleLoadMore = () => {
-    if (pagination && currentPage < pagination.total_pages && !loadingMore) {
-      fetchNotifications(currentPage + 1);
-    }
-  };
-
-  // Handle refresh
-  const handleRefresh = () => {
-    setCurrentPage(1);
-    fetchNotifications(1, true);
-  };
-
-  // Handle filter change
-  const handleFilterChange = (newFilter: 'all' | 'unread') => {
-    setFilter(newFilter);
-    setCurrentPage(1);
-  };
-
-  // Get notification icon
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -436,48 +386,32 @@ export default function RiderNotificationsScreen() {
       case 'final_warning':
       case 'resubmission_available':
         return 'alert-triangle';
-      case 'delivery':
-        return 'check-circle';
-      case 'assignment':
-        return 'clipboard';
-      case 'alert':
-        return 'alert-circle';
-      case 'system':
-        return 'info';
       default:
         return 'bell';
     }
   };
 
-  // Get notification color
   const getNotificationColor = (type: string, read: boolean) => {
-    if (read) return '#8E8E93';
+    if (read) return '#a78bfa';
 
     switch (type) {
       case 'package_delivered':
       case 'package_collected':
-      case 'delivery':
-        return '#34C759';
+        return '#10b981';
       case 'package_rejected':
       case 'package_expired':
-      case 'alert':
-        return '#FF3B30';
+        return '#ef4444';
       case 'final_warning':
       case 'resubmission_available':
-        return '#FF9800';
+        return '#f59e0b';
       case 'payment_received':
       case 'payment_reminder':
-        return '#7B3F98';
-      case 'assignment':
-        return '#FF9500';
-      case 'system':
-        return '#007AFF';
+        return '#c084fc';
       default:
         return '#8b5cf6';
     }
   };
 
-  // Format time
   const formatTime = (timeString: string) => {
     try {
       const date = new Date(timeString);
@@ -486,21 +420,35 @@ export default function RiderNotificationsScreen() {
 
       if (diffInHours < 1) {
         const diffInMinutes = Math.floor(diffInHours * 60);
-        return diffInMinutes < 1 ? 'Just now' : `${diffInMinutes}m ago`;
+        return `${diffInMinutes}m ago`;
       } else if (diffInHours < 24) {
         return `${Math.floor(diffInHours)}h ago`;
       } else {
         const diffInDays = Math.floor(diffInHours / 24);
-        if (diffInDays < 7) return `${diffInDays}d ago`;
-        return date.toLocaleDateString();
+        return `${diffInDays}d ago`;
       }
     } catch {
       return timeString;
     }
   };
 
-  // Render notification item
-  const renderNotificationItem = ({ item }: { item: Notification }) => {
+  const handleLoadMore = () => {
+    if (pagination && currentPage < pagination.total_pages && !loadingMore) {
+      fetchNotifications(currentPage + 1);
+    }
+  };
+
+  const handleRefresh = () => {
+    setCurrentPage(1);
+    fetchNotifications(1, true);
+  };
+
+  const handleFilterChange = (newFilter: 'all' | 'unread') => {
+    setFilter(newFilter);
+    setCurrentPage(1);
+  };
+
+  const renderNotificationItem = ({ item }: { item: NotificationData }) => {
     if (!item || typeof item.id === 'undefined') {
       return null;
     }
@@ -508,14 +456,12 @@ export default function RiderNotificationsScreen() {
     const title = item.title || 'No Title';
     const message = item.message || 'No Message';
     const isRead = item.read;
-    const icon = getNotificationIcon(item.notification_type, item.icon);
-    const color = getNotificationColor(item.notification_type, isRead);
 
     return (
       <TouchableOpacity
         style={[
-          styles.notificationItem,
-          !isRead && styles.notificationItemUnread,
+          styles.notificationCard,
+          !isRead && styles.unreadCard,
           item.expired && styles.expiredCard,
         ]}
         onPress={() => handleNotificationPress(item)}
@@ -523,26 +469,32 @@ export default function RiderNotificationsScreen() {
       >
         <View style={styles.notificationContent}>
           <View style={styles.iconContainer}>
-            <View style={[styles.iconBackground, { backgroundColor: color + '20' }]}>
-              <Feather name={icon} size={20} color={color} />
+            <View
+              style={[
+                styles.iconBackground,
+                { backgroundColor: getNotificationColor(item.notification_type, isRead) + '40' }
+              ]}
+            >
+              <Feather
+                name={getNotificationIcon(item.notification_type, item.icon)}
+                size={20}
+                color={getNotificationColor(item.notification_type, isRead)}
+              />
             </View>
-            {!isRead && <View style={styles.unreadDot} />}
+            {!isRead && <View style={styles.unreadIndicator} />}
           </View>
 
           <View style={styles.contentContainer}>
-            <View style={styles.notificationHeader}>
-              <Text style={[styles.notificationTitle, !isRead && styles.unreadTitle]}>
-                {title}
-              </Text>
-            </View>
-            
-            <Text style={[styles.notificationMessage, !isRead && styles.unreadMessage]}>
+            <Text style={[styles.title, !isRead && styles.unreadTitle]}>
+              {title}
+            </Text>
+            <Text style={[styles.message, !isRead && styles.unreadMessage]}>
               {message}
             </Text>
             
             {item.package && (
               <View style={styles.packageInfo}>
-                <Feather name="package" size={12} color="#7B3F98" />
+                <Feather name="package" size={12} color="#c4b5fd" />
                 <Text style={styles.packageCode}>{item.package.code}</Text>
                 <View style={styles.packageStateBadge}>
                   <Text style={styles.packageStateText}>{item.package.state_display}</Text>
@@ -560,8 +512,8 @@ export default function RiderNotificationsScreen() {
                 </View>
               )}
               {item.priority === 'urgent' && (
-                <View style={[styles.priorityBadge, { backgroundColor: '#FF3B3020' }]}>
-                  <Text style={[styles.priorityText, { color: '#FF3B30' }]}>Urgent</Text>
+                <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.3)' }]}>
+                  <Text style={[styles.priorityText, { color: '#ef4444' }]}>Urgent</Text>
                 </View>
               )}
               {item.expired && (
@@ -576,11 +528,10 @@ export default function RiderNotificationsScreen() {
     );
   };
 
-  // Render empty state
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
-        <Feather name="bell-off" size={48} color="#8E8E93" />
+        <Feather name="bell-off" size={48} color="#a78bfa" />
       </View>
       <Text style={styles.emptyTitle}>
         {filter === 'unread' ? 'No Unread Notifications' : 'No Notifications'}
@@ -594,11 +545,10 @@ export default function RiderNotificationsScreen() {
     </View>
   );
 
-  // Render error state
   const renderErrorState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
-        <Feather name="alert-circle" size={48} color="#FF3B30" />
+        <Feather name="alert-circle" size={48} color="#ef4444" />
       </View>
       <Text style={styles.emptyTitle}>Unable to Load Notifications</Text>
       <Text style={styles.emptySubtitle}>{error}</Text>
@@ -608,25 +558,23 @@ export default function RiderNotificationsScreen() {
     </View>
   );
 
-  // Render footer
   const renderFooter = () => {
     if (!loadingMore) return null;
     
     return (
       <View style={styles.loadingFooter}>
-        <ActivityIndicator size="small" color="#7B3F98" />
+        <ActivityIndicator size="small" color="#c084fc" />
         <Text style={styles.loadingText}>Loading more...</Text>
       </View>
     );
   };
 
-  // Render toast
   const renderToast = () => (
     <Animated.View
       style={[
         styles.toast,
         {
-          backgroundColor: toastType === 'success' ? '#34C759' : '#FF3B30',
+          backgroundColor: toastType === 'success' ? '#10b981' : '#ef4444',
           transform: [{ translateY: toastAnim }],
         },
       ]}
@@ -643,44 +591,14 @@ export default function RiderNotificationsScreen() {
   const unreadCount = notifications.filter(n => !n.read).length;
 
   return (
-    <SafeAreaView style={styles.container}>
-      {/* Header */}
-      <LinearGradient
-        colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
-        start={{ x: 0, y: 0 }}
-        end={{ x: 1, y: 1 }}
-        style={styles.header}
-      >
-        <View style={styles.headerContent}>
-          <TouchableOpacity 
-            onPress={() => router.back()}
-            style={styles.backButton}
-          >
-            <Feather name="arrow-left" size={24} color="#fff" />
-          </TouchableOpacity>
-          
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>Notifications</Text>
-            {unreadCount > 0 && (
-              <View style={styles.unreadBadge}>
-                <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
-              </View>
-            )}
-          </View>
-          
-          {unreadCount > 0 && (
-            <TouchableOpacity 
-              onPress={markAllAsRead}
-              style={styles.markAllButton}
-            >
-              <MaterialIcons name="done-all" size={24} color="#fff" />
-            </TouchableOpacity>
-          )}
-        </View>
-      </LinearGradient>
-
-      {/* Filter and Connection Status */}
-      <View style={styles.filterSection}>
+    <View style={styles.container}>
+      <GLTHeader 
+        title="Notifications" 
+        showBackButton={true}
+        onBackPress={() => NavigationHelper.goBack()}
+      />
+      
+      <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
         <View style={styles.filterContainer}>
           <View style={styles.filterButtons}>
             <TouchableOpacity
@@ -700,120 +618,84 @@ export default function RiderNotificationsScreen() {
               </Text>
             </TouchableOpacity>
           </View>
+
+          {unreadCount > 0 && (
+            <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
+              <Feather name="check-square" size={16} color="#c084fc" />
+              <Text style={styles.markAllButtonText}>Mark All Read</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {isConnected && (
           <View style={styles.connectionStatus}>
-            <Feather name="wifi" size={12} color="#34C759" />
+            <Feather name="wifi" size={12} color="#10b981" />
             <Text style={styles.connectionText}>Live updates enabled</Text>
           </View>
         )}
-      </View>
 
-      {/* Notifications List */}
-      {loading && notifications.length === 0 ? (
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#7B3F98" />
-          <Text style={styles.loadingText}>Loading notifications...</Text>
-        </View>
-      ) : error ? (
-        renderErrorState()
-      ) : (
-        <FlatList
-          data={notifications}
-          renderItem={renderNotificationItem}
-          keyExtractor={(item) => `notification-${item.id}`}
-          contentContainerStyle={[
-            styles.listContainer,
-            notifications.length === 0 && styles.emptyListContainer
-          ]}
-          ListEmptyComponent={renderEmptyState}
-          ListFooterComponent={renderFooter}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              colors={['#7B3F98']}
-              tintColor="#7B3F98"
-            />
-          }
-          onEndReached={handleLoadMore}
-          onEndReachedThreshold={0.3}
-          showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
-          windowSize={10}
-        />
-      )}
+        {loading && notifications.length === 0 ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#c084fc" />
+            <Text style={styles.loadingText}>Loading notifications...</Text>
+          </View>
+        ) : error ? (
+          renderErrorState()
+        ) : (
+          <FlatList
+            data={notifications}
+            renderItem={renderNotificationItem}
+            keyExtractor={(item) => `notification-${item.id}`}
+            contentContainerStyle={[
+              styles.listContainer,
+              notifications.length === 0 && styles.emptyListContainer
+            ]}
+            ListEmptyComponent={renderEmptyState}
+            ListFooterComponent={renderFooter}
+            refreshControl={
+              <RefreshControl
+                refreshing={refreshing}
+                onRefresh={handleRefresh}
+                colors={['#c084fc']}
+                tintColor="#c084fc"
+              />
+            }
+            onEndReached={handleLoadMore}
+            onEndReachedThreshold={0.3}
+            showsVerticalScrollIndicator={false}
+            removeClippedSubviews={false}
+            windowSize={10}
+          />
+        )}
+      </LinearGradient>
 
       {renderToast()}
       <CustomModal {...customModal} />
-      <Toast />
-    </SafeAreaView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#111B21',
+    backgroundColor: '#1a1b3d',
   },
-  header: {
-    paddingTop: Platform.OS === 'ios' ? 0 : 28,
-    paddingBottom: 16,
-    paddingHorizontal: 16,
-  },
-  headerContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  backButton: {
-    padding: 8,
-  },
-  headerTitleContainer: {
+  gradient: {
     flex: 1,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 20,
-    fontWeight: 'bold',
-  },
-  unreadBadge: {
-    backgroundColor: '#FF3B30',
-    borderRadius: 12,
-    minWidth: 24,
-    height: 24,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 8,
-  },
-  unreadBadgeText: {
-    color: '#fff',
-    fontSize: 12,
-    fontWeight: 'bold',
-  },
-  markAllButton: {
-    padding: 8,
-  },
-  filterSection: {
-    backgroundColor: '#1F2C34',
-    borderBottomWidth: 1,
-    borderBottomColor: '#2d3748',
   },
   filterContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    paddingHorizontal: 20,
+    paddingVertical: 16,
+    backgroundColor: 'rgba(138, 92, 246, 0.15)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(168, 123, 250, 0.3)',
   },
   filterButtons: {
     flexDirection: 'row',
-    backgroundColor: '#2d3748',
+    backgroundColor: 'rgba(138, 92, 246, 0.2)',
     borderRadius: 8,
     padding: 2,
   },
@@ -823,28 +705,51 @@ const styles = StyleSheet.create({
     borderRadius: 6,
   },
   activeFilterButton: {
-    backgroundColor: '#7B3F98',
+    backgroundColor: '#8b5cf6',
   },
   filterButtonText: {
     fontSize: 14,
     fontWeight: '500',
-    color: '#B8B8B8',
+    color: '#c4b5fd',
   },
   activeFilterButtonText: {
-    color: '#fff',
+    color: 'white',
+  },
+  markAllButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(192, 132, 252, 0.2)',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(192, 132, 252, 0.4)',
+  },
+  markAllButtonText: {
+    fontSize: 12,
+    fontWeight: '500',
+    color: '#c084fc',
   },
   connectionStatus: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingHorizontal: 16,
+    paddingHorizontal: 20,
     paddingVertical: 8,
-    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+    backgroundColor: 'rgba(16, 185, 129, 0.1)',
   },
   connectionText: {
     fontSize: 12,
-    color: '#34C759',
-    fontWeight: '500',
+    color: '#10b981',
+  },
+  listContainer: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+    paddingBottom: 20,
+  },
+  emptyListContainer: {
+    flex: 1,
   },
   loadingContainer: {
     flex: 1,
@@ -854,7 +759,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#B8B8B8',
+    color: '#c4b5fd',
   },
   loadingFooter: {
     flexDirection: 'row',
@@ -863,26 +768,18 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 16,
   },
-  listContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 20,
-  },
-  emptyListContainer: {
-    flex: 1,
-  },
-  notificationItem: {
-    backgroundColor: '#1F2C34',
+  notificationCard: {
+    backgroundColor: 'rgba(139, 92, 246, 0.15)',
     borderRadius: 12,
     marginBottom: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#2d3748',
+    borderColor: 'rgba(168, 123, 250, 0.2)',
   },
-  notificationItemUnread: {
+  unreadCard: {
     borderLeftWidth: 4,
-    borderLeftColor: '#7B3F98',
-    backgroundColor: '#252F3A',
+    borderLeftColor: '#c084fc',
+    backgroundColor: 'rgba(139, 92, 246, 0.25)',
   },
   expiredCard: {
     opacity: 0.6,
@@ -896,46 +793,41 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   iconBackground: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  unreadDot: {
+  unreadIndicator: {
     position: 'absolute',
     top: -2,
     right: -2,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#7B3F98',
+    backgroundColor: '#c084fc',
   },
   contentContainer: {
     flex: 1,
   },
-  notificationHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 4,
-  },
-  notificationTitle: {
-    flex: 1,
-    color: '#e5e7eb',
+  title: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#e5e7eb',
+    marginBottom: 4,
   },
   unreadTitle: {
-    color: '#fff',
+    color: '#f3f4f6',
   },
-  notificationMessage: {
-    color: '#B8B8B8',
+  message: {
     fontSize: 14,
+    color: '#c4b5fd',
     lineHeight: 20,
     marginBottom: 8,
   },
   unreadMessage: {
-    color: '#D0D0D0',
+    color: '#ddd6fe',
   },
   packageInfo: {
     flexDirection: 'row',
@@ -946,10 +838,10 @@ const styles = StyleSheet.create({
   packageCode: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#7B3F98',
+    color: '#c4b5fd',
   },
   packageStateBadge: {
-    backgroundColor: 'rgba(123, 63, 152, 0.2)',
+    backgroundColor: 'rgba(192, 132, 252, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -957,7 +849,7 @@ const styles = StyleSheet.create({
   packageStateText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#7B3F98',
+    color: '#c084fc',
   },
   metaContainer: {
     flexDirection: 'row',
@@ -966,10 +858,10 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 12,
-    color: '#8E8E93',
+    color: '#a78bfa',
   },
   priorityBadge: {
-    backgroundColor: 'rgba(255, 152, 0, 0.2)',
+    backgroundColor: 'rgba(251, 146, 60, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -977,10 +869,10 @@ const styles = StyleSheet.create({
   priorityText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#FF9800',
+    color: '#fb923c',
   },
   expiredBadge: {
-    backgroundColor: 'rgba(142, 142, 147, 0.2)',
+    backgroundColor: 'rgba(156, 163, 175, 0.3)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -988,20 +880,19 @@ const styles = StyleSheet.create({
   expiredText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#8E8E93',
+    color: '#9ca3af',
   },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
-    paddingVertical: 80,
   },
   emptyIconContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -1009,13 +900,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#fff',
+    color: '#e5e7eb',
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#B8B8B8',
+    color: '#c4b5fd',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -1023,17 +914,17 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: '#7B3F98',
+    backgroundColor: '#8b5cf6',
     borderRadius: 8,
   },
   retryButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#fff',
+    color: 'white',
   },
   toast: {
     position: 'absolute',
-    top: Platform.OS === 'ios' ? 50 : 20,
+    top: 0,
     left: 16,
     right: 16,
     flexDirection: 'row',
@@ -1050,7 +941,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   toastText: {
-    color: '#fff',
+    color: 'white',
     fontSize: 14,
     fontWeight: '500',
   },
