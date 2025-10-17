@@ -20,6 +20,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 import { RiderBottomTabs } from '../../components/rider/RiderBottomTabs';
 import { useUser } from '../../context/UserContext';
 import RiderQRScanner from '../../components/RiderQRScanner';
@@ -128,6 +129,7 @@ const CustomModal: React.FC<CustomModalProps> = ({
 
 export default function RiderHomeScreen() {
   const { user } = useUser();
+  const router = useRouter();
   const [showReportModal, setShowReportModal] = useState(false);
   const [selectedIssue, setSelectedIssue] = useState<ReportIssue | null>(null);
   const [issueDescription, setIssueDescription] = useState('');
@@ -690,16 +692,7 @@ export default function RiderHomeScreen() {
             <View style={styles.headerRight}>
               <TouchableOpacity 
                 style={styles.notificationButton}
-                onPress={() => {
-                  // Navigate to notifications screen
-                  Toast.show({
-                    type: 'info',
-                    text1: 'Notifications',
-                    text2: 'No new notifications',
-                    position: 'top',
-                    visibilityTime: 2000,
-                  });
-                }}
+                onPress={() => router.push('/(rider)/notifications')}
               >
                 <Feather name="bell" size={22} color="#fff" />
                 {/* Optional: Add badge for unread notifications */}
