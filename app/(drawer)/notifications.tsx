@@ -1,4 +1,5 @@
-// app/(drawer)/notifications.tsx
+// app/(drawer)/notifications.tsx - Fixed with category tabs and visibility-based auto-marking
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -21,8 +22,6 @@ import api from '../../lib/api';
 import { NavigationHelper } from '../../lib/helpers/navigation';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
-
-type Category = 'all' | 'customer_care' | 'packages' | 'updates';
 
 interface NotificationData {
   id: number;
@@ -49,13 +48,6 @@ interface NotificationsPagination {
   total_pages: number;
   total_count: number;
   per_page: number;
-}
-
-interface CategoryCounts {
-  all: number;
-  customer_care: number;
-  packages: number;
-  updates: number;
 }
 
 interface CustomModalProps {
@@ -105,6 +97,8 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
   );
 };
 
+type CategoryType = 'all' | 'customer_care' | 'packages' | 'updates';
+
 export default function NotificationsScreen() {
   const router = useRouter();
 
@@ -114,22 +108,18 @@ export default function NotificationsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<NotificationsPagination | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedCategory, setSelectedCategory] = useState<Category>('all');
-  const [categoryCounts, setCategoryCounts] = useState<CategoryCounts>({
-    all: 0,
-    customer_care: 0,
-    packages: 0,
-    updates: 0,
-  });
+  const [category, setCategory] = useState<CategoryType>('all');
   const [error, setError] = useState<string | null>(null);
   
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
-  
-  const viewedNotifications = useRef(new Set<number>());
-  const markingInProgress = useRef(false);
+
+  // Visibility tracking
+  const viewableItemsRef = useRef<Set<number>>(new Set());
+  const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const markedAsReadRef = useRef<Set<number>>(new Set());
 
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
@@ -223,12 +213,6 @@ export default function NotificationsScreen() {
           if (exists) return prev;
           return [data.notification, ...prev];
         });
-        
-        // Update category counts
-        if (data.category_counts) {
-          setCategoryCounts(data.category_counts);
-        }
-        
         showToast('New notification received', 'success');
       }
     });
@@ -239,29 +223,12 @@ export default function NotificationsScreen() {
         setNotifications(prev =>
           prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
         );
-        
-        // Update category counts
-        setCategoryCounts(prev => ({
-          ...prev,
-          all: Math.max(0, prev.all - 1),
-        }));
       }
     });
     actionCableSubscriptions.current.push(unsubNotificationRead);
 
-    const unsubAllRead = actionCable.subscribe('all_notifications_read', (data) => {
-      if (data.notification_ids) {
-        setNotifications(prev =>
-          prev.map(n => data.notification_ids.includes(n.id) ? { ...n, read: true } : n)
-        );
-      }
-      
-      setCategoryCounts({
-        all: 0,
-        customer_care: 0,
-        packages: 0,
-        updates: 0,
-      });
+    const unsubAllRead = actionCable.subscribe('all_notifications_read', () => {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     });
     actionCableSubscriptions.current.push(unsubAllRead);
   };
@@ -273,6 +240,10 @@ export default function NotificationsScreen() {
       subscriptionsSetup.current = false;
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
+      
+      if (markAsReadTimeoutRef.current) {
+        clearTimeout(markAsReadTimeoutRef.current);
+      }
     };
   }, [setupActionCable]);
 
@@ -290,7 +261,7 @@ export default function NotificationsScreen() {
       const params: any = {
         page,
         per_page: 20,
-        category: selectedCategory,
+        category: category !== 'all' ? category : undefined,
       };
 
       const response = await api.get('/api/v1/notifications', {
@@ -303,7 +274,6 @@ export default function NotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
-          viewedNotifications.current.clear();
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -314,10 +284,6 @@ export default function NotificationsScreen() {
         
         setPagination(response.data.pagination || null);
         setCurrentPage(page);
-        
-        if (response.data.category_counts) {
-          setCategoryCounts(response.data.category_counts);
-        }
       } else {
         setError('Failed to load notifications');
       }
@@ -329,70 +295,74 @@ export default function NotificationsScreen() {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [selectedCategory]);
+  }, [category]);
 
   useEffect(() => {
     fetchNotifications(1);
-  }, [selectedCategory]);
+  }, [category]);
 
-  const markVisibleAsRead = async (notificationIds: number[]) => {
-    if (markingInProgress.current || notificationIds.length === 0) return;
-    
-    try {
-      markingInProgress.current = true;
-      
-      // Optimistically mark as read in UI
-      setNotifications(prev =>
-        prev.map(n => notificationIds.includes(n.id) ? { ...n, read: true } : n)
-      );
+  // Handle viewable items changed
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const currentViewableIds = new Set(
+      viewableItems
+        .map(item => item.item?.id)
+        .filter((id): id is number => typeof id === 'number')
+    );
 
-      // Mark on server
-      const response = await api.patch('/api/v1/notifications/mark_visible_as_read', {
-        notification_ids: notificationIds,
-      });
+    viewableItemsRef.current = currentViewableIds;
 
-      if (response.data?.success && response.data.unread_count !== undefined) {
-        // Update category counts with actual server count
-        setCategoryCounts(prev => ({
-          ...prev,
-          all: response.data.unread_count,
-        }));
-      }
-    } catch (error) {
-      console.error('Failed to mark notifications as read:', error);
-    } finally {
-      markingInProgress.current = false;
+    // Debounce marking as read
+    if (markAsReadTimeoutRef.current) {
+      clearTimeout(markAsReadTimeoutRef.current);
     }
-  };
 
-  const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const unreadVisibleIds = viewableItems
-        .filter(item => {
-          const notification = item.item as NotificationData;
-          return (
-            notification &&
-            !notification.read &&
-            !viewedNotifications.current.has(notification.id)
-          );
-        })
-        .map(item => (item.item as NotificationData).id);
-
-      if (unreadVisibleIds.length > 0) {
-        // Mark as viewed locally
-        unreadVisibleIds.forEach(id => viewedNotifications.current.add(id));
-        
-        // Mark as read on server
-        markVisibleAsRead(unreadVisibleIds);
-      }
-    },
-    []
-  );
+    markAsReadTimeoutRef.current = setTimeout(() => {
+      markVisibleNotificationsAsRead();
+    }, 1500); // Wait 1.5 seconds before marking as read
+  }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 500,
+    itemVisiblePercentThreshold: 50, // Item must be 50% visible
+    minimumViewTime: 500, // Must be visible for at least 500ms
   }).current;
+
+  const markVisibleNotificationsAsRead = async () => {
+    const unreadVisibleIds = Array.from(viewableItemsRef.current).filter(id => {
+      if (markedAsReadRef.current.has(id)) return false;
+      
+      const notification = notifications.find(n => n.id === id);
+      return notification && !notification.read;
+    });
+
+    if (unreadVisibleIds.length === 0) return;
+
+    try {
+      // Optimistically update UI
+      setNotifications(prev =>
+        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
+      );
+
+      // Mark these as processed
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
+
+      // Send to backend
+      await api.post('/api/v1/notifications/mark_visible_as_read', {
+        notification_ids: unreadVisibleIds,
+      });
+
+      console.log(`✓ Marked ${unreadVisibleIds.length} notifications as read`);
+    } catch (error) {
+      console.error('Failed to mark visible notifications as read:', error);
+      
+      // Revert optimistic update
+      setNotifications(prev =>
+        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
+      );
+      
+      // Remove from marked set
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
+    }
+  };
 
   const handleNotificationPress = (notification: NotificationData) => {
     try {
@@ -422,24 +392,6 @@ export default function NotificationsScreen() {
     }
   };
 
-  const getCategoryIcon = (category: Category): keyof typeof Feather.glyphMap => {
-    switch (category) {
-      case 'customer_care': return 'message-circle';
-      case 'packages': return 'package';
-      case 'updates': return 'bell';
-      default: return 'grid';
-    }
-  };
-
-  const getCategoryLabel = (category: Category): string => {
-    switch (category) {
-      case 'all': return 'All';
-      case 'customer_care': return 'Support';
-      case 'packages': return 'Packages';
-      case 'updates': return 'Updates';
-    }
-  };
-
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -460,9 +412,12 @@ export default function NotificationsScreen() {
       case 'final_warning':
       case 'resubmission_available':
         return 'alert-triangle';
-      case 'support_message':
-      case 'support_reply':
+      case 'support':
+      case 'message':
         return 'message-circle';
+      case 'system':
+      case 'announcement':
+        return 'info';
       default:
         return 'bell';
     }
@@ -484,8 +439,8 @@ export default function NotificationsScreen() {
       case 'payment_received':
       case 'payment_reminder':
         return '#c084fc';
-      case 'support_message':
-      case 'support_reply':
+      case 'support':
+      case 'message':
         return '#3b82f6';
       default:
         return '#8b5cf6';
@@ -500,7 +455,7 @@ export default function NotificationsScreen() {
 
       if (diffInHours < 1) {
         const diffInMinutes = Math.floor(diffInHours * 60);
-        return `${diffInMinutes}m ago`;
+        return diffInMinutes < 1 ? 'Just now' : `${diffInMinutes}m ago`;
       } else if (diffInHours < 24) {
         return `${Math.floor(diffInHours)}h ago`;
       } else {
@@ -520,42 +475,14 @@ export default function NotificationsScreen() {
 
   const handleRefresh = () => {
     setCurrentPage(1);
-    viewedNotifications.current.clear();
+    markedAsReadRef.current.clear();
     fetchNotifications(1, true);
   };
 
-  const handleCategoryChange = (category: Category) => {
-    setSelectedCategory(category);
+  const handleCategoryChange = (newCategory: CategoryType) => {
+    setCategory(newCategory);
     setCurrentPage(1);
-    viewedNotifications.current.clear();
-  };
-
-  const renderCategoryTab = (category: Category) => {
-    const isSelected = selectedCategory === category;
-    const count = categoryCounts[category] || 0;
-
-    return (
-      <TouchableOpacity
-        key={category}
-        style={[styles.categoryTab, isSelected && styles.categoryTabActive]}
-        onPress={() => handleCategoryChange(category)}
-        activeOpacity={0.7}
-      >
-        <Feather
-          name={getCategoryIcon(category)}
-          size={18}
-          color={isSelected ? '#fff' : '#c4b5fd'}
-        />
-        <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelActive]}>
-          {getCategoryLabel(category)}
-        </Text>
-        {count > 0 && (
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryBadgeText}>{count}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
+    markedAsReadRef.current.clear();
   };
 
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
@@ -645,9 +572,9 @@ export default function NotificationsScreen() {
       </View>
       <Text style={styles.emptyTitle}>No Notifications</Text>
       <Text style={styles.emptySubtitle}>
-        {selectedCategory === 'all'
+        {category === 'all' 
           ? 'You\'ll see your notifications here when you receive them.'
-          : `No ${getCategoryLabel(selectedCategory).toLowerCase()} notifications at the moment.`
+          : `No ${category.replace('_', ' ')} notifications at this time.`
         }
       </Text>
     </View>
@@ -696,6 +623,8 @@ export default function NotificationsScreen() {
     </Animated.View>
   );
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   return (
     <View style={styles.container}>
       <GLTHeader 
@@ -707,13 +636,69 @@ export default function NotificationsScreen() {
       <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
         {/* Category Tabs */}
         <View style={styles.categoryContainer}>
-          {(['all', 'customer_care', 'packages', 'updates'] as Category[]).map(renderCategoryTab)}
+          <View style={styles.categoryTabs}>
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'all' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('all')}
+            >
+              <Feather 
+                name="grid" 
+                size={16} 
+                color={category === 'all' ? '#fff' : '#c4b5fd'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'all' && styles.activeCategoryTabText]}>
+                All
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'customer_care' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('customer_care')}
+            >
+              <Feather 
+                name="message-circle" 
+                size={16} 
+                color={category === 'customer_care' ? '#fff' : '#c4b5fd'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'customer_care' && styles.activeCategoryTabText]}>
+                Support
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'packages' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('packages')}
+            >
+              <Feather 
+                name="package" 
+                size={16} 
+                color={category === 'packages' ? '#fff' : '#c4b5fd'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'packages' && styles.activeCategoryTabText]}>
+                Packages
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'updates' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('updates')}
+            >
+              <Feather 
+                name="info" 
+                size={16} 
+                color={category === 'updates' ? '#fff' : '#c4b5fd'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'updates' && styles.activeCategoryTabText]}>
+                Updates
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {isConnected && (
           <View style={styles.connectionStatus}>
             <Feather name="wifi" size={12} color="#10b981" />
-            <Text style={styles.connectionText}>Auto-marking visible as read</Text>
+            <Text style={styles.connectionText}>Live updates • Auto-marking read</Text>
           </View>
         )}
 
@@ -745,7 +730,7 @@ export default function NotificationsScreen() {
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
-            onViewableItemsChanged={handleViewableItemsChanged}
+            onViewableItemsChanged={onViewableItemsChanged}
             viewabilityConfig={viewabilityConfig}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={false}
@@ -769,12 +754,14 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   categoryContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 12,
     backgroundColor: 'rgba(138, 92, 246, 0.15)',
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(168, 123, 250, 0.3)',
+  },
+  categoryTabs: {
+    flexDirection: 'row',
     gap: 8,
   },
   categoryTab: {
@@ -784,38 +771,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 6,
     paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 8,
+    paddingHorizontal: 12,
     backgroundColor: 'rgba(138, 92, 246, 0.2)',
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: 'rgba(168, 123, 250, 0.3)',
   },
-  categoryTabActive: {
+  activeCategoryTab: {
     backgroundColor: '#8b5cf6',
-    borderColor: '#c084fc',
+    borderColor: '#8b5cf6',
   },
-  categoryLabel: {
+  categoryTabText: {
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#c4b5fd',
   },
-  categoryLabelActive: {
-    color: 'white',
-    fontWeight: '600',
-  },
-  categoryBadge: {
-    backgroundColor: '#ef4444',
-    minWidth: 18,
-    height: 18,
-    borderRadius: 9,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  categoryBadgeText: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: 'white',
+  activeCategoryTabText: {
+    color: '#fff',
   },
   connectionStatus: {
     flexDirection: 'row',
