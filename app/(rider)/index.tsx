@@ -1,4 +1,5 @@
-// app/(rider)/index.tsx - Updated with Riders Controller Integration
+// app/(rider)/index.tsx - Updated with RiderQRScanner
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
@@ -21,12 +22,13 @@ import * as Location from 'expo-location';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RiderBottomTabs } from '../../components/rider/RiderBottomTabs';
 import { useUser } from '../../context/UserContext';
-import QRScanner from '../../components/QRScanner';
+import RiderQRScanner from '../../components/RiderQRScanner';
 import api from '../../lib/api';
 import firebase from '../../config/firebase';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
+import Toast from 'react-native-toast-message';
 
 type ReportIssue = 'mechanical' | 'weather' | 'fuel' | 'accident' | 'other';
 
@@ -131,7 +133,7 @@ export default function RiderHomeScreen() {
   const [issueDescription, setIssueDescription] = useState('');
   const [submittingReport, setSubmittingReport] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
-  const [scannerAction, setScannerAction] = useState<string>('');
+  const [scannerAction, setScannerAction] = useState<'collect' | 'deliver' | 'give_to_receiver'>('collect');
   
   const [isOnline, setIsOnline] = useState(false);
   const [locationPermission, setLocationPermission] = useState(false);
@@ -155,7 +157,6 @@ export default function RiderHomeScreen() {
     type: 'info',
   });
 
-  // NEW: State for active deliveries and stats
   const [activeDeliveries, setActiveDeliveries] = useState<any[]>([]);
   const [deliveryStats, setDeliveryStats] = useState({
     total: 0,
@@ -201,7 +202,6 @@ export default function RiderHomeScreen() {
     };
   }, []);
 
-  // NEW: Load active deliveries from riders controller
   const loadActiveDeliveries = async () => {
     try {
       const response = await api.get('/api/v1/riders/active_deliveries');
@@ -265,7 +265,6 @@ export default function RiderHomeScreen() {
     });
     actionCableSubscriptions.current.push(unsubLost);
 
-    // NEW: Subscribe to rider-specific updates
     if (user?.id) {
       const unsubRiderUpdates = actionCable.subscribe(`rider_${user.id}_status`, (data: any) => {
         console.log('Rider status update:', data);
@@ -384,7 +383,6 @@ export default function RiderHomeScreen() {
           ],
         });
         
-        // Reload deliveries on new assignment
         if (remoteMessage.data?.type === 'new_assignment') {
           loadActiveDeliveries();
         }
@@ -455,7 +453,6 @@ export default function RiderHomeScreen() {
     }
   };
 
-  // NEW: Updated location broadcast using riders controller
   const startLocationBroadcast = async () => {
     try {
       const location = await Location.getCurrentPositionAsync({
@@ -507,7 +504,6 @@ export default function RiderHomeScreen() {
     }
   };
 
-  // NEW: Updated offline status using riders controller
   const stopLocationBroadcast = async () => {
     if (locationInterval.current) {
       clearInterval(locationInterval.current);
@@ -538,7 +534,7 @@ export default function RiderHomeScreen() {
         }
         
         setIsOnline(true);
-        loadActiveDeliveries(); // Reload deliveries when going online
+        loadActiveDeliveries();
         
         showCustomModal({
           title: 'Online',
@@ -569,18 +565,23 @@ export default function RiderHomeScreen() {
     }
   };
 
-  const handleScanAction = (action: string) => {
+  const handleScanAction = (action: 'collect' | 'deliver' | 'give_to_receiver') => {
     setScannerAction(action);
     setShowScanner(true);
   };
 
   const handleScanSuccess = (result: any) => {
-    setShowScanner(false);
-    setScannerAction('');
-    loadActiveDeliveries(); // Reload after scan
+    Toast.show({
+      type: 'success',
+      text1: 'Success',
+      text2: `Package ${result.code} processed`,
+      position: 'top',
+      visibilityTime: 2000,
+    });
+    
+    loadActiveDeliveries();
   };
 
-  // NEW: Updated report submission using riders controller
   const handleSubmitReport = async () => {
     if (!selectedIssue) {
       showCustomModal({
@@ -846,14 +847,10 @@ export default function RiderHomeScreen() {
         </View>
       </Modal>
 
-      <QRScanner
+      <RiderQRScanner
         visible={showScanner}
-        onClose={() => {
-          setShowScanner(false);
-          setScannerAction('');
-        }}
-        userRole="rider"
-        defaultAction={scannerAction || undefined}
+        onClose={() => setShowScanner(false)}
+        actionType={scannerAction}
         onScanSuccess={handleScanSuccess}
       />
 
@@ -864,6 +861,7 @@ export default function RiderHomeScreen() {
   );
 }
 
+// Styles remain the same...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
