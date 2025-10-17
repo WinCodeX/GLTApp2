@@ -1,4 +1,5 @@
-// app/(rider)/notifications.tsx
+// app/(rider)/notifications.tsx - Updated with category tabs and visibility-based auto-marking
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -22,8 +23,6 @@ import Toast from 'react-native-toast-message';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
-
-type Category = 'all' | 'deliveries' | 'packages' | 'alerts';
 
 interface Notification {
   id: number;
@@ -51,13 +50,6 @@ interface NotificationsPagination {
   total_pages: number;
   total_count: number;
   per_page: number;
-}
-
-interface CategoryCounts {
-  all: number;
-  deliveries: number;
-  packages: number;
-  alerts: number;
 }
 
 interface CustomModalProps {
@@ -107,6 +99,8 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
   );
 };
 
+type CategoryType = 'all' | 'deliveries' | 'assignments' | 'system';
+
 export default function RiderNotificationsScreen() {
   const router = useRouter();
   
@@ -116,23 +110,21 @@ export default function RiderNotificationsScreen() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<NotificationsPagination | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [selectedCategory, setSelectedCategory] = useState<Category>('all');
-  const [categoryCounts, setCategoryCounts] = useState<CategoryCounts>({
-    all: 0,
-    deliveries: 0,
-    packages: 0,
-    alerts: 0,
-  });
+  const [category, setCategory] = useState<CategoryType>('all');
   const [error, setError] = useState<string | null>(null);
 
+  // ActionCable state
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
-  const viewedNotifications = useRef(new Set<number>());
-  const markingInProgress = useRef(false);
+  // Visibility tracking
+  const viewableItemsRef = useRef<Set<number>>(new Set());
+  const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const markedAsReadRef = useRef<Set<number>>(new Set());
 
+  // Modal state
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
     title: '',
@@ -141,6 +133,7 @@ export default function RiderNotificationsScreen() {
     onClose: () => {},
   });
 
+  // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -174,6 +167,7 @@ export default function RiderNotificationsScreen() {
     ]).start();
   };
 
+  // Setup ActionCable connection
   const setupActionCable = useCallback(async () => {
     if (subscriptionsSetup.current) return;
 
@@ -200,6 +194,7 @@ export default function RiderNotificationsScreen() {
     }
   }, []);
 
+  // Setup ActionCable subscriptions
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
@@ -225,11 +220,6 @@ export default function RiderNotificationsScreen() {
           if (exists) return prev;
           return [data.notification, ...prev];
         });
-        
-        if (data.category_counts) {
-          setCategoryCounts(data.category_counts);
-        }
-        
         showToast('New notification received', 'success');
       }
     });
@@ -240,28 +230,12 @@ export default function RiderNotificationsScreen() {
         setNotifications(prev =>
           prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
         );
-        
-        setCategoryCounts(prev => ({
-          ...prev,
-          all: Math.max(0, prev.all - 1),
-        }));
       }
     });
     actionCableSubscriptions.current.push(unsubNotificationRead);
 
-    const unsubAllRead = actionCable.subscribe('all_notifications_read', (data) => {
-      if (data.notification_ids) {
-        setNotifications(prev =>
-          prev.map(n => data.notification_ids.includes(n.id) ? { ...n, read: true } : n)
-        );
-      }
-      
-      setCategoryCounts({
-        all: 0,
-        deliveries: 0,
-        packages: 0,
-        alerts: 0,
-      });
+    const unsubAllRead = actionCable.subscribe('all_notifications_read', () => {
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
     });
     actionCableSubscriptions.current.push(unsubAllRead);
   };
@@ -273,16 +247,14 @@ export default function RiderNotificationsScreen() {
       subscriptionsSetup.current = false;
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
+      
+      if (markAsReadTimeoutRef.current) {
+        clearTimeout(markAsReadTimeoutRef.current);
+      }
     };
   }, [setupActionCable]);
 
-  const getCategoryForType = (type: string): Category => {
-    if (['assignment', 'delivery', 'route_update'].includes(type)) return 'deliveries';
-    if (['package_created', 'package_submitted', 'package_delivered', 'package_collected'].includes(type)) return 'packages';
-    if (['alert', 'warning', 'urgent', 'final_warning'].includes(type)) return 'alerts';
-    return 'all';
-  };
-
+  // Fetch notifications with pagination and category filter
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
       if (refresh) {
@@ -299,24 +271,25 @@ export default function RiderNotificationsScreen() {
         per_page: 20,
       };
 
+      // Apply category filter by type
+      if (category === 'deliveries') {
+        params.type = 'delivery,package_delivered,package_collected';
+      } else if (category === 'assignments') {
+        params.type = 'assignment';
+      } else if (category === 'system') {
+        params.type = 'system,announcement,update';
+      }
+
       const response = await api.get('/api/v1/notifications', {
         params,
         timeout: 15000,
       });
 
       if (response.data?.success) {
-        let newNotifications = response.data.data || [];
-        
-        // Filter by category on client side
-        if (selectedCategory !== 'all') {
-          newNotifications = newNotifications.filter((n: Notification) => 
-            getCategoryForType(n.notification_type) === selectedCategory
-          );
-        }
+        const newNotifications = response.data.data || [];
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
-          viewedNotifications.current.clear();
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -327,16 +300,6 @@ export default function RiderNotificationsScreen() {
         
         setPagination(response.data.pagination || null);
         setCurrentPage(page);
-        
-        // Calculate category counts
-        const allNotifications = response.data.data || [];
-        const counts: CategoryCounts = {
-          all: allNotifications.filter(n => !n.read).length,
-          deliveries: allNotifications.filter(n => !n.read && getCategoryForType(n.notification_type) === 'deliveries').length,
-          packages: allNotifications.filter(n => !n.read && getCategoryForType(n.notification_type) === 'packages').length,
-          alerts: allNotifications.filter(n => !n.read && getCategoryForType(n.notification_type) === 'alerts').length,
-        };
-        setCategoryCounts(counts);
       } else {
         setError('Failed to load notifications');
       }
@@ -348,65 +311,76 @@ export default function RiderNotificationsScreen() {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [selectedCategory]);
+  }, [category]);
 
   useEffect(() => {
     fetchNotifications(1);
-  }, [selectedCategory]);
+  }, [category]);
 
-  const markVisibleAsRead = async (notificationIds: number[]) => {
-    if (markingInProgress.current || notificationIds.length === 0) return;
-    
-    try {
-      markingInProgress.current = true;
+  // Handle viewable items changed
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const currentViewableIds = new Set(
+      viewableItems
+        .map(item => item.item?.id)
+        .filter((id): id is number => typeof id === 'number')
+    );
+
+    viewableItemsRef.current = currentViewableIds;
+
+    // Debounce marking as read
+    if (markAsReadTimeoutRef.current) {
+      clearTimeout(markAsReadTimeoutRef.current);
+    }
+
+    markAsReadTimeoutRef.current = setTimeout(() => {
+      markVisibleNotificationsAsRead();
+    }, 1500); // Wait 1.5 seconds before marking as read
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50, // Item must be 50% visible
+    minimumViewTime: 500, // Must be visible for at least 500ms
+  }).current;
+
+  const markVisibleNotificationsAsRead = async () => {
+    const unreadVisibleIds = Array.from(viewableItemsRef.current).filter(id => {
+      if (markedAsReadRef.current.has(id)) return false;
       
+      const notification = notifications.find(n => n.id === id);
+      return notification && !notification.read;
+    });
+
+    if (unreadVisibleIds.length === 0) return;
+
+    try {
+      // Optimistically update UI
       setNotifications(prev =>
-        prev.map(n => notificationIds.includes(n.id) ? { ...n, read: true } : n)
+        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
       );
 
-      const response = await api.patch('/api/v1/notifications/mark_visible_as_read', {
-        notification_ids: notificationIds,
+      // Mark these as processed
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
+
+      // Send to backend
+      await api.post('/api/v1/notifications/mark_visible_as_read', {
+        notification_ids: unreadVisibleIds,
       });
 
-      if (response.data?.success && response.data.unread_count !== undefined) {
-        setCategoryCounts(prev => ({
-          ...prev,
-          all: response.data.unread_count,
-        }));
-      }
+      console.log(`✓ Marked ${unreadVisibleIds.length} notifications as read`);
     } catch (error) {
-      console.error('Failed to mark notifications as read:', error);
-    } finally {
-      markingInProgress.current = false;
+      console.error('Failed to mark visible notifications as read:', error);
+      
+      // Revert optimistic update
+      setNotifications(prev =>
+        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
+      );
+      
+      // Remove from marked set
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
     }
   };
 
-  const handleViewableItemsChanged = useCallback(
-    ({ viewableItems }: { viewableItems: ViewToken[] }) => {
-      const unreadVisibleIds = viewableItems
-        .filter(item => {
-          const notification = item.item as Notification;
-          return (
-            notification &&
-            !notification.read &&
-            !viewedNotifications.current.has(notification.id)
-          );
-        })
-        .map(item => (item.item as Notification).id);
-
-      if (unreadVisibleIds.length > 0) {
-        unreadVisibleIds.forEach(id => viewedNotifications.current.add(id));
-        markVisibleAsRead(unreadVisibleIds);
-      }
-    },
-    []
-  );
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 500,
-  }).current;
-
+  // Handle notification press
   const handleNotificationPress = (notification: Notification) => {
     try {
       let navigationParams: any = null;
@@ -439,42 +413,28 @@ export default function RiderNotificationsScreen() {
     }
   };
 
+  // Handle load more
   const handleLoadMore = () => {
     if (pagination && currentPage < pagination.total_pages && !loadingMore) {
       fetchNotifications(currentPage + 1);
     }
   };
 
+  // Handle refresh
   const handleRefresh = () => {
     setCurrentPage(1);
-    viewedNotifications.current.clear();
+    markedAsReadRef.current.clear();
     fetchNotifications(1, true);
   };
 
-  const handleCategoryChange = (category: Category) => {
-    setSelectedCategory(category);
+  // Handle category change
+  const handleCategoryChange = (newCategory: CategoryType) => {
+    setCategory(newCategory);
     setCurrentPage(1);
-    viewedNotifications.current.clear();
+    markedAsReadRef.current.clear();
   };
 
-  const getCategoryIcon = (category: Category): keyof typeof Feather.glyphMap => {
-    switch (category) {
-      case 'deliveries': return 'truck';
-      case 'packages': return 'package';
-      case 'alerts': return 'alert-circle';
-      default: return 'grid';
-    }
-  };
-
-  const getCategoryLabel = (category: Category): string => {
-    switch (category) {
-      case 'all': return 'All';
-      case 'deliveries': return 'Deliveries';
-      case 'packages': return 'Packages';
-      case 'alerts': return 'Alerts';
-    }
-  };
-
+  // Get notification icon
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -502,12 +462,14 @@ export default function RiderNotificationsScreen() {
       case 'alert':
         return 'alert-circle';
       case 'system':
+      case 'announcement':
         return 'info';
       default:
         return 'bell';
     }
   };
 
+  // Get notification color
   const getNotificationColor = (type: string, read: boolean) => {
     if (read) return '#8E8E93';
 
@@ -529,12 +491,14 @@ export default function RiderNotificationsScreen() {
       case 'assignment':
         return '#FF9500';
       case 'system':
+      case 'announcement':
         return '#007AFF';
       default:
         return '#8b5cf6';
     }
   };
 
+  // Format time
   const formatTime = (timeString: string) => {
     try {
       const date = new Date(timeString);
@@ -556,34 +520,7 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  const renderCategoryTab = (category: Category) => {
-    const isSelected = selectedCategory === category;
-    const count = categoryCounts[category] || 0;
-
-    return (
-      <TouchableOpacity
-        key={category}
-        style={[styles.categoryTab, isSelected && styles.categoryTabActive]}
-        onPress={() => handleCategoryChange(category)}
-        activeOpacity={0.7}
-      >
-        <Feather
-          name={getCategoryIcon(category)}
-          size={18}
-          color={isSelected ? '#fff' : '#B8B8B8'}
-        />
-        <Text style={[styles.categoryLabel, isSelected && styles.categoryLabelActive]}>
-          {getCategoryLabel(category)}
-        </Text>
-        {count > 0 && (
-          <View style={styles.categoryBadge}>
-            <Text style={styles.categoryBadgeText}>{count}</Text>
-          </View>
-        )}
-      </TouchableOpacity>
-    );
-  };
-
+  // Render notification item
   const renderNotificationItem = ({ item }: { item: Notification }) => {
     if (!item || typeof item.id === 'undefined') {
       return null;
@@ -660,6 +597,7 @@ export default function RiderNotificationsScreen() {
     );
   };
 
+  // Render empty state
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -667,14 +605,15 @@ export default function RiderNotificationsScreen() {
       </View>
       <Text style={styles.emptyTitle}>No Notifications</Text>
       <Text style={styles.emptySubtitle}>
-        {selectedCategory === 'all'
+        {category === 'all' 
           ? 'You\'ll see your notifications here when you receive them.'
-          : `No ${getCategoryLabel(selectedCategory).toLowerCase()} notifications at the moment.`
+          : `No ${category} notifications at this time.`
         }
       </Text>
     </View>
   );
 
+  // Render error state
   const renderErrorState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -688,6 +627,7 @@ export default function RiderNotificationsScreen() {
     </View>
   );
 
+  // Render footer
   const renderFooter = () => {
     if (!loadingMore) return null;
     
@@ -699,6 +639,7 @@ export default function RiderNotificationsScreen() {
     );
   };
 
+  // Render toast
   const renderToast = () => (
     <Animated.View
       style={[
@@ -718,8 +659,11 @@ export default function RiderNotificationsScreen() {
     </Animated.View>
   );
 
+  const unreadCount = notifications.filter(n => !n.read).length;
+
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -736,27 +680,83 @@ export default function RiderNotificationsScreen() {
           
           <View style={styles.headerTitleContainer}>
             <Text style={styles.headerTitle}>Notifications</Text>
-            {categoryCounts.all > 0 && (
+            {unreadCount > 0 && (
               <View style={styles.unreadBadge}>
-                <Text style={styles.unreadBadgeText}>{categoryCounts.all}</Text>
+                <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
               </View>
             )}
           </View>
           
-          <View style={{ width: 40 }} />
+          <View style={styles.backButton} />
         </View>
       </LinearGradient>
 
       {/* Category Tabs */}
       <View style={styles.categorySection}>
         <View style={styles.categoryContainer}>
-          {(['all', 'deliveries', 'packages', 'alerts'] as Category[]).map(renderCategoryTab)}
+          <View style={styles.categoryTabs}>
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'all' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('all')}
+            >
+              <Feather 
+                name="grid" 
+                size={14} 
+                color={category === 'all' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'all' && styles.activeCategoryTabText]}>
+                All
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'deliveries' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('deliveries')}
+            >
+              <Feather 
+                name="package" 
+                size={14} 
+                color={category === 'deliveries' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'deliveries' && styles.activeCategoryTabText]}>
+                Deliveries
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'assignments' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('assignments')}
+            >
+              <Feather 
+                name="clipboard" 
+                size={14} 
+                color={category === 'assignments' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'assignments' && styles.activeCategoryTabText]}>
+                Tasks
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'system' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('system')}
+            >
+              <Feather 
+                name="info" 
+                size={14} 
+                color={category === 'system' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'system' && styles.activeCategoryTabText]}>
+                System
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         {isConnected && (
           <View style={styles.connectionStatus}>
             <Feather name="wifi" size={12} color="#34C759" />
-            <Text style={styles.connectionText}>Auto-marking visible as read</Text>
+            <Text style={styles.connectionText}>Live updates • Auto-marking read</Text>
           </View>
         )}
       </View>
@@ -790,7 +790,7 @@ export default function RiderNotificationsScreen() {
           }
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.3}
-          onViewableItemsChanged={handleViewableItemsChanged}
+          onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           showsVerticalScrollIndicator={false}
           removeClippedSubviews={false}
@@ -855,9 +855,11 @@ const styles = StyleSheet.create({
     borderBottomColor: '#2d3748',
   },
   categoryContainer: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
+    paddingHorizontal: 16,
     paddingVertical: 12,
+  },
+  categoryTabs: {
+    flexDirection: 'row',
     gap: 8,
   },
   categoryTab: {
@@ -868,36 +870,21 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingVertical: 10,
     paddingHorizontal: 8,
-    borderRadius: 8,
     backgroundColor: '#2d3748',
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: '#3d4852',
+    borderColor: '#374151',
   },
-  categoryTabActive: {
+  activeCategoryTab: {
     backgroundColor: '#7B3F98',
-    borderColor: '#9F7AEA',
+    borderColor: '#7B3F98',
   },
-  categoryLabel: {
+  categoryTabText: {
     fontSize: 11,
-    fontWeight: '500',
+    fontWeight: '600',
     color: '#B8B8B8',
   },
-  categoryLabelActive: {
-    color: '#fff',
-    fontWeight: '600',
-  },
-  categoryBadge: {
-    backgroundColor: '#FF3B30',
-    minWidth: 16,
-    height: 16,
-    borderRadius: 8,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 4,
-  },
-  categoryBadgeText: {
-    fontSize: 9,
-    fontWeight: '700',
+  activeCategoryTabText: {
     color: '#fff',
   },
   connectionStatus: {
