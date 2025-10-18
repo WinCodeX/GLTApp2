@@ -1,4 +1,4 @@
-// app/(rider)/notifications.tsx - Updated with category tabs and visibility-based auto-marking
+// app/(rider)/notifications.tsx - FIXED: Immediate auto-marking on connection + scroll
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -123,6 +123,7 @@ export default function RiderNotificationsScreen() {
   const viewableItemsRef = useRef<Set<number>>(new Set());
   const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const markedAsReadRef = useRef<Set<number>>(new Set());
+  const initialMarkingDone = useRef(false);
 
   // Modal state
   const [customModal, setCustomModal] = useState<CustomModalProps>({
@@ -290,6 +291,7 @@ export default function RiderNotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
+          initialMarkingDone.current = false; // Reset initial marking flag
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -317,6 +319,21 @@ export default function RiderNotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
+  // Auto-mark initial visible notifications when connected and data loaded
+  useEffect(() => {
+    if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
+      // Wait a brief moment for the FlatList to render
+      const timer = setTimeout(() => {
+        if (viewableItemsRef.current.size > 0) {
+          markVisibleNotificationsAsRead();
+          initialMarkingDone.current = true;
+        }
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isConnected, notifications.length, loading]);
+
   // Handle viewable items changed
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const currentViewableIds = new Set(
@@ -327,19 +344,19 @@ export default function RiderNotificationsScreen() {
 
     viewableItemsRef.current = currentViewableIds;
 
-    // Debounce marking as read
+    // Debounce marking as read for scroll events
     if (markAsReadTimeoutRef.current) {
       clearTimeout(markAsReadTimeoutRef.current);
     }
 
     markAsReadTimeoutRef.current = setTimeout(() => {
       markVisibleNotificationsAsRead();
-    }, 1500); // Wait 1.5 seconds before marking as read
+    }, 1500);
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50, // Item must be 50% visible
-    minimumViewTime: 500, // Must be visible for at least 500ms
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 500,
   }).current;
 
   const markVisibleNotificationsAsRead = async () => {
@@ -424,6 +441,7 @@ export default function RiderNotificationsScreen() {
   const handleRefresh = () => {
     setCurrentPage(1);
     markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
     fetchNotifications(1, true);
   };
 
@@ -432,6 +450,7 @@ export default function RiderNotificationsScreen() {
     setCategory(newCategory);
     setCurrentPage(1);
     markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
   };
 
   // Get notification icon
@@ -756,7 +775,7 @@ export default function RiderNotificationsScreen() {
         {isConnected && (
           <View style={styles.connectionStatus}>
             <Feather name="wifi" size={12} color="#34C759" />
-            <Text style={styles.connectionText}>Live updates • Auto-marking read</Text>
+            <Text style={styles.connectionText}>Live</Text>
           </View>
         )}
       </View>
