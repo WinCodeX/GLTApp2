@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - FIXED: Immediate auto-marking on connection + scroll
+// app/(drawer)/notifications.tsx
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -116,7 +116,6 @@ export default function NotificationsScreen() {
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
-  // Visibility tracking
   const viewableItemsRef = useRef<Set<number>>(new Set());
   const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const markedAsReadRef = useRef<Set<number>>(new Set());
@@ -303,7 +302,6 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
-  // Auto-mark initial visible notifications when connected and data loaded
   useEffect(() => {
     if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
       const timer = setTimeout(() => {
@@ -317,7 +315,6 @@ export default function NotificationsScreen() {
     }
   }, [isConnected, notifications.length, loading]);
 
-  // Handle viewable items changed
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const currentViewableIds = new Set(
       viewableItems
@@ -646,7 +643,6 @@ export default function NotificationsScreen() {
       />
       
       <LinearGradient colors={['#1a1b3d', '#2d1b4e', '#4c1d95']} style={styles.gradient}>
-        {/* Category Tabs */}
         <View style={styles.categoryContainer}>
           <View style={styles.categoryTabs}>
             <TouchableOpacity
