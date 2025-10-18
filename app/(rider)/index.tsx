@@ -1,4 +1,4 @@
-// app/(rider)/index.tsx - Updated with RiderQRScanner
+// app/(rider)/index.tsx - Updated with notification badge and ActionCable integration
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
@@ -142,6 +142,9 @@ export default function RiderHomeScreen() {
   const [currentLocation, setCurrentLocation] = useState<Location.LocationObject | null>(null);
   const locationInterval = useRef<NodeJS.Timeout | null>(null);
 
+  // Notification badge state
+  const [notificationCount, setNotificationCount] = useState(0);
+
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
@@ -220,6 +223,7 @@ export default function RiderHomeScreen() {
   const onRefresh = useCallback(async () => {
     setRefreshing(true);
     await loadActiveDeliveries();
+    await fetchNotificationCount();
     setRefreshing(false);
   }, []);
 
@@ -229,6 +233,8 @@ export default function RiderHomeScreen() {
     try {
       const currentAccount = accountManager.getCurrentAccount();
       if (!currentAccount) return;
+
+      console.log('📡 Rider Index: Setting up ActionCable...');
 
       actionCableRef.current = ActionCableService.getInstance();
       
@@ -242,9 +248,10 @@ export default function RiderHomeScreen() {
         setIsConnected(true);
         setupSubscriptions();
         subscriptionsSetup.current = true;
+        console.log('✅ Rider Index: ActionCable connected');
       }
     } catch (error) {
-      console.error('Failed to setup ActionCable:', error);
+      console.error('❌ Rider Index: Failed to setup ActionCable:', error);
       setIsConnected(false);
     }
   }, [user]);
@@ -252,21 +259,51 @@ export default function RiderHomeScreen() {
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
+    console.log('📡 Rider Index: Setting up subscriptions...');
+
     actionCableSubscriptions.current.forEach(unsub => unsub());
     actionCableSubscriptions.current = [];
 
     const actionCable = actionCableRef.current;
 
+    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
+      console.log('✅ Rider Index: Connected');
       setIsConnected(true);
     });
     actionCableSubscriptions.current.push(unsubConnected);
 
     const unsubLost = actionCable.subscribe('connection_lost', () => {
+      console.log('❌ Rider Index: Disconnected');
       setIsConnected(false);
     });
     actionCableSubscriptions.current.push(unsubLost);
 
+    // Initial state
+    const unsubInitialState = actionCable.subscribe('initial_state', (data) => {
+      if (data.counts) {
+        setNotificationCount(data.counts.notifications || 0);
+      }
+    });
+    actionCableSubscriptions.current.push(unsubInitialState);
+
+    const unsubInitialCounts = actionCable.subscribe('initial_counts', (data) => {
+      setNotificationCount(data.notification_count || 0);
+    });
+    actionCableSubscriptions.current.push(unsubInitialCounts);
+
+    // Real-time notification count updates
+    const unsubNotificationCount = actionCable.subscribe('notification_count_update', (data) => {
+      setNotificationCount(data.notification_count || 0);
+    });
+    actionCableSubscriptions.current.push(unsubNotificationCount);
+
+    const unsubNewNotification = actionCable.subscribe('new_notification', () => {
+      setNotificationCount(prev => prev + 1);
+    });
+    actionCableSubscriptions.current.push(unsubNewNotification);
+
+    // Rider-specific updates
     if (user?.id) {
       const unsubRiderUpdates = actionCable.subscribe(`rider_${user.id}_status`, (data: any) => {
         console.log('Rider status update:', data);
@@ -280,6 +317,35 @@ export default function RiderHomeScreen() {
         }
       });
       actionCableSubscriptions.current.push(unsubRiderUpdates);
+    }
+
+    console.log('✅ Rider Index: Subscriptions configured');
+  };
+
+  // Fallback polling when disconnected
+  useEffect(() => {
+    if (!isConnected) {
+      console.log('⏳ Rider Index: Starting fallback polling...');
+      
+      fetchNotificationCount();
+      const interval = setInterval(fetchNotificationCount, 30000);
+      
+      return () => clearInterval(interval);
+    }
+  }, [isConnected]);
+
+  const fetchNotificationCount = async () => {
+    try {
+      const response = await api.get('/api/v1/notifications/unread_count', {
+        timeout: 8000
+      });
+      
+      if (response.data?.success) {
+        const count = response.data.unread_count || response.data.count || 0;
+        setNotificationCount(count);
+      }
+    } catch (error) {
+      console.error('Failed to fetch notification count:', error);
     }
   };
 
@@ -387,6 +453,11 @@ export default function RiderHomeScreen() {
         
         if (remoteMessage.data?.type === 'new_assignment') {
           loadActiveDeliveries();
+        }
+        
+        // Update notification count
+        if (!isConnected) {
+          setNotificationCount(prev => prev + 1);
         }
       }
     });
@@ -642,6 +713,18 @@ export default function RiderHomeScreen() {
     }
   };
 
+  const renderBadge = (count: number) => {
+    if (count === 0) return null;
+    
+    return (
+      <View style={styles.notificationBadge}>
+        <Text style={styles.notificationBadgeText}>
+          {count > 99 ? '99+' : count.toString()}
+        </Text>
+      </View>
+    );
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.headerContainer}>
@@ -694,11 +777,10 @@ export default function RiderHomeScreen() {
                 style={styles.notificationButton}
                 onPress={() => router.push('/(rider)/notifications')}
               >
-                <Feather name="bell" size={22} color="#fff" />
-                {/* Optional: Add badge for unread notifications */}
-                {/* <View style={styles.notificationBadge}>
-                  <Text style={styles.notificationBadgeText}>3</Text>
-                </View> */}
+                <View style={styles.iconContainer}>
+                  <Feather name="bell" size={22} color="#fff" />
+                  {renderBadge(notificationCount)}
+                </View>
               </TouchableOpacity>
               
               <Image
@@ -874,7 +956,6 @@ export default function RiderHomeScreen() {
   );
 }
 
-// Styles remain the same...
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -959,25 +1040,33 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(255, 255, 255, 0.15)',
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  iconContainer: {
     position: 'relative',
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   notificationBadge: {
     position: 'absolute',
-    top: 8,
-    right: 8,
-    backgroundColor: '#FF3B30',
-    borderRadius: 10,
-    minWidth: 20,
-    height: 20,
-    justifyContent: 'center',
+    top: -6,
+    right: -6,
+    minWidth: 18,
+    height: 18,
+    borderRadius: 9,
+    backgroundColor: '#8b5cf6',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
     borderWidth: 2,
-    borderColor: '#7B3F98',
+    borderColor: 'rgba(255, 255, 255, 0.15)',
   },
   notificationBadgeText: {
     color: '#fff',
-    fontSize: 11,
-    fontWeight: 'bold',
+    fontSize: 10,
+    fontWeight: '600',
+    textAlign: 'center',
   },
   headerAvatar: {
     width: 50,
