@@ -1,4 +1,4 @@
-// app/(rider)/notifications.tsx - FIXED: Immediate auto-marking on connection + scroll
+// app/(rider)/notifications.tsx
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -16,10 +16,9 @@ import {
   ViewToken,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather, MaterialIcons } from '@expo/vector-icons';
+import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../lib/api';
-import Toast from 'react-native-toast-message';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
@@ -113,19 +112,16 @@ export default function RiderNotificationsScreen() {
   const [category, setCategory] = useState<CategoryType>('all');
   const [error, setError] = useState<string | null>(null);
 
-  // ActionCable state
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
-  // Visibility tracking
   const viewableItemsRef = useRef<Set<number>>(new Set());
   const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const markedAsReadRef = useRef<Set<number>>(new Set());
   const initialMarkingDone = useRef(false);
 
-  // Modal state
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
     title: '',
@@ -134,7 +130,6 @@ export default function RiderNotificationsScreen() {
     onClose: () => {},
   });
 
-  // Toast animation
   const toastAnim = useRef(new Animated.Value(-100)).current;
   const [toastMessage, setToastMessage] = useState('');
   const [toastType, setToastType] = useState<'success' | 'error'>('success');
@@ -168,7 +163,6 @@ export default function RiderNotificationsScreen() {
     ]).start();
   };
 
-  // Setup ActionCable connection
   const setupActionCable = useCallback(async () => {
     if (subscriptionsSetup.current) return;
 
@@ -195,7 +189,6 @@ export default function RiderNotificationsScreen() {
     }
   }, []);
 
-  // Setup ActionCable subscriptions
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
@@ -255,7 +248,6 @@ export default function RiderNotificationsScreen() {
     };
   }, [setupActionCable]);
 
-  // Fetch notifications with pagination and category filter
   const fetchNotifications = useCallback(async (page = 1, refresh = false) => {
     try {
       if (refresh) {
@@ -272,7 +264,6 @@ export default function RiderNotificationsScreen() {
         per_page: 20,
       };
 
-      // Apply category filter by type
       if (category === 'deliveries') {
         params.type = 'delivery,package_delivered,package_collected';
       } else if (category === 'assignments') {
@@ -291,7 +282,7 @@ export default function RiderNotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
-          initialMarkingDone.current = false; // Reset initial marking flag
+          initialMarkingDone.current = false;
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -319,10 +310,8 @@ export default function RiderNotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
-  // Auto-mark initial visible notifications when connected and data loaded
   useEffect(() => {
     if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
-      // Wait a brief moment for the FlatList to render
       const timer = setTimeout(() => {
         if (viewableItemsRef.current.size > 0) {
           markVisibleNotificationsAsRead();
@@ -334,7 +323,6 @@ export default function RiderNotificationsScreen() {
     }
   }, [isConnected, notifications.length, loading]);
 
-  // Handle viewable items changed
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const currentViewableIds = new Set(
       viewableItems
@@ -344,7 +332,6 @@ export default function RiderNotificationsScreen() {
 
     viewableItemsRef.current = currentViewableIds;
 
-    // Debounce marking as read for scroll events
     if (markAsReadTimeoutRef.current) {
       clearTimeout(markAsReadTimeoutRef.current);
     }
@@ -370,15 +357,12 @@ export default function RiderNotificationsScreen() {
     if (unreadVisibleIds.length === 0) return;
 
     try {
-      // Optimistically update UI
       setNotifications(prev =>
         prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
       );
 
-      // Mark these as processed
       unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
 
-      // Send to backend
       await api.post('/api/v1/notifications/mark_visible_as_read', {
         notification_ids: unreadVisibleIds,
       });
@@ -387,17 +371,14 @@ export default function RiderNotificationsScreen() {
     } catch (error) {
       console.error('Failed to mark visible notifications as read:', error);
       
-      // Revert optimistic update
       setNotifications(prev =>
         prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
       );
       
-      // Remove from marked set
       unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
     }
   };
 
-  // Handle notification press
   const handleNotificationPress = (notification: Notification) => {
     try {
       let navigationParams: any = null;
@@ -430,14 +411,12 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Handle load more
   const handleLoadMore = () => {
     if (pagination && currentPage < pagination.total_pages && !loadingMore) {
       fetchNotifications(currentPage + 1);
     }
   };
 
-  // Handle refresh
   const handleRefresh = () => {
     setCurrentPage(1);
     markedAsReadRef.current.clear();
@@ -445,7 +424,6 @@ export default function RiderNotificationsScreen() {
     fetchNotifications(1, true);
   };
 
-  // Handle category change
   const handleCategoryChange = (newCategory: CategoryType) => {
     setCategory(newCategory);
     setCurrentPage(1);
@@ -453,7 +431,6 @@ export default function RiderNotificationsScreen() {
     initialMarkingDone.current = false;
   };
 
-  // Get notification icon
   const getNotificationIcon = (type: string, iconName?: string) => {
     if (iconName && iconName !== 'notifications') {
       return iconName as keyof typeof Feather.glyphMap;
@@ -488,7 +465,6 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Get notification color
   const getNotificationColor = (type: string, read: boolean) => {
     if (read) return '#8E8E93';
 
@@ -517,7 +493,6 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Format time
   const formatTime = (timeString: string) => {
     try {
       const date = new Date(timeString);
@@ -539,7 +514,6 @@ export default function RiderNotificationsScreen() {
     }
   };
 
-  // Render notification item
   const renderNotificationItem = ({ item }: { item: Notification }) => {
     if (!item || typeof item.id === 'undefined') {
       return null;
@@ -616,7 +590,6 @@ export default function RiderNotificationsScreen() {
     );
   };
 
-  // Render empty state
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -632,7 +605,6 @@ export default function RiderNotificationsScreen() {
     </View>
   );
 
-  // Render error state
   const renderErrorState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
@@ -646,7 +618,6 @@ export default function RiderNotificationsScreen() {
     </View>
   );
 
-  // Render footer
   const renderFooter = () => {
     if (!loadingMore) return null;
     
@@ -658,7 +629,6 @@ export default function RiderNotificationsScreen() {
     );
   };
 
-  // Render toast
   const renderToast = () => (
     <Animated.View
       style={[
@@ -682,7 +652,6 @@ export default function RiderNotificationsScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      {/* Header */}
       <LinearGradient
         colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
@@ -710,7 +679,6 @@ export default function RiderNotificationsScreen() {
         </View>
       </LinearGradient>
 
-      {/* Category Tabs */}
       <View style={styles.categorySection}>
         <View style={styles.categoryContainer}>
           <View style={styles.categoryTabs}>
@@ -780,7 +748,6 @@ export default function RiderNotificationsScreen() {
         )}
       </View>
 
-      {/* Notifications List */}
       {loading && notifications.length === 0 ? (
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#7B3F98" />
@@ -819,7 +786,6 @@ export default function RiderNotificationsScreen() {
 
       {renderToast()}
       <CustomModal {...customModal} />
-      <Toast />
     </SafeAreaView>
   );
 }
