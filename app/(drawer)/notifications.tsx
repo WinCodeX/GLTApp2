@@ -1,4 +1,4 @@
-// app/(drawer)/notifications.tsx - Fixed with category tabs and visibility-based auto-marking
+// app/(drawer)/notifications.tsx - FIXED: Immediate auto-marking on connection + scroll
 
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
@@ -120,6 +120,7 @@ export default function NotificationsScreen() {
   const viewableItemsRef = useRef<Set<number>>(new Set());
   const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const markedAsReadRef = useRef<Set<number>>(new Set());
+  const initialMarkingDone = useRef(false);
 
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
@@ -274,6 +275,7 @@ export default function NotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
+          initialMarkingDone.current = false;
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -301,6 +303,20 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
+  // Auto-mark initial visible notifications when connected and data loaded
+  useEffect(() => {
+    if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
+      const timer = setTimeout(() => {
+        if (viewableItemsRef.current.size > 0) {
+          markVisibleNotificationsAsRead();
+          initialMarkingDone.current = true;
+        }
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isConnected, notifications.length, loading]);
+
   // Handle viewable items changed
   const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
     const currentViewableIds = new Set(
@@ -311,19 +327,18 @@ export default function NotificationsScreen() {
 
     viewableItemsRef.current = currentViewableIds;
 
-    // Debounce marking as read
     if (markAsReadTimeoutRef.current) {
       clearTimeout(markAsReadTimeoutRef.current);
     }
 
     markAsReadTimeoutRef.current = setTimeout(() => {
       markVisibleNotificationsAsRead();
-    }, 1500); // Wait 1.5 seconds before marking as read
+    }, 1500);
   }).current;
 
   const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50, // Item must be 50% visible
-    minimumViewTime: 500, // Must be visible for at least 500ms
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 500,
   }).current;
 
   const markVisibleNotificationsAsRead = async () => {
@@ -337,15 +352,12 @@ export default function NotificationsScreen() {
     if (unreadVisibleIds.length === 0) return;
 
     try {
-      // Optimistically update UI
       setNotifications(prev =>
         prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
       );
 
-      // Mark these as processed
       unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
 
-      // Send to backend
       await api.post('/api/v1/notifications/mark_visible_as_read', {
         notification_ids: unreadVisibleIds,
       });
@@ -354,12 +366,10 @@ export default function NotificationsScreen() {
     } catch (error) {
       console.error('Failed to mark visible notifications as read:', error);
       
-      // Revert optimistic update
       setNotifications(prev =>
         prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
       );
       
-      // Remove from marked set
       unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
     }
   };
@@ -476,6 +486,7 @@ export default function NotificationsScreen() {
   const handleRefresh = () => {
     setCurrentPage(1);
     markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
     fetchNotifications(1, true);
   };
 
@@ -483,6 +494,7 @@ export default function NotificationsScreen() {
     setCategory(newCategory);
     setCurrentPage(1);
     markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
   };
 
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
@@ -698,7 +710,7 @@ export default function NotificationsScreen() {
         {isConnected && (
           <View style={styles.connectionStatus}>
             <Feather name="wifi" size={12} color="#10b981" />
-            <Text style={styles.connectionText}>Live updates • Auto-marking read</Text>
+            <Text style={styles.connectionText}>Live</Text>
           </View>
         )}
 
