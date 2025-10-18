@@ -87,6 +87,11 @@ export default function Layout() {
                   <Stack.Screen name="SettingsContentSocial" />
                   <Stack.Screen name="SettingsBugReport" />
                   <Stack.Screen name="SettingsAcknowledgements" />
+                  
+                  {/* ROUTE GROUPS */}
+                  <Stack.Screen name="(agent)" />
+                  <Stack.Screen name="(rider)" />
+                  <Stack.Screen name="(support)" />
                 </Stack>
                 
                 <NetworkBanner headerHeight={60} />
