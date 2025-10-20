@@ -35,13 +35,13 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
     {
       key: 'updates',
       label: 'Updates',
-      icon: 'bell',
+      icon: 'layers',
       route: '/(agent)/updates',
     },
     {
       key: 'chat', 
       label: 'Chat',
-      icon: 'heart',
+      icon: 'message-square',
       route: '/(agent)/chat',
     },
     {
@@ -52,8 +52,8 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
     },
     {
       key: 'calls',
-      label: 'Search',
-      icon: 'search',
+      label: 'Calls',
+      icon: 'phone',
       route: '/(agent)/calls',
     },
     {
