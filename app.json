@@ -8,6 +8,12 @@
     "scheme": "https",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
+    "updates": {
+      "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lvl0-x.gltapp2",
