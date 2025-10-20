@@ -1,55 +1,55 @@
 // app/(support)/_layout.tsx - Support Section Layout
 import React from 'react';
-import { Stack } from 'expo-router';
+import { Tabs } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 
 export default function SupportLayout() {
   return (
     <>
       <StatusBar style="light" backgroundColor="#5A2D82" />
-      <Stack
+      <Tabs
         screenOptions={{
           headerShown: false,
+          tabBarStyle: { display: 'none' },
           contentStyle: { backgroundColor: '#0B141B' },
-          animation: 'none',
         }}
       >
-        <Stack.Screen 
+        <Tabs.Screen 
           name="index" 
           options={{ 
             title: 'GLT Support',
-            gestureEnabled: false 
+            href: '/(support)',
           }} 
         />
-        <Stack.Screen 
-          name="chat/[id]" 
-          options={{ 
-            title: 'Support Chat',
-            gestureEnabled: true 
-          }} 
-        />
-        <Stack.Screen 
+        <Tabs.Screen 
           name="updates" 
           options={{ 
             title: 'Updates',
-            gestureEnabled: true 
+            href: '/(support)/updates',
           }} 
         />
-        <Stack.Screen 
+        <Tabs.Screen 
           name="calls" 
           options={{ 
             title: 'Calls',
-            gestureEnabled: true 
+            href: '/(support)/calls',
           }} 
         />
-        <Stack.Screen 
+        <Tabs.Screen 
           name="account" 
           options={{ 
             title: 'Account',
-            gestureEnabled: true 
+            href: '/(support)/account',
           }} 
         />
-      </Stack>
+        <Tabs.Screen 
+          name="chat/[id]" 
+          options={{ 
+            title: 'Support Chat',
+            href: null,
+          }} 
+        />
+      </Tabs>
     </>
   );
 }
