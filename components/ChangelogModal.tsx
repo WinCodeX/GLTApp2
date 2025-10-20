@@ -1,4 +1,4 @@
-// components/ChangelogModal.tsx
+// components/ChangelogModal.tsx - Enhanced with Expo OTA Updates
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useRef, useState } from 'react';
@@ -13,8 +13,8 @@ const CHANGELOG_CONTENT = [
   'Account adding',
   'Talk to a representative implemented',
   'Support functionality implemented',
-'WhatsApp style messaging in talk to a rep',
-'ActionCable for instant messages and notifications',
+  'WhatsApp style messaging in talk to a rep',
+  'ActionCable for instant messages and notifications',
   'Other Bug fixes',
 ];
 
@@ -29,6 +29,7 @@ interface UpdateInfo {
   changelog?: string[];
   file_size?: number;
   force_update?: boolean;
+  update_type?: 'ota' | 'apk';
   isDownloading?: boolean;
   downloadProgress?: number;
   hasCompletedDownload?: boolean;
@@ -41,21 +42,17 @@ export default function ChangelogModal({ visible, onClose }: Props) {
   const [updateError, setUpdateError] = useState<string | null>(null);
   const [updateService] = useState(() => UpdateService.getInstance());
   
-  // FIXED: Use ref to prevent multiple initializations
   const hasInitialized = useRef(false);
   const autoDismissTimer = useRef<NodeJS.Timeout | null>(null);
 
-  // FIXED: Single useEffect that only runs when visibility changes
   useEffect(() => {
     if (visible && !hasInitialized.current) {
       console.log('ChangelogModal: Modal opened, initializing...');
       hasInitialized.current = true;
       initializeAndCheckUpdates();
       
-      // Start auto-dismiss timer
       autoDismissTimer.current = setTimeout(() => {
         console.log('ChangelogModal: Auto-dismiss timer triggered');
-        // Only auto-dismiss if no updates and not checking
         if (!updateInfo.isAvailable && !isCheckingUpdates && !updateInfo.hasCompletedDownload) {
           console.log('ChangelogModal: Auto-dismissing - no updates found');
           handleClose();
@@ -63,10 +60,8 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       }, AUTO_DISMISS_DELAY);
     }
 
-    // Cleanup
     return () => {
       if (!visible) {
-        // Reset when modal closes
         hasInitialized.current = false;
         if (autoDismissTimer.current) {
           clearTimeout(autoDismissTimer.current);
@@ -74,10 +69,9 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         }
       }
     };
-  }, [visible]); // FIXED: Only depend on visible
+  }, [visible]);
 
   const handleClose = () => {
-    // Clear timer when manually closing
     if (autoDismissTimer.current) {
       clearTimeout(autoDismissTimer.current);
       autoDismissTimer.current = null;
@@ -90,10 +84,9 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     try {
       console.log('ChangelogModal: Starting initialization...');
       
-      // Set current version
       await updateService.setCurrentVersion(CHANGELOG_VERSION);
       
-      // Check for completed downloads first (fast check)
+      // Only check for completed APK downloads once
       const { hasDownload, version } = await updateService.hasCompletedDownload();
       if (hasDownload) {
         console.log('ChangelogModal: Found completed download:', version);
@@ -102,11 +95,10 @@ export default function ChangelogModal({ visible, onClose }: Props) {
           hasCompletedDownload: true,
           completedVersion: version,
         });
-        return; // Don't check for new updates if we have a completed download
+        return;
       }
       
-      // Then check for new updates
-      await checkForAPKUpdates();
+      await checkForUpdates();
       
     } catch (error) {
       console.error('ChangelogModal: Initialization failed:', error);
@@ -115,19 +107,17 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     }
   };
 
-  const checkForAPKUpdates = async () => {
-    // Prevent multiple simultaneous checks
+  const checkForUpdates = async () => {
     if (isCheckingUpdates) {
       console.log('ChangelogModal: Update check already in progress, skipping...');
       return;
     }
 
     try {
-      console.log('ChangelogModal: Checking for APK updates...');
+      console.log('ChangelogModal: Checking for updates...');
       setIsCheckingUpdates(true);
       setUpdateError(null);
       
-      // Check platform support
       if (!updateService.isUpdateSupported()) {
         console.log('ChangelogModal: Platform does not support updates');
         setUpdateInfo({ isAvailable: false });
@@ -135,22 +125,23 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         return;
       }
       
-      // Check for updates
       const result = await updateService.checkForUpdates();
       
       console.log('ChangelogModal: Update check result:', {
         hasUpdate: result.hasUpdate,
-        version: result.metadata?.version
+        version: result.metadata?.version,
+        type: result.metadata?.update_type
       });
       
       if (result.hasUpdate && result.metadata) {
-        console.log('ChangelogModal: Update available:', result.metadata.version);
+        console.log('ChangelogModal: Update available:', result.metadata.version, 'Type:', result.metadata.update_type);
         setUpdateInfo({
           isAvailable: true,
           version: result.metadata.version,
           changelog: result.metadata.changelog,
           file_size: result.metadata.file_size,
           force_update: result.metadata.force_update,
+          update_type: result.metadata.update_type,
         });
       } else {
         console.log('ChangelogModal: No updates available');
@@ -165,13 +156,32 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     }
   };
 
-  const downloadAndInstallAPK = async () => {
+  const handleUpdateInstall = async () => {
     if (!updateInfo.isAvailable || updateInfo.isDownloading) {
       return;
     }
     
     try {
-      console.log('ChangelogModal: Starting download...');
+      console.log('ChangelogModal: Starting update installation, type:', updateInfo.update_type);
+      
+      // Handle OTA updates
+      if (updateInfo.update_type === 'ota') {
+        setIsCheckingUpdates(true);
+        setUpdateError(null);
+        
+        const metadata = {
+          available: true,
+          version: updateInfo.version,
+          changelog: updateInfo.changelog,
+          update_type: 'ota' as const,
+        };
+        
+        await updateService.installUpdate(metadata);
+        // App will reload automatically after OTA update
+        return;
+      }
+      
+      // Handle APK updates
       setUpdateInfo(prev => ({ ...prev, isDownloading: true }));
       setUpdateError(null);
       
@@ -181,6 +191,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         changelog: updateInfo.changelog,
         file_size: updateInfo.file_size,
         force_update: updateInfo.force_update,
+        update_type: 'apk' as const,
         download_url: `${process.env.EXPO_PUBLIC_API_URL || 'https://glt-53x8.onrender.com'}/api/v1/updates/download?version=${updateInfo.version}`,
       };
       
@@ -203,9 +214,10 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         throw new Error('Download failed');
       }
     } catch (error) {
-      console.error('ChangelogModal: Download failed:', error);
+      console.error('ChangelogModal: Update failed:', error);
       setUpdateError(`Update failed: ${error.message}`);
       setUpdateInfo(prev => ({ ...prev, isDownloading: false, downloadProgress: 0 }));
+      setIsCheckingUpdates(false);
     }
   };
 
@@ -250,7 +262,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
 
   const renderContent = () => {
     // Checking for updates
-    if (isCheckingUpdates) {
+    if (isCheckingUpdates && !updateInfo.isDownloading) {
       return (
         <View>
           <Text style={styles.title}>Checking for Updates</Text>
@@ -270,7 +282,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
           <Text style={styles.errorText}>{updateError}</Text>
           
           <View style={styles.buttonContainer}>
-            <TouchableOpacity onPress={checkForAPKUpdates} style={[styles.button, styles.retryButton]}>
+            <TouchableOpacity onPress={checkForUpdates} style={[styles.button, styles.retryButton]}>
               <Text style={styles.buttonText}>Retry</Text>
             </TouchableOpacity>
             
@@ -306,15 +318,20 @@ export default function ChangelogModal({ visible, onClose }: Props) {
 
     // New update available
     if (updateInfo.isAvailable) {
+      const isOTA = updateInfo.update_type === 'ota';
       const fileSizeText = updateInfo.file_size ? ` (${formatFileSize(updateInfo.file_size)})` : '';
+      const updateTypeLabel = isOTA ? 'OTA Update' : 'APK Update';
       
       return (
         <View>
           <Text style={styles.title}>
-            {updateInfo.force_update ? 'Required Update' : 'Update Available'} (v{updateInfo.version}){fileSizeText}
+            {updateInfo.force_update ? 'Required Update' : 'Update Available'} - {updateTypeLabel}
+          </Text>
+          <Text style={styles.versionText}>
+            Version {updateInfo.version}{fileSizeText}
           </Text>
           
-          {Platform.OS !== 'android' && (
+          {!isOTA && Platform.OS !== 'android' && (
             <Text style={styles.warningText}>
               APK updates are only supported on Android devices.
             </Text>
@@ -326,6 +343,12 @@ export default function ChangelogModal({ visible, onClose }: Props) {
               `• ${CHANGELOG_CONTENT.join('\n• ')}`
             }
           </Text>
+          
+          {isOTA && (
+            <Text style={styles.otaInfoText}>
+              This update will apply instantly without downloading a large file.
+            </Text>
+          )}
           
           {updateInfo.force_update && (
             <Text style={styles.forceUpdateText}>
@@ -348,7 +371,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
           )}
           
           <View style={styles.buttonContainer}>
-            {!updateInfo.force_update && Platform.OS === 'android' && (
+            {!updateInfo.force_update && (isOTA || Platform.OS === 'android') && (
               <TouchableOpacity 
                 onPress={installLater} 
                 style={[styles.button, styles.laterButton]}
@@ -358,14 +381,14 @@ export default function ChangelogModal({ visible, onClose }: Props) {
               </TouchableOpacity>
             )}
             
-            {Platform.OS === 'android' ? (
+            {(isOTA || Platform.OS === 'android') ? (
               <TouchableOpacity 
-                onPress={downloadAndInstallAPK} 
+                onPress={handleUpdateInstall} 
                 style={[styles.button, styles.installButton]}
                 disabled={updateInfo.isDownloading}
               >
                 <Text style={styles.buttonText}>
-                  {updateInfo.isDownloading ? 'Downloading...' : 'Download & Install'}
+                  {updateInfo.isDownloading ? 'Downloading...' : isOTA ? 'Update Now' : 'Download & Install'}
                 </Text>
               </TouchableOpacity>
             ) : (
@@ -435,6 +458,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     lineHeight: 24,
   },
+  versionText: {
+    fontSize: 14,
+    color: '#f8f8f2',
+    marginBottom: 8,
+    fontWeight: '600',
+  },
   text: {
     color: '#f8f8f2',
     fontSize: 14,
@@ -452,6 +481,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginBottom: 10,
     fontStyle: 'italic',
+    lineHeight: 18,
+  },
+  otaInfoText: {
+    color: '#50fa7b',
+    fontSize: 13,
+    marginBottom: 10,
+    fontWeight: '600',
     lineHeight: 18,
   },
   forceUpdateText: {
