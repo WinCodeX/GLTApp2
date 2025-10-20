@@ -1,5 +1,5 @@
 // components/agent/AgentBottomTabs.tsx
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { 
   View, 
   Text, 
@@ -16,7 +16,8 @@ import Svg, { Path } from 'react-native-svg';
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TAB_WIDTH = SCREEN_WIDTH / 5;
 const CIRCLE_SIZE = 56;
-const CURVE_HEIGHT = 70;
+const CURVE_HEIGHT = 75;
+const ANIMATION_DURATION = 300; // Quick animation to match screen transition
 
 const AnimatedSvg = Animated.createAnimatedComponent(Svg);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -28,21 +29,24 @@ interface AgentBottomTabsProps {
 export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) => {
   const pathname = usePathname();
   const circlePosition = useRef(new Animated.Value(TAB_WIDTH * 2)).current; // Start at home (middle)
-  const indicatorPosition = useRef(new Animated.Value(TAB_WIDTH * 2 + TAB_WIDTH / 2 - 15)).current;
+  const indicatorPosition = useRef(new Animated.Value(TAB_WIDTH * 2 + TAB_WIDTH / 2 - 20)).current;
+  const iconOpacity = useRef(new Animated.Value(1)).current;
+  const [displayedIcon, setDisplayedIcon] = useState<string>('home');
+  const [isAnimating, setIsAnimating] = useState(false);
 
-  // Tabs with home in middle
+  // Tabs with home in middle - matching original tab order but rearranged
   const tabs = [
-    {
-      key: 'updates',
-      label: 'Updates',
-      icon: 'layers',
-      route: '/(agent)/updates',
-    },
     {
       key: 'chat', 
       label: 'Chat',
       icon: 'message-square',
       route: '/(agent)/chat',
+    },
+    {
+      key: 'updates',
+      label: 'Updates',
+      icon: 'layers',
+      route: '/(agent)/updates',
     },
     {
       key: 'home',
@@ -67,39 +71,50 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
   useEffect(() => {
     const currentIndex = tabs.findIndex(tab => tab.key === currentTab);
     const targetCirclePosition = currentIndex * TAB_WIDTH;
-    const targetIndicatorPosition = targetCirclePosition + TAB_WIDTH / 2 - 15;
+    const targetIndicatorPosition = targetCirclePosition + TAB_WIDTH / 2 - 20;
+    const newIcon = tabs.find(t => t.key === currentTab)?.icon || 'home';
 
-    Animated.parallel([
-      Animated.spring(circlePosition, {
-        toValue: targetCirclePosition,
-        tension: 50,
-        friction: 8,
-        useNativeDriver: false, // Can't use native driver with SVG paths
-      }),
-      Animated.spring(indicatorPosition, {
-        toValue: targetIndicatorPosition,
-        tension: 50,
-        friction: 8,
+    if (!isAnimating) {
+      setIsAnimating(true);
+
+      // Fade out current icon
+      Animated.timing(iconOpacity, {
+        toValue: 0,
+        duration: ANIMATION_DURATION / 2,
         useNativeDriver: true,
-      })
-    ]).start();
+      }).start(() => {
+        // Change icon at midpoint
+        setDisplayedIcon(newIcon);
+        // Fade in new icon
+        Animated.timing(iconOpacity, {
+          toValue: 1,
+          duration: ANIMATION_DURATION / 2,
+          useNativeDriver: true,
+        }).start(() => {
+          setIsAnimating(false);
+        });
+      });
+
+      // Move circle and indicator simultaneously
+      Animated.parallel([
+        Animated.timing(circlePosition, {
+          toValue: targetCirclePosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: false, // Can't use native driver with SVG paths
+        }),
+        Animated.timing(indicatorPosition, {
+          toValue: targetIndicatorPosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: true,
+        })
+      ]).start();
+    }
   }, [currentTab]);
 
   const handleTabPress = (route: string) => {
     if (pathname !== route) {
       router.push(route);
     }
-  };
-
-  // Dynamic path for curved cutout
-  const getPath = () => {
-    return circlePosition.interpolate({
-      inputRange: [0, SCREEN_WIDTH],
-      outputRange: [
-        `M0,25 Q0,0 25,0 L${0},0 Q${15},0 ${25},8 T${45},25 T${65},8 Q${75},0 ${90},0 L${SCREEN_WIDTH - 25},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},25 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`,
-        `M0,25 Q0,0 25,0 L${SCREEN_WIDTH - 90},0 Q${SCREEN_WIDTH - 75},0 ${SCREEN_WIDTH - 65},8 T${SCREEN_WIDTH - 45},25 T${SCREEN_WIDTH - 25},8 Q${SCREEN_WIDTH - 15},0 ${SCREEN_WIDTH},0 L${SCREEN_WIDTH - 25},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},25 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`
-      ]
-    });
   };
 
   return (
@@ -118,11 +133,13 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
           }
         ]}
       >
-        <Feather
-          name={tabs.find(t => t.key === currentTab)?.icon as any}
-          size={26}
-          color="#FFFFFF"
-        />
+        <Animated.View style={{ opacity: iconOpacity }}>
+          <Feather
+            name={displayedIcon as any}
+            size={24}
+            color="#FFFFFF"
+          />
+        </Animated.View>
       </Animated.View>
 
       {/* Nav Background with Dynamic Cutout */}
@@ -137,34 +154,41 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
               inputRange: tabs.map((_, i) => i * TAB_WIDTH),
               outputRange: tabs.map((_, i) => {
                 const centerX = i * TAB_WIDTH + TAB_WIDTH / 2;
-                const curveStart = centerX - 35;
-                const curveEnd = centerX + 35;
+                const curveStart = centerX - 38;
+                const curveEnd = centerX + 38;
                 
-                return `M0,20 Q0,0 20,0 L${curveStart - 10},0 Q${curveStart},0 ${curveStart + 8},7 Q${curveStart + 18},20 ${centerX},20 Q${curveEnd - 18},20 ${curveEnd - 8},7 Q${curveEnd},0 ${curveEnd + 10},0 L${SCREEN_WIDTH - 20},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},20 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`;
+                return `M0,25 Q0,0 25,0 L${curveStart - 10},0 Q${curveStart},0 ${curveStart + 10},8 Q${curveStart + 20},25 ${centerX},25 Q${curveEnd - 20},25 ${curveEnd - 10},8 Q${curveEnd},0 ${curveEnd + 10},0 L${SCREEN_WIDTH - 25},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},25 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`;
               })
             })}
-            fill="#FFFFFF"
+            fill="#1F2C34"
           />
         </AnimatedSvg>
 
-        {/* Tab Icons */}
+        {/* Tab Icons and Labels */}
         <View style={styles.tabsContainer}>
-          {tabs.map((tab, index) => {
+          {tabs.map((tab) => {
             const isActive = currentTab === tab.key;
             return (
               <TouchableOpacity
                 key={tab.key}
                 style={styles.tab}
                 onPress={() => handleTabPress(tab.route)}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
               >
-                {!isActive && (
-                  <Feather
-                    name={tab.icon as any}
-                    size={24}
-                    color="#9CA3AF"
-                  />
-                )}
+                <View style={styles.tabContent}>
+                  {!isActive && (
+                    <>
+                      <Feather
+                        name={tab.icon as any}
+                        size={22}
+                        color="#8E8E93"
+                      />
+                      <Text style={styles.tabLabel}>
+                        {tab.label}
+                      </Text>
+                    </>
+                  )}
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -198,18 +222,18 @@ const styles = StyleSheet.create({
     width: CIRCLE_SIZE,
     height: CIRCLE_SIZE,
     borderRadius: CIRCLE_SIZE / 2,
-    backgroundColor: '#8B5CF6',
+    backgroundColor: '#7B3F98',
     justifyContent: 'center',
     alignItems: 'center',
     zIndex: 10,
-    shadowColor: '#8B5CF6',
+    shadowColor: '#7B3F98',
     shadowOffset: {
       width: 0,
-      height: 2,
+      height: 4,
     },
-    shadowOpacity: 0.25,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    elevation: 8,
   },
   navContainer: {
     position: 'absolute',
@@ -222,30 +246,40 @@ const styles = StyleSheet.create({
     shadowColor: '#000',
     shadowOffset: {
       width: 0,
-      height: -2,
+      height: -4,
     },
     shadowOpacity: 0.1,
-    shadowRadius: 3,
-    elevation: 5,
+    shadowRadius: 8,
+    elevation: 8,
   },
   tabsContainer: {
     flexDirection: 'row',
     position: 'absolute',
-    bottom: 15,
+    bottom: 20,
     width: SCREEN_WIDTH,
   },
   tab: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingVertical: 10,
+    height: 45,
+  },
+  tabContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabLabel: {
+    color: '#8E8E93',
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 4,
   },
   bottomLine: {
     position: 'absolute',
     bottom: 8,
-    width: 30,
+    width: 40,
     height: 3,
-    backgroundColor: '#1F2937',
+    backgroundColor: '#2A2A2A',
     borderRadius: 2,
   },
 });
