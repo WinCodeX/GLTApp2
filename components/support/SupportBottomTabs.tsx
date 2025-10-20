@@ -29,12 +29,8 @@ interface SupportBottomTabsProps {
 export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab }) => {
   const pathname = usePathname();
   const unreadChatsCount = useUnreadConversationsCount();
-  const circlePosition = useRef(new Animated.Value(TAB_WIDTH * 1)).current;
-  const indicatorPosition = useRef(new Animated.Value(TAB_WIDTH * 1 + TAB_WIDTH / 2 - 20)).current;
-  const iconOpacity = useRef(new Animated.Value(1)).current;
-  const [displayedIcon, setDisplayedIcon] = useState<string>('message-square');
-  const [isAnimating, setIsAnimating] = useState(false);
-
+  
+  // Tabs with chats in second position for better balance
   const tabs = [
     {
       key: 'updates',
@@ -66,21 +62,35 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
     },
   ];
 
+  // Initialize based on current tab
+  const initialIndex = tabs.findIndex(tab => tab.key === currentTab);
+  const initialIcon = tabs.find(t => t.key === currentTab)?.icon || 'message-square';
+  
+  const circlePosition = useRef(new Animated.Value(initialIndex * TAB_WIDTH)).current;
+  const indicatorPosition = useRef(new Animated.Value(initialIndex * TAB_WIDTH + TAB_WIDTH / 2 - 20)).current;
+  const iconOpacity = useRef(new Animated.Value(1)).current;
+  const [displayedIcon, setDisplayedIcon] = useState<string>(initialIcon);
+  const [isAnimating, setIsAnimating] = useState(false);
+
   useEffect(() => {
     const currentIndex = tabs.findIndex(tab => tab.key === currentTab);
     const targetCirclePosition = currentIndex * TAB_WIDTH;
     const targetIndicatorPosition = targetCirclePosition + TAB_WIDTH / 2 - 20;
     const newIcon = tabs.find(t => t.key === currentTab)?.icon || 'message-square';
 
-    if (!isAnimating) {
+    // Only animate if the icon is actually changing
+    if (displayedIcon !== newIcon && !isAnimating) {
       setIsAnimating(true);
 
+      // Fade out current icon
       Animated.timing(iconOpacity, {
         toValue: 0,
         duration: ANIMATION_DURATION / 2,
         useNativeDriver: true,
       }).start(() => {
+        // Change icon at midpoint
         setDisplayedIcon(newIcon);
+        // Fade in new icon
         Animated.timing(iconOpacity, {
           toValue: 1,
           duration: ANIMATION_DURATION / 2,
@@ -90,6 +100,21 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
         });
       });
 
+      // Move circle and indicator
+      Animated.parallel([
+        Animated.timing(circlePosition, {
+          toValue: targetCirclePosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: false,
+        }),
+        Animated.timing(indicatorPosition, {
+          toValue: targetIndicatorPosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: true,
+        })
+      ]).start();
+    } else if (displayedIcon === newIcon) {
+      // Just move the position without icon animation
       Animated.parallel([
         Animated.timing(circlePosition, {
           toValue: targetCirclePosition,
@@ -103,7 +128,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
         })
       ]).start();
     }
-  }, [currentTab]);
+  }, [currentTab, displayedIcon]);
 
   const handleTabPress = (route: string) => {
     if (pathname !== route) {
@@ -113,6 +138,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
 
   return (
     <View style={styles.container}>
+      {/* Floating Circle with Badge Support */}
       <Animated.View 
         style={[
           styles.floatingCircle,
@@ -133,8 +159,19 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
             color="#FFFFFF"
           />
         </Animated.View>
+        {/* Show badge on floating circle for active tab */}
+        {tabs.find(t => t.key === currentTab)?.badgeCount > 0 && (
+          <View style={styles.floatingBadge}>
+            <Text style={styles.badgeText}>
+              {tabs.find(t => t.key === currentTab).badgeCount > 99 
+                ? '99+' 
+                : tabs.find(t => t.key === currentTab).badgeCount}
+            </Text>
+          </View>
+        )}
       </Animated.View>
 
+      {/* Nav Background with Dynamic Cutout */}
       <View style={styles.navContainer}>
         <AnimatedSvg
           width={SCREEN_WIDTH}
@@ -156,6 +193,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
           />
         </AnimatedSvg>
 
+        {/* Tab Icons and Labels */}
         <View style={styles.tabsContainer}>
           {tabs.map((tab) => {
             const isActive = currentTab === tab.key;
@@ -194,6 +232,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
           })}
         </View>
 
+        {/* Bottom Line Indicator */}
         <Animated.View 
           style={[
             styles.bottomLine,
@@ -233,6 +272,17 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.3,
     shadowRadius: 10,
     elevation: 8,
+  },
+  floatingBadge: {
+    position: 'absolute',
+    top: 8,
+    right: 8,
+    backgroundColor: '#FF3B30',
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    minWidth: 18,
+    alignItems: 'center',
   },
   navContainer: {
     position: 'absolute',
