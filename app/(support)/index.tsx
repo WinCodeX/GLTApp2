@@ -962,7 +962,7 @@ export default function SupportDashboard() {
       >
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>My Tickets</Text>
+            <Text style={styles.headerTitle}>GLT Support</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
                 Welcome back, {user?.first_name || 'Agent'}
