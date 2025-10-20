@@ -1,26 +1,27 @@
-// app/(agent)/notifications.tsx - Agent notifications with ActionCable
+// app/(agent)/notifications.tsx
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
+  SafeAreaView,
   FlatList,
   TouchableOpacity,
-  StyleSheet,
   RefreshControl,
+  Platform,
   ActivityIndicator,
   Animated,
   Modal,
-  SafeAreaView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../lib/api';
-import { NavigationHelper } from '../../lib/helpers/navigation';
 import ActionCableService from '../../lib/services/ActionCableService';
 import { accountManager } from '../../lib/AccountManager';
+import { NavigationHelper } from '../../lib/helpers/navigation';
 
-interface NotificationData {
+interface Notification {
   id: number;
   title: string;
   message: string;
@@ -32,6 +33,7 @@ interface NotificationData {
   icon: string;
   action_url?: string;
   expired: boolean;
+  data?: any;
   package?: {
     id: number;
     code: string;
@@ -68,7 +70,7 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
     switch (type) {
       case 'success': return '#10b981';
       case 'error': return '#ef4444';
-      default: return '#FF6B35';
+      default: return '#8b5cf6';
     }
   };
 
@@ -76,7 +78,7 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
     <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
       <View style={modalStyles.overlay}>
         <View style={modalStyles.container}>
-          <LinearGradient colors={['#FF6B35', '#F7931E']} style={modalStyles.gradient}>
+          <LinearGradient colors={['#2d1b4e', '#1a1b3d']} style={modalStyles.gradient}>
             <View style={modalStyles.iconContainer}>
               <View style={[modalStyles.iconCircle, { backgroundColor: getIconColor() + '20' }]}>
                 <Feather name={getIcon()} size={32} color={getIconColor()} />
@@ -94,18 +96,20 @@ const CustomModal: React.FC<CustomModalProps> = ({ visible, title, message, type
   );
 };
 
+type CategoryType = 'all' | 'packages' | 'assignments' | 'system';
+
 export default function AgentNotificationsScreen() {
   const router = useRouter();
-
-  const [notifications, setNotifications] = useState<NotificationData[]>([]);
-  const [loading, setLoading] = useState(true);
+  
+  const [notifications, setNotifications] = useState<Notification[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [pagination, setPagination] = useState<NotificationsPagination | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
-  const [filter, setFilter] = useState<'all' | 'unread'>('all');
+  const [category, setCategory] = useState<CategoryType>('all');
   const [error, setError] = useState<string | null>(null);
-  
+
   const [isConnected, setIsConnected] = useState(false);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
@@ -249,8 +253,12 @@ export default function AgentNotificationsScreen() {
         per_page: 20,
       };
 
-      if (filter === 'unread') {
-        params.unread_only = 'true';
+      if (category === 'packages') {
+        params.type = 'delivery,package_delivered,package_collected,package_rejected,package_scanned';
+      } else if (category === 'assignments') {
+        params.type = 'assignment,task';
+      } else if (category === 'system') {
+        params.type = 'system,announcement,update';
       }
 
       const response = await api.get('/api/v1/notifications', {
@@ -284,57 +292,34 @@ export default function AgentNotificationsScreen() {
       setRefreshing(false);
       setLoadingMore(false);
     }
-  }, [filter]);
+  }, [category]);
 
   useEffect(() => {
     fetchNotifications(1);
-  }, [filter]);
+  }, [category]);
 
-  const markAsRead = async (notificationId: number) => {
+  const handleNotificationPress = async (notification: Notification) => {
     try {
-      const notificationToUpdate = notifications.find(n => n.id === notificationId);
-      if (!notificationToUpdate || notificationToUpdate.read) return;
+      // Mark as read if not already read
+      if (!notification.read) {
+        // Optimistically update UI
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+        );
 
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, read: true } : n)
-      );
-
-      if (isConnected && actionCableRef.current) {
-        await actionCableRef.current.markNotificationRead(notificationId);
-      } else {
-        await api.patch(`/api/v1/notifications/${notificationId}/mark_as_read`);
+        // Send request to mark as read
+        try {
+          await api.post(`/api/v1/notifications/${notification.id}/mark_as_read`);
+        } catch (error) {
+          console.error('Failed to mark notification as read:', error);
+          // Revert on error
+          setNotifications(prev =>
+            prev.map(n => n.id === notification.id ? { ...n, read: false } : n)
+          );
+        }
       }
-    } catch (error) {
-      console.error('Failed to mark notification as read:', error);
-      
-      setNotifications(prev =>
-        prev.map(n => n.id === notificationId ? { ...n, read: false } : n)
-      );
-    }
-  };
 
-  const markAllAsRead = async () => {
-    try {
-      const previousNotifications = [...notifications];
-      
-      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
-
-      const response = await api.patch('/api/v1/notifications/mark_all_as_read');
-      
-      if (response.data?.success) {
-        showToast('All notifications marked as read', 'success');
-      } else {
-        setNotifications(previousNotifications);
-        showCustomModal('Error', 'Failed to mark all as read', 'error');
-      }
-    } catch (error) {
-      console.error('Failed to mark all notifications as read:', error);
-      showCustomModal('Error', 'Failed to mark all as read', 'error');
-    }
-  };
-
-  const handleNotificationPress = (notification: NotificationData) => {
-    try {
+      // Navigate based on notification type
       let navigationParams: any = null;
       
       if (notification.action_url) {
@@ -346,6 +331,8 @@ export default function AgentNotificationsScreen() {
         }
       } else if (notification.package?.code) {
         navigationParams = { code: notification.package.code };
+      } else if (notification.data?.package_code) {
+        navigationParams = { code: notification.data.package_code };
       }
       
       if (navigationParams) {
@@ -353,69 +340,13 @@ export default function AgentNotificationsScreen() {
           params: navigationParams,
           trackInHistory: true
         });
-      }
-      
-      if (!notification.read) {
-        markAsRead(notification.id);
+      } else if (notification.notification_type === 'assignment' || notification.notification_type === 'task') {
+        router.push('/(staff)/');
       }
       
     } catch (error) {
       console.error('Navigation error:', error);
       showCustomModal('Error', 'Failed to navigate', 'error');
-    }
-  };
-
-  const getNotificationIcon = (type: string, iconName?: string) => {
-    if (iconName && iconName !== 'notifications') {
-      return iconName as keyof typeof Feather.glyphMap;
-    }
-
-    switch (type) {
-      case 'package_created':
-      case 'package_rejected':
-      case 'package_expired':
-      case 'package_delivered':
-      case 'package_collected':
-        return 'package';
-      case 'package_submitted':
-        return 'send';
-      default:
-        return 'bell';
-    }
-  };
-
-  const getNotificationColor = (type: string, read: boolean) => {
-    if (read) return '#999';
-
-    switch (type) {
-      case 'package_delivered':
-      case 'package_collected':
-        return '#4CAF50';
-      case 'package_rejected':
-      case 'package_expired':
-        return '#ef4444';
-      default:
-        return '#FF6B35';
-    }
-  };
-
-  const formatTime = (timeString: string) => {
-    try {
-      const date = new Date(timeString);
-      const now = new Date();
-      const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
-
-      if (diffInHours < 1) {
-        const diffInMinutes = Math.floor(diffInHours * 60);
-        return `${diffInMinutes}m ago`;
-      } else if (diffInHours < 24) {
-        return `${Math.floor(diffInHours)}h ago`;
-      } else {
-        const diffInDays = Math.floor(diffInHours / 24);
-        return `${diffInDays}d ago`;
-      }
-    } catch {
-      return timeString;
     }
   };
 
@@ -430,12 +361,100 @@ export default function AgentNotificationsScreen() {
     fetchNotifications(1, true);
   };
 
-  const handleFilterChange = (newFilter: 'all' | 'unread') => {
-    setFilter(newFilter);
+  const handleCategoryChange = (newCategory: CategoryType) => {
+    setCategory(newCategory);
     setCurrentPage(1);
   };
 
-  const renderNotificationItem = ({ item }: { item: NotificationData }) => {
+  const getNotificationIcon = (type: string, iconName?: string) => {
+    if (iconName && iconName !== 'notifications') {
+      return iconName as keyof typeof Feather.glyphMap;
+    }
+
+    switch (type) {
+      case 'package_created':
+      case 'package_rejected':
+      case 'package_expired':
+      case 'package_delivered':
+      case 'package_collected':
+      case 'package_scanned':
+        return 'package';
+      case 'package_submitted':
+        return 'send';
+      case 'payment_received':
+      case 'payment_reminder':
+        return 'credit-card';
+      case 'final_warning':
+      case 'resubmission_available':
+        return 'alert-triangle';
+      case 'delivery':
+        return 'check-circle';
+      case 'assignment':
+      case 'task':
+        return 'clipboard';
+      case 'alert':
+        return 'alert-circle';
+      case 'system':
+      case 'announcement':
+        return 'info';
+      default:
+        return 'bell';
+    }
+  };
+
+  const getNotificationColor = (type: string, read: boolean) => {
+    if (read) return '#8E8E93';
+
+    switch (type) {
+      case 'package_delivered':
+      case 'package_collected':
+      case 'delivery':
+        return '#34C759';
+      case 'package_rejected':
+      case 'package_expired':
+      case 'alert':
+        return '#FF3B30';
+      case 'final_warning':
+      case 'resubmission_available':
+        return '#FF9800';
+      case 'payment_received':
+      case 'payment_reminder':
+        return '#7B3F98';
+      case 'assignment':
+      case 'task':
+        return '#FF9500';
+      case 'package_scanned':
+        return '#007AFF';
+      case 'system':
+      case 'announcement':
+        return '#007AFF';
+      default:
+        return '#8b5cf6';
+    }
+  };
+
+  const formatTime = (timeString: string) => {
+    try {
+      const date = new Date(timeString);
+      const now = new Date();
+      const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
+
+      if (diffInHours < 1) {
+        const diffInMinutes = Math.floor(diffInHours * 60);
+        return diffInMinutes < 1 ? 'Just now' : `${diffInMinutes}m ago`;
+      } else if (diffInHours < 24) {
+        return `${Math.floor(diffInHours)}h ago`;
+      } else {
+        const diffInDays = Math.floor(diffInHours / 24);
+        if (diffInDays < 7) return `${diffInDays}d ago`;
+        return date.toLocaleDateString();
+      }
+    } catch {
+      return timeString;
+    }
+  };
+
+  const renderNotificationItem = ({ item }: { item: Notification }) => {
     if (!item || typeof item.id === 'undefined') {
       return null;
     }
@@ -443,12 +462,14 @@ export default function AgentNotificationsScreen() {
     const title = item.title || 'No Title';
     const message = item.message || 'No Message';
     const isRead = item.read;
+    const icon = getNotificationIcon(item.notification_type, item.icon);
+    const color = getNotificationColor(item.notification_type, isRead);
 
     return (
       <TouchableOpacity
         style={[
-          styles.notificationCard,
-          !isRead && styles.unreadCard,
+          styles.notificationItem,
+          !isRead && styles.notificationItemUnread,
           item.expired && styles.expiredCard,
         ]}
         onPress={() => handleNotificationPress(item)}
@@ -456,32 +477,26 @@ export default function AgentNotificationsScreen() {
       >
         <View style={styles.notificationContent}>
           <View style={styles.iconContainer}>
-            <View
-              style={[
-                styles.iconBackground,
-                { backgroundColor: getNotificationColor(item.notification_type, isRead) + '40' }
-              ]}
-            >
-              <Feather
-                name={getNotificationIcon(item.notification_type, item.icon)}
-                size={20}
-                color={getNotificationColor(item.notification_type, isRead)}
-              />
+            <View style={[styles.iconBackground, { backgroundColor: color + '20' }]}>
+              <Feather name={icon} size={20} color={color} />
             </View>
-            {!isRead && <View style={styles.unreadIndicator} />}
+            {!isRead && <View style={styles.unreadDot} />}
           </View>
 
           <View style={styles.contentContainer}>
-            <Text style={[styles.title, !isRead && styles.unreadTitle]}>
-              {title}
-            </Text>
-            <Text style={[styles.message, !isRead && styles.unreadMessage]}>
+            <View style={styles.notificationHeader}>
+              <Text style={[styles.notificationTitle, !isRead && styles.unreadTitle]}>
+                {title}
+              </Text>
+            </View>
+            
+            <Text style={[styles.notificationMessage, !isRead && styles.unreadMessage]} numberOfLines={2}>
               {message}
             </Text>
             
             {item.package && (
               <View style={styles.packageInfo}>
-                <Feather name="package" size={12} color="#999" />
+                <Feather name="package" size={12} color="#7B3F98" />
                 <Text style={styles.packageCode}>{item.package.code}</Text>
                 <View style={styles.packageStateBadge}>
                   <Text style={styles.packageStateText}>{item.package.state_display}</Text>
@@ -499,8 +514,13 @@ export default function AgentNotificationsScreen() {
                 </View>
               )}
               {item.priority === 'urgent' && (
-                <View style={[styles.priorityBadge, { backgroundColor: 'rgba(239, 68, 68, 0.3)' }]}>
-                  <Text style={[styles.priorityText, { color: '#ef4444' }]}>Urgent</Text>
+                <View style={[styles.priorityBadge, { backgroundColor: '#FF3B3020' }]}>
+                  <Text style={[styles.priorityText, { color: '#FF3B30' }]}>Urgent</Text>
+                </View>
+              )}
+              {item.expired && (
+                <View style={styles.expiredBadge}>
+                  <Text style={styles.expiredText}>Expired</Text>
                 </View>
               )}
             </View>
@@ -513,17 +533,28 @@ export default function AgentNotificationsScreen() {
   const renderEmptyState = () => (
     <View style={styles.emptyContainer}>
       <View style={styles.emptyIconContainer}>
-        <Feather name="bell-off" size={48} color="#FF6B35" />
+        <Feather name="bell-off" size={48} color="#8E8E93" />
       </View>
-      <Text style={styles.emptyTitle}>
-        {filter === 'unread' ? 'No Unread Notifications' : 'No Notifications'}
-      </Text>
+      <Text style={styles.emptyTitle}>No Notifications</Text>
       <Text style={styles.emptySubtitle}>
-        {filter === 'unread' 
-          ? 'All caught up! No new notifications to show.'
-          : 'You\'ll see your package notifications here.'
+        {category === 'all' 
+          ? 'You\'ll see your notifications here when you receive them.'
+          : `No ${category} notifications at this time.`
         }
       </Text>
+    </View>
+  );
+
+  const renderErrorState = () => (
+    <View style={styles.emptyContainer}>
+      <View style={styles.emptyIconContainer}>
+        <Feather name="alert-circle" size={48} color="#FF3B30" />
+      </View>
+      <Text style={styles.emptyTitle}>Unable to Load Notifications</Text>
+      <Text style={styles.emptySubtitle}>{error}</Text>
+      <TouchableOpacity style={styles.retryButton} onPress={() => fetchNotifications(1, true)}>
+        <Text style={styles.retryButtonText}>Try Again</Text>
+      </TouchableOpacity>
     </View>
   );
 
@@ -532,7 +563,7 @@ export default function AgentNotificationsScreen() {
     
     return (
       <View style={styles.loadingFooter}>
-        <ActivityIndicator size="small" color="#FF6B35" />
+        <ActivityIndicator size="small" color="#7B3F98" />
         <Text style={styles.loadingText}>Loading more...</Text>
       </View>
     );
@@ -543,7 +574,7 @@ export default function AgentNotificationsScreen() {
       style={[
         styles.toast,
         {
-          backgroundColor: toastType === 'success' ? '#4CAF50' : '#ef4444',
+          backgroundColor: toastType === 'success' ? '#34C759' : '#FF3B30',
           transform: [{ translateY: toastAnim }],
         },
       ]}
@@ -562,66 +593,108 @@ export default function AgentNotificationsScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
-        colors={['#FF6B35', '#F7931E']}
+        colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
         start={{ x: 0, y: 0 }}
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <Text style={styles.headerTitle}>Notifications</Text>
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
-          <Feather name="x" size={24} color="#fff" />
-        </TouchableOpacity>
+        <View style={styles.headerContent}>
+          <TouchableOpacity 
+            onPress={() => router.back()}
+            style={styles.backButton}
+          >
+            <Feather name="arrow-left" size={24} color="#fff" />
+          </TouchableOpacity>
+          
+          <View style={styles.headerTitleContainer}>
+            <Text style={styles.headerTitle}>Notifications</Text>
+            {unreadCount > 0 && (
+              <View style={styles.unreadBadge}>
+                <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+              </View>
+            )}
+          </View>
+          
+          <View style={styles.backButton} />
+        </View>
       </LinearGradient>
 
-      <View style={styles.filterContainer}>
-        <View style={styles.filterButtons}>
-          <TouchableOpacity
-            style={[styles.filterButton, filter === 'all' && styles.activeFilterButton]}
-            onPress={() => handleFilterChange('all')}
-          >
-            <Text style={[styles.filterButtonText, filter === 'all' && styles.activeFilterButtonText]}>
-              All
-            </Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[styles.filterButton, filter === 'unread' && styles.activeFilterButton]}
-            onPress={() => handleFilterChange('unread')}
-          >
-            <Text style={[styles.filterButtonText, filter === 'unread' && styles.activeFilterButtonText]}>
-              Unread ({unreadCount})
-            </Text>
-          </TouchableOpacity>
+      <View style={styles.categorySection}>
+        <View style={styles.categoryContainer}>
+          <View style={styles.categoryTabs}>
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'all' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('all')}
+            >
+              <Feather 
+                name="grid" 
+                size={14} 
+                color={category === 'all' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'all' && styles.activeCategoryTabText]}>
+                All
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'packages' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('packages')}
+            >
+              <Feather 
+                name="package" 
+                size={14} 
+                color={category === 'packages' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'packages' && styles.activeCategoryTabText]}>
+                Packages
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'assignments' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('assignments')}
+            >
+              <Feather 
+                name="clipboard" 
+                size={14} 
+                color={category === 'assignments' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'assignments' && styles.activeCategoryTabText]}>
+                Tasks
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[styles.categoryTab, category === 'system' && styles.activeCategoryTab]}
+              onPress={() => handleCategoryChange('system')}
+            >
+              <Feather 
+                name="info" 
+                size={14} 
+                color={category === 'system' ? '#fff' : '#B8B8B8'} 
+              />
+              <Text style={[styles.categoryTabText, category === 'system' && styles.activeCategoryTabText]}>
+                System
+              </Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        {unreadCount > 0 && (
-          <TouchableOpacity style={styles.markAllButton} onPress={markAllAsRead}>
-            <Feather name="check-square" size={16} color="#FF6B35" />
-            <Text style={styles.markAllButtonText}>Mark All Read</Text>
-          </TouchableOpacity>
+        {isConnected && (
+          <View style={styles.connectionStatus}>
+            <Feather name="wifi" size={12} color="#34C759" />
+            <Text style={styles.connectionText}>Live</Text>
+          </View>
         )}
       </View>
 
-      {isConnected && (
-        <View style={styles.connectionStatus}>
-          <Feather name="wifi" size={12} color="#4CAF50" />
-          <Text style={styles.connectionText}>Live updates enabled</Text>
-        </View>
-      )}
-
       {loading && notifications.length === 0 ? (
         <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color="#FF6B35" />
+          <ActivityIndicator size="large" color="#7B3F98" />
           <Text style={styles.loadingText}>Loading notifications...</Text>
         </View>
       ) : error ? (
-        <View style={styles.emptyContainer}>
-          <Feather name="alert-circle" size={48} color="#ef4444" />
-          <Text style={styles.emptyTitle}>Unable to Load</Text>
-          <Text style={styles.emptySubtitle}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => fetchNotifications(1, true)}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
+        renderErrorState()
       ) : (
         <FlatList
           data={notifications}
@@ -637,13 +710,15 @@ export default function AgentNotificationsScreen() {
             <RefreshControl
               refreshing={refreshing}
               onRefresh={handleRefresh}
-              colors={['#FF6B35']}
-              tintColor="#FF6B35"
+              colors={['#7B3F98']}
+              tintColor="#7B3F98"
             />
           }
           onEndReached={handleLoadMore}
           onEndReachedThreshold={0.3}
           showsVerticalScrollIndicator={false}
+          removeClippedSubviews={false}
+          windowSize={10}
         />
       )}
 
@@ -656,69 +731,84 @@ export default function AgentNotificationsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#111B21',
   },
   header: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingTop: 28,
+    paddingTop: Platform.OS === 'ios' ? 0 : 28,
     paddingBottom: 16,
     paddingHorizontal: 16,
   },
-  headerTitle: {
-    color: '#fff',
-    fontSize: 24,
-    fontWeight: 'bold',
+  headerContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   backButton: {
     padding: 8,
   },
-  filterContainer: {
+  headerTitleContainer: {
+    flex: 1,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  unreadBadge: {
+    backgroundColor: '#FF3B30',
+    borderRadius: 12,
+    minWidth: 24,
+    height: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+  },
+  unreadBadgeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  categorySection: {
+    backgroundColor: '#1F2C34',
+    borderBottomWidth: 1,
+    borderBottomColor: '#2d3748',
+  },
+  categoryContainer: {
     paddingHorizontal: 16,
     paddingVertical: 12,
-    backgroundColor: '#fff',
   },
-  filterButtons: {
+  categoryTabs: {
     flexDirection: 'row',
-    backgroundColor: 'rgba(255, 107, 53, 0.1)',
-    borderRadius: 8,
-    padding: 2,
+    gap: 8,
   },
-  filterButton: {
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 6,
-  },
-  activeFilterButton: {
-    backgroundColor: '#FF6B35',
-  },
-  filterButtonText: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#666',
-  },
-  activeFilterButtonText: {
-    color: 'white',
-  },
-  markAllButton: {
+  categoryTab: {
+    flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    backgroundColor: 'rgba(255, 107, 53, 0.1)',
-    borderRadius: 6,
+    justifyContent: 'center',
+    gap: 4,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    backgroundColor: '#2d3748',
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255, 107, 53, 0.3)',
+    borderColor: '#374151',
   },
-  markAllButtonText: {
-    fontSize: 12,
-    fontWeight: '500',
-    color: '#FF6B35',
+  activeCategoryTab: {
+    backgroundColor: '#7B3F98',
+    borderColor: '#7B3F98',
+  },
+  categoryTabText: {
+    fontSize: 11,
+    fontWeight: '600',
+    color: '#B8B8B8',
+  },
+  activeCategoryTabText: {
+    color: '#fff',
   },
   connectionStatus: {
     flexDirection: 'row',
@@ -726,19 +816,12 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 16,
     paddingVertical: 8,
-    backgroundColor: 'rgba(76, 175, 80, 0.1)',
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
   },
   connectionText: {
-    fontSize: 12,
-    color: '#4CAF50',
-  },
-  listContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    paddingBottom: 20,
-  },
-  emptyListContainer: {
-    flex: 1,
+    fontSize: 11,
+    color: '#34C759',
+    fontWeight: '500',
   },
   loadingContainer: {
     flex: 1,
@@ -748,7 +831,7 @@ const styles = StyleSheet.create({
   },
   loadingText: {
     fontSize: 14,
-    color: '#666',
+    color: '#B8B8B8',
   },
   loadingFooter: {
     flexDirection: 'row',
@@ -757,18 +840,26 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 16,
   },
-  notificationCard: {
-    backgroundColor: '#fff',
+  listContainer: {
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 20,
+  },
+  emptyListContainer: {
+    flex: 1,
+  },
+  notificationItem: {
+    backgroundColor: '#1F2C34',
     borderRadius: 12,
     marginBottom: 12,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: '#e0e0e0',
+    borderColor: '#2d3748',
   },
-  unreadCard: {
+  notificationItemUnread: {
     borderLeftWidth: 4,
-    borderLeftColor: '#FF6B35',
-    backgroundColor: 'rgba(255, 107, 53, 0.05)',
+    borderLeftColor: '#7B3F98',
+    backgroundColor: '#252F3A',
   },
   expiredCard: {
     opacity: 0.6,
@@ -782,41 +873,46 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   iconBackground: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     justifyContent: 'center',
     alignItems: 'center',
   },
-  unreadIndicator: {
+  unreadDot: {
     position: 'absolute',
     top: -2,
     right: -2,
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#7B3F98',
   },
   contentContainer: {
     flex: 1,
   },
-  title: {
-    fontSize: 16,
-    fontWeight: '600',
-    color: '#666',
+  notificationHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 4,
   },
-  unreadTitle: {
-    color: '#000',
+  notificationTitle: {
+    flex: 1,
+    color: '#e5e7eb',
+    fontSize: 16,
+    fontWeight: '600',
   },
-  message: {
+  unreadTitle: {
+    color: '#fff',
+  },
+  notificationMessage: {
+    color: '#B8B8B8',
     fontSize: 14,
-    color: '#999',
     lineHeight: 20,
     marginBottom: 8,
   },
   unreadMessage: {
-    color: '#666',
+    color: '#D0D0D0',
   },
   packageInfo: {
     flexDirection: 'row',
@@ -827,10 +923,10 @@ const styles = StyleSheet.create({
   packageCode: {
     fontSize: 12,
     fontWeight: '500',
-    color: '#666',
+    color: '#7B3F98',
   },
   packageStateBadge: {
-    backgroundColor: 'rgba(255, 107, 53, 0.2)',
+    backgroundColor: 'rgba(123, 63, 152, 0.2)',
     paddingHorizontal: 6,
     paddingVertical: 2,
     borderRadius: 4,
@@ -838,7 +934,7 @@ const styles = StyleSheet.create({
   packageStateText: {
     fontSize: 10,
     fontWeight: '500',
-    color: '#FF6B35',
+    color: '#7B3F98',
   },
   metaContainer: {
     flexDirection: 'row',
@@ -847,7 +943,7 @@ const styles = StyleSheet.create({
   },
   timeText: {
     fontSize: 12,
-    color: '#999',
+    color: '#8E8E93',
   },
   priorityBadge: {
     backgroundColor: 'rgba(255, 152, 0, 0.2)',
@@ -860,17 +956,29 @@ const styles = StyleSheet.create({
     fontWeight: '500',
     color: '#FF9800',
   },
+  expiredBadge: {
+    backgroundColor: 'rgba(142, 142, 147, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  expiredText: {
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#8E8E93',
+  },
   emptyContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 40,
+    paddingVertical: 80,
   },
   emptyIconContainer: {
     width: 80,
     height: 80,
     borderRadius: 40,
-    backgroundColor: 'rgba(255, 107, 53, 0.1)',
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 16,
@@ -878,13 +986,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#000',
+    color: '#fff',
     marginBottom: 8,
     textAlign: 'center',
   },
   emptySubtitle: {
     fontSize: 14,
-    color: '#666',
+    color: '#B8B8B8',
     textAlign: 'center',
     lineHeight: 20,
   },
@@ -892,17 +1000,17 @@ const styles = StyleSheet.create({
     marginTop: 16,
     paddingHorizontal: 24,
     paddingVertical: 12,
-    backgroundColor: '#FF6B35',
+    backgroundColor: '#7B3F98',
     borderRadius: 8,
   },
   retryButtonText: {
     fontSize: 14,
     fontWeight: '600',
-    color: 'white',
+    color: '#fff',
   },
   toast: {
     position: 'absolute',
-    top: 0,
+    top: Platform.OS === 'ios' ? 50 : 20,
     left: 16,
     right: 16,
     flexDirection: 'row',
@@ -919,7 +1027,7 @@ const styles = StyleSheet.create({
     zIndex: 1000,
   },
   toastText: {
-    color: 'white',
+    color: '#fff',
     fontSize: 14,
     fontWeight: '500',
   },
@@ -962,14 +1070,13 @@ const modalStyles = StyleSheet.create({
   },
   message: {
     fontSize: 15,
-    color: '#fff',
+    color: '#c4b5fd',
     textAlign: 'center',
     lineHeight: 22,
     marginBottom: 24,
-    opacity: 0.9,
   },
   button: {
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
+    backgroundColor: '#8b5cf6',
     paddingVertical: 12,
     paddingHorizontal: 24,
     borderRadius: 8,
