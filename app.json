@@ -2,7 +2,7 @@
   "expo": {
     "name": "gltapp2",
     "slug": "gltapp2",
-    "version": "1.8.3",
+    "version": "1.8.4",
     "orientation": "portrait",
     "icon": "./assets/images/Glt_icon.png",
     "scheme": "https",
@@ -11,7 +11,7 @@
     "updates": {
       "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
     },
-    "runtimeVersion": "1.8.3",
+    "runtimeVersion": "1.8.4",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lvl0-x.gltapp2",
