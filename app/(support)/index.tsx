@@ -188,7 +188,7 @@ export default function SupportDashboard() {
       isSyncing.current = true;
       console.log('🔄 Background sync triggered');
       
-      const response = await api.get('/api/v1/support/tickets', {
+      const response = await api.get('/api/v1/support/my_tickets', {
         params: {
           limit: 50,
           page: 1,
