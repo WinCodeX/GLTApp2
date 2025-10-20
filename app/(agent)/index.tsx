@@ -10,11 +10,13 @@ import {
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { AgentBottomTabs } from '../../components/agent/AgentBottomTabs';
 import { useUser } from '../../context/UserContext';
 
-export default function AgentHomeScreen() {
+export default function StaffHomeScreen() {
   const { user } = useUser();
+  const router = useRouter();
 
   const stats = [
     { label: 'Active Deliveries', value: '12', icon: 'package' },
@@ -28,6 +30,10 @@ export default function AgentHomeScreen() {
     { id: 3, title: 'Package in transit', time: '1 hour ago', status: 'active' },
   ];
 
+  const handleNotificationPress = () => {
+    router.push('/(staff)/notifications');
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -40,10 +46,13 @@ export default function AgentHomeScreen() {
         <View>
           <Text style={styles.headerGreeting}>Welcome back,</Text>
           <Text style={styles.headerName}>
-            {user?.display_name || user?.first_name || 'Agent'}
+            {user?.display_name || user?.first_name || 'Staff'}
           </Text>
         </View>
-        <TouchableOpacity style={styles.notificationButton}>
+        <TouchableOpacity 
+          style={styles.notificationButton}
+          onPress={handleNotificationPress}
+        >
           <Feather name="bell" size={24} color="#fff" />
           <View style={styles.notificationBadge}>
             <Text style={styles.notificationBadgeText}>3</Text>
