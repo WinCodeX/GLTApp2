@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - FIXED: All improvements implemented
+// app/(support)/index.tsx - Updated for agent-specific tickets
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -85,13 +85,12 @@ interface AgentStats {
   satisfaction_rating: number;
 }
 
+// Updated filter options - removed 'assigned' and 'closed'
 const STATUS_FILTERS = [
-  { key: 'in_progress', label: 'Active', icon: 'activity' },
+  { key: 'active', label: 'Active', icon: 'activity' },
   { key: 'pending', label: 'Pending', icon: 'clock' },
   { key: 'all', label: 'All', icon: 'list' },
-  { key: 'assigned', label: 'Assigned', icon: 'user' },
   { key: 'resolved', label: 'Resolved', icon: 'check-circle' },
-  { key: 'closed', label: 'Closed', icon: 'x-circle' },
 ];
 
 const BACKGROUND_SYNC_INTERVAL = 30000; // 30 seconds
@@ -108,7 +107,7 @@ export default function SupportDashboard() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeFilter, setActiveFilter] = useState('in_progress');
+  const [activeFilter, setActiveFilter] = useState('active');
   const [showStats, setShowStats] = useState(false);
   
   const [isConnected, setIsConnected] = useState(false);
@@ -125,6 +124,7 @@ export default function SupportDashboard() {
   const isSyncing = useRef<boolean>(false);
   const processingTickets = useRef<Set<string>>(new Set());
   const syncFailureCount = useRef<number>(0);
+  const flatListRef = useRef<FlatList>(null);
 
   // ============= APP STATE MANAGEMENT =============
   
@@ -503,8 +503,12 @@ export default function SupportDashboard() {
           ...data.ticket,
           id: normalizeId(data.ticket.id),
         };
-        setTickets(prev => [normalizedTicket, ...prev]);
-        loadDashboardData();
+        
+        // Only add if it's assigned to the current agent
+        if (normalizedTicket.assigned_agent?.id === normalizeId(user?.id)) {
+          setTickets(prev => [normalizedTicket, ...prev]);
+          loadDashboardData();
+        }
       }
     });
     actionCableSubscriptions.current.push(unsubNewTicket);
@@ -651,11 +655,14 @@ export default function SupportDashboard() {
       console.log('👤 Agent assignment update:', data);
       if (data.ticket_id && data.agent) {
         const normalizedTicketId = normalizeId(data.ticket_id);
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === normalizedTicketId 
-            ? { ...ticket, assigned_agent: data.agent, status: 'assigned' }
-            : ticket
-        ));
+        
+        // If assigned to current user, reload tickets to include it
+        if (normalizeId(data.agent.id) === normalizeId(user?.id)) {
+          loadTickets();
+        } else {
+          // If assigned to someone else, remove it from the list
+          setTickets(prev => prev.filter(ticket => ticket.id !== normalizedTicketId));
+        }
       }
     });
     actionCableSubscriptions.current.push(unsubAgentAssignment);
@@ -710,14 +717,25 @@ export default function SupportDashboard() {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      const endpoint = '/api/v1/support/tickets';
+      // Changed endpoint to my_tickets
+      const endpoint = '/api/v1/support/my_tickets';
       const params: any = {
         limit: 50,
         page: 1,
       };
 
+      // Handle filter mapping
       if (activeFilter !== 'all') {
-        params.status = activeFilter;
+        if (activeFilter === 'active') {
+          // Active means in_progress or assigned
+          params.status = 'active';
+        } else if (activeFilter === 'resolved') {
+          // Resolved includes both resolved and closed
+          params.include_closed = true;
+          params.status = 'resolved';
+        } else {
+          params.status = activeFilter;
+        }
       }
 
       if (searchQuery.trim()) {
@@ -749,7 +767,7 @@ export default function SupportDashboard() {
       }
     } catch (error) {
       console.error('Failed to load support tickets:', error);
-      Alert.alert('Error', 'Failed to load support tickets');
+      Alert.alert('Error', 'Failed to load your support tickets');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -782,37 +800,6 @@ export default function SupportDashboard() {
 
   // ============= ACTIONS =============
   
-  const handleQuickAssign = async (ticketId: string) => {
-    try {
-      const normalizedTicketId = normalizeId(ticketId);
-      const response = await api.post(`/api/v1/support/tickets/${normalizedTicketId}/assign`, {
-        agent_id: normalizeId(user?.id)
-      });
-      
-      if (response.data.success) {
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === normalizedTicketId 
-            ? { 
-                ...ticket, 
-                assigned_agent: { 
-                  id: normalizeId(user?.id) || '', 
-                  name: user?.display_name || user?.first_name || 'Me',
-                  email: user?.email || ''
-                },
-                status: 'assigned' as const
-              }
-            : ticket
-        ));
-        
-        Alert.alert('Success', 'Ticket assigned to you');
-      }
-    } catch (error) {
-      console.error('Failed to assign ticket:', error);
-      Alert.alert('Error', 'Failed to assign ticket');
-      loadTickets();
-    }
-  };
-
   const handleTicketRead = useCallback(async (ticketId: string) => {
     try {
       const normalizedTicketId = normalizeId(ticketId);
@@ -834,13 +821,19 @@ export default function SupportDashboard() {
 
   // ============= COMPUTED VALUES =============
   
-  const statusCounts = {
-    in_progress: tickets.filter(t => t.status === 'in_progress').length,
-    pending: tickets.filter(t => t.status === 'pending').length,
-    all: tickets.length,
-    assigned: tickets.filter(t => t.status === 'assigned').length,
-    resolved: tickets.filter(t => t.status === 'resolved').length,
-    closed: tickets.filter(t => t.status === 'closed').length,
+  const getFilteredTicketCount = (filterKey: string) => {
+    switch (filterKey) {
+      case 'active':
+        return tickets.filter(t => t.status === 'in_progress' || t.status === 'assigned').length;
+      case 'pending':
+        return tickets.filter(t => t.status === 'pending').length;
+      case 'resolved':
+        return tickets.filter(t => t.status === 'resolved' || t.status === 'closed').length;
+      case 'all':
+        return tickets.length;
+      default:
+        return 0;
+    }
   };
 
   // ============= RENDER FUNCTIONS =============
@@ -851,7 +844,7 @@ export default function SupportDashboard() {
     return (
       <View style={styles.statsContainer}>
         <View style={styles.statsHeader}>
-          <Text style={styles.statsTitle}>Live Dashboard</Text>
+          <Text style={styles.statsTitle}>My Performance</Text>
           {isConnected && (
             <View style={styles.liveIndicator}>
               <View style={styles.liveDot} />
@@ -861,37 +854,25 @@ export default function SupportDashboard() {
         </View>
         
         <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{dashboardStats.total_tickets || 0}</Text>
-            <Text style={styles.statLabel}>Total Tickets</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{dashboardStats.pending_tickets || 0}</Text>
-            <Text style={styles.statLabel}>Pending</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{dashboardStats.in_progress_tickets || 0}</Text>
-            <Text style={styles.statLabel}>In Progress</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{dashboardStats.resolved_today || 0}</Text>
-            <Text style={styles.statLabel}>Resolved Today</Text>
-          </View>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{dashboardStats.avg_response_time || '0m'}</Text>
-            <Text style={styles.statLabel}>Avg Response</Text>
-          </View>
           {agentStats && (
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{agentStats.active_tickets || 0}</Text>
-              <Text style={styles.statLabel}>My Active</Text>
-            </View>
-          )}
-          {dashboardStats.satisfaction_score !== undefined && (
-            <View style={styles.statCard}>
-              <Text style={styles.statNumber}>{(dashboardStats.satisfaction_score || 0).toFixed(1)}</Text>
-              <Text style={styles.statLabel}>Satisfaction</Text>
-            </View>
+            <>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{agentStats.active_tickets || 0}</Text>
+                <Text style={styles.statLabel}>My Active</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{agentStats.tickets_resolved_today || 0}</Text>
+                <Text style={styles.statLabel}>Resolved Today</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{agentStats.avg_resolution_time || '0m'}</Text>
+                <Text style={styles.statLabel}>Avg Resolution</Text>
+              </View>
+              <View style={styles.statCard}>
+                <Text style={styles.statNumber}>{(agentStats.satisfaction_rating || 0).toFixed(1)}</Text>
+                <Text style={styles.statLabel}>My Rating</Text>
+              </View>
+            </>
           )}
         </ScrollView>
       </View>
@@ -960,31 +941,11 @@ export default function SupportDashboard() {
                 </View>
               </View>
               <View style={styles.ticketRightMeta}>
-                {!item.assigned_agent && item.status === 'pending' && (
-                  <TouchableOpacity
-                    style={styles.quickAssignButton}
-                    onPress={(e) => {
-                      e.stopPropagation();
-                      handleQuickAssign(item.id);
-                    }}
-                  >
-                    <Feather name="user-plus" size={12} color="#7B3F98" />
-                    <Text style={styles.quickAssignText}>Assign</Text>
-                  </TouchableOpacity>
-                )}
                 <View style={[styles.statusBadge, { backgroundColor: getStatusColor(item.status) }]}>
                   <Text style={styles.statusText}>{item.status.replace('_', ' ').toUpperCase()}</Text>
                 </View>
               </View>
             </View>
-            {item.assigned_agent && (
-              <View style={styles.assignedAgentRow}>
-                <Feather name="user" size={12} color="#8E8E93" />
-                <Text style={styles.assignedAgentText}>
-                  Assigned to {item.assigned_agent.name}
-                </Text>
-              </View>
-            )}
           </View>
         </View>
       </View>
@@ -1001,7 +962,7 @@ export default function SupportDashboard() {
       >
         <View style={styles.headerContent}>
           <View style={styles.headerLeft}>
-            <Text style={styles.headerTitle}>GLT Support</Text>
+            <Text style={styles.headerTitle}>My Tickets</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
                 Welcome back, {user?.first_name || 'Agent'}
@@ -1014,7 +975,7 @@ export default function SupportDashboard() {
               )}
             </View>
             <Text style={styles.headerDescription}>
-              {dashboardStats ? `${dashboardStats.pending_tickets || 0} pending • ${dashboardStats.total_tickets || 0} total tickets` : 'Loading dashboard...'}
+              {agentStats ? `${agentStats.active_tickets || 0} active tickets assigned to you` : 'Loading your tickets...'}
             </Text>
           </View>
           <View style={styles.headerRight}>
@@ -1052,7 +1013,7 @@ export default function SupportDashboard() {
           <Feather name="search" size={20} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search tickets, customers, or ticket IDs..."
+            placeholder="Search your tickets..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1068,13 +1029,14 @@ export default function SupportDashboard() {
       </View>
 
       <View style={styles.filtersContainer}>
-        <FlatList
-          horizontal
+        <ScrollView 
+          horizontal 
           showsHorizontalScrollIndicator={false}
-          data={STATUS_FILTERS}
-          keyExtractor={(item) => item.key}
-          renderItem={({ item }) => (
+          contentContainerStyle={{ paddingRight: 16 }}
+        >
+          {STATUS_FILTERS.map((item) => (
             <TouchableOpacity
+              key={item.key}
               style={[
                 styles.filterPill,
                 activeFilter === item.key && styles.filterPillActive
@@ -1094,29 +1056,30 @@ export default function SupportDashboard() {
               >
                 {item.label}
               </Text>
-              {statusCounts[item.key as keyof typeof statusCounts] > 0 && (
+              {getFilteredTicketCount(item.key) > 0 && (
                 <View style={[
                   styles.filterPillBadge,
                   isConnected && styles.filterPillBadgeLive
                 ]}>
                   <Text style={styles.filterPillBadgeText}>
-                    {statusCounts[item.key as keyof typeof statusCounts]}
+                    {getFilteredTicketCount(item.key)}
                   </Text>
                 </View>
               )}
             </TouchableOpacity>
-          )}
-        />
+          ))}
+        </ScrollView>
       </View>
 
       <View style={styles.listContainer}>
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7B3F98" />
-            <Text style={styles.loadingText}>Loading support tickets...</Text>
+            <Text style={styles.loadingText}>Loading your tickets...</Text>
           </View>
         ) : (
           <FlatList
+            ref={flatListRef}
             data={tickets}
             keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={renderTicketItem}
@@ -1136,13 +1099,15 @@ export default function SupportDashboard() {
                 <MaterialIcons name="support-agent" size={64} color="#444" />
                 <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
-                  {activeFilter === 'in_progress' 
-                    ? 'No active support tickets'
+                  {activeFilter === 'active' 
+                    ? 'You have no active tickets'
                     : activeFilter === 'pending'
-                    ? 'No pending support tickets'
+                    ? 'You have no pending tickets'
+                    : activeFilter === 'resolved'
+                    ? 'You have no resolved tickets'
                     : searchQuery
                     ? `No tickets match "${searchQuery}"`
-                    : `No ${activeFilter} tickets`
+                    : 'You have no assigned tickets'
                   }
                 </Text>
                 {searchQuery && (
@@ -1155,7 +1120,10 @@ export default function SupportDashboard() {
                 )}
               </View>
             )}
-            contentContainerStyle={tickets.length === 0 ? { flex: 1 } : undefined}
+            contentContainerStyle={tickets.length === 0 ? styles.emptyListContent : undefined}
+            scrollEnabled={true}
+            nestedScrollEnabled={true}
+            removeClippedSubviews={false}
           />
         )}
       </View>
@@ -1211,77 +1179,375 @@ const getPriorityColor = (priority: string) => {
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#111B21' },
-  header: { paddingTop: 28, paddingBottom: 20, paddingHorizontal: 16 },
-  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  headerLeft: { flex: 1 },
-  headerRight: { flexDirection: 'row', alignItems: 'center' },
-  headerTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
-  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
-  headerSubtitle: { color: '#E1BEE7', fontSize: 16, fontWeight: '500' },
-  connectionStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 8, backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
-  connectedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
-  connectedText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
-  headerDescription: { color: '#C1A7C9', fontSize: 14, opacity: 0.9 },
-  statsToggleButton: { padding: 8, marginRight: 8 },
-  headerAvatar: { width: 50, height: 50, borderRadius: 25 },
-  statsContainer: { backgroundColor: 'rgba(123, 63, 152, 0.1)', paddingVertical: 12 },
-  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8 },
-  statsTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
-  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
-  liveText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
-  statCard: { backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 12, marginHorizontal: 8, borderRadius: 12, alignItems: 'center', minWidth: 80 },
-  statNumber: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
-  statLabel: { color: '#E1BEE7', fontSize: 12, marginTop: 4 },
-  connectionBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(249, 115, 22, 0.1)', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(249, 115, 22, 0.2)' },
-  connectionBannerText: { color: '#f97316', fontSize: 14, marginLeft: 8 },
-  searchContainer: { padding: 16 },
-  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
-  searchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 8 },
-  filtersContainer: { paddingHorizontal: 16, marginBottom: 8 },
-  filterPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
-  filterPillActive: { backgroundColor: '#7B3F98' },
-  filterPillText: { color: '#8E8E93', fontSize: 14, fontWeight: '500', marginLeft: 6 },
-  filterPillTextActive: { color: '#fff' },
-  filterPillBadge: { backgroundColor: '#E1BEE7', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
-  filterPillBadgeLive: { backgroundColor: '#10b981' },
-  filterPillBadgeText: { color: '#7B3F98', fontSize: 12, fontWeight: '600' },
-  listContainer: { flex: 1 },
-  ticketItem: { backgroundColor: '#1F2C34', marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
-  ticketContent: { padding: 12 },
-  ticketHeader: { flexDirection: 'row', alignItems: 'flex-start' },
-  customerAvatar: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
-  ticketInfo: { flex: 1 },
-  ticketTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  customerName: { color: '#fff', fontSize: 16, fontWeight: '600', flex: 1 },
-  ticketMeta: { flexDirection: 'row', alignItems: 'center' },
-  ticketTime: { color: '#8E8E93', fontSize: 12 },
-  realtimeIndicator: { marginLeft: 6 },
-  realtimeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
-  ticketSubtitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
-  ticketPreview: { color: '#B8B8B8', fontSize: 14, flex: 1 },
-  typingIndicator: { color: '#4FC3F7', fontSize: 14, flex: 1, fontStyle: 'italic' },
-  unreadBadge: { backgroundColor: '#7B3F98', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 },
-  unreadBadgeLive: { backgroundColor: '#10b981' },
-  unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
-  ticketMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
-  ticketLeftMeta: { flexDirection: 'row', alignItems: 'center' },
-  ticketRightMeta: { flexDirection: 'row', alignItems: 'center' },
-  ticketId: { color: '#8E8E93', fontSize: 12, marginRight: 8 },
-  priorityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 8 },
-  priorityText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-  quickAssignButton: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(123, 63, 152, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, marginRight: 8 },
-  quickAssignText: { color: '#7B3F98', fontSize: 10, fontWeight: '600', marginLeft: 4 },
-  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
-  statusText: { color: '#fff', fontSize: 10, fontWeight: '600' },
-  assignedAgentRow: { flexDirection: 'row', alignItems: 'center', marginTop: 4 },
-  assignedAgentText: { color: '#8E8E93', fontSize: 12, marginLeft: 4 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
-  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  emptyText: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 },
-  emptySubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
-  clearSearchButton: { backgroundColor: '#7B3F98', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, marginTop: 16 },
-  clearSearchText: { color: '#fff', fontSize: 14, fontWeight: '500' },
+  container: { 
+    flex: 1, 
+    backgroundColor: '#111B21' 
+  },
+  header: { 
+    paddingTop: 28, 
+    paddingBottom: 20, 
+    paddingHorizontal: 16 
+  },
+  headerContent: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center' 
+  },
+  headerLeft: { 
+    flex: 1 
+  },
+  headerRight: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  headerTitle: { 
+    color: '#fff', 
+    fontSize: 28, 
+    fontWeight: 'bold', 
+    marginBottom: 4 
+  },
+  headerSubtitleRow: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginBottom: 2 
+  },
+  headerSubtitle: { 
+    color: '#E1BEE7', 
+    fontSize: 16, 
+    fontWeight: '500' 
+  },
+  connectionStatus: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    marginLeft: 8, 
+    backgroundColor: 'rgba(16, 185, 129, 0.2)', 
+    paddingHorizontal: 6, 
+    paddingVertical: 2, 
+    borderRadius: 8 
+  },
+  connectedDot: { 
+    width: 6, 
+    height: 6, 
+    borderRadius: 3, 
+    backgroundColor: '#10b981', 
+    marginRight: 4 
+  },
+  connectedText: { 
+    color: '#10b981', 
+    fontSize: 10, 
+    fontWeight: '600' 
+  },
+  headerDescription: { 
+    color: '#C1A7C9', 
+    fontSize: 14, 
+    opacity: 0.9 
+  },
+  statsToggleButton: { 
+    padding: 8, 
+    marginRight: 8 
+  },
+  headerAvatar: { 
+    width: 50, 
+    height: 50, 
+    borderRadius: 25 
+  },
+  statsContainer: { 
+    backgroundColor: 'rgba(123, 63, 152, 0.1)', 
+    paddingVertical: 12 
+  },
+  statsHeader: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    paddingHorizontal: 16, 
+    marginBottom: 8 
+  },
+  statsTitle: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: '600' 
+  },
+  liveIndicator: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(16, 185, 129, 0.2)', 
+    paddingHorizontal: 8, 
+    paddingVertical: 4, 
+    borderRadius: 12 
+  },
+  liveDot: { 
+    width: 6, 
+    height: 6, 
+    borderRadius: 3, 
+    backgroundColor: '#10b981', 
+    marginRight: 4 
+  },
+  liveText: { 
+    color: '#10b981', 
+    fontSize: 10, 
+    fontWeight: '600' 
+  },
+  statCard: { 
+    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+    paddingHorizontal: 16, 
+    paddingVertical: 12, 
+    marginHorizontal: 8, 
+    borderRadius: 12, 
+    alignItems: 'center', 
+    minWidth: 80 
+  },
+  statNumber: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: 'bold' 
+  },
+  statLabel: { 
+    color: '#E1BEE7', 
+    fontSize: 12, 
+    marginTop: 4 
+  },
+  connectionBanner: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(249, 115, 22, 0.1)', 
+    paddingVertical: 8, 
+    paddingHorizontal: 16, 
+    borderBottomWidth: 1, 
+    borderBottomColor: 'rgba(249, 115, 22, 0.2)' 
+  },
+  connectionBannerText: { 
+    color: '#f97316', 
+    fontSize: 14, 
+    marginLeft: 8 
+  },
+  searchContainer: { 
+    padding: 16 
+  },
+  searchInputContainer: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: '#1F2C34', 
+    borderRadius: 10, 
+    paddingHorizontal: 12, 
+    paddingVertical: 8 
+  },
+  searchInput: { 
+    flex: 1, 
+    color: '#fff', 
+    fontSize: 16, 
+    marginLeft: 8 
+  },
+  filtersContainer: { 
+    paddingLeft: 16, 
+    marginBottom: 8 
+  },
+  filterPill: { 
+    flexDirection: 'row', 
+    alignItems: 'center', 
+    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
+    paddingHorizontal: 16, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    marginRight: 8 
+  },
+  filterPillActive: { 
+    backgroundColor: '#7B3F98' 
+  },
+  filterPillText: { 
+    color: '#8E8E93', 
+    fontSize: 14, 
+    fontWeight: '500', 
+    marginLeft: 6 
+  },
+  filterPillTextActive: { 
+    color: '#fff' 
+  },
+  filterPillBadge: { 
+    backgroundColor: '#E1BEE7', 
+    borderRadius: 10, 
+    paddingHorizontal: 6, 
+    paddingVertical: 2, 
+    marginLeft: 6 
+  },
+  filterPillBadgeLive: { 
+    backgroundColor: '#10b981' 
+  },
+  filterPillBadgeText: { 
+    color: '#7B3F98', 
+    fontSize: 12, 
+    fontWeight: '600' 
+  },
+  listContainer: { 
+    flex: 1,
+    paddingBottom: 2 
+  },
+  ticketItem: { 
+    backgroundColor: '#1F2C34', 
+    marginHorizontal: 8, 
+    marginVertical: 2, 
+    borderRadius: 8 
+  },
+  ticketContent: { 
+    padding: 12 
+  },
+  ticketHeader: { 
+    flexDirection: 'row', 
+    alignItems: 'flex-start' 
+  },
+  customerAvatar: { 
+    width: 50, 
+    height: 50, 
+    borderRadius: 25, 
+    marginRight: 12 
+  },
+  ticketInfo: { 
+    flex: 1 
+  },
+  ticketTitleRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 4 
+  },
+  customerName: { 
+    color: '#fff', 
+    fontSize: 16, 
+    fontWeight: '600', 
+    flex: 1 
+  },
+  ticketMeta: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  ticketTime: { 
+    color: '#8E8E93', 
+    fontSize: 12 
+  },
+  realtimeIndicator: { 
+    marginLeft: 6 
+  },
+  realtimeDot: { 
+    width: 6, 
+    height: 6, 
+    borderRadius: 3, 
+    backgroundColor: '#10b981' 
+  },
+  ticketSubtitleRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 6 
+  },
+  ticketPreview: { 
+    color: '#B8B8B8', 
+    fontSize: 14, 
+    flex: 1 
+  },
+  typingIndicator: { 
+    color: '#4FC3F7', 
+    fontSize: 14, 
+    flex: 1, 
+    fontStyle: 'italic' 
+  },
+  unreadBadge: { 
+    backgroundColor: '#7B3F98', 
+    borderRadius: 10, 
+    paddingHorizontal: 6, 
+    paddingVertical: 2, 
+    marginLeft: 8 
+  },
+  unreadBadgeLive: { 
+    backgroundColor: '#10b981' 
+  },
+  unreadText: { 
+    color: '#fff', 
+    fontSize: 12, 
+    fontWeight: '600' 
+  },
+  ticketMetaRow: { 
+    flexDirection: 'row', 
+    justifyContent: 'space-between', 
+    alignItems: 'center', 
+    marginBottom: 4 
+  },
+  ticketLeftMeta: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  ticketRightMeta: { 
+    flexDirection: 'row', 
+    alignItems: 'center' 
+  },
+  ticketId: { 
+    color: '#8E8E93', 
+    fontSize: 12, 
+    marginRight: 8 
+  },
+  priorityBadge: { 
+    paddingHorizontal: 6, 
+    paddingVertical: 2, 
+    borderRadius: 4, 
+    marginRight: 8 
+  },
+  priorityText: { 
+    color: '#fff', 
+    fontSize: 10, 
+    fontWeight: '600' 
+  },
+  statusBadge: { 
+    paddingHorizontal: 6, 
+    paddingVertical: 2, 
+    borderRadius: 4 
+  },
+  statusText: { 
+    color: '#fff', 
+    fontSize: 10, 
+    fontWeight: '600' 
+  },
+  loadingContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingTop: 100 
+  },
+  loadingText: { 
+    color: '#8E8E93', 
+    fontSize: 16, 
+    marginTop: 16 
+  },
+  emptyContainer: { 
+    flex: 1, 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingTop: 100 
+  },
+  emptyListContent: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center'
+  },
+  emptyText: { 
+    color: '#fff', 
+    fontSize: 18, 
+    fontWeight: '600', 
+    marginTop: 16 
+  },
+  emptySubtext: { 
+    color: '#8E8E93', 
+    fontSize: 14, 
+    marginTop: 8, 
+    textAlign: 'center' 
+  },
+  clearSearchButton: { 
+    backgroundColor: '#7B3F98', 
+    paddingHorizontal: 16, 
+    paddingVertical: 8, 
+    borderRadius: 16, 
+    marginTop: 16 
+  },
+  clearSearchText: { 
+    color: '#fff', 
+    fontSize: 14, 
+    fontWeight: '500' 
+  },
 });
