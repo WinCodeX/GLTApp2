@@ -14,7 +14,7 @@ import { useRouter } from 'expo-router';
 import { AgentBottomTabs } from '../../components/agent/AgentBottomTabs';
 import { useUser } from '../../context/UserContext';
 
-export default function StaffHomeScreen() {
+export default function AgentHomeScreen() {
   const { user } = useUser();
   const router = useRouter();
 
