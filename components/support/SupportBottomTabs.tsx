@@ -132,7 +132,7 @@ export const SupportBottomTabs: React.FC<SupportBottomTabsProps> = ({ currentTab
 
   const handleTabPress = (route: string) => {
     if (pathname !== route) {
-      router.push(route);
+      router.replace(route);
     }
   };
 
