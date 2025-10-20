@@ -1,11 +1,12 @@
-// lib/services/updateService.ts - Enhanced with Downloads folder and ChangelogModal version integration
+// lib/services/updateService.ts - Enhanced with Expo OTA Updates
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
+import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
 import { Platform, Alert, AppState, AppStateStatus, Linking } from 'react-native';
-import api from '../api'; // Import your API service to get auth headers
+import api from '../api';
 
 const UPDATE_CHECK_INTERVAL = 24 * 60 * 60 * 1000; // 24 hours
 const DOWNLOAD_STORAGE_KEY = 'pending_apk_download';
@@ -19,14 +20,15 @@ interface UpdateMetadata {
   force_update?: boolean;
   download_url?: string;
   file_size?: number;
+  update_type?: 'ota' | 'apk'; // New: specify update type
 }
 
 interface DownloadProgress {
   loaded: number;
   total: number;
   percentage: number;
-  speed: number; // bytes per second
-  remainingTime: number; // seconds
+  speed: number;
+  remainingTime: number;
 }
 
 interface DownloadProgressCallback {
@@ -36,7 +38,7 @@ interface DownloadProgressCallback {
 interface StoredDownload {
   version: string;
   filePath: string;
-  downloadsPath?: string; // Path in Downloads folder
+  downloadsPath?: string;
   metadata: UpdateMetadata;
   downloadedAt: number;
   isComplete: boolean;
@@ -62,7 +64,6 @@ class UpdateService {
     try {
       console.log('UpdateService: Starting initialization...');
       
-      // Detect if running in Expo Go
       this.isExpoGo = Constants.appOwnership === 'expo';
       
       if (this.isExpoGo) {
@@ -71,13 +72,7 @@ class UpdateService {
         console.log('UpdateService: Running in standalone app - full functionality available');
       }
       
-      // Initialize version tracking
       await this.initializeVersionTracking();
-      
-      // Check for pending downloads
-      await this.checkPendingDownloads();
-      
-      // Monitor app state changes for background downloads
       this.setupAppStateMonitoring();
       
       console.log('UpdateService: Initialization completed successfully');
@@ -86,9 +81,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Initialize version tracking for update detection
-   */
   private async initializeVersionTracking(): Promise<void> {
     try {
       console.log('UpdateService: Initializing version tracking...');
@@ -100,7 +92,6 @@ class UpdateService {
       console.log('UpdateService: Last known version:', lastKnownVersion);
       
       if (!lastKnownVersion) {
-        // First run - set current version
         await AsyncStorage.setItem('last_known_version', currentVersion);
         console.log('UpdateService: Version tracking initialized for first run');
       } else {
@@ -119,19 +110,11 @@ class UpdateService {
   private async handleAppStateChange(nextAppState: AppStateStatus) {
     console.log(`UpdateService: App state changed to: ${nextAppState}`);
     
-    if (nextAppState === 'background' || nextAppState === 'inactive') {
-      // App going to background - check if we should start background download
-      await this.checkAndStartBackgroundDownload();
-    } else if (nextAppState === 'active') {
-      // App coming to foreground - check download status and installation status
-      await this.checkDownloadStatus();
+    if (nextAppState === 'active') {
       await this.checkPostInstallation();
     }
   }
 
-  /**
-   * Check if app was updated after returning from background
-   */
   private async checkPostInstallation(): Promise<void> {
     try {
       console.log('UpdateService: Checking post-installation status...');
@@ -143,13 +126,10 @@ class UpdateService {
       console.log('UpdateService: Last known version:', lastKnownVersion);
       
       if (lastKnownVersion && lastKnownVersion !== currentVersion) {
-        // Version changed - installation was successful!
         console.log(`UpdateService: App updated successfully: ${lastKnownVersion} → ${currentVersion}`);
         
-        // Clean up any remaining download files
         await this.cleanupAfterSuccessfulInstall();
         
-        // Show success message
         Alert.alert(
           'Update Successful!',
           `GLT has been updated to version ${currentVersion}. Enjoy the new features and improvements!`,
@@ -159,21 +139,16 @@ class UpdateService {
         console.log('UpdateService: No version change detected');
       }
       
-      // Always update the last known version
       await AsyncStorage.setItem('last_known_version', currentVersion);
     } catch (error) {
       console.error('UpdateService: Failed to check post-installation status:', error);
     }
   }
 
-  /**
-   * Cleanup after successful installation
-   */
   private async cleanupAfterSuccessfulInstall(): Promise<void> {
     try {
       console.log('UpdateService: Cleaning up after successful installation...');
       
-      // Clear all update-related storage
       await AsyncStorage.multiRemove([
         'stored_apk_download',
         'pending_apk_download', 
@@ -187,76 +162,58 @@ class UpdateService {
     }
   }
 
-  private async checkAndStartBackgroundDownload() {
+  /**
+   * Check for Expo OTA updates
+   */
+  async checkForOTAUpdates(): Promise<{ hasUpdate: boolean; isAvailable?: boolean }> {
     try {
-      console.log('UpdateService: Checking for background downloads...');
+      console.log('UpdateService: Checking for Expo OTA updates...');
       
-      const pendingDownload = await AsyncStorage.getItem(DOWNLOAD_STORAGE_KEY);
-      if (pendingDownload) {
-        const downloadInfo = JSON.parse(pendingDownload);
-        console.log('UpdateService: Starting background download for version:', downloadInfo.version);
-        
-        // Start download in background
-        this.startBackgroundDownload(downloadInfo.metadata);
-      } else {
-        console.log('UpdateService: No background downloads pending');
+      if (!Updates.isEnabled) {
+        console.log('UpdateService: Expo Updates is not enabled');
+        return { hasUpdate: false };
       }
-    } catch (error) {
-      console.error('UpdateService: Failed to start background download:', error);
-    }
-  }
 
-  private async checkDownloadStatus() {
-    try {
-      console.log('UpdateService: Checking download status...');
+      const update = await Updates.checkForUpdateAsync();
       
-      const progressData = await AsyncStorage.getItem(DOWNLOAD_PROGRESS_KEY);
-      if (progressData) {
-        const progress = JSON.parse(progressData);
-        console.log('UpdateService: Resuming download progress tracking:', progress);
-        
-        // Update progress callback if set
-        if (this.downloadProgressCallback) {
-          this.downloadProgressCallback(progress);
-        }
+      if (update.isAvailable) {
+        console.log('UpdateService: OTA update is available');
+        return { hasUpdate: true, isAvailable: true };
       } else {
-        console.log('UpdateService: No download progress to resume');
+        console.log('UpdateService: No OTA updates available');
+        return { hasUpdate: false, isAvailable: false };
       }
     } catch (error) {
-      console.error('UpdateService: Failed to check download status:', error);
-    }
-  }
-
-  async checkPendingDownloads() {
-    try {
-      console.log('UpdateService: Checking for pending downloads...');
-      
-      const storedDownload = await this.getStoredDownload();
-      if (storedDownload && storedDownload.isComplete) {
-        console.log('UpdateService: Found completed download for version:', storedDownload.version);
-        
-        // Check if file still exists
-        const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
-        if (fileInfo.exists) {
-          console.log('UpdateService: Download file exists, showing alert');
-          
-          // Show alert about available install
-          this.showDownloadCompleteAlert(storedDownload);
-        } else {
-          console.log('UpdateService: Download file was deleted, cleaning up storage');
-          // File was deleted, clean up storage
-          await this.clearStoredDownload();
-        }
-      } else {
-        console.log('UpdateService: No pending downloads found');
-      }
-    } catch (error) {
-      console.error('UpdateService: Error checking pending downloads:', error);
+      console.error('UpdateService: OTA update check failed:', error);
+      return { hasUpdate: false };
     }
   }
 
   /**
-   * Check for available APK updates - Using authenticated request
+   * Fetch and apply Expo OTA update
+   */
+  async fetchAndApplyOTAUpdate(): Promise<boolean> {
+    try {
+      console.log('UpdateService: Fetching OTA update...');
+      
+      const update = await Updates.fetchUpdateAsync();
+      
+      if (update.isNew) {
+        console.log('UpdateService: New OTA update fetched, reloading app...');
+        await Updates.reloadAsync();
+        return true;
+      } else {
+        console.log('UpdateService: OTA update fetch returned no new update');
+        return false;
+      }
+    } catch (error) {
+      console.error('UpdateService: Failed to fetch OTA update:', error);
+      return false;
+    }
+  }
+
+  /**
+   * Check for available updates - checks OTA first, then APK
    */
   async checkForUpdates(): Promise<{ hasUpdate: boolean; metadata?: UpdateMetadata }> {
     if (this.updateCheckInProgress) {
@@ -268,10 +225,25 @@ class UpdateService {
       this.updateCheckInProgress = true;
       console.log('UpdateService: Starting update check...');
       
+      // First, check for OTA updates (instant, no download needed)
+      const otaResult = await this.checkForOTAUpdates();
+      if (otaResult.hasUpdate) {
+        console.log('UpdateService: OTA update available');
+        return {
+          hasUpdate: true,
+          metadata: {
+            available: true,
+            update_type: 'ota',
+            version: await this.getCurrentVersion(),
+            changelog: ['Over-the-air update available'],
+          }
+        };
+      }
+      
+      // If no OTA update, check for APK updates
       const currentVersion = await this.getCurrentVersion();
       console.log('UpdateService: Current version:', currentVersion);
       
-      // Use the authenticated API service
       console.log('UpdateService: Making authenticated request via API service...');
       
       const response = await api.get(`/api/v1/updates/info?current_version=${currentVersion}`);
@@ -286,26 +258,22 @@ class UpdateService {
       console.log('UpdateService: Version:', data.version);
       
       if (data.available === true) {
-        console.log(`UpdateService: Update IS available! Version ${data.version} (current: ${currentVersion})`);
+        console.log(`UpdateService: APK update IS available! Version ${data.version} (current: ${currentVersion})`);
         console.log('UpdateService: Full update metadata:', JSON.stringify(data, null, 2));
-        return { hasUpdate: true, metadata: data };
+        return { 
+          hasUpdate: true, 
+          metadata: { 
+            ...data, 
+            update_type: 'apk' 
+          } 
+        };
       } else {
-        console.log('UpdateService: No updates available (available = false)');
-        console.log('UpdateService: Full response:', JSON.stringify(data, null, 2));
+        console.log('UpdateService: No updates available');
         return { hasUpdate: false };
       }
       
     } catch (error) {
       console.error('UpdateService: Update check failed:', error);
-      console.error('UpdateService: Error type:', typeof error);
-      console.error('UpdateService: Error constructor:', error.constructor.name);
-      console.error('UpdateService: Error message:', error.message);
-      
-      if (error.response) {
-        console.error('UpdateService: Response status:', error.response.status);
-        console.error('UpdateService: Response data:', error.response.data);
-      }
-      
       return { hasUpdate: false };
     } finally {
       this.updateCheckInProgress = false;
@@ -314,7 +282,7 @@ class UpdateService {
   }
 
   /**
-   * Download update with progress tracking and Downloads folder support (SDK 54)
+   * Download APK update with progress tracking
    */
   async downloadUpdateWithProgress(
     metadata: UpdateMetadata, 
@@ -338,7 +306,6 @@ class UpdateService {
       this.downloadProgressCallback = progressCallback || null;
       this.downloadStartTime = Date.now();
 
-      // First download to cache, then copy to Downloads using SAF
       const downloadDir = FileSystem.cacheDirectory + 'downloads/';
       await FileSystem.makeDirectoryAsync(downloadDir, { intermediates: true });
       
@@ -349,17 +316,14 @@ class UpdateService {
       console.log('UpdateService: File name:', fileName);
       console.log('UpdateService: Temp file URI:', tempFileUri);
       
-      // Clean up any existing file
       const existingFile = await FileSystem.getInfoAsync(tempFileUri);
       if (existingFile.exists) {
         console.log('UpdateService: Removing existing file');
         await FileSystem.deleteAsync(tempFileUri);
       }
 
-      // Show download start alert
       this.showDownloadStartAlert(metadata.version);
 
-      // Start download with progress tracking
       console.log('UpdateService: Creating download resumable...');
       const downloadResumable = FileSystem.createDownloadResumable(
         metadata.download_url,
@@ -377,7 +341,6 @@ class UpdateService {
         throw new Error(`Download failed with status ${result?.status || 'unknown'}`);
       }
 
-      // Verify file integrity
       const fileInfo = await FileSystem.getInfoAsync(result.uri);
       console.log('UpdateService: Downloaded file info:', fileInfo);
       
@@ -387,7 +350,6 @@ class UpdateService {
 
       console.log('UpdateService: APK downloaded to cache:', result.uri);
 
-      // Copy to Downloads folder using Storage Access Framework
       let downloadsPath: string | undefined;
       try {
         console.log('UpdateService: Attempting to save to Downloads folder...');
@@ -395,10 +357,8 @@ class UpdateService {
         console.log('UpdateService: APK saved to Downloads folder:', downloadsPath);
       } catch (error) {
         console.warn('UpdateService: Failed to save to Downloads folder:', error);
-        // Continue anyway - we still have the file in cache
       }
 
-      // Store download info
       const storedDownload: StoredDownload = {
         version: metadata.version || 'latest',
         filePath: result.uri,
@@ -411,10 +371,8 @@ class UpdateService {
       console.log('UpdateService: Storing download info:', storedDownload);
       await this.storeDownload(storedDownload);
       
-      // Show completion alert
       this.showDownloadCompleteAlert(storedDownload);
       
-      // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
       
       console.log('UpdateService: APK download completed successfully');
@@ -423,10 +381,8 @@ class UpdateService {
     } catch (error) {
       console.error('UpdateService: APK download failed:', error);
       
-      // Show error alert
       this.showDownloadErrorAlert(metadata.version || 'latest');
       
-      // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
       
       return false;
@@ -437,25 +393,19 @@ class UpdateService {
     }
   }
 
-  /**
-   * Save file to Downloads folder using Storage Access Framework (SDK 54)
-   */
   private async saveToDownloadsFolder(sourceUri: string, fileName: string): Promise<string> {
     try {
-      // Get or request Downloads folder permission
       const downloadsUri = await this.getDownloadsFolderPermission();
       if (!downloadsUri) {
         throw new Error('Downloads folder permission not granted');
       }
 
-      // Create the APK file in Downloads folder
       const downloadedFileUri = await FileSystem.StorageAccessFramework.createFileAsync(
         downloadsUri,
         fileName,
         'application/vnd.android.package-archive'
       );
 
-      // Read the source file and write to Downloads
       const fileContent = await FileSystem.readAsStringAsync(sourceUri, {
         encoding: FileSystem.EncodingType.Base64,
       });
@@ -473,28 +423,20 @@ class UpdateService {
     }
   }
 
-  /**
-   * Get Downloads folder permission using Storage Access Framework
-   */
   private async getDownloadsFolderPermission(): Promise<string | null> {
     try {
-      // Check if we already have permission stored
       const storedUri = await AsyncStorage.getItem('downloads_folder_uri');
       if (storedUri) {
-        // Verify the permission is still valid
         try {
           await FileSystem.StorageAccessFramework.readDirectoryAsync(storedUri);
           return storedUri;
         } catch (error) {
-          // Permission invalid, need to request again
           await AsyncStorage.removeItem('downloads_folder_uri');
         }
       }
 
-      // Request Downloads folder permission
       const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync();
       if (permissions.granted && permissions.directoryUri) {
-        // Save the permission for future use
         await AsyncStorage.setItem('downloads_folder_uri', permissions.directoryUri);
         return permissions.directoryUri;
       }
@@ -506,12 +448,8 @@ class UpdateService {
     }
   }
 
-  /**
-   * Open Downloads folder using file manager intent
-   */
   private async openDownloadsFolder() {
     try {
-      // Method 1: Try Downloads app
       const downloadsIntent = 'content://com.android.providers.downloads.ui.DownloadList';
       const canOpenDownloads = await Linking.canOpenURL(downloadsIntent);
       
@@ -520,7 +458,6 @@ class UpdateService {
         return;
       }
 
-      // Method 2: Try file manager with Downloads path
       await IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: 'content://com.android.externalstorage.documents/document/primary%3ADownload',
         type: 'resource/folder'
@@ -528,7 +465,6 @@ class UpdateService {
     } catch (error) {
       console.error('Failed to open Downloads folder:', error);
       
-      // Method 3: Generic file manager
       try {
         await IntentLauncher.startActivityAsync('android.intent.action.GET_CONTENT', {
           type: '*/*',
@@ -547,7 +483,7 @@ class UpdateService {
   private createProgressHandler(metadata: UpdateMetadata) {
     return (downloadProgress: FileSystem.DownloadProgressData) => {
       const currentTime = Date.now();
-      const elapsedTime = (currentTime - this.downloadStartTime) / 1000; // seconds
+      const elapsedTime = (currentTime - this.downloadStartTime) / 1000;
       
       const loaded = downloadProgress.totalBytesWritten;
       const total = downloadProgress.totalBytesExpectedToWrite;
@@ -564,10 +500,8 @@ class UpdateService {
         remainingTime,
       };
 
-      // Store progress for persistence
       AsyncStorage.setItem(DOWNLOAD_PROGRESS_KEY, JSON.stringify(progress)).catch(console.error);
 
-      // Call progress callback
       if (this.downloadProgressCallback) {
         this.downloadProgressCallback(progress);
       }
@@ -589,7 +523,6 @@ class UpdateService {
       { text: 'Later', style: 'cancel' as const }
     ];
 
-    // Add Downloads button if we successfully saved to Downloads folder
     if (hasDownloadsPath) {
       buttons.unshift({ text: 'Open Downloads', onPress: () => this.openDownloadsFolder() });
     }
@@ -608,9 +541,6 @@ class UpdateService {
     );
   }
 
-  /**
-   * Install downloaded APK with multiple methods
-   */
   async installDownloadedAPK(version?: string): Promise<boolean> {
     try {
       const storedDownload = await this.getStoredDownload();
@@ -619,13 +549,10 @@ class UpdateService {
         throw new Error('No matching download found');
       }
 
-      // Try app storage file first, then Downloads folder
       let installPath = storedDownload.filePath;
       
-      // Verify file still exists
       const fileInfo = await FileSystem.getInfoAsync(installPath);
       if (!fileInfo.exists && storedDownload.downloadsPath) {
-        // Try Downloads folder copy
         installPath = storedDownload.downloadsPath;
       }
 
@@ -634,7 +561,6 @@ class UpdateService {
         throw new Error('Download file no longer exists');
       }
 
-      // Install APK with multiple methods
       await this.installAPKMultipleMethods(installPath, storedDownload.version);
       
       return true;
@@ -652,14 +578,10 @@ class UpdateService {
     }
   }
 
-  /**
-   * Check if app has install permissions and guide user through the process
-   */
   private async checkInstallPermission(): Promise<boolean> {
     try {
       if (Platform.OS !== 'android') return false;
       
-      // Check if we can install packages (Android 8.0+)
       const hasPermission = await IntentLauncher.startActivityAsync('android.settings.MANAGE_UNKNOWN_APP_SOURCES', {
         data: `package:${Constants.expoConfig?.android?.package || 'com.lvl0_x.gltapp2'}`
       }).then(() => true).catch(() => false);
@@ -671,9 +593,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Guide user to enable install permissions if needed
-   */
   private async requestInstallPermission(): Promise<boolean> {
     return new Promise((resolve) => {
       Alert.alert(
@@ -690,7 +609,6 @@ class UpdateService {
                 resolve(true);
               } catch (error) {
                 console.error('Failed to open install permission settings:', error);
-                // Fallback to general security settings
                 try {
                   await IntentLauncher.startActivityAsync('android.settings.SECURITY');
                   resolve(true);
@@ -707,26 +625,19 @@ class UpdateService {
     });
   }
 
-  /**
-   * Try multiple installation methods for better compatibility
-   */
   private async installAPKMultipleMethods(fileUri: string, version: string): Promise<void> {
     console.log('Installing APK:', fileUri);
 
-    // First check if we have install permissions
     const hasPermission = await this.checkInstallPermission();
     
     if (!hasPermission) {
-      // Guide user to enable permissions
       const permissionGranted = await this.requestInstallPermission();
       if (!permissionGranted) {
-        // User cancelled or couldn't enable permissions
         this.showManualInstallOptions(fileUri);
         return;
       }
     }
 
-    // Show installation starting message
     Alert.alert(
       'Installing Update',
       `Installing GLT version ${version}...\n\nThe Android installer will open. Please:\n• Tap "Install" when prompted\n• Wait for installation to complete\n• The app will restart automatically`,
@@ -738,18 +649,16 @@ class UpdateService {
 
   private async tryInstallMethods(fileUri: string): Promise<void> {
     const methods = [
-      // Method 1: Standard VIEW intent with proper flags
       () => IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: fileUri,
         type: 'application/vnd.android.package-archive',
-        flags: 268435457, // FLAG_ACTIVITY_NEW_TASK | FLAG_GRANT_READ_URI_PERMISSION
+        flags: 268435457,
         extra: {
           'android.intent.extra.NOT_UNKNOWN_SOURCE': true,
           'android.intent.extra.INSTALLER_PACKAGE_NAME': Constants.expoConfig?.android?.package || 'com.lvl0_x.gltapp2'
         }
       }),
       
-      // Method 2: INSTALL_PACKAGE intent (Android 7.0+)
       () => IntentLauncher.startActivityAsync('android.intent.action.INSTALL_PACKAGE', {
         data: fileUri,
         type: 'application/vnd.android.package-archive',
@@ -760,7 +669,6 @@ class UpdateService {
         }
       }),
 
-      // Method 3: Package manager intent
       () => IntentLauncher.startActivityAsync('android.intent.action.VIEW', {
         data: fileUri,
         type: 'application/vnd.android.package-archive',
@@ -774,39 +682,29 @@ class UpdateService {
         await methods[i]();
         console.log(`Installation method ${i + 1} launched successfully`);
         
-        // Show success message and cleanup
         this.handleInstallationStarted();
         return;
       } catch (error) {
         console.error(`Installation method ${i + 1} failed:`, error);
         if (i === methods.length - 1) {
-          // All methods failed, show manual options
           this.showManualInstallOptions(fileUri);
         }
       }
     }
   }
 
-  /**
-   * Handle when installation process has started
-   */
   private handleInstallationStarted(): void {
-    // Show success message
     Alert.alert(
       'Installation Started',
       'The Android installer is now running. After installation completes, the app will restart with the new version.',
       [{ text: 'OK' }]
     );
 
-    // Schedule cleanup after a delay (installer is running)
     setTimeout(() => {
       this.cleanupAfterInstall();
     }, 3000);
   }
 
-  /**
-   * Show manual installation options when automatic fails
-   */
   private showManualInstallOptions(fileUri: string): void {
     Alert.alert(
       'Manual Installation Required',
@@ -819,15 +717,9 @@ class UpdateService {
     );
   }
 
-  /**
-   * Cleanup after installation attempt
-   */
   private async cleanupAfterInstall(): Promise<void> {
     try {
-      // Clear stored download info since installation is in progress
       await this.clearStoredDownload();
-      
-      // Clear progress tracking
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
       
       console.log('Cleanup completed after installation');
@@ -836,31 +728,32 @@ class UpdateService {
     }
   }
 
-  /**
-   * Legacy download method - now uses new progress tracking
-   */
   async downloadUpdate(metadata?: UpdateMetadata): Promise<boolean> {
     if (!metadata) return false;
     return this.downloadUpdateWithProgress(metadata);
   }
 
-  /**
-   * Install update - for APK updates, this triggers download and install
-   */
   async installUpdate(metadata?: UpdateMetadata): Promise<void> {
     if (!metadata) {
-      throw new Error('Update metadata required for APK installation');
+      throw new Error('Update metadata required for installation');
     }
     
+    // Handle OTA updates
+    if (metadata.update_type === 'ota') {
+      const success = await this.fetchAndApplyOTAUpdate();
+      if (!success) {
+        throw new Error('Failed to apply OTA update');
+      }
+      return;
+    }
+    
+    // Handle APK updates
     const success = await this.downloadUpdateWithProgress(metadata);
     if (!success) {
       throw new Error('Failed to download APK update');
     }
   }
 
-  /**
-   * Schedule download for when app goes to background
-   */
   async scheduleBackgroundDownload(metadata: UpdateMetadata): Promise<void> {
     try {
       const downloadInfo = {
@@ -876,31 +769,10 @@ class UpdateService {
     }
   }
 
-  /**
-   * Start background download immediately
-   */
-  private async startBackgroundDownload(metadata: UpdateMetadata): Promise<void> {
-    try {
-      // Clear the scheduled download
-      await AsyncStorage.removeItem(DOWNLOAD_STORAGE_KEY);
-      
-      // Start download
-      await this.downloadUpdateWithProgress(metadata);
-    } catch (error) {
-      console.error('Background download failed:', error);
-    }
-  }
-
-  /**
-   * Schedule install for later - for APK updates, just mark preference
-   */
   async scheduleInstallForLater(): Promise<void> {
     await AsyncStorage.setItem('user_postponed_update', 'true');
   }
 
-  /**
-   * Store download information
-   */
   private async storeDownload(download: StoredDownload): Promise<void> {
     try {
       await AsyncStorage.setItem('stored_apk_download', JSON.stringify(download));
@@ -909,9 +781,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Get stored download information
-   */
   private async getStoredDownload(): Promise<StoredDownload | null> {
     try {
       const stored = await AsyncStorage.getItem('stored_apk_download');
@@ -922,9 +791,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Clear stored download information
-   */
   private async clearStoredDownload(): Promise<void> {
     try {
       await AsyncStorage.removeItem('stored_apk_download');
@@ -933,9 +799,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Check if there's a completed download ready for install
-   */
   async hasCompletedDownload(): Promise<{ hasDownload: boolean; version?: string }> {
     try {
       console.log('UpdateService: Checking for completed downloads...');
@@ -944,14 +807,12 @@ class UpdateService {
       if (storedDownload && storedDownload.isComplete) {
         console.log('UpdateService: Found completed download for version:', storedDownload.version);
         
-        // Verify file still exists
         const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
         if (fileInfo.exists) {
           console.log('UpdateService: Completed download file exists');
           return { hasDownload: true, version: storedDownload.version };
         } else {
           console.log('UpdateService: Completed download file was deleted, cleaning up');
-          // File was deleted, clean up
           await this.clearStoredDownload();
         }
       } else {
@@ -964,17 +825,17 @@ class UpdateService {
     }
   }
 
-  /**
-   * Show update dialog to user
-   */
   showUpdateDialog(metadata: UpdateMetadata): Promise<boolean> {
     return new Promise((resolve) => {
       const changelogText = metadata.changelog?.join('\n• ') || 'Bug fixes and improvements';
       const sizeText = metadata.file_size ? ` (${this.formatFileSize(metadata.file_size)})` : '';
       
+      const isOTA = metadata.update_type === 'ota';
+      const updateTypeText = isOTA ? 'Over-the-air update' : 'APK update';
+      
       Alert.alert(
         metadata.force_update ? 'Required Update' : 'Update Available',
-        `Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\nThis will download and install a new APK file to your Downloads folder.`,
+        `${updateTypeText} - Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\n${isOTA ? 'This will update the app instantly.' : 'This will download and install a new APK file.'}`,
         [
           ...(metadata.force_update ? [] : [{
             text: 'Later',
@@ -982,7 +843,7 @@ class UpdateService {
             onPress: () => resolve(false)
           }]),
           {
-            text: 'Download',
+            text: isOTA ? 'Update Now' : 'Download',
             onPress: () => resolve(true)
           }
         ],
@@ -991,41 +852,31 @@ class UpdateService {
     });
   }
 
-  /**
-   * Get current app version from ChangelogModal or Constants
-   */
   async getCurrentVersion(): Promise<string> {
     try {
       console.log('UpdateService: Getting current version...');
       
-      // First try to get from stored version (set by ChangelogModal)
       const storedVersion = await this.getStoredCurrentVersion();
       if (storedVersion) {
         console.log('UpdateService: Found stored version:', storedVersion);
         return storedVersion;
       }
       
-      // Fallback to Constants
       const configVersion = Constants.expoConfig?.version;
       if (configVersion) {
         console.log('UpdateService: Using config version:', configVersion);
-        // Store it for future use
         await this.setCurrentVersion(configVersion);
         return configVersion;
       }
       
-      // Final fallback
-      console.log('UpdateService: Using fallback version: 1.7.6');
-      return '1.7.6';
+      console.log('UpdateService: Using fallback version: 1.8.3');
+      return '1.8.3';
     } catch (error) {
       console.error('UpdateService: Failed to get current version:', error);
-      return '1.7.6';
+      return '1.8.3';
     }
   }
 
-  /**
-   * Set current version from external source (like ChangelogModal)
-   */
   async setCurrentVersion(version: string): Promise<void> {
     try {
       console.log('UpdateService: Setting current version to:', version);
@@ -1036,9 +887,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Get stored current version
-   */
   private async getStoredCurrentVersion(): Promise<string | null> {
     try {
       const version = await AsyncStorage.getItem('app_current_version');
@@ -1050,16 +898,10 @@ class UpdateService {
     }
   }
 
-  /**
-   * Get update ID - for APK updates, return app version
-   */
   async getUpdateId(): Promise<string> {
     return await this.getCurrentVersion();
   }
 
-  /**
-   * Format file size for display
-   */
   private formatFileSize(bytes: number): string {
     const sizes = ['Bytes', 'KB', 'MB', 'GB'];
     if (bytes === 0) return '0 Bytes';
@@ -1067,18 +909,12 @@ class UpdateService {
     return Math.round(bytes / Math.pow(1024, i) * 100) / 100 + ' ' + sizes[i];
   }
 
-  /**
-   * Check if device supports APK installation
-   */
   isUpdateSupported(): boolean {
-    const supported = Platform.OS === 'android';
+    const supported = Platform.OS === 'android' || Updates.isEnabled;
     console.log('UpdateService: Update support check - Platform:', Platform.OS, 'Supported:', supported);
     return supported;
   }
 
-  /**
-   * Check if user has postponed update
-   */
   async hasUserPostponedUpdate(): Promise<boolean> {
     try {
       const postponed = await AsyncStorage.getItem('user_postponed_update');
@@ -1088,9 +924,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Clear postponed update flag
-   */
   async clearPostponedUpdate(): Promise<void> {
     try {
       await AsyncStorage.removeItem('user_postponed_update');
@@ -1099,9 +932,6 @@ class UpdateService {
     }
   }
 
-  /**
-   * Cleanup method
-   */
   cleanup(): void {
     console.log('UpdateService: Cleaning up...');
     if (this.appStateSubscription) {
