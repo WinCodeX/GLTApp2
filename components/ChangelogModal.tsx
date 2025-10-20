@@ -5,7 +5,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Modal, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import UpdateService from '../lib/services/updateService';
 
-export const CHANGELOG_VERSION = '1.8.3';
+export const CHANGELOG_VERSION = '1.8.4';
 export const CHANGELOG_KEY = `changelog_seen_${CHANGELOG_VERSION}`;
 const AUTO_DISMISS_DELAY = 10000;
 
@@ -15,6 +15,7 @@ const CHANGELOG_CONTENT = [
   'Support functionality implemented',
   'WhatsApp style messaging in talk to a rep',
   'ActionCable for instant messages and notifications',
+  'Bottom tabs new styling',
   'Other Bug fixes',
 ];
 
