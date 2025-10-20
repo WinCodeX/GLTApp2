@@ -11,7 +11,7 @@ export default function SupportLayout() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: '#0B141B' },
-          animation: 'slide_from_right',
+          animation: 'none',
         }}
       >
         <Stack.Screen 
