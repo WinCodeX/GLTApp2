@@ -27,12 +27,8 @@ interface RiderBottomTabsProps {
 
 export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) => {
   const pathname = usePathname();
-  const circlePosition = useRef(new Animated.Value(TAB_WIDTH * 1)).current;
-  const indicatorPosition = useRef(new Animated.Value(TAB_WIDTH * 1 + TAB_WIDTH / 2 - 20)).current;
-  const iconOpacity = useRef(new Animated.Value(1)).current;
-  const [displayedIcon, setDisplayedIcon] = useState<string>('home');
-  const [isAnimating, setIsAnimating] = useState(false);
-
+  
+  // Tabs with home in second position for better balance
   const tabs = [
     {
       key: 'scan',
@@ -60,21 +56,35 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
     },
   ];
 
+  // Initialize based on current tab
+  const initialIndex = tabs.findIndex(tab => tab.key === currentTab);
+  const initialIcon = tabs.find(t => t.key === currentTab)?.icon || 'home';
+  
+  const circlePosition = useRef(new Animated.Value(initialIndex * TAB_WIDTH)).current;
+  const indicatorPosition = useRef(new Animated.Value(initialIndex * TAB_WIDTH + TAB_WIDTH / 2 - 20)).current;
+  const iconOpacity = useRef(new Animated.Value(1)).current;
+  const [displayedIcon, setDisplayedIcon] = useState<string>(initialIcon);
+  const [isAnimating, setIsAnimating] = useState(false);
+
   useEffect(() => {
     const currentIndex = tabs.findIndex(tab => tab.key === currentTab);
     const targetCirclePosition = currentIndex * TAB_WIDTH;
     const targetIndicatorPosition = targetCirclePosition + TAB_WIDTH / 2 - 20;
     const newIcon = tabs.find(t => t.key === currentTab)?.icon || 'home';
 
-    if (!isAnimating) {
+    // Only animate icon if it's actually changing
+    if (displayedIcon !== newIcon && !isAnimating) {
       setIsAnimating(true);
 
+      // Fade out current icon
       Animated.timing(iconOpacity, {
         toValue: 0,
         duration: ANIMATION_DURATION / 2,
         useNativeDriver: true,
       }).start(() => {
+        // Change icon at midpoint
         setDisplayedIcon(newIcon);
+        // Fade in new icon
         Animated.timing(iconOpacity, {
           toValue: 1,
           duration: ANIMATION_DURATION / 2,
@@ -84,6 +94,21 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
         });
       });
 
+      // Move circle and indicator
+      Animated.parallel([
+        Animated.timing(circlePosition, {
+          toValue: targetCirclePosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: false,
+        }),
+        Animated.timing(indicatorPosition, {
+          toValue: targetIndicatorPosition,
+          duration: ANIMATION_DURATION,
+          useNativeDriver: true,
+        })
+      ]).start();
+    } else if (displayedIcon === newIcon) {
+      // Just move the position without icon animation
       Animated.parallel([
         Animated.timing(circlePosition, {
           toValue: targetCirclePosition,
@@ -97,7 +122,7 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
         })
       ]).start();
     }
-  }, [currentTab]);
+  }, [currentTab, displayedIcon]);
 
   const handleTabPress = (route: string) => {
     if (pathname !== route) {
@@ -107,6 +132,7 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
 
   return (
     <View style={styles.container}>
+      {/* Floating Circle */}
       <Animated.View 
         style={[
           styles.floatingCircle,
@@ -129,6 +155,7 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
         </Animated.View>
       </Animated.View>
 
+      {/* Nav Background with Dynamic Cutout */}
       <View style={styles.navContainer}>
         <AnimatedSvg
           width={SCREEN_WIDTH}
@@ -150,6 +177,7 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
           />
         </AnimatedSvg>
 
+        {/* Tab Icons and Labels */}
         <View style={styles.tabsContainer}>
           {tabs.map((tab) => {
             const isActive = currentTab === tab.key;
@@ -179,6 +207,7 @@ export const RiderBottomTabs: React.FC<RiderBottomTabsProps> = ({ currentTab }) 
           })}
         </View>
 
+        {/* Bottom Line Indicator */}
         <Animated.View 
           style={[
             styles.bottomLine,
