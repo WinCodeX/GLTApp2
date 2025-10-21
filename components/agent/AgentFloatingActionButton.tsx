@@ -9,12 +9,12 @@ import {
 } from 'react-native';
 import { MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
-import Svg, { Path } from 'react-native-svg';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FAB_SIZE = 56;
 const MENU_ITEM_SIZE = 50;
 const MENU_RADIUS = 100;
+const FAB_RIGHT_MARGIN = 20;
 
 interface AgentFloatingActionButtonProps {
   onNewPress: () => void;
@@ -39,16 +39,18 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
       Animated.spring(rotateAnim, {
         toValue,
         useNativeDriver: true,
-        friction: 5,
+        friction: 6,
+        tension: 40,
       }),
       Animated.spring(scaleAnim, {
         toValue,
         useNativeDriver: true,
-        friction: 6,
+        friction: 7,
+        tension: 40,
       }),
       Animated.timing(opacityAnim, {
         toValue,
-        duration: 200,
+        duration: 150,
         useNativeDriver: true,
       }),
     ]).start();
@@ -58,7 +60,7 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
 
   const handleMenuItemPress = (action: () => void) => {
     toggleMenu();
-    setTimeout(() => action(), 300);
+    setTimeout(() => action(), 200);
   };
 
   const rotation = rotateAnim.interpolate({
@@ -66,28 +68,27 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
     outputRange: ['0deg', '45deg'],
   });
 
-  // Calculate menu item positions (half circle above FAB)
   const menuItems = [
     {
       icon: 'add',
       label: 'New',
       color: ['#667eea', '#764ba2'],
       onPress: () => handleMenuItemPress(onNewPress),
-      angle: -60, // Left position
+      angle: -60,
     },
     {
       icon: 'qr-code-scanner',
       label: 'Scan',
       color: ['#FF9500', '#FF8C00'],
       onPress: () => handleMenuItemPress(onScanPress),
-      angle: -90, // Center position
+      angle: -90,
     },
     {
       icon: 'phone',
       label: 'Quick Call',
       color: ['#34C759', '#30A46C'],
       onPress: () => handleMenuItemPress(onQuickCallPress),
-      angle: -120, // Right position
+      angle: -120,
     },
   ];
 
@@ -101,7 +102,6 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
 
   return (
     <>
-      {/* Backdrop */}
       {isExpanded && (
         <Animated.View 
           style={[
@@ -109,7 +109,7 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
             {
               opacity: opacityAnim.interpolate({
                 inputRange: [0, 1],
-                outputRange: [0, 0.7],
+                outputRange: [0, 0.5],
               }),
             },
           ]}
@@ -122,7 +122,6 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
         </Animated.View>
       )}
 
-      {/* Menu Items */}
       <View style={styles.menuContainer} pointerEvents="box-none">
         {menuItems.map((item, index) => {
           const position = getMenuItemPosition(item.angle);
@@ -149,11 +148,11 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
                   ],
                 },
               ]}
-              pointerEvents={isExpanded ? 'auto' : 'none'}
             >
               <TouchableOpacity
                 onPress={item.onPress}
-                activeOpacity={0.8}
+                activeOpacity={0.7}
+                disabled={!isExpanded}
               >
                 <LinearGradient
                   colors={item.color}
@@ -171,7 +170,6 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
         })}
       </View>
 
-      {/* Main FAB */}
       <View style={styles.fabContainer} pointerEvents="box-none">
         <TouchableOpacity
           onPress={toggleMenu}
@@ -213,7 +211,7 @@ const styles = StyleSheet.create({
   menuContainer: {
     position: 'absolute',
     bottom: 110,
-    left: SCREEN_WIDTH / 2 - MENU_ITEM_SIZE / 2,
+    right: FAB_RIGHT_MARGIN + FAB_SIZE / 2 - MENU_ITEM_SIZE / 2,
     zIndex: 999,
   },
   menuItem: {
@@ -241,7 +239,7 @@ const styles = StyleSheet.create({
   fabContainer: {
     position: 'absolute',
     bottom: 100,
-    left: SCREEN_WIDTH / 2 - FAB_SIZE / 2,
+    right: FAB_RIGHT_MARGIN,
     zIndex: 1000,
   },
   fabTouchable: {
