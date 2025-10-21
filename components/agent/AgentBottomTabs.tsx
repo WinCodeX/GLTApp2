@@ -37,9 +37,8 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
   const [displayedIcon, setDisplayedIcon] = useState<string>('home');
   const [isAnimating, setIsAnimating] = useState(false);
   
-  // FAB menu states
   const [showScanner, setShowScanner] = useState(false);
-  const [scannerAction, setScannerAction] = useState<'collect_from_sender' | 'print'>('collect_from_sender');
+  const [scannerAction, setScannerAction] = useState<'collect' | 'print'>('collect');
 
   const tabs = [
     {
@@ -127,17 +126,15 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
       position: 'top',
       visibilityTime: 2000,
     });
-    // Add navigation to new package screen
-    // router.push('/(agent)/new-package');
   };
 
   const handleScanPress = () => {
-    setScannerAction('collect_from_sender');
+    setScannerAction('collect');
     setShowScanner(true);
   };
 
   const handleQuickCallPress = async () => {
-    const phoneNumber = 'tel:+1234567890'; // Replace with actual support number
+    const phoneNumber = 'tel:+1234567890';
     try {
       const supported = await Linking.canOpenURL(phoneNumber);
       if (supported) {
@@ -176,7 +173,6 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
   return (
     <>
       <View style={styles.container}>
-        {/* Floating Circle */}
         <Animated.View 
           style={[
             styles.floatingCircle,
@@ -199,7 +195,6 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
           </Animated.View>
         </Animated.View>
 
-        {/* Nav Background with Dynamic Cutout */}
         <View style={styles.navContainer}>
           <AnimatedSvg
             width={SCREEN_WIDTH}
@@ -221,7 +216,6 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
             />
           </AnimatedSvg>
 
-          {/* Tab Icons and Labels */}
           <View style={styles.tabsContainer}>
             {tabs.map((tab) => {
               const isActive = currentTab === tab.key;
@@ -251,7 +245,6 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
             })}
           </View>
 
-          {/* Bottom Line Indicator */}
           <Animated.View 
             style={[
               styles.bottomLine,
@@ -263,14 +256,12 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
         </View>
       </View>
 
-      {/* Floating Action Button */}
       <AgentFloatingActionButton
         onNewPress={handleNewPress}
         onScanPress={handleScanPress}
         onQuickCallPress={handleQuickCallPress}
       />
 
-      {/* Agent QR Scanner */}
       <AgentQRScanner
         visible={showScanner}
         onClose={() => setShowScanner(false)}
