@@ -1,4 +1,4 @@
-// app/(agent)/index.tsx
+// app/(agent)/index.tsx - CRASH-SAFE VERSION
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -47,11 +47,29 @@ interface Activity {
   timestamp: string;
 }
 
+// Safe defaults
+const DEFAULT_STATS: DashboardStats = {
+  incoming_deliveries: 0,
+  completed_today: 0,
+  pending_packages: { total: 0 },
+  staff_info: {
+    id: 0,
+    name: 'Staff',
+    role: 'agent',
+    role_display: 'Agent'
+  },
+  activity_summary: {
+    scans_today: 0,
+    prints_today: 0,
+    packages_handled_today: 0
+  }
+};
+
 export default function AgentHomeScreen() {
   const { user } = useUser();
   const router = useRouter();
   
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+  const [stats, setStats] = useState<DashboardStats>(DEFAULT_STATS);
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -67,7 +85,10 @@ export default function AgentHomeScreen() {
 
     try {
       const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount) return;
+      if (!currentAccount) {
+        console.log('No current account, skipping ActionCable setup');
+        return;
+      }
 
       actionCableRef.current = ActionCableService.getInstance();
       
@@ -81,68 +102,149 @@ export default function AgentHomeScreen() {
         setIsConnected(true);
         setupSubscriptions();
         subscriptionsSetup.current = true;
+        console.log('✅ ActionCable connected successfully');
       }
     } catch (error) {
-      console.error('Failed to setup ActionCable:', error);
+      console.error('❌ Failed to setup ActionCable:', error);
       setIsConnected(false);
+      // Don't crash, just log the error
     }
   }, []);
 
   const setupSubscriptions = () => {
     if (!actionCableRef.current) return;
 
-    actionCableSubscriptions.current.forEach(unsub => unsub());
-    actionCableSubscriptions.current = [];
+    try {
+      actionCableSubscriptions.current.forEach(unsub => unsub());
+      actionCableSubscriptions.current = [];
 
-    const actionCable = actionCableRef.current;
+      const actionCable = actionCableRef.current;
 
-    const unsubConnected = actionCable.subscribe('connection_established', () => {
-      setIsConnected(true);
-    });
-    actionCableSubscriptions.current.push(unsubConnected);
+      const unsubConnected = actionCable.subscribe('connection_established', () => {
+        console.log('🔌 ActionCable connection established');
+        setIsConnected(true);
+      });
+      actionCableSubscriptions.current.push(unsubConnected);
 
-    const unsubLost = actionCable.subscribe('connection_lost', () => {
-      setIsConnected(false);
-    });
-    actionCableSubscriptions.current.push(unsubLost);
+      const unsubLost = actionCable.subscribe('connection_lost', () => {
+        console.log('🔌 ActionCable connection lost');
+        setIsConnected(false);
+      });
+      actionCableSubscriptions.current.push(unsubLost);
 
-    const unsubStatsUpdate = actionCable.subscribe('dashboard_stats_update', (data) => {
-      if (data.stats) {
-        setStats(prevStats => ({
-          ...prevStats,
-          incoming_deliveries: data.stats.pending_packages?.total || 0,
-          completed_today: data.stats.completed_today || 0,
-          pending_packages: data.stats.pending_packages || { total: 0 },
-          staff_info: data.stats.staff_info || prevStats?.staff_info,
-          activity_summary: data.stats.activity_summary || prevStats?.activity_summary,
-        }));
-      }
-    });
-    actionCableSubscriptions.current.push(unsubStatsUpdate);
+      const unsubStatsUpdate = actionCable.subscribe('dashboard_stats_update', (data) => {
+        try {
+          if (data?.stats) {
+            console.log('📊 Received stats update via ActionCable');
+            const updatedStats = safeParseStats(data.stats);
+            setStats(updatedStats);
+          }
+        } catch (err) {
+          console.error('❌ Error processing stats update:', err);
+        }
+      });
+      actionCableSubscriptions.current.push(unsubStatsUpdate);
 
-    const unsubPackageScanned = actionCable.subscribe('package_scanned', () => {
-      fetchDashboardData();
-    });
-    actionCableSubscriptions.current.push(unsubPackageScanned);
+      const unsubPackageScanned = actionCable.subscribe('package_scanned', () => {
+        console.log('📦 Package scanned event received');
+        fetchDashboardData(true);
+      });
+      actionCableSubscriptions.current.push(unsubPackageScanned);
 
-    const unsubPackageRejected = actionCable.subscribe('package_rejected', () => {
-      fetchDashboardData();
-    });
-    actionCableSubscriptions.current.push(unsubPackageRejected);
+      const unsubPackageRejected = actionCable.subscribe('package_rejected', () => {
+        console.log('❌ Package rejected event received');
+        fetchDashboardData(true);
+      });
+      actionCableSubscriptions.current.push(unsubPackageRejected);
+
+      console.log('✅ ActionCable subscriptions setup complete');
+    } catch (error) {
+      console.error('❌ Error setting up subscriptions:', error);
+      // Don't crash, just log
+    }
   };
 
   useEffect(() => {
     setupActionCable();
     
     return () => {
-      subscriptionsSetup.current = false;
-      actionCableSubscriptions.current.forEach(unsub => unsub());
-      actionCableSubscriptions.current = [];
+      try {
+        subscriptionsSetup.current = false;
+        actionCableSubscriptions.current.forEach(unsub => unsub());
+        actionCableSubscriptions.current = [];
+      } catch (err) {
+        console.error('❌ Error cleaning up ActionCable:', err);
+      }
     };
   }, [setupActionCable]);
 
+  // Safe stats parser
+  const safeParseStats = useCallback((apiStats: any): DashboardStats => {
+    try {
+      return {
+        incoming_deliveries: apiStats?.pending_packages?.total || apiStats?.incoming_deliveries || 0,
+        completed_today: apiStats?.completed_today || 0,
+        pending_packages: {
+          total: apiStats?.pending_packages?.total || 0
+        },
+        staff_info: {
+          id: apiStats?.staff_info?.id || user?.id || 0,
+          name: apiStats?.staff_info?.name || user?.display_name || user?.first_name || 'Staff',
+          role: apiStats?.staff_info?.role || 'agent',
+          role_display: apiStats?.staff_info?.role_display || 'Agent'
+        },
+        activity_summary: {
+          scans_today: apiStats?.activity_summary?.scans_today || 0,
+          prints_today: apiStats?.activity_summary?.prints_today || 0,
+          packages_handled_today: apiStats?.activity_summary?.packages_handled_today || 0
+        }
+      };
+    } catch (err) {
+      console.error('❌ Error parsing stats:', err);
+      return DEFAULT_STATS;
+    }
+  }, [user]);
+
+  // Safe activity parser
+  const safeParseActivities = useCallback((activities: any[]): Activity[] => {
+    try {
+      if (!Array.isArray(activities)) {
+        console.warn('⚠️ Activities is not an array:', activities);
+        return [];
+      }
+
+      return activities.map((activity, index) => {
+        try {
+          return {
+            id: activity?.id || `activity-${index}`,
+            type: activity?.type || 'scan',
+            activity_type: activity?.activity_type || 'unknown',
+            description: activity?.description || 'Activity',
+            package_code: activity?.package_code || 'N/A',
+            timestamp: activity?.timestamp || new Date().toISOString()
+          };
+        } catch (err) {
+          console.error('❌ Error parsing activity:', err, activity);
+          return {
+            id: `error-${index}`,
+            type: 'scan',
+            activity_type: 'unknown',
+            description: 'Error loading activity',
+            package_code: 'N/A',
+            timestamp: new Date().toISOString()
+          };
+        }
+      }).filter(Boolean);
+    } catch (err) {
+      console.error('❌ Error parsing activities array:', err);
+      return [];
+    }
+  }, []);
+
   const fetchDashboardData = useCallback(async (isRefresh = false) => {
     try {
+      console.log('🔄 Fetching dashboard data...', { isRefresh });
+      
       if (isRefresh) {
         setRefreshing(true);
       } else {
@@ -150,38 +252,72 @@ export default function AgentHomeScreen() {
       }
       setError(null);
 
-      const [statsResponse, activitiesResponse] = await Promise.all([
-        api.get('/api/v1/staff/dashboard/stats', { timeout: 15000 }),
-        api.get('/api/v1/staff/activities', { 
-          params: { limit: 5 },
-          timeout: 15000 
-        })
-      ]);
+      // Fetch stats with timeout
+      let statsResponse: any = null;
+      try {
+        statsResponse = await Promise.race([
+          api.get('/api/v1/staff/dashboard/stats'),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Stats request timeout')), 15000)
+          )
+        ]);
+        
+        console.log('📊 Stats response:', statsResponse?.data?.success ? 'Success' : 'Failed');
+      } catch (statsError: any) {
+        console.error('❌ Stats fetch error:', statsError.message);
+        // Continue with activities fetch even if stats fail
+      }
 
-      if (statsResponse.data?.success) {
-        const apiStats = statsResponse.data.data;
-        setStats({
-          incoming_deliveries: apiStats.pending_packages?.total || 0,
-          completed_today: apiStats.completed_today || 0,
-          pending_packages: apiStats.pending_packages || { total: 0 },
-          staff_info: apiStats.staff_info,
-          activity_summary: apiStats.activity_summary
-        });
+      // Parse stats safely
+      if (statsResponse?.data?.success && statsResponse?.data?.data) {
+        const parsedStats = safeParseStats(statsResponse.data.data);
+        setStats(parsedStats);
+        console.log('✅ Stats updated successfully');
       } else {
-        setError('Failed to load dashboard data');
+        console.warn('⚠️ Using default stats');
+        setStats(DEFAULT_STATS);
       }
 
-      if (activitiesResponse.data?.success) {
-        setRecentActivities(activitiesResponse.data.data.activities || []);
+      // Fetch activities with timeout
+      let activitiesResponse: any = null;
+      try {
+        activitiesResponse = await Promise.race([
+          api.get('/api/v1/staff/activities', { params: { limit: 5 } }),
+          new Promise((_, reject) => 
+            setTimeout(() => reject(new Error('Activities request timeout')), 15000)
+          )
+        ]);
+        
+        console.log('📋 Activities response:', activitiesResponse?.data?.success ? 'Success' : 'Failed');
+      } catch (activitiesError: any) {
+        console.error('❌ Activities fetch error:', activitiesError.message);
+        // Continue even if activities fail
       }
+
+      // Parse activities safely
+      if (activitiesResponse?.data?.success && activitiesResponse?.data?.data?.activities) {
+        const parsedActivities = safeParseActivities(activitiesResponse.data.data.activities);
+        setRecentActivities(parsedActivities);
+        console.log('✅ Activities updated successfully:', parsedActivities.length);
+      } else {
+        console.warn('⚠️ No activities available');
+        setRecentActivities([]);
+      }
+
     } catch (error: any) {
-      console.error('Failed to fetch dashboard data:', error);
-      setError(error.response?.data?.message || 'Unable to load dashboard. Please try again.');
+      console.error('❌ Dashboard fetch failed:', error);
+      const errorMessage = error?.response?.data?.message || error?.message || 'Unable to load dashboard';
+      setError(errorMessage);
+      
+      // Set safe defaults on error
+      setStats(DEFAULT_STATS);
+      setRecentActivities([]);
     } finally {
       setLoading(false);
       setRefreshing(false);
+      console.log('✅ Dashboard fetch complete');
     }
-  }, []);
+  }, [safeParseStats, safeParseActivities]);
 
   useEffect(() => {
     fetchDashboardData();
@@ -192,42 +328,61 @@ export default function AgentHomeScreen() {
   };
 
   const handleNotificationPress = () => {
-    router.push('/(agent)/notifications');
+    try {
+      router.push('/(agent)/notifications');
+    } catch (err) {
+      console.error('❌ Navigation error:', err);
+    }
   };
 
   const handleQuickAction = (action: string) => {
-    switch (action) {
-      case 'scan':
-        router.push('/(agent)/scan');
-        break;
-      case 'track':
-        router.push('/(agent)/track');
-        break;
-      case 'packages':
-        router.push('/(agent)/packages');
-        break;
-      case 'history':
-        router.push('/(agent)/activities');
-        break;
+    try {
+      console.log('🎯 Quick action:', action);
+      switch (action) {
+        case 'scan':
+          router.push('/(agent)/scan');
+          break;
+        case 'track':
+          router.push('/(agent)/track');
+          break;
+        case 'packages':
+          router.push('/(agent)/packages');
+          break;
+        case 'history':
+          router.push('/(agent)/activities');
+          break;
+        default:
+          console.warn('⚠️ Unknown action:', action);
+      }
+    } catch (err) {
+      console.error('❌ Navigation error:', err);
     }
   };
 
   const getActivityIcon = (type: string, activityType: string) => {
-    if (type === 'print') return 'printer';
-    if (activityType.includes('scan')) return 'maximize';
-    return 'package';
+    try {
+      if (type === 'print') return 'printer';
+      if (activityType.includes('scan')) return 'maximize';
+      return 'package';
+    } catch {
+      return 'package';
+    }
   };
 
   const formatTimestamp = (timestamp: string) => {
-    const date = new Date(timestamp);
-    const now = new Date();
-    const diffMs = now.getTime() - date.getTime();
-    const diffMins = Math.floor(diffMs / 60000);
-    
-    if (diffMins < 1) return 'Just now';
-    if (diffMins < 60) return `${diffMins}m ago`;
-    if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
-    return date.toLocaleDateString();
+    try {
+      const date = new Date(timestamp);
+      const now = new Date();
+      const diffMs = now.getTime() - date.getTime();
+      const diffMins = Math.floor(diffMs / 60000);
+      
+      if (diffMins < 1) return 'Just now';
+      if (diffMins < 60) return `${diffMins}m ago`;
+      if (diffMins < 1440) return `${Math.floor(diffMins / 60)}h ago`;
+      return date.toLocaleDateString();
+    } catch {
+      return 'Recently';
+    }
   };
 
   if (loading && !stats) {
@@ -254,43 +409,15 @@ export default function AgentHomeScreen() {
     );
   }
 
-  if (error && !stats) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <LinearGradient
-          colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <View>
-            <Text style={styles.headerGreeting}>Welcome back,</Text>
-            <Text style={styles.headerName}>
-              {user?.display_name || user?.first_name || 'Staff'}
-            </Text>
-          </View>
-        </LinearGradient>
-        <View style={styles.errorContainer}>
-          <Feather name="alert-circle" size={48} color="#FF3B30" />
-          <Text style={styles.errorTitle}>Unable to Load Dashboard</Text>
-          <Text style={styles.errorMessage}>{error}</Text>
-          <TouchableOpacity style={styles.retryButton} onPress={() => fetchDashboardData()}>
-            <Text style={styles.retryButtonText}>Try Again</Text>
-          </TouchableOpacity>
-        </View>
-      </SafeAreaView>
-    );
-  }
-
   const displayStats = [
     { 
       label: 'Incoming Deliveries', 
-      value: stats?.incoming_deliveries.toString() || '0', 
+      value: (stats?.incoming_deliveries || 0).toString(), 
       icon: 'inbox' as const
     },
     { 
       label: 'Completed Today', 
-      value: stats?.completed_today.toString() || '0', 
+      value: (stats?.completed_today || 0).toString(), 
       icon: 'check-circle' as const
     },
   ];
@@ -306,9 +433,9 @@ export default function AgentHomeScreen() {
         <View>
           <Text style={styles.headerGreeting}>Welcome back,</Text>
           <Text style={styles.headerName}>
-            {stats?.staff_info.name || user?.display_name || user?.first_name || 'Staff'}
+            {stats?.staff_info?.name || user?.display_name || user?.first_name || 'Staff'}
           </Text>
-          {stats?.staff_info.role_display && (
+          {stats?.staff_info?.role_display && (
             <Text style={styles.headerRole}>{stats.staff_info.role_display}</Text>
           )}
         </View>
@@ -334,6 +461,13 @@ export default function AgentHomeScreen() {
           />
         }
       >
+        {error && (
+          <View style={styles.errorBanner}>
+            <Feather name="alert-circle" size={16} color="#FF3B30" />
+            <Text style={styles.errorBannerText}>{error}</Text>
+          </View>
+        )}
+
         {isConnected && (
           <View style={styles.connectionBanner}>
             <Feather name="wifi" size={12} color="#34C759" />
@@ -406,7 +540,7 @@ export default function AgentHomeScreen() {
               <View key={activity.id} style={styles.activityCard}>
                 <View style={styles.activityIcon}>
                   <Feather 
-                    name={getActivityIcon(activity.type, activity.activity_type)} 
+                    name={getActivityIcon(activity.type, activity.activity_type) as any} 
                     size={18} 
                     color="#7B3F98" 
                   />
@@ -496,38 +630,23 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#B8B8B8',
   },
-  errorContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingHorizontal: 40,
-  },
-  errorTitle: {
-    fontSize: 18,
-    fontWeight: '600',
-    color: '#fff',
-    marginTop: 16,
-    marginBottom: 8,
-  },
-  errorMessage: {
-    fontSize: 14,
-    color: '#B8B8B8',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  retryButton: {
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    backgroundColor: '#7B3F98',
-    borderRadius: 8,
-  },
-  retryButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#fff',
-  },
   content: {
     flex: 1,
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(255, 59, 48, 0.1)',
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 59, 48, 0.2)',
+  },
+  errorBannerText: {
+    flex: 1,
+    fontSize: 12,
+    color: '#FF3B30',
   },
   connectionBanner: {
     flexDirection: 'row',
