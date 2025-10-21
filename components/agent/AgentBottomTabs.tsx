@@ -7,17 +7,20 @@ import {
   StyleSheet, 
   Dimensions,
   Animated,
-  Platform
+  Linking,
 } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
+import { AgentFloatingActionButton } from './AgentFloatingActionButton';
+import AgentQRScanner from './AgentQRScanner';
+import Toast from 'react-native-toast-message';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const TAB_WIDTH = SCREEN_WIDTH / 5;
 const CIRCLE_SIZE = 56;
 const CURVE_HEIGHT = 75;
-const ANIMATION_DURATION = 300; // Quick animation to match screen transition
+const ANIMATION_DURATION = 300;
 
 const AnimatedSvg = Animated.createAnimatedComponent(Svg);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
@@ -28,13 +31,16 @@ interface AgentBottomTabsProps {
 
 export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) => {
   const pathname = usePathname();
-  const circlePosition = useRef(new Animated.Value(TAB_WIDTH * 2)).current; // Start at home (middle)
+  const circlePosition = useRef(new Animated.Value(TAB_WIDTH * 2)).current;
   const indicatorPosition = useRef(new Animated.Value(TAB_WIDTH * 2 + TAB_WIDTH / 2 - 20)).current;
   const iconOpacity = useRef(new Animated.Value(1)).current;
   const [displayedIcon, setDisplayedIcon] = useState<string>('home');
   const [isAnimating, setIsAnimating] = useState(false);
+  
+  // FAB menu states
+  const [showScanner, setShowScanner] = useState(false);
+  const [scannerAction, setScannerAction] = useState<'collect_from_sender' | 'print'>('collect_from_sender');
 
-  // Tabs with home in middle - matching original tab order but rearranged
   const tabs = [
     {
       key: 'chat', 
@@ -77,15 +83,12 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
     if (!isAnimating) {
       setIsAnimating(true);
 
-      // Fade out current icon
       Animated.timing(iconOpacity, {
         toValue: 0,
         duration: ANIMATION_DURATION / 2,
         useNativeDriver: true,
       }).start(() => {
-        // Change icon at midpoint
         setDisplayedIcon(newIcon);
-        // Fade in new icon
         Animated.timing(iconOpacity, {
           toValue: 1,
           duration: ANIMATION_DURATION / 2,
@@ -95,12 +98,11 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
         });
       });
 
-      // Move circle and indicator simultaneously
       Animated.parallel([
         Animated.timing(circlePosition, {
           toValue: targetCirclePosition,
           duration: ANIMATION_DURATION,
-          useNativeDriver: false, // Can't use native driver with SVG paths
+          useNativeDriver: false,
         }),
         Animated.timing(indicatorPosition, {
           toValue: targetIndicatorPosition,
@@ -117,94 +119,166 @@ export const AgentBottomTabs: React.FC<AgentBottomTabsProps> = ({ currentTab }) 
     }
   };
 
+  const handleNewPress = () => {
+    Toast.show({
+      type: 'info',
+      text1: 'New Package',
+      text2: 'Navigate to create new package screen',
+      position: 'top',
+      visibilityTime: 2000,
+    });
+    // Add navigation to new package screen
+    // router.push('/(agent)/new-package');
+  };
+
+  const handleScanPress = () => {
+    setScannerAction('collect_from_sender');
+    setShowScanner(true);
+  };
+
+  const handleQuickCallPress = async () => {
+    const phoneNumber = 'tel:+1234567890'; // Replace with actual support number
+    try {
+      const supported = await Linking.canOpenURL(phoneNumber);
+      if (supported) {
+        await Linking.openURL(phoneNumber);
+      } else {
+        Toast.show({
+          type: 'error',
+          text1: 'Cannot Make Call',
+          text2: 'Phone dialer not available',
+          position: 'top',
+          visibilityTime: 3000,
+        });
+      }
+    } catch (error) {
+      Toast.show({
+        type: 'error',
+        text1: 'Call Failed',
+        text2: 'Unable to initiate call',
+        position: 'top',
+        visibilityTime: 3000,
+      });
+    }
+  };
+
+  const handleScanSuccess = (result: any) => {
+    setShowScanner(false);
+    Toast.show({
+      type: 'success',
+      text1: 'Package Processed',
+      text2: `${result.code} processed successfully`,
+      position: 'top',
+      visibilityTime: 3000,
+    });
+  };
+
   return (
-    <View style={styles.container}>
-      {/* Floating Circle */}
-      <Animated.View 
-        style={[
-          styles.floatingCircle,
-          {
-            transform: [{ 
-              translateX: Animated.add(
-                circlePosition, 
-                new Animated.Value(TAB_WIDTH / 2 - CIRCLE_SIZE / 2)
-              )
-            }]
-          }
-        ]}
-      >
-        <Animated.View style={{ opacity: iconOpacity }}>
-          <Feather
-            name={displayedIcon as any}
-            size={24}
-            color="#FFFFFF"
-          />
-        </Animated.View>
-      </Animated.View>
-
-      {/* Nav Background with Dynamic Cutout */}
-      <View style={styles.navContainer}>
-        <AnimatedSvg
-          width={SCREEN_WIDTH}
-          height={CURVE_HEIGHT}
-          style={styles.svg}
-        >
-          <AnimatedPath
-            d={circlePosition.interpolate({
-              inputRange: tabs.map((_, i) => i * TAB_WIDTH),
-              outputRange: tabs.map((_, i) => {
-                const centerX = i * TAB_WIDTH + TAB_WIDTH / 2;
-                const curveStart = centerX - 38;
-                const curveEnd = centerX + 38;
-                
-                return `M0,25 Q0,0 25,0 L${curveStart - 10},0 Q${curveStart},0 ${curveStart + 10},8 Q${curveStart + 20},25 ${centerX},25 Q${curveEnd - 20},25 ${curveEnd - 10},8 Q${curveEnd},0 ${curveEnd + 10},0 L${SCREEN_WIDTH - 25},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},25 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`;
-              })
-            })}
-            fill="#1F2C34"
-          />
-        </AnimatedSvg>
-
-        {/* Tab Icons and Labels */}
-        <View style={styles.tabsContainer}>
-          {tabs.map((tab) => {
-            const isActive = currentTab === tab.key;
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={styles.tab}
-                onPress={() => handleTabPress(tab.route)}
-                activeOpacity={0.7}
-              >
-                <View style={styles.tabContent}>
-                  {!isActive && (
-                    <>
-                      <Feather
-                        name={tab.icon as any}
-                        size={22}
-                        color="#8E8E93"
-                      />
-                      <Text style={styles.tabLabel}>
-                        {tab.label}
-                      </Text>
-                    </>
-                  )}
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {/* Bottom Line Indicator */}
+    <>
+      <View style={styles.container}>
+        {/* Floating Circle */}
         <Animated.View 
           style={[
-            styles.bottomLine,
+            styles.floatingCircle,
             {
-              transform: [{ translateX: indicatorPosition }]
+              transform: [{ 
+                translateX: Animated.add(
+                  circlePosition, 
+                  new Animated.Value(TAB_WIDTH / 2 - CIRCLE_SIZE / 2)
+                )
+              }]
             }
           ]}
-        />
+        >
+          <Animated.View style={{ opacity: iconOpacity }}>
+            <Feather
+              name={displayedIcon as any}
+              size={24}
+              color="#FFFFFF"
+            />
+          </Animated.View>
+        </Animated.View>
+
+        {/* Nav Background with Dynamic Cutout */}
+        <View style={styles.navContainer}>
+          <AnimatedSvg
+            width={SCREEN_WIDTH}
+            height={CURVE_HEIGHT}
+            style={styles.svg}
+          >
+            <AnimatedPath
+              d={circlePosition.interpolate({
+                inputRange: tabs.map((_, i) => i * TAB_WIDTH),
+                outputRange: tabs.map((_, i) => {
+                  const centerX = i * TAB_WIDTH + TAB_WIDTH / 2;
+                  const curveStart = centerX - 38;
+                  const curveEnd = centerX + 38;
+                  
+                  return `M0,25 Q0,0 25,0 L${curveStart - 10},0 Q${curveStart},0 ${curveStart + 10},8 Q${curveStart + 20},25 ${centerX},25 Q${curveEnd - 20},25 ${curveEnd - 10},8 Q${curveEnd},0 ${curveEnd + 10},0 L${SCREEN_WIDTH - 25},0 Q${SCREEN_WIDTH},0 ${SCREEN_WIDTH},25 L${SCREEN_WIDTH},${CURVE_HEIGHT} L0,${CURVE_HEIGHT} Z`;
+                })
+              })}
+              fill="#1F2C34"
+            />
+          </AnimatedSvg>
+
+          {/* Tab Icons and Labels */}
+          <View style={styles.tabsContainer}>
+            {tabs.map((tab) => {
+              const isActive = currentTab === tab.key;
+              return (
+                <TouchableOpacity
+                  key={tab.key}
+                  style={styles.tab}
+                  onPress={() => handleTabPress(tab.route)}
+                  activeOpacity={0.7}
+                >
+                  <View style={styles.tabContent}>
+                    {!isActive && (
+                      <>
+                        <Feather
+                          name={tab.icon as any}
+                          size={22}
+                          color="#8E8E93"
+                        />
+                        <Text style={styles.tabLabel}>
+                          {tab.label}
+                        </Text>
+                      </>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {/* Bottom Line Indicator */}
+          <Animated.View 
+            style={[
+              styles.bottomLine,
+              {
+                transform: [{ translateX: indicatorPosition }]
+              }
+            ]}
+          />
+        </View>
       </View>
-    </View>
+
+      {/* Floating Action Button */}
+      <AgentFloatingActionButton
+        onNewPress={handleNewPress}
+        onScanPress={handleScanPress}
+        onQuickCallPress={handleQuickCallPress}
+      />
+
+      {/* Agent QR Scanner */}
+      <AgentQRScanner
+        visible={showScanner}
+        onClose={() => setShowScanner(false)}
+        actionType={scannerAction}
+        onScanSuccess={handleScanSuccess}
+        autoPrint={true}
+      />
+    </>
   );
 };
 
