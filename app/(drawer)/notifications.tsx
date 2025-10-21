@@ -1,5 +1,4 @@
 // app/(drawer)/notifications.tsx
-
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -10,9 +9,7 @@ import {
   RefreshControl,
   ActivityIndicator,
   Animated,
-  Platform,
   Modal,
-  ViewToken,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -115,11 +112,6 @@ export default function NotificationsScreen() {
   const actionCableRef = useRef<ActionCableService | null>(null);
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
-
-  const viewableItemsRef = useRef<Set<number>>(new Set());
-  const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const markedAsReadRef = useRef<Set<number>>(new Set());
-  const initialMarkingDone = useRef(false);
 
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
@@ -240,10 +232,6 @@ export default function NotificationsScreen() {
       subscriptionsSetup.current = false;
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
-      
-      if (markAsReadTimeoutRef.current) {
-        clearTimeout(markAsReadTimeoutRef.current);
-      }
     };
   }, [setupActionCable]);
 
@@ -274,7 +262,6 @@ export default function NotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
-          initialMarkingDone.current = false;
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -302,77 +289,28 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
-  useEffect(() => {
-    if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
-      const timer = setTimeout(() => {
-        if (viewableItemsRef.current.size > 0) {
-          markVisibleNotificationsAsRead();
-          initialMarkingDone.current = true;
+  const handleNotificationPress = async (notification: NotificationData) => {
+    try {
+      // Mark as read if not already read
+      if (!notification.read) {
+        // Optimistically update UI
+        setNotifications(prev =>
+          prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
+        );
+
+        // Send request to mark as read
+        try {
+          await api.post(`/api/v1/notifications/${notification.id}/mark_as_read`);
+        } catch (error) {
+          console.error('Failed to mark notification as read:', error);
+          // Revert on error
+          setNotifications(prev =>
+            prev.map(n => n.id === notification.id ? { ...n, read: false } : n)
+          );
         }
-      }, 500);
-      
-      return () => clearTimeout(timer);
-    }
-  }, [isConnected, notifications.length, loading]);
+      }
 
-  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
-    const currentViewableIds = new Set(
-      viewableItems
-        .map(item => item.item?.id)
-        .filter((id): id is number => typeof id === 'number')
-    );
-
-    viewableItemsRef.current = currentViewableIds;
-
-    if (markAsReadTimeoutRef.current) {
-      clearTimeout(markAsReadTimeoutRef.current);
-    }
-
-    markAsReadTimeoutRef.current = setTimeout(() => {
-      markVisibleNotificationsAsRead();
-    }, 1500);
-  }).current;
-
-  const viewabilityConfig = useRef({
-    itemVisiblePercentThreshold: 50,
-    minimumViewTime: 500,
-  }).current;
-
-  const markVisibleNotificationsAsRead = async () => {
-    const unreadVisibleIds = Array.from(viewableItemsRef.current).filter(id => {
-      if (markedAsReadRef.current.has(id)) return false;
-      
-      const notification = notifications.find(n => n.id === id);
-      return notification && !notification.read;
-    });
-
-    if (unreadVisibleIds.length === 0) return;
-
-    try {
-      setNotifications(prev =>
-        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
-      );
-
-      unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
-
-      await api.post('/api/v1/notifications/mark_visible_as_read', {
-        notification_ids: unreadVisibleIds,
-      });
-
-      console.log(`✓ Marked ${unreadVisibleIds.length} notifications as read`);
-    } catch (error) {
-      console.error('Failed to mark visible notifications as read:', error);
-      
-      setNotifications(prev =>
-        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
-      );
-      
-      unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
-    }
-  };
-
-  const handleNotificationPress = (notification: NotificationData) => {
-    try {
+      // Navigate based on notification type
       let navigationParams: any = null;
       
       if (notification.action_url) {
@@ -482,16 +420,12 @@ export default function NotificationsScreen() {
 
   const handleRefresh = () => {
     setCurrentPage(1);
-    markedAsReadRef.current.clear();
-    initialMarkingDone.current = false;
     fetchNotifications(1, true);
   };
 
   const handleCategoryChange = (newCategory: CategoryType) => {
     setCategory(newCategory);
     setCurrentPage(1);
-    markedAsReadRef.current.clear();
-    initialMarkingDone.current = false;
   };
 
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
@@ -738,8 +672,6 @@ export default function NotificationsScreen() {
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
-            onViewableItemsChanged={onViewableItemsChanged}
-            viewabilityConfig={viewabilityConfig}
             showsVerticalScrollIndicator={false}
             removeClippedSubviews={false}
             windowSize={10}
