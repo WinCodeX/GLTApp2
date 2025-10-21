@@ -1,4 +1,4 @@
-// components/ChangelogModal.tsx - Enhanced with Expo OTA Updates
+// components/ChangelogModal.tsx - Fixed for Expo Go compatibility
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import React, { useEffect, useRef, useState } from 'react';
@@ -87,7 +87,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
       
       await updateService.setCurrentVersion(CHANGELOG_VERSION);
       
-      // Only check for completed APK downloads once
+      // Check for completed APK downloads first
       const { hasDownload, version } = await updateService.hasCompletedDownload();
       if (hasDownload) {
         console.log('ChangelogModal: Found completed download:', version);
@@ -99,6 +99,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         return;
       }
       
+      // Check for new updates
       await checkForUpdates();
       
     } catch (error) {
@@ -126,6 +127,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
         return;
       }
       
+      // This will now safely skip OTA checks in Expo Go
       const result = await updateService.checkForUpdates();
       
       console.log('ChangelogModal: Update check result:', {
@@ -165,7 +167,7 @@ export default function ChangelogModal({ visible, onClose }: Props) {
     try {
       console.log('ChangelogModal: Starting update installation, type:', updateInfo.update_type);
       
-      // Handle OTA updates
+      // Handle OTA updates (only available in standalone builds)
       if (updateInfo.update_type === 'ota') {
         setIsCheckingUpdates(true);
         setUpdateError(null);
@@ -177,8 +179,14 @@ export default function ChangelogModal({ visible, onClose }: Props) {
           update_type: 'ota' as const,
         };
         
-        await updateService.installUpdate(metadata);
-        // App will reload automatically after OTA update
+        try {
+          await updateService.installUpdate(metadata);
+          // App will reload automatically after OTA update
+        } catch (error) {
+          console.error('ChangelogModal: OTA update failed:', error);
+          setUpdateError('OTA update not available in this build. Please use APK update instead.');
+          setIsCheckingUpdates(false);
+        }
         return;
       }
       
