@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   RefreshControl,
   Alert,
+  Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -44,6 +45,12 @@ export default function ViewPackagesScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedState, setSelectedState] = useState<string>('pending');
+  
+  // Rejection modal state
+  const [rejectionModalVisible, setRejectionModalVisible] = useState(false);
+  const [selectedPackage, setSelectedPackage] = useState<Package | null>(null);
+  const [rejectionReason, setRejectionReason] = useState('');
+  const [submittingRejection, setSubmittingRejection] = useState(false);
 
   const stateFilters = [
     { value: 'pending', label: 'Pending', color: '#FF9500' },
@@ -104,51 +111,71 @@ export default function ViewPackagesScreen() {
     filterPackages(packages, searchQuery);
   }, [searchQuery, packages]);
 
-  const handleRejectPackage = async (pkg: Package) => {
+  const handleTrackPackage = (pkg: Package) => {
+    router.replace({
+      pathname: '/(agent)/track',
+      params: { 
+        code: pkg.code,
+        packageId: pkg.id.toString() 
+      }
+    });
+  };
+
+  const handleCollectPackage = async (pkg: Package) => {
     Alert.alert(
-      'Reject Package',
-      `Are you sure you want to reject package ${pkg.code}?`,
+      'Collect Package',
+      `Mark package ${pkg.code} as collected?`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
-          text: 'Reject',
-          style: 'destructive',
-          onPress: () => showRejectReasonPrompt(pkg),
+          text: 'Collect',
+          onPress: async () => {
+            try {
+              const response = await api.post('/api/v1/staff/scan_events', {
+                package_code: pkg.code,
+                event_type: 'collected_by_rider',
+                location: 'Agent Office',
+              });
+
+              if (response.data.success) {
+                Alert.alert('Success', 'Package marked as collected');
+                fetchPackages(true);
+              } else {
+                Alert.alert('Error', response.data.message);
+              }
+            } catch (error: any) {
+              Alert.alert('Error', error.response?.data?.message || 'Failed to collect package');
+            }
+          },
         },
       ]
     );
   };
 
-  const showRejectReasonPrompt = (pkg: Package) => {
-    Alert.prompt(
-      'Rejection Reason',
-      'Please provide a reason for rejection',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Submit',
-          onPress: async (reason) => {
-            if (!reason?.trim()) {
-              Alert.alert('Error', 'Rejection reason is required');
-              return;
-            }
-            await submitRejection(pkg, reason.trim());
-          },
-        },
-      ],
-      'plain-text'
-    );
+  const handleRejectPackage = (pkg: Package) => {
+    setSelectedPackage(pkg);
+    setRejectionReason('');
+    setRejectionModalVisible(true);
   };
 
-  const submitRejection = async (pkg: Package, reason: string) => {
+  const submitRejection = async () => {
+    if (!selectedPackage || !rejectionReason.trim()) {
+      Alert.alert('Error', 'Please enter a rejection reason');
+      return;
+    }
+
+    setSubmittingRejection(true);
     try {
-      const response = await api.post(`/api/v1/staff/packages/${pkg.id}/reject`, {
-        reason,
+      const response = await api.post(`/api/v1/staff/packages/${selectedPackage.id}/reject`, {
+        reason: rejectionReason.trim(),
         rejection_type: 'manual',
       });
 
       if (response.data.success) {
         Alert.alert('Success', 'Package rejected successfully');
+        setRejectionModalVisible(false);
+        setSelectedPackage(null);
+        setRejectionReason('');
         fetchPackages(true);
       } else {
         Alert.alert('Error', response.data.message);
@@ -156,6 +183,8 @@ export default function ViewPackagesScreen() {
     } catch (error: any) {
       console.error('Rejection error:', error);
       Alert.alert('Error', error.response?.data?.message || 'Failed to reject package');
+    } finally {
+      setSubmittingRejection(false);
     }
   };
 
@@ -201,10 +230,18 @@ export default function ViewPackagesScreen() {
       <View style={styles.packageActions}>
         <TouchableOpacity
           style={[styles.actionButton, styles.trackButton]}
-          onPress={() => router.push(`/(agent)/track?code=${item.code}`)}
+          onPress={() => handleTrackPackage(item)}
         >
           <Feather name="search" size={16} color="#007AFF" />
           <Text style={[styles.actionButtonText, { color: '#007AFF' }]}>Track</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[styles.actionButton, styles.collectButton]}
+          onPress={() => handleCollectPackage(item)}
+        >
+          <Feather name="check-circle" size={16} color="#34C759" />
+          <Text style={[styles.actionButtonText, { color: '#34C759' }]}>Collect</Text>
         </TouchableOpacity>
 
         {item.can_be_rejected && (
@@ -243,7 +280,7 @@ export default function ViewPackagesScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(agent)')} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Packages</Text>
@@ -322,6 +359,68 @@ export default function ViewPackagesScreen() {
           }
         />
       )}
+
+      {/* Rejection Modal */}
+      <Modal
+        visible={rejectionModalVisible}
+        transparent={true}
+        animationType="slide"
+        onRequestClose={() => setRejectionModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Reject Package</Text>
+              <TouchableOpacity onPress={() => setRejectionModalVisible(false)}>
+                <Feather name="x" size={24} color="#fff" />
+              </TouchableOpacity>
+            </View>
+
+            {selectedPackage && (
+              <View style={styles.modalPackageInfo}>
+                <Text style={styles.modalPackageCode}>{selectedPackage.code}</Text>
+                <Text style={styles.modalPackageReceiver}>{selectedPackage.receiver.name}</Text>
+              </View>
+            )}
+
+            <Text style={styles.modalLabel}>Rejection Reason *</Text>
+            <TextInput
+              style={styles.modalTextArea}
+              placeholder="Enter reason for rejection..."
+              placeholderTextColor="#8E8E93"
+              value={rejectionReason}
+              onChangeText={setRejectionReason}
+              multiline
+              numberOfLines={4}
+              textAlignVertical="top"
+            />
+
+            <View style={styles.modalActions}>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalCancelButton]}
+                onPress={() => setRejectionModalVisible(false)}
+              >
+                <Text style={styles.modalCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalRejectButton]}
+                onPress={submitRejection}
+                disabled={submittingRejection || !rejectionReason.trim()}
+              >
+                {submittingRejection ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <>
+                    <Feather name="x-circle" size={16} color="#fff" />
+                    <Text style={styles.modalRejectButtonText}>Reject Package</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
@@ -468,6 +567,9 @@ const styles = StyleSheet.create({
   trackButton: {
     backgroundColor: 'rgba(0, 122, 255, 0.1)',
   },
+  collectButton: {
+    backgroundColor: 'rgba(52, 199, 89, 0.1)',
+  },
   rejectButton: {
     backgroundColor: 'rgba(255, 59, 48, 0.1)',
   },
@@ -490,5 +592,89 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#8E8E93',
     marginTop: 8,
+  },
+  // Modal styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+    justifyContent: 'flex-end',
+  },
+  modalContent: {
+    backgroundColor: '#1F2C34',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 24,
+    maxHeight: '80%',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 20,
+    fontWeight: 'bold',
+    color: '#fff',
+  },
+  modalPackageInfo: {
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    padding: 12,
+    borderRadius: 8,
+    marginBottom: 20,
+  },
+  modalPackageCode: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 4,
+  },
+  modalPackageReceiver: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  modalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  modalTextArea: {
+    backgroundColor: '#111B21',
+    borderRadius: 8,
+    padding: 12,
+    color: '#fff',
+    fontSize: 14,
+    minHeight: 100,
+    marginBottom: 20,
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    borderRadius: 8,
+    gap: 8,
+  },
+  modalCancelButton: {
+    backgroundColor: 'rgba(142, 142, 147, 0.2)',
+  },
+  modalCancelButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#8E8E93',
+  },
+  modalRejectButton: {
+    backgroundColor: '#FF3B30',
+  },
+  modalRejectButtonText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
