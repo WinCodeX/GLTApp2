@@ -1,4 +1,5 @@
 // app/(drawer)/notifications.tsx
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -9,7 +10,9 @@ import {
   RefreshControl,
   ActivityIndicator,
   Animated,
+  Platform,
   Modal,
+  ViewToken,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
@@ -113,6 +116,11 @@ export default function NotificationsScreen() {
   const subscriptionsSetup = useRef(false);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
 
+  const viewableItemsRef = useRef<Set<number>>(new Set());
+  const markAsReadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const markedAsReadRef = useRef<Set<number>>(new Set());
+  const initialMarkingDone = useRef(false);
+
   const [customModal, setCustomModal] = useState<CustomModalProps>({
     visible: false,
     title: '',
@@ -213,7 +221,12 @@ export default function NotificationsScreen() {
     const unsubNotificationRead = actionCable.subscribe('notification_read', (data) => {
       if (data.notification_id) {
         setNotifications(prev =>
-          prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
+          prev.map(n => {
+            if (n.id === data.notification_id) {
+              return { ...n, read: true };
+            }
+            return n;
+          })
         );
       }
     });
@@ -232,6 +245,10 @@ export default function NotificationsScreen() {
       subscriptionsSetup.current = false;
       actionCableSubscriptions.current.forEach(unsub => unsub());
       actionCableSubscriptions.current = [];
+      
+      if (markAsReadTimeoutRef.current) {
+        clearTimeout(markAsReadTimeoutRef.current);
+      }
     };
   }, [setupActionCable]);
 
@@ -262,6 +279,7 @@ export default function NotificationsScreen() {
         
         if (refresh || page === 1) {
           setNotifications(newNotifications);
+          initialMarkingDone.current = false;
         } else {
           setNotifications(prev => {
             const existingIds = new Set(prev.map(n => n.id));
@@ -289,28 +307,106 @@ export default function NotificationsScreen() {
     fetchNotifications(1);
   }, [category]);
 
-  const handleNotificationPress = async (notification: NotificationData) => {
-    try {
-      // Mark as read if not already read
-      if (!notification.read) {
-        // Optimistically update UI
-        setNotifications(prev =>
-          prev.map(n => n.id === notification.id ? { ...n, read: true } : n)
-        );
-
-        // Send request to mark as read
-        try {
-          await api.post(`/api/v1/notifications/${notification.id}/mark_as_read`);
-        } catch (error) {
-          console.error('Failed to mark notification as read:', error);
-          // Revert on error
-          setNotifications(prev =>
-            prev.map(n => n.id === notification.id ? { ...n, read: false } : n)
-          );
+  useEffect(() => {
+    if (isConnected && notifications.length > 0 && !loading && !initialMarkingDone.current) {
+      const timer = setTimeout(() => {
+        if (viewableItemsRef.current.size > 0) {
+          markVisibleNotificationsAsRead();
+          initialMarkingDone.current = true;
         }
-      }
+      }, 500);
+      
+      return () => clearTimeout(timer);
+    }
+  }, [isConnected, notifications.length, loading]);
 
-      // Navigate based on notification type
+  const onViewableItemsChanged = useRef(({ viewableItems }: { viewableItems: ViewToken[] }) => {
+    const currentViewableIds = new Set(
+      viewableItems
+        .map(item => item.item?.id)
+        .filter((id): id is number => typeof id === 'number')
+    );
+
+    viewableItemsRef.current = currentViewableIds;
+
+    if (markAsReadTimeoutRef.current) {
+      clearTimeout(markAsReadTimeoutRef.current);
+    }
+
+    markAsReadTimeoutRef.current = setTimeout(() => {
+      markVisibleNotificationsAsRead();
+    }, 1500);
+  }).current;
+
+  const viewabilityConfig = useRef({
+    itemVisiblePercentThreshold: 50,
+    minimumViewTime: 500,
+  }).current;
+
+  const markVisibleNotificationsAsRead = async () => {
+    const unreadVisibleIds = Array.from(viewableItemsRef.current).filter(id => {
+      if (markedAsReadRef.current.has(id)) return false;
+      
+      const notification = notifications.find(n => n.id === id);
+      return notification && !notification.read;
+    });
+
+    if (unreadVisibleIds.length === 0) return;
+
+    try {
+      // Mark in ref first to prevent duplicate marking
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
+
+      // Update state with proper deep clone
+      setNotifications(prev =>
+        prev.map(n => {
+          if (unreadVisibleIds.includes(n.id)) {
+            // Deep clone to prevent reference issues
+            return {
+              ...n,
+              read: true,
+              // Explicitly preserve all fields
+              id: n.id,
+              title: n.title,
+              message: n.message,
+              notification_type: n.notification_type,
+              priority: n.priority,
+              created_at: n.created_at,
+              time_since_creation: n.time_since_creation,
+              icon: n.icon,
+              action_url: n.action_url,
+              expired: n.expired,
+              package: n.package ? { ...n.package } : undefined,
+            };
+          }
+          return n;
+        })
+      );
+
+      await api.post('/api/v1/notifications/mark_visible_as_read', {
+        notification_ids: unreadVisibleIds,
+      });
+
+      console.log(`✓ Marked ${unreadVisibleIds.length} notifications as read`);
+    } catch (error) {
+      console.error('Failed to mark visible notifications as read:', error);
+      
+      // Revert on error
+      setNotifications(prev =>
+        prev.map(n => {
+          if (unreadVisibleIds.includes(n.id)) {
+            return { ...n, read: false };
+          }
+          return n;
+        })
+      );
+      
+      unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
+    }
+  };
+
+  const handleNotificationPress = (notification: NotificationData) => {
+    try {
       let navigationParams: any = null;
       
       if (notification.action_url) {
@@ -420,22 +516,31 @@ export default function NotificationsScreen() {
 
   const handleRefresh = () => {
     setCurrentPage(1);
+    markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
     fetchNotifications(1, true);
   };
 
   const handleCategoryChange = (newCategory: CategoryType) => {
     setCategory(newCategory);
     setCurrentPage(1);
+    markedAsReadRef.current.clear();
+    initialMarkingDone.current = false;
   };
 
   const renderNotificationItem = ({ item }: { item: NotificationData }) => {
+    // Defensive checks to prevent blank rendering
     if (!item || typeof item.id === 'undefined') {
       return null;
     }
 
-    const title = item.title || 'No Title';
-    const message = item.message || 'No Message';
-    const isRead = item.read;
+    // Ensure we have valid data with fallbacks
+    const title = item.title || 'Notification';
+    const message = item.message || '';
+    const isRead = item.read === true;
+    const notificationType = item.notification_type || 'system';
+    const icon = getNotificationIcon(notificationType, item.icon);
+    const color = getNotificationColor(notificationType, isRead);
 
     return (
       <TouchableOpacity
@@ -452,13 +557,13 @@ export default function NotificationsScreen() {
             <View
               style={[
                 styles.iconBackground,
-                { backgroundColor: getNotificationColor(item.notification_type, isRead) + '40' }
+                { backgroundColor: color + '40' }
               ]}
             >
               <Feather
-                name={getNotificationIcon(item.notification_type, item.icon)}
+                name={icon}
                 size={20}
-                color={getNotificationColor(item.notification_type, isRead)}
+                color={color}
               />
             </View>
             {!isRead && <View style={styles.unreadIndicator} />}
@@ -472,12 +577,12 @@ export default function NotificationsScreen() {
               {message}
             </Text>
             
-            {item.package && (
+            {item.package && item.package.code && (
               <View style={styles.packageInfo}>
                 <Feather name="package" size={12} color="#c4b5fd" />
                 <Text style={styles.packageCode}>{item.package.code}</Text>
                 <View style={styles.packageStateBadge}>
-                  <Text style={styles.packageStateText}>{item.package.state_display}</Text>
+                  <Text style={styles.packageStateText}>{item.package.state_display || 'Unknown'}</Text>
                 </View>
               </View>
             )}
@@ -566,7 +671,7 @@ export default function NotificationsScreen() {
     </Animated.View>
   );
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter(n => n && n.read === false).length;
 
   return (
     <View style={styles.container}>
@@ -655,7 +760,7 @@ export default function NotificationsScreen() {
           <FlatList
             data={notifications}
             renderItem={renderNotificationItem}
-            keyExtractor={(item) => `notification-${item.id}`}
+            keyExtractor={(item) => `notification-${item?.id || Math.random()}`}
             contentContainerStyle={[
               styles.listContainer,
               notifications.length === 0 && styles.emptyListContainer
@@ -672,9 +777,14 @@ export default function NotificationsScreen() {
             }
             onEndReached={handleLoadMore}
             onEndReachedThreshold={0.3}
+            onViewableItemsChanged={onViewableItemsChanged}
+            viewabilityConfig={viewabilityConfig}
             showsVerticalScrollIndicator={false}
-            removeClippedSubviews={false}
+            removeClippedSubviews={Platform.OS === 'android'}
             windowSize={10}
+            maxToRenderPerBatch={10}
+            updateCellsBatchingPeriod={50}
+            initialNumToRender={10}
           />
         )}
       </LinearGradient>
