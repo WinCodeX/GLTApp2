@@ -1,5 +1,5 @@
 // app/(agent)/scan.tsx
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import {
   View,
   Text,
@@ -67,6 +67,18 @@ export default function ScanPackageScreen() {
     setScannedPackage(null);
   };
 
+  const handleViewTracking = () => {
+    if (scannedPackage) {
+      router.replace({
+        pathname: '/(agent)/track',
+        params: { 
+          code: scannedPackage.code,
+          packageId: scannedPackage.id.toString() 
+        }
+      });
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
@@ -75,7 +87,7 @@ export default function ScanPackageScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(agent)')} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Scan Package</Text>
@@ -192,6 +204,11 @@ export default function ScanPackageScreen() {
                   {scannedPackage.delivery_type_display}
                 </Text>
               </View>
+
+              <TouchableOpacity style={styles.trackingButton} onPress={handleViewTracking}>
+                <Feather name="eye" size={16} color="#fff" />
+                <Text style={styles.trackingButtonText}>View Full Tracking</Text>
+              </TouchableOpacity>
             </View>
           </View>
         )}
@@ -384,5 +401,20 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#fff',
     fontWeight: '500',
+  },
+  trackingButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7B3F98',
+    borderRadius: 8,
+    paddingVertical: 12,
+    marginTop: 16,
+    gap: 8,
+  },
+  trackingButtonText: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
   },
 });
