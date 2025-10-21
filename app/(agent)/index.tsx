@@ -192,22 +192,22 @@ export default function AgentHomeScreen() {
   };
 
   const handleNotificationPress = () => {
-    router.push('/(agent)/notifications');
+    router.replace('/(agent)/notifications');
   };
 
   const handleQuickAction = (action: string) => {
     switch (action) {
       case 'scan':
-        router.push('/(agent)/scan');
+        router.replace('/(agent)/scan');
         break;
       case 'track':
-        router.push('/(agent)/track');
+        router.replace('/(agent)/track');
         break;
       case 'packages':
-        router.push('/(agent)/packages');
+        router.replace('/(agent)/packages');
         break;
       case 'history':
-        router.push('/(agent)/activities');
+        router.replace('/(agent)/activities');
         break;
     }
   };
