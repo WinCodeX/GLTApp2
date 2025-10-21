@@ -112,7 +112,7 @@ export default function ActivitiesScreen() {
   };
 
   const handleActivityPress = (item: Activity) => {
-    router.replace({
+    router.push({
       pathname: '/(agent)/track',
       params: { 
         code: item.package_code,
