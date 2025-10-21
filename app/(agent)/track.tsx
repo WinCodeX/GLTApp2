@@ -1,5 +1,5 @@
 // app/(agent)/track.tsx
-import React, { useState } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
   Text,
@@ -10,10 +10,12 @@ import {
   ActivityIndicator,
   ScrollView,
   Alert,
+  RefreshControl,
+  Animated,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import api from '../../lib/api';
 
 interface TrackingEvent {
@@ -27,14 +29,23 @@ interface TrackingEvent {
     name: string;
     role: string;
   };
+  metadata: any;
+  location: string;
 }
 
 interface PackageInfo {
   code: string;
   state: string;
   state_display: string;
+  delivery_type: string;
   delivery_type_display: string;
+  package_size: string;
+  cost: number;
   receiver: {
+    name: string;
+    phone: string;
+  };
+  sender: {
     name: string;
     phone: string;
   };
@@ -43,14 +54,52 @@ interface PackageInfo {
     destination: string;
     description: string;
   };
+  created_at: string;
+  updated_at: string;
 }
 
 export default function TrackPackageScreen() {
   const router = useRouter();
-  const [packageCode, setPackageCode] = useState('');
+  const params = useLocalSearchParams();
+  const [packageCode, setPackageCode] = useState(params.code as string || '');
   const [searching, setSearching] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [packageInfo, setPackageInfo] = useState<PackageInfo | null>(null);
   const [trackingEvents, setTrackingEvents] = useState<TrackingEvent[]>([]);
+  const [estimatedDelivery, setEstimatedDelivery] = useState<string>('');
+  
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+
+  useEffect(() => {
+    if (params.code) {
+      handleTrack();
+    }
+  }, [params.code]);
+
+  useEffect(() => {
+    const pulseAnimation = () => {
+      Animated.sequence([
+        Animated.timing(pulseAnim, {
+          toValue: 1.2,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+        Animated.timing(pulseAnim, {
+          toValue: 1,
+          duration: 1000,
+          useNativeDriver: true,
+        }),
+      ]).start(() => pulseAnimation());
+    };
+    
+    if (packageInfo && ['in_transit', 'submitted'].includes(packageInfo.state)) {
+      pulseAnimation();
+    }
+    
+    return () => {
+      pulseAnim.stopAnimation();
+    };
+  }, [packageInfo]);
 
   const handleTrack = async () => {
     if (!packageCode.trim()) {
@@ -65,6 +114,7 @@ export default function TrackPackageScreen() {
       if (response.data.success) {
         setPackageInfo(response.data.data.package);
         setTrackingEvents(response.data.data.tracking_events || []);
+        setEstimatedDelivery(response.data.data.estimated_delivery || '');
       } else {
         Alert.alert('Error', response.data.message);
         setPackageInfo(null);
@@ -83,6 +133,12 @@ export default function TrackPackageScreen() {
     }
   };
 
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await handleTrack();
+    setRefreshing(false);
+  };
+
   const formatTimestamp = (timestamp: string) => {
     const date = new Date(timestamp);
     return date.toLocaleString('en-US', {
@@ -94,12 +150,125 @@ export default function TrackPackageScreen() {
     });
   };
 
+  const formatTimeAgo = (timestamp: string) => {
+    const now = new Date();
+    const time = new Date(timestamp);
+    const diffInMinutes = Math.floor((now.getTime() - time.getTime()) / (1000 * 60));
+    
+    if (diffInMinutes < 1) return 'Just now';
+    if (diffInMinutes < 60) return `${diffInMinutes}m ago`;
+    if (diffInMinutes < 1440) return `${Math.floor(diffInMinutes / 60)}h ago`;
+    return `${Math.floor(diffInMinutes / 1440)}d ago`;
+  };
+
   const getEventIcon = (eventType: string) => {
     if (eventType.includes('print')) return 'printer';
     if (eventType.includes('collect')) return 'truck';
     if (eventType.includes('deliver')) return 'home';
     if (eventType.includes('process')) return 'package';
+    if (eventType.includes('reject')) return 'x-circle';
     return 'check-circle';
+  };
+
+  const getStateColor = (state: string) => {
+    switch (state) {
+      case 'pending': return '#FF9500';
+      case 'submitted': return '#007AFF';
+      case 'in_transit': return '#5856D6';
+      case 'delivered': return '#34C759';
+      case 'collected': return '#2563eb';
+      case 'rejected': return '#FF3B30';
+      default: return '#8E8E93';
+    }
+  };
+
+  const getDeliveryTypeColor = (deliveryType: string) => {
+    switch (deliveryType) {
+      case 'doorstep':
+      case 'home': return '#8b5cf6';
+      case 'office':
+      case 'agent': return '#3b82f6';
+      case 'fragile': return '#f97316';
+      case 'collection': return '#10b981';
+      default: return '#8b5cf6';
+    }
+  };
+
+  const getPackageTypeIcon = (deliveryType: string) => {
+    switch (deliveryType) {
+      case 'collection': return 'shopping-bag';
+      case 'fragile': return 'shield';
+      case 'doorstep':
+      case 'home': return 'home';
+      case 'office':
+      case 'agent': return 'briefcase';
+      default: return 'package';
+    }
+  };
+
+  const renderTimelineItem = (event: TrackingEvent, index: number) => {
+    const isActive = index === 0;
+    
+    return (
+      <View key={event.id} style={styles.timelineItem}>
+        <View style={styles.timelineIndicator}>
+          <Animated.View style={[
+            styles.timelineDot,
+            { 
+              backgroundColor: isActive ? getStateColor(packageInfo?.state || '') : '#444',
+              transform: isActive ? [{ scale: pulseAnim }] : [{ scale: 1 }]
+            }
+          ]}>
+            <Feather 
+              name={getEventIcon(event.event_type) as any} 
+              size={isActive ? 10 : 8} 
+              color={isActive ? '#fff' : '#888'} 
+            />
+          </Animated.View>
+          {index < trackingEvents.length - 1 && (
+            <View style={[
+              styles.timelineLine,
+              { backgroundColor: isActive ? getStateColor(packageInfo?.state || '') : '#444' }
+            ]} />
+          )}
+        </View>
+        
+        <View style={styles.timelineContent}>
+          <View style={styles.timelineHeader}>
+            <Text style={[
+              styles.timelineDescription,
+              { color: isActive ? '#fff' : '#888' },
+              isActive && styles.currentTimelineDescription
+            ]}>
+              {event.description}
+            </Text>
+            <Text style={styles.timelineTimestamp}>
+              {formatTimeAgo(event.timestamp)}
+            </Text>
+          </View>
+          
+          <Text style={styles.timelineFullTimestamp}>
+            {formatTimestamp(event.timestamp)}
+          </Text>
+          
+          {event.user && (
+            <View style={styles.timelineUser}>
+              <Feather name="user" size={12} color="#10b981" />
+              <Text style={styles.timelineUserText}>
+                {event.user.name} ({event.user.role})
+              </Text>
+            </View>
+          )}
+          
+          {event.location && (
+            <View style={styles.timelineLocation}>
+              <Feather name="map-pin" size={12} color="#8b5cf6" />
+              <Text style={styles.timelineLocationText}>{event.location}</Text>
+            </View>
+          )}
+        </View>
+      </View>
+    );
   };
 
   return (
@@ -110,14 +279,24 @@ export default function TrackPackageScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(agent)')} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Track Package</Text>
         <View style={{ width: 40 }} />
       </LinearGradient>
 
-      <ScrollView style={styles.content}>
+      <ScrollView 
+        style={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#7B3F98"
+            colors={['#7B3F98']}
+          />
+        }
+      >
         <View style={styles.searchSection}>
           <View style={styles.inputContainer}>
             <Feather name="search" size={20} color="#8E8E93" />
@@ -151,32 +330,87 @@ export default function TrackPackageScreen() {
 
         {packageInfo && (
           <>
+            {/* Status Card */}
+            <View style={styles.statusCard}>
+              <LinearGradient
+                colors={['rgba(139, 92, 246, 0.15)', 'rgba(139, 92, 246, 0.05)']}
+                style={styles.statusGradient}
+              >
+                <View style={styles.statusHeader}>
+                  <View style={styles.statusIcon}>
+                    <Feather name="activity" size={20} color="#8b5cf6" />
+                  </View>
+                  <Text style={styles.statusTitle}>Current Status</Text>
+                  {['in_transit', 'submitted'].includes(packageInfo.state) && (
+                    <View style={styles.liveIndicator}>
+                      <Animated.View style={[styles.liveDot, { transform: [{ scale: pulseAnim }] }]} />
+                      <Text style={styles.liveText}>LIVE</Text>
+                    </View>
+                  )}
+                </View>
+                
+                <Text style={styles.statusDescription}>
+                  {packageInfo.state_display}
+                </Text>
+                
+                {estimatedDelivery && (
+                  <View style={styles.statusEstimate}>
+                    <Feather name="clock" size={14} color="#f59e0b" />
+                    <Text style={styles.statusEstimateText}>
+                      Est. delivery: {estimatedDelivery}
+                    </Text>
+                  </View>
+                )}
+              </LinearGradient>
+            </View>
+
+            {/* Package Summary Card */}
             <View style={styles.packageSection}>
               <Text style={styles.sectionTitle}>Package Information</Text>
               <View style={styles.packageCard}>
                 <View style={styles.packageHeader}>
-                  <Text style={styles.packageCode}>{packageInfo.code}</Text>
-                  <View style={styles.statusBadge}>
-                    <Text style={styles.statusText}>{packageInfo.state_display}</Text>
+                  <View style={styles.packageMainInfo}>
+                    <Text style={styles.packageCode}>{packageInfo.code}</Text>
+                    <Text style={styles.packageRoute}>{packageInfo.route.description}</Text>
+                  </View>
+                  <View style={styles.packageBadges}>
+                    <View style={[
+                      styles.deliveryTypeBadge,
+                      { borderColor: getDeliveryTypeColor(packageInfo.delivery_type) }
+                    ]}>
+                      <Feather 
+                        name={getPackageTypeIcon(packageInfo.delivery_type) as any} 
+                        size={12} 
+                        color={getDeliveryTypeColor(packageInfo.delivery_type)} 
+                      />
+                      <Text style={[styles.badgeText, { color: getDeliveryTypeColor(packageInfo.delivery_type) }]}>
+                        {packageInfo.delivery_type_display}
+                      </Text>
+                    </View>
+                    <View style={[
+                      styles.statusBadge,
+                      { backgroundColor: getStateColor(packageInfo.state) }
+                    ]}>
+                      <Text style={styles.badgeText}>{packageInfo.state_display.toUpperCase()}</Text>
+                    </View>
                   </View>
                 </View>
 
                 <View style={styles.infoRow}>
                   <Feather name="user" size={16} color="#8E8E93" />
                   <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Receiver</Text>
-                    <Text style={styles.infoValue}>{packageInfo.receiver.name}</Text>
-                    <Text style={styles.infoSubValue}>{packageInfo.receiver.phone}</Text>
+                    <Text style={styles.infoLabel}>Sender</Text>
+                    <Text style={styles.infoValue}>{packageInfo.sender.name}</Text>
+                    <Text style={styles.infoSubValue}>{packageInfo.sender.phone}</Text>
                   </View>
                 </View>
 
                 <View style={styles.infoRow}>
-                  <Feather name="package" size={16} color="#8E8E93" />
+                  <Feather name="user-check" size={16} color="#8E8E93" />
                   <View style={styles.infoContent}>
-                    <Text style={styles.infoLabel}>Delivery Type</Text>
-                    <Text style={styles.infoValue}>
-                      {packageInfo.delivery_type_display}
-                    </Text>
+                    <Text style={styles.infoLabel}>Receiver</Text>
+                    <Text style={styles.infoValue}>{packageInfo.receiver.name}</Text>
+                    <Text style={styles.infoSubValue}>{packageInfo.receiver.phone}</Text>
                   </View>
                 </View>
 
@@ -193,17 +427,31 @@ export default function TrackPackageScreen() {
                     <View style={[styles.routeDot, styles.routeDotDestination]} />
                     <View style={styles.routeInfo}>
                       <Text style={styles.routeLabel}>Destination</Text>
-                      <Text style={styles.routeValue}>
-                        {packageInfo.route.destination}
-                      </Text>
+                      <Text style={styles.routeValue}>{packageInfo.route.destination}</Text>
                     </View>
                   </View>
+                </View>
+
+                <View style={styles.packageDetails}>
+                  <View style={styles.detailItem}>
+                    <Text style={styles.detailLabel}>Cost</Text>
+                    <Text style={styles.detailValue}>
+                      KES {packageInfo.cost?.toLocaleString() || '0'}
+                    </Text>
+                  </View>
+                  {packageInfo.package_size && (
+                    <View style={styles.detailItem}>
+                      <Text style={styles.detailLabel}>Size</Text>
+                      <Text style={styles.detailValue}>{packageInfo.package_size}</Text>
+                    </View>
+                  )}
                 </View>
               </View>
             </View>
 
+            {/* Enhanced Timeline */}
             <View style={styles.trackingSection}>
-              <Text style={styles.sectionTitle}>Tracking History</Text>
+              <Text style={styles.sectionTitle}>Journey Timeline</Text>
               {trackingEvents.length === 0 ? (
                 <View style={styles.emptyState}>
                   <Feather name="clock" size={48} color="#8E8E93" />
@@ -211,28 +459,7 @@ export default function TrackPackageScreen() {
                 </View>
               ) : (
                 <View style={styles.timelineContainer}>
-                  {trackingEvents.map((event, index) => (
-                    <View key={event.id} style={styles.timelineItem}>
-                      <View style={styles.timelineIconContainer}>
-                        <View style={styles.timelineIcon}>
-                          <Feather
-                            name={getEventIcon(event.event_type) as any}
-                            size={16}
-                            color="#7B3F98"
-                          />
-                        </View>
-                        {index < trackingEvents.length - 1 && (
-                          <View style={styles.timelineLine} />
-                        )}
-                      </View>
-                      <View style={styles.timelineContent}>
-                        <Text style={styles.eventTitle}>{event.description}</Text>
-                        <Text style={styles.eventMeta}>
-                          {event.user.name} • {formatTimestamp(event.timestamp)}
-                        </Text>
-                      </View>
-                    </View>
-                  ))}
+                  {trackingEvents.map((event, index) => renderTimelineItem(event, index))}
                 </View>
               )}
             </View>
@@ -319,8 +546,76 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  statusCard: {
+    margin: 16,
+    marginBottom: 8,
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  statusGradient: {
+    padding: 20,
+    borderWidth: 1,
+    borderColor: 'rgba(139, 92, 246, 0.3)',
+  },
+  statusHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+    gap: 12,
+  },
+  statusIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: 'rgba(139, 92, 246, 0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statusTitle: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+    flex: 1,
+  },
+  liveIndicator: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: 'rgba(16, 185, 129, 0.2)',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  liveDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: '#10b981',
+  },
+  liveText: {
+    fontSize: 10,
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  statusDescription: {
+    fontSize: 16,
+    color: '#e5e7eb',
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  statusEstimate: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  statusEstimateText: {
+    fontSize: 12,
+    color: '#f59e0b',
+    fontWeight: '500',
+  },
   packageSection: {
     padding: 16,
+    paddingTop: 8,
   },
   sectionTitle: {
     fontSize: 18,
@@ -336,27 +631,46 @@ const styles = StyleSheet.create({
   packageHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
     marginBottom: 16,
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255, 255, 255, 0.1)',
   },
+  packageMainInfo: {
+    flex: 1,
+  },
   packageCode: {
     fontSize: 18,
     fontWeight: '600',
     color: '#fff',
+    marginBottom: 4,
+  },
+  packageRoute: {
+    fontSize: 13,
+    color: '#888',
+  },
+  packageBadges: {
+    alignItems: 'flex-end',
+    gap: 6,
+  },
+  deliveryTypeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    gap: 4,
   },
   statusBadge: {
-    backgroundColor: '#7B3F98',
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 12,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
   },
-  statusText: {
-    color: '#fff',
-    fontSize: 12,
+  badgeText: {
+    fontSize: 10,
     fontWeight: '600',
+    color: '#fff',
   },
   infoRow: {
     flexDirection: 'row',
@@ -383,7 +697,7 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   routeSection: {
-    marginTop: 8,
+    marginVertical: 16,
   },
   routePoint: {
     flexDirection: 'row',
@@ -420,8 +734,29 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontWeight: '500',
   },
+  packageDetails: {
+    flexDirection: 'row',
+    gap: 20,
+    paddingTop: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  detailItem: {
+    flex: 1,
+  },
+  detailLabel: {
+    fontSize: 12,
+    color: '#8E8E93',
+    marginBottom: 4,
+  },
+  detailValue: {
+    fontSize: 16,
+    color: '#10b981',
+    fontWeight: '600',
+  },
   trackingSection: {
     padding: 16,
+    paddingTop: 8,
   },
   timelineContainer: {
     backgroundColor: '#1F2C34',
@@ -430,38 +765,78 @@ const styles = StyleSheet.create({
   },
   timelineItem: {
     flexDirection: 'row',
-    gap: 12,
+    alignItems: 'flex-start',
+    gap: 16,
+    minHeight: 60,
   },
-  timelineIconContainer: {
+  timelineIndicator: {
     alignItems: 'center',
+    paddingTop: 4,
   },
-  timelineIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+  timelineDot: {
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    marginBottom: 8,
+    alignItems: 'center',
     justifyContent: 'center',
-    alignItems: 'center',
   },
   timelineLine: {
     width: 2,
     flex: 1,
-    backgroundColor: 'rgba(123, 63, 152, 0.2)',
-    marginTop: 4,
+    minHeight: 24,
   },
   timelineContent: {
     flex: 1,
-    paddingBottom: 20,
+    paddingBottom: 16,
   },
-  eventTitle: {
-    fontSize: 14,
-    fontWeight: '500',
-    color: '#fff',
+  timelineHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 4,
   },
-  eventMeta: {
+  timelineDescription: {
+    fontSize: 14,
+    fontWeight: '500',
+    flex: 1,
+    marginRight: 8,
+  },
+  currentTimelineDescription: {
+    color: '#10b981',
+    fontWeight: '600',
+  },
+  timelineTimestamp: {
+    fontSize: 11,
+    color: '#666',
+    fontWeight: '400',
+  },
+  timelineFullTimestamp: {
+    fontSize: 11,
+    color: '#888',
+    marginBottom: 6,
+  },
+  timelineUser: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineUserText: {
     fontSize: 12,
-    color: '#8E8E93',
+    color: '#10b981',
+    fontWeight: '500',
+  },
+  timelineLocation: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 4,
+  },
+  timelineLocationText: {
+    fontSize: 12,
+    color: '#8b5cf6',
+    fontWeight: '500',
   },
   emptyState: {
     alignItems: 'center',
