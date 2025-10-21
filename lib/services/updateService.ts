@@ -1,4 +1,4 @@
-// lib/services/updateService.ts - Enhanced with Expo OTA Updates
+// lib/services/updateService.ts - With proper OTA version tracking
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -20,7 +20,8 @@ interface UpdateMetadata {
   force_update?: boolean;
   download_url?: string;
   file_size?: number;
-  update_type?: 'ota' | 'apk'; // New: specify update type
+  update_type?: 'ota' | 'apk';
+  bundle_version?: string; // New: separate bundle version for OTA
 }
 
 interface DownloadProgress {
@@ -52,6 +53,7 @@ class UpdateService {
   private downloadStartTime = 0;
   private appStateSubscription: any = null;
   private isExpoGo = false;
+  private otaUpdatesAvailable = false;
 
   static getInstance(): UpdateService {
     if (!UpdateService.instance) {
@@ -65,15 +67,21 @@ class UpdateService {
       console.log('UpdateService: Starting initialization...');
       
       this.isExpoGo = Constants.appOwnership === 'expo';
+      this.otaUpdatesAvailable = !this.isExpoGo && Updates.isEnabled;
       
       if (this.isExpoGo) {
-        console.log('UpdateService: Running in Expo Go - limited functionality');
+        console.log('UpdateService: Running in Expo Go - OTA updates NOT available, APK updates only');
+      } else if (this.otaUpdatesAvailable) {
+        console.log('UpdateService: Running in standalone build - Full OTA and APK update support available');
       } else {
-        console.log('UpdateService: Running in standalone app - full functionality available');
+        console.log('UpdateService: OTA updates disabled - APK updates only');
       }
       
       await this.initializeVersionTracking();
       this.setupAppStateMonitoring();
+      
+      // Check if we just applied an OTA update
+      await this.checkForOTAUpdateApplication();
       
       console.log('UpdateService: Initialization completed successfully');
     } catch (error) {
@@ -81,21 +89,82 @@ class UpdateService {
     }
   }
 
+  /**
+   * Check if an OTA update was just applied
+   * This runs on app startup to detect OTA bundle changes
+   */
+  private async checkForOTAUpdateApplication(): Promise<void> {
+    if (!this.otaUpdatesAvailable) return;
+
+    try {
+      const currentBundleId = await this.getCurrentBundleId();
+      const lastKnownBundleId = await AsyncStorage.getItem('last_known_bundle_id');
+      
+      console.log('UpdateService: Current bundle ID:', currentBundleId);
+      console.log('UpdateService: Last known bundle ID:', lastKnownBundleId);
+      
+      if (lastKnownBundleId && lastKnownBundleId !== currentBundleId) {
+        console.log('UpdateService: OTA update detected - bundle changed');
+        
+        Alert.alert(
+          'Update Applied!',
+          'An over-the-air update has been applied. Your app is now running the latest code.',
+          [{ text: 'Great!' }]
+        );
+      }
+      
+      await AsyncStorage.setItem('last_known_bundle_id', currentBundleId);
+    } catch (error) {
+      console.error('UpdateService: Failed to check OTA update application:', error);
+    }
+  }
+
+  /**
+   * Get the current bundle/update ID from Expo Updates
+   * This changes with each OTA update, even if APK version stays the same
+   */
+  private async getCurrentBundleId(): Promise<string> {
+    if (!this.otaUpdatesAvailable) {
+      return 'no-ota-support';
+    }
+
+    try {
+      // Updates.updateId is unique per bundle
+      // Updates.createdAt shows when this bundle was created
+      const updateId = Updates.updateId || 'unknown';
+      const createdAt = Updates.createdAt ? Updates.createdAt.getTime() : Date.now();
+      
+      return `${updateId}_${createdAt}`;
+    } catch (error) {
+      console.error('UpdateService: Failed to get bundle ID:', error);
+      return 'error';
+    }
+  }
+
   private async initializeVersionTracking(): Promise<void> {
     try {
       console.log('UpdateService: Initializing version tracking...');
       
-      const currentVersion = await this.getCurrentVersion();
-      const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
+      // Track APK version separately from bundle version
+      const currentAPKVersion = await this.getCurrentAPKVersion();
+      const lastKnownAPKVersion = await AsyncStorage.getItem('last_known_apk_version');
       
-      console.log('UpdateService: Current version:', currentVersion);
-      console.log('UpdateService: Last known version:', lastKnownVersion);
+      console.log('UpdateService: Current APK version:', currentAPKVersion);
+      console.log('UpdateService: Last known APK version:', lastKnownAPKVersion);
       
-      if (!lastKnownVersion) {
-        await AsyncStorage.setItem('last_known_version', currentVersion);
-        console.log('UpdateService: Version tracking initialized for first run');
-      } else {
-        console.log('UpdateService: Version tracking already initialized');
+      if (!lastKnownAPKVersion) {
+        await AsyncStorage.setItem('last_known_apk_version', currentAPKVersion);
+        console.log('UpdateService: APK version tracking initialized');
+      } else if (lastKnownAPKVersion !== currentAPKVersion) {
+        console.log('UpdateService: APK version changed - new APK installed');
+        await this.cleanupAfterSuccessfulInstall();
+        await AsyncStorage.setItem('last_known_apk_version', currentAPKVersion);
+        
+        Alert.alert(
+          'Update Successful!',
+          `GLT has been updated to version ${currentAPKVersion}. Enjoy the new features!`,
+          [{ text: 'Great!' }]
+        );
       }
     } catch (error) {
       console.error('UpdateService: Failed to initialize version tracking:', error);
@@ -112,6 +181,11 @@ class UpdateService {
     
     if (nextAppState === 'active') {
       await this.checkPostInstallation();
+      
+      // Check for OTA bundle changes when app becomes active
+      if (this.otaUpdatesAvailable) {
+        await this.checkForOTAUpdateApplication();
+      }
     }
   }
 
@@ -119,29 +193,17 @@ class UpdateService {
     try {
       console.log('UpdateService: Checking post-installation status...');
       
-      const currentVersion = await this.getCurrentVersion();
-      const lastKnownVersion = await AsyncStorage.getItem('last_known_version');
-      
-      console.log('UpdateService: Current version:', currentVersion);
-      console.log('UpdateService: Last known version:', lastKnownVersion);
+      const currentVersion = await this.getCurrentAPKVersion();
+      const lastKnownVersion = await AsyncStorage.getItem('last_known_apk_version');
       
       if (lastKnownVersion && lastKnownVersion !== currentVersion) {
-        console.log(`UpdateService: App updated successfully: ${lastKnownVersion} → ${currentVersion}`);
-        
+        console.log(`UpdateService: APK updated: ${lastKnownVersion} → ${currentVersion}`);
         await this.cleanupAfterSuccessfulInstall();
-        
-        Alert.alert(
-          'Update Successful!',
-          `GLT has been updated to version ${currentVersion}. Enjoy the new features and improvements!`,
-          [{ text: 'Great!' }]
-        );
-      } else {
-        console.log('UpdateService: No version change detected');
       }
       
-      await AsyncStorage.setItem('last_known_version', currentVersion);
+      await AsyncStorage.setItem('last_known_apk_version', currentVersion);
     } catch (error) {
-      console.error('UpdateService: Failed to check post-installation status:', error);
+      console.error('UpdateService: Failed to check post-installation:', error);
     }
   }
 
@@ -156,28 +218,36 @@ class UpdateService {
         'user_postponed_update'
       ]);
       
-      console.log('UpdateService: Cleanup completed after successful installation');
+      console.log('UpdateService: Cleanup completed');
     } catch (error) {
-      console.error('UpdateService: Failed to cleanup after successful install:', error);
+      console.error('UpdateService: Failed to cleanup:', error);
     }
   }
 
   /**
    * Check for Expo OTA updates
+   * OTA updates change the JavaScript bundle, not the APK
    */
   async checkForOTAUpdates(): Promise<{ hasUpdate: boolean; isAvailable?: boolean }> {
+    if (this.isExpoGo) {
+      console.log('UpdateService: Skipping OTA check - running in Expo Go');
+      return { hasUpdate: false };
+    }
+
+    if (!this.otaUpdatesAvailable) {
+      console.log('UpdateService: Skipping OTA check - Updates not enabled');
+      return { hasUpdate: false };
+    }
+
     try {
       console.log('UpdateService: Checking for Expo OTA updates...');
+      console.log('UpdateService: Current bundle ID:', await this.getCurrentBundleId());
       
-      if (!Updates.isEnabled) {
-        console.log('UpdateService: Expo Updates is not enabled');
-        return { hasUpdate: false };
-      }
-
       const update = await Updates.checkForUpdateAsync();
       
       if (update.isAvailable) {
-        console.log('UpdateService: OTA update is available');
+        console.log('UpdateService: OTA update IS available');
+        console.log('UpdateService: This will update JavaScript bundle, NOT the APK');
         return { hasUpdate: true, isAvailable: true };
       } else {
         console.log('UpdateService: No OTA updates available');
@@ -191,19 +261,37 @@ class UpdateService {
 
   /**
    * Fetch and apply Expo OTA update
+   * This updates the JavaScript bundle and reloads the app
+   * The APK version number DOES NOT CHANGE
    */
   async fetchAndApplyOTAUpdate(): Promise<boolean> {
+    if (this.isExpoGo) {
+      console.log('UpdateService: Cannot apply OTA - running in Expo Go');
+      return false;
+    }
+
+    if (!this.otaUpdatesAvailable) {
+      console.log('UpdateService: Cannot apply OTA - Updates not enabled');
+      return false;
+    }
+
     try {
       console.log('UpdateService: Fetching OTA update...');
+      console.log('UpdateService: NOTE - This will NOT change the APK version');
+      console.log('UpdateService: Only JavaScript bundle will update');
       
       const update = await Updates.fetchUpdateAsync();
       
       if (update.isNew) {
-        console.log('UpdateService: New OTA update fetched, reloading app...');
+        console.log('UpdateService: New OTA bundle fetched');
+        console.log('UpdateService: Reloading app with new bundle...');
+        
+        // This reloads the app with the new JavaScript bundle
+        // The APK stays the same, only the bundle changes
         await Updates.reloadAsync();
         return true;
       } else {
-        console.log('UpdateService: OTA update fetch returned no new update');
+        console.log('UpdateService: No new bundle to apply');
         return false;
       }
     } catch (error) {
@@ -213,53 +301,53 @@ class UpdateService {
   }
 
   /**
-   * Check for available updates - checks OTA first, then APK
+   * Check for available updates - OTA first, then APK
    */
   async checkForUpdates(): Promise<{ hasUpdate: boolean; metadata?: UpdateMetadata }> {
     if (this.updateCheckInProgress) {
-      console.log('UpdateService: Update check already in progress, skipping');
+      console.log('UpdateService: Update check already in progress');
       return { hasUpdate: false };
     }
 
     try {
       this.updateCheckInProgress = true;
       console.log('UpdateService: Starting update check...');
+      console.log('UpdateService: Current APK version:', await this.getCurrentAPKVersion());
       
-      // First, check for OTA updates (instant, no download needed)
-      const otaResult = await this.checkForOTAUpdates();
-      if (otaResult.hasUpdate) {
-        console.log('UpdateService: OTA update available');
-        return {
-          hasUpdate: true,
-          metadata: {
-            available: true,
-            update_type: 'ota',
-            version: await this.getCurrentVersion(),
-            changelog: ['Over-the-air update available'],
-          }
-        };
+      // Check OTA first (instant, no download)
+      if (this.otaUpdatesAvailable) {
+        console.log('UpdateService: Checking for OTA (JavaScript bundle) updates...');
+        const otaResult = await this.checkForOTAUpdates();
+        if (otaResult.hasUpdate) {
+          const currentBundleId = await this.getCurrentBundleId();
+          return {
+            hasUpdate: true,
+            metadata: {
+              available: true,
+              update_type: 'ota',
+              version: await this.getCurrentAPKVersion(), // APK version stays same
+              bundle_version: currentBundleId,
+              changelog: ['JavaScript bundle update available', 'No APK download required'],
+            }
+          };
+        }
+      } else {
+        console.log('UpdateService: Skipping OTA check - not available');
       }
       
-      // If no OTA update, check for APK updates
-      const currentVersion = await this.getCurrentVersion();
-      console.log('UpdateService: Current version:', currentVersion);
+      // Check for APK updates
+      const currentAPKVersion = await this.getCurrentAPKVersion();
+      console.log('UpdateService: Checking for APK updates via API...');
       
-      console.log('UpdateService: Making authenticated request via API service...');
-      
-      const response = await api.get(`/api/v1/updates/info?current_version=${currentVersion}`);
-      
-      console.log('UpdateService: Response received');
-      console.log('UpdateService: Status:', response.status);
-      console.log('UpdateService: Data keys:', Object.keys(response.data || {}));
-      
+      const response = await api.get(`/api/v1/updates/info?current_version=${currentAPKVersion}`);
       const data: UpdateMetadata = response.data;
       
-      console.log('UpdateService: Available:', data.available);
-      console.log('UpdateService: Version:', data.version);
+      console.log('UpdateService: APK update available:', data.available);
+      if (data.available) {
+        console.log('UpdateService: New APK version available:', data.version);
+      }
       
       if (data.available === true) {
-        console.log(`UpdateService: APK update IS available! Version ${data.version} (current: ${currentVersion})`);
-        console.log('UpdateService: Full update metadata:', JSON.stringify(data, null, 2));
         return { 
           hasUpdate: true, 
           metadata: { 
@@ -277,7 +365,6 @@ class UpdateService {
       return { hasUpdate: false };
     } finally {
       this.updateCheckInProgress = false;
-      console.log('UpdateService: Update check process finished');
     }
   }
 
@@ -289,18 +376,17 @@ class UpdateService {
     progressCallback?: DownloadProgressCallback
   ): Promise<boolean> {
     if (!metadata.download_url || this.downloadInProgress) {
-      console.log('UpdateService: Download blocked - no URL or already in progress');
       return false;
     }
 
     if (Platform.OS !== 'android') {
-      console.log('UpdateService: APK updates only supported on Android');
-      Alert.alert('Unsupported', 'APK updates are only supported on Android devices.');
+      Alert.alert('Unsupported', 'APK updates are only supported on Android.');
       return false;
     }
 
     try {
-      console.log('UpdateService: Starting download for version:', metadata.version);
+      console.log('UpdateService: Starting APK download for version:', metadata.version);
+      console.log('UpdateService: This WILL change the APK version when installed');
       
       this.downloadInProgress = true;
       this.downloadProgressCallback = progressCallback || null;
@@ -312,19 +398,13 @@ class UpdateService {
       const fileName = `GLT_v${metadata.version?.replace(/\./g, '_')}_update.apk`;
       const tempFileUri = downloadDir + fileName;
       
-      console.log('UpdateService: Download directory:', downloadDir);
-      console.log('UpdateService: File name:', fileName);
-      console.log('UpdateService: Temp file URI:', tempFileUri);
-      
       const existingFile = await FileSystem.getInfoAsync(tempFileUri);
       if (existingFile.exists) {
-        console.log('UpdateService: Removing existing file');
         await FileSystem.deleteAsync(tempFileUri);
       }
 
       this.showDownloadStartAlert(metadata.version);
 
-      console.log('UpdateService: Creating download resumable...');
       const downloadResumable = FileSystem.createDownloadResumable(
         metadata.download_url,
         tempFileUri,
@@ -332,31 +412,22 @@ class UpdateService {
         this.createProgressHandler(metadata)
       );
 
-      console.log('UpdateService: Starting download...');
       const result = await downloadResumable.downloadAsync();
-      
-      console.log('UpdateService: Download result:', result);
       
       if (!result || result.status !== 200) {
         throw new Error(`Download failed with status ${result?.status || 'unknown'}`);
       }
 
       const fileInfo = await FileSystem.getInfoAsync(result.uri);
-      console.log('UpdateService: Downloaded file info:', fileInfo);
-      
       if (!fileInfo.exists || fileInfo.size === 0) {
         throw new Error('Downloaded file is invalid');
       }
 
-      console.log('UpdateService: APK downloaded to cache:', result.uri);
-
       let downloadsPath: string | undefined;
       try {
-        console.log('UpdateService: Attempting to save to Downloads folder...');
         downloadsPath = await this.saveToDownloadsFolder(result.uri, fileName);
-        console.log('UpdateService: APK saved to Downloads folder:', downloadsPath);
       } catch (error) {
-        console.warn('UpdateService: Failed to save to Downloads folder:', error);
+        console.warn('UpdateService: Failed to save to Downloads:', error);
       }
 
       const storedDownload: StoredDownload = {
@@ -368,28 +439,20 @@ class UpdateService {
         isComplete: true,
       };
       
-      console.log('UpdateService: Storing download info:', storedDownload);
       await this.storeDownload(storedDownload);
-      
       this.showDownloadCompleteAlert(storedDownload);
-      
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
       
-      console.log('UpdateService: APK download completed successfully');
       return true;
 
     } catch (error) {
       console.error('UpdateService: APK download failed:', error);
-      
       this.showDownloadErrorAlert(metadata.version || 'latest');
-      
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
-      
       return false;
     } finally {
       this.downloadInProgress = false;
       this.downloadProgressCallback = null;
-      console.log('UpdateService: Download process completed');
     }
   }
 
@@ -418,7 +481,7 @@ class UpdateService {
 
       return downloadedFileUri;
     } catch (error) {
-      console.error('Failed to save to Downloads folder:', error);
+      console.error('Failed to save to Downloads:', error);
       throw error;
     }
   }
@@ -443,7 +506,7 @@ class UpdateService {
 
       return null;
     } catch (error) {
-      console.error('Failed to get Downloads folder permission:', error);
+      console.error('Failed to get Downloads permission:', error);
       return null;
     }
   }
@@ -463,7 +526,7 @@ class UpdateService {
         type: 'resource/folder'
       });
     } catch (error) {
-      console.error('Failed to open Downloads folder:', error);
+      console.error('Failed to open Downloads:', error);
       
       try {
         await IntentLauncher.startActivityAsync('android.intent.action.GET_CONTENT', {
@@ -471,7 +534,6 @@ class UpdateService {
           category: 'android.intent.category.OPENABLE'
         });
       } catch (fallbackError) {
-        console.error('All methods failed to open Downloads:', fallbackError);
         Alert.alert(
           'Downloads Folder', 
           'Please check your Downloads folder in your file manager for the GLT APK file.'
@@ -509,14 +571,14 @@ class UpdateService {
   }
 
   private showDownloadStartAlert(version?: string) {
-    console.log(`UpdateService: Starting download for GLT version ${version || 'latest'}...`);
+    console.log(`UpdateService: Starting APK download for version ${version}...`);
   }
 
   private showDownloadCompleteAlert(download: StoredDownload) {
     const hasDownloadsPath = !!download.downloadsPath;
     const message = hasDownloadsPath 
-      ? `GLT version ${download.version} is ready to install.\n\nThe APK has been saved to your Downloads folder and is ready for installation.`
-      : `GLT version ${download.version} is ready to install.\n\nThe APK has been downloaded and is ready for installation.`;
+      ? `GLT version ${download.version} APK is ready to install.\n\nThe APK has been saved to your Downloads folder.`
+      : `GLT version ${download.version} APK is ready to install.`;
 
     const buttons = [
       { text: 'Install Now', onPress: () => this.installDownloadedAPK(download.version) },
@@ -527,13 +589,13 @@ class UpdateService {
       buttons.unshift({ text: 'Open Downloads', onPress: () => this.openDownloadsFolder() });
     }
 
-    Alert.alert('Update Downloaded', message, buttons);
+    Alert.alert('APK Downloaded', message, buttons);
   }
 
   private showDownloadErrorAlert(version: string) {
     Alert.alert(
       'Download Failed',
-      `Failed to download GLT version ${version}. Please check your internet connection and try again.`,
+      `Failed to download GLT version ${version}. Check your internet connection and try again.`,
       [
         { text: 'Retry', onPress: () => this.checkForUpdates() },
         { text: 'OK', style: 'cancel' }
@@ -565,10 +627,10 @@ class UpdateService {
       
       return true;
     } catch (error) {
-      console.error('Failed to install downloaded APK:', error);
+      console.error('Failed to install APK:', error);
       Alert.alert(
         'Installation Error',
-        `Unable to install update: ${error.message}\n\nYou can manually install the APK from your Downloads folder.`,
+        `Unable to install update: ${error.message}\n\nYou can manually install from Downloads.`,
         [
           { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
           { text: 'OK', style: 'cancel' }
@@ -588,7 +650,6 @@ class UpdateService {
       
       return hasPermission;
     } catch (error) {
-      console.error('Failed to check install permission:', error);
       return false;
     }
   }
@@ -597,7 +658,7 @@ class UpdateService {
     return new Promise((resolve) => {
       Alert.alert(
         'Enable App Installation',
-        `To install GLT updates, you need to allow this app to install other apps.\n\nSteps:\n1. Tap "Open Settings"\n2. Turn ON "Allow from this source"\n3. Come back to GLT\n4. Try installation again`,
+        `To install GLT updates, allow this app to install other apps.\n\nSteps:\n1. Tap "Open Settings"\n2. Turn ON "Allow from this source"\n3. Return to GLT\n4. Try installation again`,
         [
           { 
             text: 'Open Settings', 
@@ -608,12 +669,10 @@ class UpdateService {
                 });
                 resolve(true);
               } catch (error) {
-                console.error('Failed to open install permission settings:', error);
                 try {
                   await IntentLauncher.startActivityAsync('android.settings.SECURITY');
                   resolve(true);
                 } catch (fallbackError) {
-                  console.error('Failed to open security settings:', fallbackError);
                   resolve(false);
                 }
               }
@@ -626,8 +685,6 @@ class UpdateService {
   }
 
   private async installAPKMultipleMethods(fileUri: string, version: string): Promise<void> {
-    console.log('Installing APK:', fileUri);
-
     const hasPermission = await this.checkInstallPermission();
     
     if (!hasPermission) {
@@ -640,7 +697,7 @@ class UpdateService {
 
     Alert.alert(
       'Installing Update',
-      `Installing GLT version ${version}...\n\nThe Android installer will open. Please:\n• Tap "Install" when prompted\n• Wait for installation to complete\n• The app will restart automatically`,
+      `Installing GLT version ${version}...\n\nThe Android installer will open. Please:\n• Tap "Install"\n• Wait for installation\n• App will restart automatically`,
       [
         { text: 'Start Installation', onPress: () => this.tryInstallMethods(fileUri) }
       ]
@@ -680,8 +737,6 @@ class UpdateService {
     for (let i = 0; i < methods.length; i++) {
       try {
         await methods[i]();
-        console.log(`Installation method ${i + 1} launched successfully`);
-        
         this.handleInstallationStarted();
         return;
       } catch (error) {
@@ -696,7 +751,7 @@ class UpdateService {
   private handleInstallationStarted(): void {
     Alert.alert(
       'Installation Started',
-      'The Android installer is now running. After installation completes, the app will restart with the new version.',
+      'The Android installer is running. After installation, the app will restart with the new version.',
       [{ text: 'OK' }]
     );
 
@@ -708,7 +763,7 @@ class UpdateService {
   private showManualInstallOptions(fileUri: string): void {
     Alert.alert(
       'Manual Installation Required',
-      'Automatic installation failed. You can:\n\n• Find the APK in Downloads folder\n• Open your file manager to locate the file\n• Try installation again',
+      'Automatic installation failed. You can:\n\n• Find APK in Downloads folder\n• Open file manager\n• Try installation again',
       [
         { text: 'Open Downloads', onPress: () => this.openDownloadsFolder() },
         { text: 'Try Again', onPress: () => this.tryInstallMethods(fileUri) },
@@ -721,8 +776,6 @@ class UpdateService {
     try {
       await this.clearStoredDownload();
       await AsyncStorage.removeItem(DOWNLOAD_PROGRESS_KEY);
-      
-      console.log('Cleanup completed after installation');
     } catch (error) {
       console.error('Failed to cleanup after install:', error);
     }
@@ -735,11 +788,15 @@ class UpdateService {
 
   async installUpdate(metadata?: UpdateMetadata): Promise<void> {
     if (!metadata) {
-      throw new Error('Update metadata required for installation');
+      throw new Error('Update metadata required');
     }
     
     // Handle OTA updates
     if (metadata.update_type === 'ota') {
+      if (!this.otaUpdatesAvailable) {
+        throw new Error('OTA updates not available');
+      }
+      
       const success = await this.fetchAndApplyOTAUpdate();
       if (!success) {
         throw new Error('Failed to apply OTA update');
@@ -750,7 +807,7 @@ class UpdateService {
     // Handle APK updates
     const success = await this.downloadUpdateWithProgress(metadata);
     if (!success) {
-      throw new Error('Failed to download APK update');
+      throw new Error('Failed to download APK');
     }
   }
 
@@ -763,7 +820,6 @@ class UpdateService {
       };
       
       await AsyncStorage.setItem(DOWNLOAD_STORAGE_KEY, JSON.stringify(downloadInfo));
-      console.log('Background download scheduled for version:', metadata.version);
     } catch (error) {
       console.error('Failed to schedule background download:', error);
     }
@@ -777,7 +833,7 @@ class UpdateService {
     try {
       await AsyncStorage.setItem('stored_apk_download', JSON.stringify(download));
     } catch (error) {
-      console.error('Failed to store download info:', error);
+      console.error('Failed to store download:', error);
     }
   }
 
@@ -786,7 +842,6 @@ class UpdateService {
       const stored = await AsyncStorage.getItem('stored_apk_download');
       return stored ? JSON.parse(stored) : null;
     } catch (error) {
-      console.error('Failed to get stored download:', error);
       return null;
     }
   }
@@ -801,26 +856,17 @@ class UpdateService {
 
   async hasCompletedDownload(): Promise<{ hasDownload: boolean; version?: string }> {
     try {
-      console.log('UpdateService: Checking for completed downloads...');
-      
       const storedDownload = await this.getStoredDownload();
       if (storedDownload && storedDownload.isComplete) {
-        console.log('UpdateService: Found completed download for version:', storedDownload.version);
-        
         const fileInfo = await FileSystem.getInfoAsync(storedDownload.filePath);
         if (fileInfo.exists) {
-          console.log('UpdateService: Completed download file exists');
           return { hasDownload: true, version: storedDownload.version };
         } else {
-          console.log('UpdateService: Completed download file was deleted, cleaning up');
           await this.clearStoredDownload();
         }
-      } else {
-        console.log('UpdateService: No completed downloads found');
       }
       return { hasDownload: false };
     } catch (error) {
-      console.error('UpdateService: Failed to check completed download:', error);
       return { hasDownload: false };
     }
   }
@@ -831,11 +877,14 @@ class UpdateService {
       const sizeText = metadata.file_size ? ` (${this.formatFileSize(metadata.file_size)})` : '';
       
       const isOTA = metadata.update_type === 'ota';
-      const updateTypeText = isOTA ? 'Over-the-air update' : 'APK update';
+      const updateTypeText = isOTA ? 'JavaScript Bundle Update (OTA)' : 'APK Update';
+      const updateDescription = isOTA 
+        ? 'This will update your app code instantly without changing the APK version.'
+        : 'This will download and install a new APK file, changing your app version.';
       
       Alert.alert(
         metadata.force_update ? 'Required Update' : 'Update Available',
-        `${updateTypeText} - Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\n${isOTA ? 'This will update the app instantly.' : 'This will download and install a new APK file.'}`,
+        `${updateTypeText} - Version ${metadata.version}${sizeText}\n\n• ${changelogText}\n\n${updateDescription}`,
         [
           ...(metadata.force_update ? [] : [{
             text: 'Later',
@@ -852,54 +901,52 @@ class UpdateService {
     });
   }
 
-  async getCurrentVersion(): Promise<string> {
+  /**
+   * Get current APK version
+   * This is the native app version that only changes with new APK installs
+   */
+  async getCurrentAPKVersion(): Promise<string> {
     try {
-      console.log('UpdateService: Getting current version...');
-      
       const storedVersion = await this.getStoredCurrentVersion();
       if (storedVersion) {
-        console.log('UpdateService: Found stored version:', storedVersion);
         return storedVersion;
       }
       
       const configVersion = Constants.expoConfig?.version;
       if (configVersion) {
-        console.log('UpdateService: Using config version:', configVersion);
         await this.setCurrentVersion(configVersion);
         return configVersion;
       }
       
-      console.log('UpdateService: Using fallback version: 1.8.3');
       return '1.8.3';
     } catch (error) {
-      console.error('UpdateService: Failed to get current version:', error);
+      console.error('Failed to get APK version:', error);
       return '1.8.3';
     }
   }
 
+  async getCurrentVersion(): Promise<string> {
+    return this.getCurrentAPKVersion();
+  }
+
   async setCurrentVersion(version: string): Promise<void> {
     try {
-      console.log('UpdateService: Setting current version to:', version);
       await AsyncStorage.setItem('app_current_version', version);
-      console.log('UpdateService: Version stored successfully');
     } catch (error) {
-      console.error('UpdateService: Failed to set current version:', error);
+      console.error('Failed to set current version:', error);
     }
   }
 
   private async getStoredCurrentVersion(): Promise<string | null> {
     try {
-      const version = await AsyncStorage.getItem('app_current_version');
-      console.log('UpdateService: Retrieved stored version:', version);
-      return version;
+      return await AsyncStorage.getItem('app_current_version');
     } catch (error) {
-      console.error('UpdateService: Failed to get stored version:', error);
       return null;
     }
   }
 
   async getUpdateId(): Promise<string> {
-    return await this.getCurrentVersion();
+    return await this.getCurrentAPKVersion();
   }
 
   private formatFileSize(bytes: number): string {
@@ -910,8 +957,7 @@ class UpdateService {
   }
 
   isUpdateSupported(): boolean {
-    const supported = Platform.OS === 'android' || Updates.isEnabled;
-    console.log('UpdateService: Update support check - Platform:', Platform.OS, 'Supported:', supported);
+    const supported = Platform.OS === 'android' || this.otaUpdatesAvailable;
     return supported;
   }
 
@@ -928,12 +974,11 @@ class UpdateService {
     try {
       await AsyncStorage.removeItem('user_postponed_update');
     } catch (error) {
-      console.error('Failed to clear postponed update flag:', error);
+      console.error('Failed to clear postponed update:', error);
     }
   }
 
   cleanup(): void {
-    console.log('UpdateService: Cleaning up...');
     if (this.appStateSubscription) {
       this.appStateSubscription.remove();
       this.appStateSubscription = null;
