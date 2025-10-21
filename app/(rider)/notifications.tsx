@@ -222,7 +222,12 @@ export default function RiderNotificationsScreen() {
     const unsubNotificationRead = actionCable.subscribe('notification_read', (data) => {
       if (data.notification_id) {
         setNotifications(prev =>
-          prev.map(n => n.id === data.notification_id ? { ...n, read: true } : n)
+          prev.map(n => {
+            if (n.id === data.notification_id) {
+              return { ...n, read: true };
+            }
+            return n;
+          })
         );
       }
     });
@@ -357,11 +362,35 @@ export default function RiderNotificationsScreen() {
     if (unreadVisibleIds.length === 0) return;
 
     try {
-      setNotifications(prev =>
-        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: true } : n)
-      );
-
+      // Mark in ref first to prevent duplicate marking
       unreadVisibleIds.forEach(id => markedAsReadRef.current.add(id));
+
+      // Update state with proper deep clone
+      setNotifications(prev =>
+        prev.map(n => {
+          if (unreadVisibleIds.includes(n.id)) {
+            // Deep clone to prevent reference issues
+            return {
+              ...n,
+              read: true,
+              // Explicitly preserve all fields
+              id: n.id,
+              title: n.title,
+              message: n.message,
+              notification_type: n.notification_type,
+              priority: n.priority,
+              created_at: n.created_at,
+              time_since_creation: n.time_since_creation,
+              icon: n.icon,
+              action_url: n.action_url,
+              expired: n.expired,
+              data: n.data,
+              package: n.package ? { ...n.package } : undefined,
+            };
+          }
+          return n;
+        })
+      );
 
       await api.post('/api/v1/notifications/mark_visible_as_read', {
         notification_ids: unreadVisibleIds,
@@ -371,8 +400,14 @@ export default function RiderNotificationsScreen() {
     } catch (error) {
       console.error('Failed to mark visible notifications as read:', error);
       
+      // Revert on error
       setNotifications(prev =>
-        prev.map(n => unreadVisibleIds.includes(n.id) ? { ...n, read: false } : n)
+        prev.map(n => {
+          if (unreadVisibleIds.includes(n.id)) {
+            return { ...n, read: false };
+          }
+          return n;
+        })
       );
       
       unreadVisibleIds.forEach(id => markedAsReadRef.current.delete(id));
@@ -515,15 +550,18 @@ export default function RiderNotificationsScreen() {
   };
 
   const renderNotificationItem = ({ item }: { item: Notification }) => {
+    // Defensive checks to prevent blank rendering
     if (!item || typeof item.id === 'undefined') {
       return null;
     }
 
-    const title = item.title || 'No Title';
-    const message = item.message || 'No Message';
-    const isRead = item.read;
-    const icon = getNotificationIcon(item.notification_type, item.icon);
-    const color = getNotificationColor(item.notification_type, isRead);
+    // Ensure we have valid data with fallbacks
+    const title = item.title || 'Notification';
+    const message = item.message || '';
+    const isRead = item.read === true;
+    const notificationType = item.notification_type || 'system';
+    const icon = getNotificationIcon(notificationType, item.icon);
+    const color = getNotificationColor(notificationType, isRead);
 
     return (
       <TouchableOpacity
@@ -554,12 +592,12 @@ export default function RiderNotificationsScreen() {
               {message}
             </Text>
             
-            {item.package && (
+            {item.package && item.package.code && (
               <View style={styles.packageInfo}>
                 <Feather name="package" size={12} color="#7B3F98" />
                 <Text style={styles.packageCode}>{item.package.code}</Text>
                 <View style={styles.packageStateBadge}>
-                  <Text style={styles.packageStateText}>{item.package.state_display}</Text>
+                  <Text style={styles.packageStateText}>{item.package.state_display || 'Unknown'}</Text>
                 </View>
               </View>
             )}
@@ -648,7 +686,7 @@ export default function RiderNotificationsScreen() {
     </Animated.View>
   );
 
-  const unreadCount = notifications.filter(n => !n.read).length;
+  const unreadCount = notifications.filter(n => n && n.read === false).length;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -759,7 +797,7 @@ export default function RiderNotificationsScreen() {
         <FlatList
           data={notifications}
           renderItem={renderNotificationItem}
-          keyExtractor={(item) => `notification-${item.id}`}
+          keyExtractor={(item) => `notification-${item?.id || Math.random()}`}
           contentContainerStyle={[
             styles.listContainer,
             notifications.length === 0 && styles.emptyListContainer
@@ -779,8 +817,11 @@ export default function RiderNotificationsScreen() {
           onViewableItemsChanged={onViewableItemsChanged}
           viewabilityConfig={viewabilityConfig}
           showsVerticalScrollIndicator={false}
-          removeClippedSubviews={false}
+          removeClippedSubviews={Platform.OS === 'android'}
           windowSize={10}
+          maxToRenderPerBatch={10}
+          updateCellsBatchingPeriod={50}
+          initialNumToRender={10}
         />
       )}
 
