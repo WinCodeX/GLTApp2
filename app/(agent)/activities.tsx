@@ -111,8 +111,22 @@ export default function ActivitiesScreen() {
     });
   };
 
+  const handleActivityPress = (item: Activity) => {
+    router.replace({
+      pathname: '/(agent)/track',
+      params: { 
+        code: item.package_code,
+        packageId: item.package_id.toString() 
+      }
+    });
+  };
+
   const renderActivityItem = ({ item }: { item: Activity }) => (
-    <View style={styles.activityCard}>
+    <TouchableOpacity 
+      style={styles.activityCard}
+      onPress={() => handleActivityPress(item)}
+      activeOpacity={0.7}
+    >
       <View style={[styles.activityIconContainer, { backgroundColor: `${getActivityColor(item.type)}15` }]}>
         <Feather
           name={getActivityIcon(item.type, item.activity_type) as any}
@@ -138,7 +152,7 @@ export default function ActivitiesScreen() {
       <View style={[styles.typeBadge, { backgroundColor: getActivityColor(item.type) }]}>
         <Text style={styles.typeBadgeText}>{item.type}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   const renderHeader = () => (
@@ -219,7 +233,7 @@ export default function ActivitiesScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.replace('/(agent)')} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Activity History</Text>
