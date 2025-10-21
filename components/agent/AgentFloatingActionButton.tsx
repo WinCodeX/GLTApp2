@@ -74,21 +74,21 @@ export const AgentFloatingActionButton: React.FC<AgentFloatingActionButtonProps>
       label: 'New',
       color: ['#667eea', '#764ba2'],
       onPress: () => handleMenuItemPress(onNewPress),
-      angle: -60,
+      angle: -150, // Upper left
     },
     {
       icon: 'qr-code-scanner',
       label: 'Scan',
       color: ['#FF9500', '#FF8C00'],
       onPress: () => handleMenuItemPress(onScanPress),
-      angle: -90,
+      angle: -120, // Left-top diagonal
     },
     {
       icon: 'phone',
       label: 'Quick Call',
       color: ['#34C759', '#30A46C'],
       onPress: () => handleMenuItemPress(onQuickCallPress),
-      angle: -120,
+      angle: -90, // Straight up
     },
   ];
 
