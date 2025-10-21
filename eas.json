@@ -7,33 +7,15 @@
     "development": {
       "developmentClient": true,
       "distribution": "internal",
-      "channel": "development",
-      "android": {
-        "googleServicesFile": "./android/app/google-services.json"
-      },
-      "ios": {
-        "googleServicesFile": "./ios/GoogleService-Info.plist"
-      }
+      "channel": "development"
     },
     "preview": {
       "distribution": "internal",
-      "channel": "preview",
-      "android": {
-        "googleServicesFile": "./android/app/google-services.json"
-      },
-      "ios": {
-        "googleServicesFile": "./ios/GoogleService-Info.plist"
-      }
+      "channel": "preview"
     },
     "production": {
       "autoIncrement": true,
-      "channel": "production",
-      "android": {
-        "googleServicesFile": "./android/app/google-services.json"
-      },
-      "ios": {
-        "googleServicesFile": "./ios/GoogleService-Info.plist"
-      }
+      "channel": "production"
     }
   },
   "submit": {
