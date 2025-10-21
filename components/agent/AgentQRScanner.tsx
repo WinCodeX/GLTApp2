@@ -26,7 +26,7 @@ const { width } = Dimensions.get('window');
 interface AgentQRScannerProps {
   visible: boolean;
   onClose: () => void;
-  actionType: 'collect_from_sender' | 'print';
+  actionType: 'collect' | 'print';
   onScanSuccess?: (result: any) => void;
   autoPrint?: boolean;
 }
@@ -73,8 +73,13 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
   }, [visible]);
 
   const requestCameraPermission = async () => {
-    const { status } = await Camera.requestCameraPermissionsAsync();
-    setHasPermission(status === 'granted');
+    try {
+      const { status } = await Camera.requestCameraPermissionsAsync();
+      setHasPermission(status === 'granted');
+    } catch (error) {
+      console.error('Permission request failed:', error);
+      setHasPermission(false);
+    }
   };
 
   const checkConnectivity = async () => {
@@ -91,12 +96,12 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
       Animated.sequence([
         Animated.timing(cornerAnimation, {
           toValue: 1,
-          duration: 2000,
+          duration: 1500,
           useNativeDriver: false,
         }),
         Animated.timing(cornerAnimation, {
           toValue: 0,
-          duration: 2000,
+          duration: 1500,
           useNativeDriver: false,
         }),
       ])
@@ -105,13 +110,13 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
     Animated.loop(
       Animated.sequence([
         Animated.timing(pulseAnimation, {
-          toValue: 1.05,
-          duration: 1500,
+          toValue: 1.03,
+          duration: 1200,
           useNativeDriver: true,
         }),
         Animated.timing(pulseAnimation, {
           toValue: 1,
-          duration: 1500,
+          duration: 1200,
           useNativeDriver: true,
         }),
       ])
@@ -124,7 +129,7 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
   };
 
   const handleBarcodeScanned = async ({ type, data }: { type: string; data: string }) => {
-    if (scanned) return;
+    if (scanned || loading) return;
     
     setScanned(true);
     Vibration.vibrate(100);
@@ -172,6 +177,8 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
     setLoading(true);
 
     try {
+      console.log('🔍 Processing package:', packageCode, 'Action:', actionType);
+      
       const online = await offlineService.isOnline();
       setIsOnline(online);
 
@@ -181,16 +188,19 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
         const cached = await offlineService.getCachedPackage(packageCode);
         if (cached) {
           packageData = cached.package;
+          console.log('📦 Loaded from cache');
         } else {
           throw new Error('Package not found in offline cache');
         }
       } else {
+        console.log('🌐 Fetching package details from server');
         const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
+        
+        console.log('📊 API Response:', response.data);
         
         if (response.data.success) {
           packageData = response.data.data.package;
           
-          // Cache for offline use
           await offlineService.cachePackage(
             packageCode,
             packageData,
@@ -201,15 +211,14 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
         }
       }
 
-      // Process based on action type
-      if (actionType === 'collect_from_sender') {
-        await performCollectFromSender(packageData);
+      if (actionType === 'collect') {
+        await performCollect(packageData);
       } else if (actionType === 'print') {
         await performPrint(packageData);
       }
 
     } catch (error: any) {
-      console.error('Failed to process package:', error);
+      console.error('❌ Failed to process package:', error);
       
       Toast.show({
         type: 'error',
@@ -224,15 +233,16 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
     }
   };
 
-  const performCollectFromSender = async (packageData: any) => {
+  const performCollect = async (packageData: any) => {
     try {
+      console.log('📦 Performing collect action for:', packageData.code);
+      
       const online = await offlineService.isOnline();
       
       if (!online) {
-        // Store for offline sync
         const result = await offlineService.storeScanAction(
           packageData.code,
-          'collect_from_sender',
+          'collect',
           { id: 'agent', name: 'Agent', role: 'agent' },
           {
             location: null,
@@ -243,22 +253,26 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
         if (!result.success) {
           throw new Error(result.message);
         }
+        
+        console.log('✅ Stored offline');
       } else {
+        console.log('🚀 Sending collect action to server');
         const response = await api.post('/api/v1/scanning/scan_action', {
           package_code: packageData.code,
-          action_type: 'collect_from_sender',
+          action_type: 'collect',
           metadata: {
             location: null,
             device_info: { platform: 'react-native', timestamp: new Date().toISOString() }
           }
         });
         
+        console.log('📊 Server response:', response.data);
+        
         if (!response.data.success) {
           throw new Error(response.data.message || 'Collection failed');
         }
       }
 
-      // Auto-print if enabled
       if (autoPrint) {
         await performPrint(packageData);
       } else {
@@ -266,6 +280,7 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
       }
 
     } catch (error: any) {
+      console.error('❌ Collect failed:', error);
       throw error;
     }
   };
@@ -274,14 +289,14 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
     setIsPrinting(true);
 
     try {
-      // Check printer availability
+      console.log('🖨️ Starting print process');
+      
       const availability = await printService.isPrintingAvailable(bluetoothContext);
       
       if (!availability.available) {
         throw new Error(availability.reason || 'Printer not available');
       }
 
-      // Print the package
       const result = await printService.printPackage(bluetoothContext, {
         code: packageData.code,
         receiver_name: packageData.receiver_name,
@@ -294,10 +309,11 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
         throw new Error(result.message || 'Print failed');
       }
 
+      console.log('✅ Print successful');
       showSuccessResult(packageData, 'printed');
 
     } catch (error: any) {
-      console.error('Print failed:', error);
+      console.error('❌ Print failed:', error);
       
       let errorMessage = error.message;
       if (error.message.includes('Bluetooth not available')) {
@@ -314,8 +330,7 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
         visibilityTime: 4000,
       });
       
-      // Still show success for collection even if print fails
-      if (actionType === 'collect_from_sender') {
+      if (actionType === 'collect') {
         showSuccessResult(packageData, 'collected_no_print');
       } else {
         setScanned(false);
@@ -346,13 +361,13 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
   };
 
   const getActionColor = () => {
-    if (actionType === 'collect_from_sender') return ['#667eea', '#764ba2'];
+    if (actionType === 'collect') return ['#667eea', '#764ba2'];
     if (actionType === 'print') return ['#FF9500', '#FF8C00'];
     return ['#667eea', '#764ba2'];
   };
 
   const getActionLabel = () => {
-    if (actionType === 'collect_from_sender') return 'Collect from Sender';
+    if (actionType === 'collect') return 'Collect from Sender';
     if (actionType === 'print') return 'Print Label';
     return 'Scan Package';
   };
@@ -364,7 +379,7 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
 
   if (hasPermission === null) {
     return (
-      <Modal visible={visible} animationType="slide">
+      <Modal visible={visible} animationType="fade">
         <LinearGradient colors={['#1a1a2e', '#16213e']} style={styles.centeredContainer}>
           <ActivityIndicator size="large" color="#667eea" />
           <Text style={styles.permissionText}>Requesting camera permission...</Text>
@@ -460,7 +475,6 @@ const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
           )}
         </View>
 
-        {/* Compact Result Modal */}
         <Modal visible={showResultModal} transparent animationType="fade">
           <View style={styles.resultOverlay}>
             <View style={styles.compactResult}>
