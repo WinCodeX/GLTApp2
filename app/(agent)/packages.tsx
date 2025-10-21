@@ -112,7 +112,7 @@ export default function ViewPackagesScreen() {
   }, [searchQuery, packages]);
 
   const handleTrackPackage = (pkg: Package) => {
-    router.replace({
+    router.push({
       pathname: '/(agent)/track',
       params: { 
         code: pkg.code,
@@ -280,7 +280,7 @@ export default function ViewPackagesScreen() {
         end={{ x: 1, y: 1 }}
         style={styles.header}
       >
-        <TouchableOpacity onPress={() => router.replace('/(agent)')} style={styles.backButton}>
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <Feather name="arrow-left" size={24} color="#fff" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Packages</Text>
