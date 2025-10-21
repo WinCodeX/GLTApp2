@@ -1,0 +1,388 @@
+// app/(agent)/scan.tsx
+import React, { useState, useEffect } from 'react';
+import {
+  View,
+  Text,
+  StyleSheet,
+  SafeAreaView,
+  TouchableOpacity,
+  TextInput,
+  ActivityIndicator,
+  Alert,
+  ScrollView,
+} from 'react-native';
+import { LinearGradient } from 'expo-linear-gradient';
+import { Feather } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
+import api from '../../lib/api';
+
+export default function ScanPackageScreen() {
+  const router = useRouter();
+  const [packageCode, setPackageCode] = useState('');
+  const [scanning, setScanning] = useState(false);
+  const [scannedPackage, setScannedPackage] = useState<any>(null);
+  const [eventType, setEventType] = useState<string>('scan');
+
+  const eventTypes = [
+    { value: 'scan', label: 'General Scan', icon: 'maximize' },
+    { value: 'printed_by_agent', label: 'Print Label', icon: 'printer' },
+    { value: 'collected_by_rider', label: 'Collected', icon: 'truck' },
+    { value: 'processed_by_warehouse', label: 'Processed', icon: 'package' },
+  ];
+
+  const handleScan = async () => {
+    if (!packageCode.trim()) {
+      Alert.alert('Error', 'Please enter a package code');
+      return;
+    }
+
+    setScanning(true);
+    try {
+      const response = await api.post('/api/v1/staff/scan_events', {
+        package_code: packageCode.trim(),
+        event_type: eventType,
+        location: 'Agent Office',
+      });
+
+      if (response.data.success) {
+        setScannedPackage(response.data.data.package);
+        Alert.alert('Success', response.data.message);
+        setPackageCode('');
+      } else {
+        Alert.alert('Error', response.data.message);
+      }
+    } catch (error: any) {
+      console.error('Scan error:', error);
+      Alert.alert(
+        'Scan Failed',
+        error.response?.data?.message || 'Failed to scan package'
+      );
+    } finally {
+      setScanning(false);
+    }
+  };
+
+  const handleClearCode = () => {
+    setPackageCode('');
+    setScannedPackage(null);
+  };
+
+  return (
+    <SafeAreaView style={styles.container}>
+      <LinearGradient
+        colors={['#7B3F98', '#5A2D82', '#4A1E6B']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.header}
+      >
+        <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
+          <Feather name="arrow-left" size={24} color="#fff" />
+        </TouchableOpacity>
+        <Text style={styles.headerTitle}>Scan Package</Text>
+        <View style={{ width: 40 }} />
+      </LinearGradient>
+
+      <ScrollView style={styles.content}>
+        <View style={styles.scanSection}>
+          <View style={styles.scanIconContainer}>
+            <Feather name="maximize" size={48} color="#7B3F98" />
+          </View>
+          <Text style={styles.scanTitle}>Scan Package Code</Text>
+          <Text style={styles.scanSubtitle}>Enter the package tracking code</Text>
+
+          <View style={styles.inputContainer}>
+            <Feather name="hash" size={20} color="#8E8E93" />
+            <TextInput
+              style={styles.input}
+              placeholder="Enter package code"
+              placeholderTextColor="#8E8E93"
+              value={packageCode}
+              onChangeText={setPackageCode}
+              autoCapitalize="characters"
+              autoCorrect={false}
+            />
+            {packageCode.length > 0 && (
+              <TouchableOpacity onPress={handleClearCode}>
+                <Feather name="x-circle" size={20} color="#8E8E93" />
+              </TouchableOpacity>
+            )}
+          </View>
+
+          <View style={styles.eventTypeSection}>
+            <Text style={styles.eventTypeLabel}>Scan Type</Text>
+            <View style={styles.eventTypeGrid}>
+              {eventTypes.map((type) => (
+                <TouchableOpacity
+                  key={type.value}
+                  style={[
+                    styles.eventTypeCard,
+                    eventType === type.value && styles.eventTypeCardActive,
+                  ]}
+                  onPress={() => setEventType(type.value)}
+                >
+                  <Feather
+                    name={type.icon as any}
+                    size={20}
+                    color={eventType === type.value ? '#fff' : '#7B3F98'}
+                  />
+                  <Text
+                    style={[
+                      styles.eventTypeText,
+                      eventType === type.value && styles.eventTypeTextActive,
+                    ]}
+                  >
+                    {type.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <TouchableOpacity
+            style={[styles.scanButton, scanning && styles.scanButtonDisabled]}
+            onPress={handleScan}
+            disabled={scanning}
+          >
+            {scanning ? (
+              <ActivityIndicator color="#fff" />
+            ) : (
+              <>
+                <Feather name="check-circle" size={20} color="#fff" />
+                <Text style={styles.scanButtonText}>Scan Package</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
+
+        {scannedPackage && (
+          <View style={styles.resultSection}>
+            <View style={styles.resultHeader}>
+              <Feather name="check-circle" size={24} color="#34C759" />
+              <Text style={styles.resultTitle}>Scan Successful</Text>
+            </View>
+
+            <View style={styles.packageCard}>
+              <View style={styles.packageHeader}>
+                <Text style={styles.packageCode}>{scannedPackage.code}</Text>
+                <View style={[styles.statusBadge, { backgroundColor: '#34C759' }]}>
+                  <Text style={styles.statusText}>{scannedPackage.state_display}</Text>
+                </View>
+              </View>
+
+              <View style={styles.packageDetail}>
+                <Feather name="user" size={16} color="#8E8E93" />
+                <Text style={styles.packageDetailLabel}>Receiver:</Text>
+                <Text style={styles.packageDetailValue}>
+                  {scannedPackage.receiver.name}
+                </Text>
+              </View>
+
+              <View style={styles.packageDetail}>
+                <Feather name="map-pin" size={16} color="#8E8E93" />
+                <Text style={styles.packageDetailLabel}>Route:</Text>
+                <Text style={styles.packageDetailValue}>
+                  {scannedPackage.route.description}
+                </Text>
+              </View>
+
+              <View style={styles.packageDetail}>
+                <Feather name="package" size={16} color="#8E8E93" />
+                <Text style={styles.packageDetailLabel}>Type:</Text>
+                <Text style={styles.packageDetailValue}>
+                  {scannedPackage.delivery_type_display}
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  container: {
+    flex: 1,
+    backgroundColor: '#111B21',
+  },
+  header: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingTop: 28,
+    paddingBottom: 24,
+    paddingHorizontal: 16,
+  },
+  backButton: {
+    width: 40,
+    height: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  headerTitle: {
+    color: '#fff',
+    fontSize: 20,
+    fontWeight: 'bold',
+  },
+  content: {
+    flex: 1,
+  },
+  scanSection: {
+    padding: 24,
+    alignItems: 'center',
+  },
+  scanIconContainer: {
+    width: 100,
+    height: 100,
+    borderRadius: 50,
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  scanTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#fff',
+    marginBottom: 8,
+  },
+  scanSubtitle: {
+    fontSize: 14,
+    color: '#8E8E93',
+    marginBottom: 24,
+  },
+  inputContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#1F2C34',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    width: '100%',
+    gap: 12,
+    marginBottom: 24,
+  },
+  input: {
+    flex: 1,
+    color: '#fff',
+    fontSize: 16,
+  },
+  eventTypeSection: {
+    width: '100%',
+    marginBottom: 24,
+  },
+  eventTypeLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
+    marginBottom: 12,
+  },
+  eventTypeGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  eventTypeCard: {
+    flex: 1,
+    minWidth: '48%',
+    backgroundColor: '#1F2C34',
+    borderRadius: 12,
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderWidth: 2,
+    borderColor: 'transparent',
+  },
+  eventTypeCardActive: {
+    backgroundColor: '#7B3F98',
+    borderColor: '#9F5FB8',
+  },
+  eventTypeText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  eventTypeTextActive: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  scanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#7B3F98',
+    borderRadius: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    width: '100%',
+    gap: 8,
+  },
+  scanButtonDisabled: {
+    opacity: 0.6,
+  },
+  scanButtonText: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  resultSection: {
+    padding: 16,
+  },
+  resultHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginBottom: 16,
+  },
+  resultTitle: {
+    fontSize: 18,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  packageCard: {
+    backgroundColor: '#1F2C34',
+    borderRadius: 12,
+    padding: 16,
+  },
+  packageHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+    paddingBottom: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255, 255, 255, 0.1)',
+  },
+  packageCode: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: '#fff',
+  },
+  statusBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 12,
+  },
+  statusText: {
+    color: '#fff',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  packageDetail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  packageDetailLabel: {
+    fontSize: 14,
+    color: '#8E8E93',
+  },
+  packageDetailValue: {
+    flex: 1,
+    fontSize: 14,
+    color: '#fff',
+    fontWeight: '500',
+  },
+});
