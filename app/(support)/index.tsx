@@ -1,4 +1,4 @@
-// app/(support)/index.tsx - Updated for agent-specific tickets
+// app/(support)/index.tsx - Fixed filter functionality
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -85,7 +85,7 @@ interface AgentStats {
   satisfaction_rating: number;
 }
 
-// Updated filter options - removed 'assigned' and 'closed'
+// Updated filter options - kept the same as UI requirements
 const STATUS_FILTERS = [
   { key: 'active', label: 'Active', icon: 'activity' },
   { key: 'pending', label: 'Pending', icon: 'clock' },
@@ -188,12 +188,25 @@ export default function SupportDashboard() {
       isSyncing.current = true;
       console.log('🔄 Background sync triggered');
       
+      const params: any = {
+        limit: 50,
+        page: 1,
+      };
+
+      // Apply filter parameters based on activeFilter
+      if (activeFilter !== 'all') {
+        if (activeFilter === 'active') {
+          params.status = 'active';
+        } else if (activeFilter === 'resolved') {
+          params.status = 'resolved';
+          params.include_closed = 'true';
+        } else {
+          params.status = activeFilter;
+        }
+      }
+
       const response = await api.get('/api/v1/support/my_tickets', {
-        params: {
-          limit: 50,
-          page: 1,
-          status: activeFilter !== 'all' ? activeFilter : undefined,
-        },
+        params,
         timeout: 10000,
       });
 
@@ -717,23 +730,24 @@ export default function SupportDashboard() {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      // Changed endpoint to my_tickets
+      // Always use my_tickets endpoint for agent-specific tickets
       const endpoint = '/api/v1/support/my_tickets';
       const params: any = {
         limit: 50,
         page: 1,
       };
 
-      // Handle filter mapping
+      // Fixed filter mapping with backend
       if (activeFilter !== 'all') {
         if (activeFilter === 'active') {
-          // Active means in_progress or assigned
+          // Active filter sends 'active' - backend handles in_progress OR assigned
           params.status = 'active';
         } else if (activeFilter === 'resolved') {
-          // Resolved includes both resolved and closed
-          params.include_closed = true;
+          // Resolved filter includes both resolved and closed
           params.status = 'resolved';
+          params.include_closed = 'true';
         } else {
+          // Direct status filter for 'pending'
           params.status = activeFilter;
         }
       }
@@ -742,10 +756,13 @@ export default function SupportDashboard() {
         params.search = searchQuery.trim();
       }
 
+      console.log('Loading tickets with params:', params);
+
       const response = await api.get(endpoint, { params });
 
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
+        console.log(`Received ${newTickets.length} tickets from API`);
         
         // Normalize all ticket IDs
         const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
@@ -764,6 +781,11 @@ export default function SupportDashboard() {
         });
         
         lastSyncTime.current = Date.now();
+        
+        // Update agent stats if available
+        if (response.data.data.agent_stats) {
+          setAgentStats(response.data.data.agent_stats);
+        }
       }
     } catch (error) {
       console.error('Failed to load support tickets:', error);
@@ -821,16 +843,35 @@ export default function SupportDashboard() {
 
   // ============= COMPUTED VALUES =============
   
+  const getFilteredTickets = useCallback(() => {
+    // The actual filtering is done on the backend now
+    // This just returns the tickets we've loaded based on the active filter
+    return tickets;
+  }, [tickets]);
+
   const getFilteredTicketCount = (filterKey: string) => {
+    // Since we're only loading tickets for the current filter,
+    // we can't show accurate counts for other filters without additional API calls
+    // For now, only show count for the active filter
+    if (filterKey === activeFilter) {
+      return tickets.length;
+    }
+    
+    // For other filters, we'd need to make additional API calls or store counts separately
+    // For better UX, we can show a placeholder or fetch counts from dashboard stats
     switch (filterKey) {
       case 'active':
-        return tickets.filter(t => t.status === 'in_progress' || t.status === 'assigned').length;
+        // Sum of in_progress and assigned from agent stats
+        return agentStats?.active_tickets || 0;
       case 'pending':
-        return tickets.filter(t => t.status === 'pending').length;
+        // Would need separate count from API
+        return 0;
       case 'resolved':
-        return tickets.filter(t => t.status === 'resolved' || t.status === 'closed').length;
+        // Today's resolved from agent stats
+        return agentStats?.tickets_resolved_today || 0;
       case 'all':
-        return tickets.length;
+        // Would need total count from API
+        return 0;
       default:
         return 0;
     }
@@ -952,6 +993,8 @@ export default function SupportDashboard() {
     </TouchableOpacity>
   );
 
+  const filteredTickets = getFilteredTickets();
+
   return (
     <SafeAreaView style={styles.container}>
       <LinearGradient
@@ -1056,13 +1099,13 @@ export default function SupportDashboard() {
               >
                 {item.label}
               </Text>
-              {getFilteredTicketCount(item.key) > 0 && (
+              {activeFilter === item.key && filteredTickets.length > 0 && (
                 <View style={[
                   styles.filterPillBadge,
                   isConnected && styles.filterPillBadgeLive
                 ]}>
                   <Text style={styles.filterPillBadgeText}>
-                    {getFilteredTicketCount(item.key)}
+                    {filteredTickets.length}
                   </Text>
                 </View>
               )}
@@ -1080,7 +1123,7 @@ export default function SupportDashboard() {
         ) : (
           <FlatList
             ref={flatListRef}
-            data={tickets}
+            data={filteredTickets}
             keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={renderTicketItem}
             refreshControl={
@@ -1100,11 +1143,11 @@ export default function SupportDashboard() {
                 <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
                   {activeFilter === 'active' 
-                    ? 'You have no active tickets'
+                    ? 'You have no active tickets (in progress or assigned)'
                     : activeFilter === 'pending'
                     ? 'You have no pending tickets'
                     : activeFilter === 'resolved'
-                    ? 'You have no resolved tickets'
+                    ? 'You have no resolved or closed tickets'
                     : searchQuery
                     ? `No tickets match "${searchQuery}"`
                     : 'You have no assigned tickets'
@@ -1120,7 +1163,7 @@ export default function SupportDashboard() {
                 )}
               </View>
             )}
-            contentContainerStyle={tickets.length === 0 ? styles.emptyListContent : undefined}
+            contentContainerStyle={filteredTickets.length === 0 ? styles.emptyListContent : undefined}
             scrollEnabled={true}
             nestedScrollEnabled={true}
             removeClippedSubviews={false}
