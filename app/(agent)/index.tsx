@@ -188,7 +188,7 @@ export default function AgentHomeScreen() {
   };
 
   const handleNotificationPress = () => {
-    router.push('/(staff)/notifications');
+    router.push('/(agent)/notifications');
   };
 
   const handleQuickAction = (action: string) => {
