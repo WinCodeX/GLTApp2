@@ -1,4 +1,5 @@
-// app/(support)/index.tsx - Fixed filter functionality
+// app/(support)/index.tsx - FIXED: Proper ID passing, improved filtering, real-time updates
+
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -85,7 +86,6 @@ interface AgentStats {
   satisfaction_rating: number;
 }
 
-// Updated filter options - kept the same as UI requirements
 const STATUS_FILTERS = [
   { key: 'active', label: 'Active', icon: 'activity' },
   { key: 'pending', label: 'Pending', icon: 'clock' },
@@ -93,10 +93,9 @@ const STATUS_FILTERS = [
   { key: 'resolved', label: 'Resolved', icon: 'check-circle' },
 ];
 
-const BACKGROUND_SYNC_INTERVAL = 30000; // 30 seconds
-const MIN_SYNC_INTERVAL = 30000; // Minimum 30 seconds between syncs
+const BACKGROUND_SYNC_INTERVAL = 30000;
+const MIN_SYNC_INTERVAL = 30000;
 
-// ============= HELPER FUNCTION FOR ID NORMALIZATION =============
 const normalizeId = (id: any): string => String(id);
 
 export default function SupportDashboard() {
@@ -130,10 +129,7 @@ export default function SupportDashboard() {
   
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    
-    return () => {
-      subscription.remove();
-    };
+    return () => subscription.remove();
   }, [isConnected]);
 
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
@@ -144,7 +140,6 @@ export default function SupportDashboard() {
         await setupActionCableConnection();
       }
       
-      // Sync data that might have changed while app was in background
       const timeSinceLastSync = Date.now() - lastSyncTime.current;
       if (timeSinceLastSync > MIN_SYNC_INTERVAL) {
         await Promise.all([
@@ -153,7 +148,6 @@ export default function SupportDashboard() {
         ]);
       }
       
-      // Resume background sync
       if (backgroundSyncInterval.current) {
         clearInterval(backgroundSyncInterval.current);
       }
@@ -162,7 +156,6 @@ export default function SupportDashboard() {
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App went to background');
       
-      // Clear background sync
       if (backgroundSyncInterval.current) {
         clearInterval(backgroundSyncInterval.current);
         backgroundSyncInterval.current = null;
@@ -179,7 +172,7 @@ export default function SupportDashboard() {
 
   const backgroundSync = useCallback(async () => {
     if (appState.current !== 'active') return;
-    if (isSyncing.current) return; // Prevent concurrent syncs
+    if (isSyncing.current) return;
     
     const timeSinceLastSync = Date.now() - lastSyncTime.current;
     if (timeSinceLastSync < MIN_SYNC_INTERVAL) return;
@@ -193,7 +186,6 @@ export default function SupportDashboard() {
         page: 1,
       };
 
-      // Apply filter parameters based on activeFilter
       if (activeFilter !== 'all') {
         if (activeFilter === 'active') {
           params.status = 'active';
@@ -213,13 +205,11 @@ export default function SupportDashboard() {
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
         
-        // Normalize all ticket IDs
         const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
           ...ticket,
           id: normalizeId(ticket.id),
         }));
         
-        // Update tickets while preserving typing indicators
         setTickets(prev => {
           const updatedTickets = normalizedTickets.map((newTicket: SupportTicket) => {
             const existingTicket = prev.find(t => t.id === newTicket.id);
@@ -231,13 +221,12 @@ export default function SupportDashboard() {
         });
         
         lastSyncTime.current = Date.now();
-        syncFailureCount.current = 0; // Reset failure count on success
+        syncFailureCount.current = 0;
       }
     } catch (error) {
       console.error('Background sync failed:', error);
       syncFailureCount.current++;
       
-      // Exponential backoff on repeated failures
       if (syncFailureCount.current > 3 && backgroundSyncInterval.current) {
         clearInterval(backgroundSyncInterval.current);
         const backoffDelay = Math.min(BACKGROUND_SYNC_INTERVAL * Math.pow(2, syncFailureCount.current - 3), 300000);
@@ -262,10 +251,10 @@ export default function SupportDashboard() {
 
   const setupFirebaseMessaging = async () => {
     try {
-      console.log('🔥 SETTING UP FIREBASE MESSAGING FOR SUPPORT DASHBOARD...');
+      console.log('🔥 Setting up Firebase messaging...');
       
       if (!firebase.isNative || !firebase.messaging()) {
-        console.log('🔥 Skipping Firebase messaging setup - not native or messaging unavailable');
+        console.log('🔥 Skipping Firebase - not native or unavailable');
         return;
       }
 
@@ -276,10 +265,10 @@ export default function SupportDashboard() {
       setupFirebaseListeners();
       handleInitialNotification();
       
-      console.log('✅ FIREBASE MESSAGING SETUP COMPLETE FOR SUPPORT');
+      console.log('✅ Firebase messaging setup complete');
       
     } catch (error) {
-      console.error('❌ FAILED TO SETUP FIREBASE MESSAGING:', error);
+      console.error('❌ Firebase setup failed:', error);
     }
   };
 
@@ -292,22 +281,22 @@ export default function SupportDashboard() {
       const enabled = authStatus === 1 || authStatus === 2;
 
       if (enabled) {
-        console.log('✅ FIREBASE AUTHORIZATION STATUS:', authStatus);
+        console.log('✅ Firebase permissions granted');
         return true;
       } else {
-        console.log('❌ FIREBASE PERMISSIONS DENIED');
+        console.log('❌ Firebase permissions denied');
         Alert.alert(
           'Notifications Required',
-          'GLT Support needs notification permissions to send you important updates about support tickets.',
+          'Enable notifications to receive real-time updates.',
           [
-            { text: 'Maybe Later', style: 'cancel' },
-            { text: 'Open Settings', onPress: () => Linking.openSettings() }
+            { text: 'Later', style: 'cancel' },
+            { text: 'Settings', onPress: () => Linking.openSettings() }
           ]
         );
         return false;
       }
     } catch (error) {
-      console.error('❌ ERROR REQUESTING FIREBASE PERMISSIONS:', error);
+      console.error('❌ Firebase permissions error:', error);
       return false;
     }
   };
@@ -318,25 +307,25 @@ export default function SupportDashboard() {
       if (!messaging) return;
       
       const token = await messaging.getToken();
-      console.log('🔥 FCM TOKEN RECEIVED:', token?.substring(0, 50) + '...');
+      console.log('🔥 FCM token received');
       setFcmToken(token);
 
       await registerFCMTokenWithBackend(token);
       
       unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
-        console.log('🔥 FCM TOKEN REFRESHED:', newToken?.substring(0, 50) + '...');
+        console.log('🔥 FCM token refreshed');
         setFcmToken(newToken);
         await registerFCMTokenWithBackend(newToken);
       });
       
     } catch (error) {
-      console.error('❌ DETAILED FCM TOKEN ERROR:', error);
+      console.error('❌ FCM token error:', error);
     }
   };
 
   const registerFCMTokenWithBackend = async (token: string) => {
     try {
-      console.log('🔥 REGISTERING FCM TOKEN WITH BACKEND...');
+      console.log('🔥 Registering FCM token...');
       
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
@@ -350,13 +339,13 @@ export default function SupportDashboard() {
       });
       
       if (response.data?.success) {
-        console.log('✅ FCM TOKEN REGISTERED SUCCESSFULLY');
+        console.log('✅ FCM token registered');
         await AsyncStorage.setItem('fcm_token', token);
         await AsyncStorage.setItem('fcm_token_registered', 'true');
       }
       
     } catch (error: any) {
-      console.error('❌ FCM TOKEN BACKEND REGISTRATION FAILED:', error.response?.data || error);
+      console.error('❌ FCM registration failed:', error.response?.data || error);
     }
   };
 
@@ -365,15 +354,13 @@ export default function SupportDashboard() {
     if (!messaging) return;
 
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
-      console.log('🔥 FOREGROUND MESSAGE RECEIVED IN SUPPORT:', remoteMessage);
-      
-      // Silently refresh data without showing alert
+      console.log('🔥 Foreground message received');
       loadTickets(true);
       loadDashboardData();
     });
 
     unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
-      console.log('🔥 NOTIFICATION OPENED APP FROM BACKGROUND:', remoteMessage);
+      console.log('🔥 Notification opened app');
       handleNotificationData(remoteMessage.data);
     });
   };
@@ -386,22 +373,24 @@ export default function SupportDashboard() {
       const initialNotification = await messaging.getInitialNotification();
       
       if (initialNotification) {
-        console.log('🔥 APP OPENED BY NOTIFICATION (FROM KILLED STATE):', initialNotification);
+        console.log('🔥 App opened by notification');
         setTimeout(() => {
           handleNotificationData(initialNotification.data);
         }, 2000);
       }
     } catch (error) {
-      console.error('🔥 ERROR HANDLING INITIAL NOTIFICATION:', error);
+      console.error('🔥 Initial notification error:', error);
     }
   };
 
   const handleNotificationData = async (data: any) => {
-    console.log('🔥 HANDLING NOTIFICATION DATA IN SUPPORT:', data);
+    console.log('🔥 Handling notification data:', data);
     
     try {
       if (data?.conversation_id) {
-        router.push(`/(support)/chat/${normalizeId(data.conversation_id)}`);
+        // FIXED: Properly normalize and navigate with conversation ID
+        const conversationId = normalizeId(data.conversation_id);
+        router.push(`/(support)/chat/${conversationId}`);
       } else if (data?.ticket_id) {
         const ticket = tickets.find(t => t.ticket_id === data.ticket_id);
         if (ticket) {
@@ -409,7 +398,7 @@ export default function SupportDashboard() {
         }
       }
     } catch (error) {
-      console.error('🔥 ERROR HANDLING NOTIFICATION DATA:', error);
+      console.error('🔥 Notification handling error:', error);
     }
   };
 
@@ -418,17 +407,17 @@ export default function SupportDashboard() {
   const setupActionCableConnection = useCallback(async () => {
     try {
       if (!user) {
-        console.log('📡 No user available for ActionCable connection');
+        console.log('📡 No user available');
         return;
       }
 
       const currentAccount = accountManager.getCurrentAccount();
       if (!currentAccount) {
-        console.log('📡 No account available for ActionCable connection');
+        console.log('📡 No account available');
         return;
       }
 
-      console.log('📡 Setting up ActionCable connection for support dashboard...');
+      console.log('📡 Setting up ActionCable...');
 
       const actionCable = ActionCableService.getInstance();
       
@@ -445,7 +434,6 @@ export default function SupportDashboard() {
         setIsConnected(true);
         setupActionCableSubscriptions();
         
-        // Start background sync
         if (backgroundSyncInterval.current) {
           clearInterval(backgroundSyncInterval.current);
         }
@@ -454,17 +442,16 @@ export default function SupportDashboard() {
         setIsConnected(false);
       }
     } catch (error) {
-      console.error('❌ Failed to setup ActionCable connection:', error);
+      console.error('❌ ActionCable setup failed:', error);
       setIsConnected(false);
     }
   }, [user, backgroundSync]);
 
   const setupActionCableSubscriptions = () => {
-    console.log('📡 Setting up ActionCable subscriptions for support dashboard...');
+    console.log('📡 Setting up ActionCable subscriptions...');
 
     const actionCable = ActionCableService.getInstance();
 
-    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       console.log('📡 ActionCable connected');
       setIsConnected(true);
@@ -477,9 +464,8 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubLost);
 
-    // Dashboard stats updates
     const unsubInitialState = actionCable.subscribe('initial_state', (data) => {
-      console.log('📊 Received initial state via ActionCable:', data);
+      console.log('📊 Received initial state');
       if (data.dashboard_stats) {
         setDashboardStats(data.dashboard_stats);
       }
@@ -490,7 +476,7 @@ export default function SupportDashboard() {
     actionCableSubscriptions.current.push(unsubInitialState);
 
     const unsubDashboardStats = actionCable.subscribe('dashboard_stats_update', (data) => {
-      console.log('📊 Dashboard stats update received:', data);
+      console.log('📊 Dashboard stats update');
       if (data.stats) {
         setDashboardStats(prev => ({
           ...(prev || {
@@ -508,16 +494,14 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubDashboardStats);
 
-    // Ticket updates
     const unsubNewTicket = actionCable.subscribe('new_support_ticket', (data) => {
-      console.log('🎫 New support ticket:', data);
+      console.log('🎫 New support ticket');
       if (data.ticket) {
         const normalizedTicket = {
           ...data.ticket,
           id: normalizeId(data.ticket.id),
         };
         
-        // Only add if it's assigned to the current agent
         if (normalizedTicket.assigned_agent?.id === normalizeId(user?.id)) {
           setTickets(prev => [normalizedTicket, ...prev]);
           loadDashboardData();
@@ -527,7 +511,7 @@ export default function SupportDashboard() {
     actionCableSubscriptions.current.push(unsubNewTicket);
 
     const unsubTicketStatus = actionCable.subscribe('ticket_status_update', (data) => {
-      console.log('🎫 Ticket status update:', data);
+      console.log('🎫 Ticket status update');
       if (data.ticket_id && data.status) {
         const normalizedTicketId = normalizeId(data.ticket_id);
         setTickets(prev => prev.map(ticket => 
@@ -540,15 +524,13 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTicketStatus);
 
-    // New message with enhanced deduplication
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
-      console.log('📨 New message received:', data);
+      console.log('📨 New message received');
       if (data.conversation_id && data.message) {
         const normalizedConversationId = normalizeId(data.conversation_id);
         
-        // Check if we're already processing this update
         if (processingTickets.current.has(normalizedConversationId)) {
-          console.log('Skipping message update - already processing:', normalizedConversationId);
+          console.log('Skipping - already processing');
           return;
         }
         
@@ -565,14 +547,12 @@ export default function SupportDashboard() {
               };
               updatedTicket.last_activity_at = data.message.created_at;
               
-              // Only increment unread if it's a customer message
               if (!data.message.from_support) {
                 updatedTicket.unread_count = (updatedTicket.unread_count || 0) + 1;
               }
               
               updatedTicket.message_count = (updatedTicket.message_count || 0) + 1;
               
-              // Clear typing indicator when message is sent
               if (updatedTicket.typing_user && updatedTicket.typing_user.id === data.message.user?.id) {
                 delete updatedTicket.typing_user;
               }
@@ -582,12 +562,10 @@ export default function SupportDashboard() {
             return ticket;
           });
           
-          // Move updated ticket to top
           const ticket = updatedTickets.find(t => t.id === normalizedConversationId);
           if (ticket) {
             const others = updatedTickets.filter(t => t.id !== normalizedConversationId);
             
-            // Clear processing flag after a delay
             setTimeout(() => {
               processingTickets.current.delete(normalizedConversationId);
             }, 1000);
@@ -595,7 +573,6 @@ export default function SupportDashboard() {
             return [ticket, ...others];
           }
           
-          // Clear processing flag
           setTimeout(() => {
             processingTickets.current.delete(normalizedConversationId);
           }, 1000);
@@ -606,9 +583,7 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
-    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
-      console.log('⌨️ Typing indicator:', data);
       if (data.conversation_id && data.user_id !== user?.id) {
         const normalizedConversationId = normalizeId(data.conversation_id);
         setTickets(prev => prev.map(ticket => {
@@ -629,7 +604,6 @@ export default function SupportDashboard() {
           return ticket;
         }));
         
-        // Also update local typing users map
         if (data.typing) {
           setTypingUsers(prev => {
             const newMap = new Map(prev);
@@ -650,9 +624,7 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
-    // Message read
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
-      console.log('📖 Conversation read:', data);
       if (data.conversation_id && data.reader_id === normalizeId(user?.id)) {
         const normalizedConversationId = normalizeId(data.conversation_id);
         setTickets(prev => prev.map(ticket => 
@@ -665,15 +637,13 @@ export default function SupportDashboard() {
     actionCableSubscriptions.current.push(unsubRead);
 
     const unsubAgentAssignment = actionCable.subscribe('agent_assignment_update', (data) => {
-      console.log('👤 Agent assignment update:', data);
+      console.log('👤 Agent assignment update');
       if (data.ticket_id && data.agent) {
         const normalizedTicketId = normalizeId(data.ticket_id);
         
-        // If assigned to current user, reload tickets to include it
         if (normalizeId(data.agent.id) === normalizeId(user?.id)) {
           loadTickets();
         } else {
-          // If assigned to someone else, remove it from the list
           setTickets(prev => prev.filter(ticket => ticket.id !== normalizedTicketId));
         }
       }
@@ -681,7 +651,7 @@ export default function SupportDashboard() {
     actionCableSubscriptions.current.push(unsubAgentAssignment);
 
     const unsubTicketEscalated = actionCable.subscribe('ticket_escalated', (data) => {
-      console.log('🚨 Ticket escalated:', data);
+      console.log('🚨 Ticket escalated');
       if (data.ticket_id) {
         const normalizedTicketId = normalizeId(data.ticket_id);
         setTickets(prev => prev.map(ticket => 
@@ -693,7 +663,7 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTicketEscalated);
 
-    console.log('✅ ActionCable subscriptions configured for support dashboard');
+    console.log('✅ ActionCable subscriptions configured');
   };
 
   // ============= DATA LOADING =============
@@ -721,7 +691,7 @@ export default function SupportDashboard() {
         setAgentStats(agentPerformance);
       }
     } catch (error) {
-      console.error('Failed to load dashboard stats:', error);
+      console.error('Dashboard load failed:', error);
     }
   }, []);
 
@@ -730,24 +700,19 @@ export default function SupportDashboard() {
       if (refresh) setRefreshing(true);
       else setLoading(true);
 
-      // Always use my_tickets endpoint for agent-specific tickets
       const endpoint = '/api/v1/support/my_tickets';
       const params: any = {
         limit: 50,
         page: 1,
       };
 
-      // Fixed filter mapping with backend
       if (activeFilter !== 'all') {
         if (activeFilter === 'active') {
-          // Active filter sends 'active' - backend handles in_progress OR assigned
           params.status = 'active';
         } else if (activeFilter === 'resolved') {
-          // Resolved filter includes both resolved and closed
           params.status = 'resolved';
           params.include_closed = 'true';
         } else {
-          // Direct status filter for 'pending'
           params.status = activeFilter;
         }
       }
@@ -756,21 +721,19 @@ export default function SupportDashboard() {
         params.search = searchQuery.trim();
       }
 
-      console.log('Loading tickets with params:', params);
+      console.log('Loading tickets:', params);
 
       const response = await api.get(endpoint, { params });
 
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
-        console.log(`Received ${newTickets.length} tickets from API`);
+        console.log(`Received ${newTickets.length} tickets`);
         
-        // Normalize all ticket IDs
         const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
           ...ticket,
           id: normalizeId(ticket.id),
         }));
         
-        // Preserve typing indicators from current state
         setTickets(prevTickets => {
           return normalizedTickets.map((newTicket: SupportTicket) => {
             const existingTicket = prevTickets.find(t => t.id === newTicket.id);
@@ -782,14 +745,13 @@ export default function SupportDashboard() {
         
         lastSyncTime.current = Date.now();
         
-        // Update agent stats if available
         if (response.data.data.agent_stats) {
           setAgentStats(response.data.data.agent_stats);
         }
       }
     } catch (error) {
-      console.error('Failed to load support tickets:', error);
-      Alert.alert('Error', 'Failed to load your support tickets');
+      console.error('Ticket load failed:', error);
+      Alert.alert('Error', 'Failed to load tickets');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -826,7 +788,6 @@ export default function SupportDashboard() {
     try {
       const normalizedTicketId = normalizeId(ticketId);
       
-      // Optimistically clear unread count
       setTickets(prev => prev.map(ticket => 
         ticket.id === normalizedTicketId 
           ? { ...ticket, unread_count: 0 }
@@ -837,45 +798,18 @@ export default function SupportDashboard() {
       await actionCable.markMessageRead(normalizedTicketId);
       
     } catch (error) {
-      console.error('Failed to mark ticket as read:', error);
+      console.error('Mark read failed:', error);
     }
   }, []);
 
-  // ============= COMPUTED VALUES =============
-  
-  const getFilteredTickets = useCallback(() => {
-    // The actual filtering is done on the backend now
-    // This just returns the tickets we've loaded based on the active filter
-    return tickets;
-  }, [tickets]);
-
-  const getFilteredTicketCount = (filterKey: string) => {
-    // Since we're only loading tickets for the current filter,
-    // we can't show accurate counts for other filters without additional API calls
-    // For now, only show count for the active filter
-    if (filterKey === activeFilter) {
-      return tickets.length;
-    }
-    
-    // For other filters, we'd need to make additional API calls or store counts separately
-    // For better UX, we can show a placeholder or fetch counts from dashboard stats
-    switch (filterKey) {
-      case 'active':
-        // Sum of in_progress and assigned from agent stats
-        return agentStats?.active_tickets || 0;
-      case 'pending':
-        // Would need separate count from API
-        return 0;
-      case 'resolved':
-        // Today's resolved from agent stats
-        return agentStats?.tickets_resolved_today || 0;
-      case 'all':
-        // Would need total count from API
-        return 0;
-      default:
-        return 0;
-    }
-  };
+  // FIXED: Navigate with properly normalized ID
+  const handleTicketPress = useCallback((ticket: SupportTicket) => {
+    console.log('Opening chat for ticket:', ticket.id);
+    handleTicketRead(ticket.id);
+    // Ensure ID is string and properly formatted
+    const conversationId = normalizeId(ticket.id);
+    router.push(`/(support)/chat/${conversationId}`);
+  }, [handleTicketRead]);
 
   // ============= RENDER FUNCTIONS =============
   
@@ -899,7 +833,7 @@ export default function SupportDashboard() {
             <>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.active_tickets || 0}</Text>
-                <Text style={styles.statLabel}>My Active</Text>
+                <Text style={styles.statLabel}>Active</Text>
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.tickets_resolved_today || 0}</Text>
@@ -907,11 +841,11 @@ export default function SupportDashboard() {
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.avg_resolution_time || '0m'}</Text>
-                <Text style={styles.statLabel}>Avg Resolution</Text>
+                <Text style={styles.statLabel}>Avg Time</Text>
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{(agentStats.satisfaction_rating || 0).toFixed(1)}</Text>
-                <Text style={styles.statLabel}>My Rating</Text>
+                <Text style={styles.statLabel}>Rating</Text>
               </View>
             </>
           )}
@@ -923,11 +857,7 @@ export default function SupportDashboard() {
   const renderTicketItem = ({ item }: { item: SupportTicket }) => (
     <TouchableOpacity
       style={styles.ticketItem}
-      onPress={() => {
-        console.log('Navigating to chat with ID:', item.id);
-        handleTicketRead(item.id);
-        router.push(`/(support)/chat/${normalizeId(item.id)}`);
-      }}
+      onPress={() => handleTicketPress(item)}
     >
       <View style={styles.ticketContent}>
         <View style={styles.ticketHeader}>
@@ -993,7 +923,7 @@ export default function SupportDashboard() {
     </TouchableOpacity>
   );
 
-  const filteredTickets = getFilteredTickets();
+  const filteredTickets = tickets;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -1008,7 +938,7 @@ export default function SupportDashboard() {
             <Text style={styles.headerTitle}>GLT Support</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
-                Welcome back, {user?.first_name || 'Agent'}
+                Welcome, {user?.first_name || 'Agent'}
               </Text>
               {isConnected && (
                 <View style={styles.connectionStatus}>
@@ -1018,7 +948,7 @@ export default function SupportDashboard() {
               )}
             </View>
             <Text style={styles.headerDescription}>
-              {agentStats ? `${agentStats.active_tickets || 0} active tickets assigned to you` : 'Loading your tickets...'}
+              {agentStats ? `${agentStats.active_tickets || 0} active tickets` : 'Loading...'}
             </Text>
           </View>
           <View style={styles.headerRight}>
@@ -1046,7 +976,7 @@ export default function SupportDashboard() {
         <View style={styles.connectionBanner}>
           <MaterialIcons name="wifi-off" size={16} color="#f97316" />
           <Text style={styles.connectionBannerText}>
-            Real-time updates unavailable. Reconnecting...
+            Reconnecting...
           </Text>
         </View>
       )}
@@ -1056,7 +986,7 @@ export default function SupportDashboard() {
           <Feather name="search" size={20} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search your tickets..."
+            placeholder="Search tickets..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1118,13 +1048,13 @@ export default function SupportDashboard() {
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7B3F98" />
-            <Text style={styles.loadingText}>Loading your tickets...</Text>
+            <Text style={styles.loadingText}>Loading tickets...</Text>
           </View>
         ) : (
           <FlatList
             ref={flatListRef}
             data={filteredTickets}
-            keyExtractor={(item, index) => `${item.id}-${index}`}
+            keyExtractor={(item) => item.id}
             renderItem={renderTicketItem}
             refreshControl={
               <RefreshControl
@@ -1143,14 +1073,14 @@ export default function SupportDashboard() {
                 <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
                   {activeFilter === 'active' 
-                    ? 'You have no active tickets (in progress or assigned)'
+                    ? 'No active tickets'
                     : activeFilter === 'pending'
-                    ? 'You have no pending tickets'
+                    ? 'No pending tickets'
                     : activeFilter === 'resolved'
-                    ? 'You have no resolved or closed tickets'
+                    ? 'No resolved tickets'
                     : searchQuery
-                    ? `No tickets match "${searchQuery}"`
-                    : 'You have no assigned tickets'
+                    ? `No results for "${searchQuery}"`
+                    : 'No tickets assigned'
                   }
                 </Text>
                 {searchQuery && (
@@ -1164,9 +1094,6 @@ export default function SupportDashboard() {
               </View>
             )}
             contentContainerStyle={filteredTickets.length === 0 ? styles.emptyListContent : undefined}
-            scrollEnabled={true}
-            nestedScrollEnabled={true}
-            removeClippedSubviews={false}
           />
         )}
       </View>
@@ -1222,375 +1149,74 @@ const getPriorityColor = (priority: string) => {
 };
 
 const styles = StyleSheet.create({
-  container: { 
-    flex: 1, 
-    backgroundColor: '#111B21' 
-  },
-  header: { 
-    paddingTop: 28, 
-    paddingBottom: 20, 
-    paddingHorizontal: 16 
-  },
-  headerContent: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center' 
-  },
-  headerLeft: { 
-    flex: 1 
-  },
-  headerRight: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
-  },
-  headerTitle: { 
-    color: '#fff', 
-    fontSize: 28, 
-    fontWeight: 'bold', 
-    marginBottom: 4 
-  },
-  headerSubtitleRow: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginBottom: 2 
-  },
-  headerSubtitle: { 
-    color: '#E1BEE7', 
-    fontSize: 16, 
-    fontWeight: '500' 
-  },
-  connectionStatus: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    marginLeft: 8, 
-    backgroundColor: 'rgba(16, 185, 129, 0.2)', 
-    paddingHorizontal: 6, 
-    paddingVertical: 2, 
-    borderRadius: 8 
-  },
-  connectedDot: { 
-    width: 6, 
-    height: 6, 
-    borderRadius: 3, 
-    backgroundColor: '#10b981', 
-    marginRight: 4 
-  },
-  connectedText: { 
-    color: '#10b981', 
-    fontSize: 10, 
-    fontWeight: '600' 
-  },
-  headerDescription: { 
-    color: '#C1A7C9', 
-    fontSize: 14, 
-    opacity: 0.9 
-  },
-  statsToggleButton: { 
-    padding: 8, 
-    marginRight: 8 
-  },
-  headerAvatar: { 
-    width: 50, 
-    height: 50, 
-    borderRadius: 25 
-  },
-  statsContainer: { 
-    backgroundColor: 'rgba(123, 63, 152, 0.1)', 
-    paddingVertical: 12 
-  },
-  statsHeader: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    paddingHorizontal: 16, 
-    marginBottom: 8 
-  },
-  statsTitle: { 
-    color: '#fff', 
-    fontSize: 16, 
-    fontWeight: '600' 
-  },
-  liveIndicator: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'rgba(16, 185, 129, 0.2)', 
-    paddingHorizontal: 8, 
-    paddingVertical: 4, 
-    borderRadius: 12 
-  },
-  liveDot: { 
-    width: 6, 
-    height: 6, 
-    borderRadius: 3, 
-    backgroundColor: '#10b981', 
-    marginRight: 4 
-  },
-  liveText: { 
-    color: '#10b981', 
-    fontSize: 10, 
-    fontWeight: '600' 
-  },
-  statCard: { 
-    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
-    paddingHorizontal: 16, 
-    paddingVertical: 12, 
-    marginHorizontal: 8, 
-    borderRadius: 12, 
-    alignItems: 'center', 
-    minWidth: 80 
-  },
-  statNumber: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: 'bold' 
-  },
-  statLabel: { 
-    color: '#E1BEE7', 
-    fontSize: 12, 
-    marginTop: 4 
-  },
-  connectionBanner: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'rgba(249, 115, 22, 0.1)', 
-    paddingVertical: 8, 
-    paddingHorizontal: 16, 
-    borderBottomWidth: 1, 
-    borderBottomColor: 'rgba(249, 115, 22, 0.2)' 
-  },
-  connectionBannerText: { 
-    color: '#f97316', 
-    fontSize: 14, 
-    marginLeft: 8 
-  },
-  searchContainer: { 
-    padding: 16 
-  },
-  searchInputContainer: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: '#1F2C34', 
-    borderRadius: 10, 
-    paddingHorizontal: 12, 
-    paddingVertical: 8 
-  },
-  searchInput: { 
-    flex: 1, 
-    color: '#fff', 
-    fontSize: 16, 
-    marginLeft: 8 
-  },
-  filtersContainer: { 
-    paddingLeft: 16, 
-    marginBottom: 8 
-  },
-  filterPill: { 
-    flexDirection: 'row', 
-    alignItems: 'center', 
-    backgroundColor: 'rgba(255, 255, 255, 0.1)', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderRadius: 20, 
-    marginRight: 8 
-  },
-  filterPillActive: { 
-    backgroundColor: '#7B3F98' 
-  },
-  filterPillText: { 
-    color: '#8E8E93', 
-    fontSize: 14, 
-    fontWeight: '500', 
-    marginLeft: 6 
-  },
-  filterPillTextActive: { 
-    color: '#fff' 
-  },
-  filterPillBadge: { 
-    backgroundColor: '#E1BEE7', 
-    borderRadius: 10, 
-    paddingHorizontal: 6, 
-    paddingVertical: 2, 
-    marginLeft: 6 
-  },
-  filterPillBadgeLive: { 
-    backgroundColor: '#10b981' 
-  },
-  filterPillBadgeText: { 
-    color: '#7B3F98', 
-    fontSize: 12, 
-    fontWeight: '600' 
-  },
-  listContainer: { 
-    flex: 1,
-    paddingBottom: 2 
-  },
-  ticketItem: { 
-    backgroundColor: '#1F2C34', 
-    marginHorizontal: 8, 
-    marginVertical: 2, 
-    borderRadius: 8 
-  },
-  ticketContent: { 
-    padding: 12 
-  },
-  ticketHeader: { 
-    flexDirection: 'row', 
-    alignItems: 'flex-start' 
-  },
-  customerAvatar: { 
-    width: 50, 
-    height: 50, 
-    borderRadius: 25, 
-    marginRight: 12 
-  },
-  ticketInfo: { 
-    flex: 1 
-  },
-  ticketTitleRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 4 
-  },
-  customerName: { 
-    color: '#fff', 
-    fontSize: 16, 
-    fontWeight: '600', 
-    flex: 1 
-  },
-  ticketMeta: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
-  },
-  ticketTime: { 
-    color: '#8E8E93', 
-    fontSize: 12 
-  },
-  realtimeIndicator: { 
-    marginLeft: 6 
-  },
-  realtimeDot: { 
-    width: 6, 
-    height: 6, 
-    borderRadius: 3, 
-    backgroundColor: '#10b981' 
-  },
-  ticketSubtitleRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 6 
-  },
-  ticketPreview: { 
-    color: '#B8B8B8', 
-    fontSize: 14, 
-    flex: 1 
-  },
-  typingIndicator: { 
-    color: '#4FC3F7', 
-    fontSize: 14, 
-    flex: 1, 
-    fontStyle: 'italic' 
-  },
-  unreadBadge: { 
-    backgroundColor: '#7B3F98', 
-    borderRadius: 10, 
-    paddingHorizontal: 6, 
-    paddingVertical: 2, 
-    marginLeft: 8 
-  },
-  unreadBadgeLive: { 
-    backgroundColor: '#10b981' 
-  },
-  unreadText: { 
-    color: '#fff', 
-    fontSize: 12, 
-    fontWeight: '600' 
-  },
-  ticketMetaRow: { 
-    flexDirection: 'row', 
-    justifyContent: 'space-between', 
-    alignItems: 'center', 
-    marginBottom: 4 
-  },
-  ticketLeftMeta: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
-  },
-  ticketRightMeta: { 
-    flexDirection: 'row', 
-    alignItems: 'center' 
-  },
-  ticketId: { 
-    color: '#8E8E93', 
-    fontSize: 12, 
-    marginRight: 8 
-  },
-  priorityBadge: { 
-    paddingHorizontal: 6, 
-    paddingVertical: 2, 
-    borderRadius: 4, 
-    marginRight: 8 
-  },
-  priorityText: { 
-    color: '#fff', 
-    fontSize: 10, 
-    fontWeight: '600' 
-  },
-  statusBadge: { 
-    paddingHorizontal: 6, 
-    paddingVertical: 2, 
-    borderRadius: 4 
-  },
-  statusText: { 
-    color: '#fff', 
-    fontSize: 10, 
-    fontWeight: '600' 
-  },
-  loadingContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    paddingTop: 100 
-  },
-  loadingText: { 
-    color: '#8E8E93', 
-    fontSize: 16, 
-    marginTop: 16 
-  },
-  emptyContainer: { 
-    flex: 1, 
-    justifyContent: 'center', 
-    alignItems: 'center', 
-    paddingTop: 100 
-  },
-  emptyListContent: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center'
-  },
-  emptyText: { 
-    color: '#fff', 
-    fontSize: 18, 
-    fontWeight: '600', 
-    marginTop: 16 
-  },
-  emptySubtext: { 
-    color: '#8E8E93', 
-    fontSize: 14, 
-    marginTop: 8, 
-    textAlign: 'center' 
-  },
-  clearSearchButton: { 
-    backgroundColor: '#7B3F98', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderRadius: 16, 
-    marginTop: 16 
-  },
-  clearSearchText: { 
-    color: '#fff', 
-    fontSize: 14, 
-    fontWeight: '500' 
-  },
+  container: { flex: 1, backgroundColor: '#111B21' },
+  header: { paddingTop: 28, paddingBottom: 20, paddingHorizontal: 16 },
+  headerContent: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  headerLeft: { flex: 1 },
+  headerRight: { flexDirection: 'row', alignItems: 'center' },
+  headerTitle: { color: '#fff', fontSize: 28, fontWeight: 'bold', marginBottom: 4 },
+  headerSubtitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 2 },
+  headerSubtitle: { color: '#E1BEE7', fontSize: 16, fontWeight: '500' },
+  connectionStatus: { flexDirection: 'row', alignItems: 'center', marginLeft: 8, backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8 },
+  connectedDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
+  connectedText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
+  headerDescription: { color: '#C1A7C9', fontSize: 14, opacity: 0.9 },
+  statsToggleButton: { padding: 8, marginRight: 8 },
+  headerAvatar: { width: 50, height: 50, borderRadius: 25 },
+  statsContainer: { backgroundColor: 'rgba(123, 63, 152, 0.1)', paddingVertical: 12 },
+  statsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, marginBottom: 8 },
+  statsTitle: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  liveIndicator: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(16, 185, 129, 0.2)', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12 },
+  liveDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981', marginRight: 4 },
+  liveText: { color: '#10b981', fontSize: 10, fontWeight: '600' },
+  statCard: { backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 12, marginHorizontal: 8, borderRadius: 12, alignItems: 'center', minWidth: 80 },
+  statNumber: { color: '#fff', fontSize: 18, fontWeight: 'bold' },
+  statLabel: { color: '#E1BEE7', fontSize: 12, marginTop: 4 },
+  connectionBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(249, 115, 22, 0.1)', paddingVertical: 8, paddingHorizontal: 16, borderBottomWidth: 1, borderBottomColor: 'rgba(249, 115, 22, 0.2)' },
+  connectionBannerText: { color: '#f97316', fontSize: 14, marginLeft: 8 },
+  searchContainer: { padding: 16 },
+  searchInputContainer: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 10, paddingHorizontal: 12, paddingVertical: 8 },
+  searchInput: { flex: 1, color: '#fff', fontSize: 16, marginLeft: 8 },
+  filtersContainer: { paddingLeft: 16, marginBottom: 8 },
+  filterPill: { flexDirection: 'row', alignItems: 'center', backgroundColor: 'rgba(255, 255, 255, 0.1)', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20, marginRight: 8 },
+  filterPillActive: { backgroundColor: '#7B3F98' },
+  filterPillText: { color: '#8E8E93', fontSize: 14, fontWeight: '500', marginLeft: 6 },
+  filterPillTextActive: { color: '#fff' },
+  filterPillBadge: { backgroundColor: '#E1BEE7', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 6 },
+  filterPillBadgeLive: { backgroundColor: '#10b981' },
+  filterPillBadgeText: { color: '#7B3F98', fontSize: 12, fontWeight: '600' },
+  listContainer: { flex: 1, paddingBottom: 2 },
+  ticketItem: { backgroundColor: '#1F2C34', marginHorizontal: 8, marginVertical: 2, borderRadius: 8 },
+  ticketContent: { padding: 12 },
+  ticketHeader: { flexDirection: 'row', alignItems: 'flex-start' },
+  customerAvatar: { width: 50, height: 50, borderRadius: 25, marginRight: 12 },
+  ticketInfo: { flex: 1 },
+  ticketTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  customerName: { color: '#fff', fontSize: 16, fontWeight: '600', flex: 1 },
+  ticketMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketTime: { color: '#8E8E93', fontSize: 12 },
+  realtimeIndicator: { marginLeft: 6 },
+  realtimeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: '#10b981' },
+  ticketSubtitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  ticketPreview: { color: '#B8B8B8', fontSize: 14, flex: 1 },
+  typingIndicator: { color: '#4FC3F7', fontSize: 14, flex: 1, fontStyle: 'italic' },
+  unreadBadge: { backgroundColor: '#7B3F98', borderRadius: 10, paddingHorizontal: 6, paddingVertical: 2, marginLeft: 8 },
+  unreadBadgeLive: { backgroundColor: '#10b981' },
+  unreadText: { color: '#fff', fontSize: 12, fontWeight: '600' },
+  ticketMetaRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4 },
+  ticketLeftMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketRightMeta: { flexDirection: 'row', alignItems: 'center' },
+  ticketId: { color: '#8E8E93', fontSize: 12, marginRight: 8 },
+  priorityBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4, marginRight: 8 },
+  priorityText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  statusBadge: { paddingHorizontal: 6, paddingVertical: 2, borderRadius: 4 },
+  statusText: { color: '#fff', fontSize: 10, fontWeight: '600' },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
+  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
+  emptyContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
+  emptyListContent: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { color: '#fff', fontSize: 18, fontWeight: '600', marginTop: 16 },
+  emptySubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
+  clearSearchButton: { backgroundColor: '#7B3F98', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 16, marginTop: 16 },
+  clearSearchText: { color: '#fff', fontSize: 14, fontWeight: '500' },
 });
