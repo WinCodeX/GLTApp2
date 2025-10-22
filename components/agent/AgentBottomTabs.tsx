@@ -1,4 +1,3 @@
-// components/agent/AgentBottomTabs.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { 
   View, 
@@ -13,7 +12,10 @@ import { Feather } from '@expo/vector-icons';
 import { router, usePathname } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { AgentFloatingActionButton } from './AgentFloatingActionButton';
-import AgentQRScanner from './AgentQRScanner';
+// --- FIX ---
+// Changed from default import 'AgentQRScanner' to named import '{ AgentQRScanner }'
+import { AgentQRScanner } from './AgentQRScanner';
+// --- END FIX ---
 import Toast from 'react-native-toast-message';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -348,3 +350,4 @@ const styles = StyleSheet.create({
     borderRadius: 2,
   },
 });
+
