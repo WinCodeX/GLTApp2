@@ -8,20 +8,24 @@ import {
   TouchableOpacity,
   TextInput,
   ActivityIndicator,
-  Alert,
   ScrollView,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../lib/api';
+import { AgentQRScanner } from '../../components/agent/AgentQRScanner';
+import { useAlertModal } from '../../components/agent/AlertModal';
 
 export default function ScanPackageScreen() {
   const router = useRouter();
+  const { alertConfig, showAlert, hideAlert, AlertModalComponent } = useAlertModal();
+  
   const [packageCode, setPackageCode] = useState('');
   const [scanning, setScanning] = useState(false);
   const [scannedPackage, setScannedPackage] = useState<any>(null);
   const [eventType, setEventType] = useState<string>('scan');
+  const [showQRScanner, setShowQRScanner] = useState(false);
 
   const eventTypes = [
     { value: 'scan', label: 'General Scan', icon: 'maximize' },
@@ -30,36 +34,65 @@ export default function ScanPackageScreen() {
     { value: 'processed_by_warehouse', label: 'Processed', icon: 'package' },
   ];
 
-  const handleScan = async () => {
-    if (!packageCode.trim()) {
-      Alert.alert('Error', 'Please enter a package code');
+  const handleScan = async (code?: string) => {
+    const codeToScan = code || packageCode;
+    
+    if (!codeToScan.trim()) {
+      showAlert({
+        type: 'error',
+        title: 'Invalid Input',
+        message: 'Please enter a package code',
+        buttons: [{ text: 'OK', onPress: hideAlert }]
+      });
       return;
     }
 
     setScanning(true);
     try {
       const response = await api.post('/api/v1/staff/scan_events', {
-        package_code: packageCode.trim(),
+        package_code: codeToScan.trim(),
         event_type: eventType,
         location: 'Agent Office',
       });
 
       if (response.data.success) {
         setScannedPackage(response.data.data.package);
-        Alert.alert('Success', response.data.message);
+        showAlert({
+          type: 'success',
+          title: 'Scan Successful',
+          message: response.data.message,
+          buttons: [{ text: 'OK', onPress: hideAlert }]
+        });
         setPackageCode('');
       } else {
-        Alert.alert('Error', response.data.message);
+        showAlert({
+          type: 'error',
+          title: 'Scan Failed',
+          message: response.data.message,
+          buttons: [{ text: 'OK', onPress: hideAlert }]
+        });
       }
     } catch (error: any) {
       console.error('Scan error:', error);
-      Alert.alert(
-        'Scan Failed',
-        error.response?.data?.message || 'Failed to scan package'
-      );
+      showAlert({
+        type: 'error',
+        title: 'Scan Failed',
+        message: error.response?.data?.message || 'Failed to scan package',
+        buttons: [{ text: 'OK', onPress: hideAlert }]
+      });
     } finally {
       setScanning(false);
     }
+  };
+
+  const handleQRScan = (code: string) => {
+    console.log('📷 QR Code scanned:', code);
+    setPackageCode(code);
+    setShowQRScanner(false);
+    // Automatically trigger scan with the scanned code
+    setTimeout(() => {
+      handleScan(code);
+    }, 300);
   };
 
   const handleClearCode = () => {
@@ -100,7 +133,7 @@ export default function ScanPackageScreen() {
             <Feather name="maximize" size={48} color="#7B3F98" />
           </View>
           <Text style={styles.scanTitle}>Scan Package Code</Text>
-          <Text style={styles.scanSubtitle}>Enter the package tracking code</Text>
+          <Text style={styles.scanSubtitle}>Enter or scan the package tracking code</Text>
 
           <View style={styles.inputContainer}>
             <Feather name="hash" size={20} color="#8E8E93" />
@@ -119,6 +152,15 @@ export default function ScanPackageScreen() {
               </TouchableOpacity>
             )}
           </View>
+
+          {/* QR Scanner Button */}
+          <TouchableOpacity
+            style={styles.qrScanButton}
+            onPress={() => setShowQRScanner(true)}
+          >
+            <Feather name="camera" size={20} color="#7B3F98" />
+            <Text style={styles.qrScanButtonText}>Scan QR Code</Text>
+          </TouchableOpacity>
 
           <View style={styles.eventTypeSection}>
             <Text style={styles.eventTypeLabel}>Scan Type</Text>
@@ -152,7 +194,7 @@ export default function ScanPackageScreen() {
 
           <TouchableOpacity
             style={[styles.scanButton, scanning && styles.scanButtonDisabled]}
-            onPress={handleScan}
+            onPress={() => handleScan()}
             disabled={scanning}
           >
             {scanning ? (
@@ -213,6 +255,17 @@ export default function ScanPackageScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* QR Scanner Modal */}
+      <AgentQRScanner
+        visible={showQRScanner}
+        onClose={() => setShowQRScanner(false)}
+        onScan={handleQRScan}
+        title="Scan Package QR Code"
+      />
+
+      {/* Alert Modal */}
+      {AlertModalComponent}
     </SafeAreaView>
   );
 }
@@ -283,6 +336,25 @@ const styles = StyleSheet.create({
     flex: 1,
     color: '#fff',
     fontSize: 16,
+  },
+  qrScanButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(123, 63, 152, 0.1)',
+    borderRadius: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    width: '100%',
+    gap: 8,
+    marginBottom: 24,
+    borderWidth: 1,
+    borderColor: 'rgba(123, 63, 152, 0.3)',
+  },
+  qrScanButtonText: {
+    color: '#7B3F98',
+    fontSize: 16,
+    fontWeight: '600',
   },
   eventTypeSection: {
     width: '100%',
