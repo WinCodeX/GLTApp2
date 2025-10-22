@@ -10,13 +10,13 @@ import {
   FlatList,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Modal,
 } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import api from '../../lib/api';
+import { useAlertModal } from '../../components/agent/AlertModal';
 
 interface Package {
   id: number;
@@ -39,6 +39,8 @@ interface Package {
 
 export default function ViewPackagesScreen() {
   const router = useRouter();
+  const { alertConfig, showAlert, hideAlert, AlertModalComponent } = useAlertModal();
+  
   const [packages, setPackages] = useState<Package[]>([]);
   const [filteredPackages, setFilteredPackages] = useState<Package[]>([]);
   const [loading, setLoading] = useState(true);
@@ -80,7 +82,12 @@ export default function ViewPackagesScreen() {
       }
     } catch (error: any) {
       console.error('Failed to fetch packages:', error);
-      Alert.alert('Error', 'Failed to load packages');
+      showAlert({
+        type: 'error',
+        title: 'Failed to Load Packages',
+        message: 'Unable to load packages. Please try again.',
+        buttons: [{ text: 'OK', onPress: hideAlert }]
+      });
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -122,14 +129,17 @@ export default function ViewPackagesScreen() {
   };
 
   const handleCollectPackage = async (pkg: Package) => {
-    Alert.alert(
-      'Collect Package',
-      `Mark package ${pkg.code} as collected?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
+    showAlert({
+      type: 'confirm',
+      title: 'Collect Package',
+      message: `Mark package ${pkg.code} as collected?`,
+      buttons: [
+        { text: 'Cancel', style: 'cancel', onPress: hideAlert },
         {
           text: 'Collect',
+          style: 'default',
           onPress: async () => {
+            hideAlert();
             try {
               const response = await api.post('/api/v1/staff/scan_events', {
                 package_code: pkg.code,
@@ -138,18 +148,35 @@ export default function ViewPackagesScreen() {
               });
 
               if (response.data.success) {
-                Alert.alert('Success', 'Package marked as collected');
-                fetchPackages(true);
+                showAlert({
+                  type: 'success',
+                  title: 'Success',
+                  message: 'Package marked as collected',
+                  buttons: [{ text: 'OK', onPress: () => {
+                    hideAlert();
+                    fetchPackages(true);
+                  }}]
+                });
               } else {
-                Alert.alert('Error', response.data.message);
+                showAlert({
+                  type: 'error',
+                  title: 'Error',
+                  message: response.data.message,
+                  buttons: [{ text: 'OK', onPress: hideAlert }]
+                });
               }
             } catch (error: any) {
-              Alert.alert('Error', error.response?.data?.message || 'Failed to collect package');
+              showAlert({
+                type: 'error',
+                title: 'Collection Failed',
+                message: error.response?.data?.message || 'Failed to collect package',
+                buttons: [{ text: 'OK', onPress: hideAlert }]
+              });
             }
           },
         },
       ]
-    );
+    });
   };
 
   const handleRejectPackage = (pkg: Package) => {
@@ -160,7 +187,12 @@ export default function ViewPackagesScreen() {
 
   const submitRejection = async () => {
     if (!selectedPackage || !rejectionReason.trim()) {
-      Alert.alert('Error', 'Please enter a rejection reason');
+      showAlert({
+        type: 'error',
+        title: 'Invalid Input',
+        message: 'Please enter a rejection reason',
+        buttons: [{ text: 'OK', onPress: hideAlert }]
+      });
       return;
     }
 
@@ -172,17 +204,35 @@ export default function ViewPackagesScreen() {
       });
 
       if (response.data.success) {
-        Alert.alert('Success', 'Package rejected successfully');
         setRejectionModalVisible(false);
         setSelectedPackage(null);
         setRejectionReason('');
-        fetchPackages(true);
+        
+        showAlert({
+          type: 'success',
+          title: 'Package Rejected',
+          message: 'Package rejected successfully',
+          buttons: [{ text: 'OK', onPress: () => {
+            hideAlert();
+            fetchPackages(true);
+          }}]
+        });
       } else {
-        Alert.alert('Error', response.data.message);
+        showAlert({
+          type: 'error',
+          title: 'Rejection Failed',
+          message: response.data.message,
+          buttons: [{ text: 'OK', onPress: hideAlert }]
+        });
       }
     } catch (error: any) {
       console.error('Rejection error:', error);
-      Alert.alert('Error', error.response?.data?.message || 'Failed to reject package');
+      showAlert({
+        type: 'error',
+        title: 'Rejection Failed',
+        message: error.response?.data?.message || 'Failed to reject package',
+        buttons: [{ text: 'OK', onPress: hideAlert }]
+      });
     } finally {
       setSubmittingRejection(false);
     }
@@ -236,13 +286,15 @@ export default function ViewPackagesScreen() {
           <Text style={[styles.actionButtonText, { color: '#007AFF' }]}>Track</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity
-          style={[styles.actionButton, styles.collectButton]}
-          onPress={() => handleCollectPackage(item)}
-        >
-          <Feather name="check-circle" size={16} color="#34C759" />
-          <Text style={[styles.actionButtonText, { color: '#34C759' }]}>Collect</Text>
-        </TouchableOpacity>
+        {item.state === 'pending' && (
+          <TouchableOpacity
+            style={[styles.actionButton, styles.collectButton]}
+            onPress={() => handleCollectPackage(item)}
+          >
+            <Feather name="check-circle" size={16} color="#34C759" />
+            <Text style={[styles.actionButtonText, { color: '#34C759' }]}>Collect</Text>
+          </TouchableOpacity>
+        )}
 
         {item.can_be_rejected && (
           <TouchableOpacity
@@ -421,6 +473,9 @@ export default function ViewPackagesScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Alert Modal */}
+      {AlertModalComponent}
     </SafeAreaView>
   );
 }
