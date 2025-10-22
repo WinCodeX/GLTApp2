@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: Double messages & cache persistence
+// app/(support)/chat/[id].tsx - FIXED: ActionCable-only, storage-first, scroll memory
 
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -26,23 +26,36 @@ import {
 import { useUser } from '../../../context/UserContext';
 import { accountManager } from '../../../lib/AccountManager';
 import api from '../../../lib/api';
-import ChatCacheManager, { CachedConversation, CachedMessage } from '../../../lib/cache/ChatCacheManager';
 import ActionCableService from '../../../lib/services/ActionCableService';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
-const INITIAL_MESSAGE_LIMIT = 20;
-const PAGINATION_LIMIT = 15;
-const REQUEST_TIMEOUT = 20000;
-const LOAD_MORE_THRESHOLD = 3;
-const CACHE_STALE_TIME = 5 * 60 * 1000;
-const MAX_RETRY_ATTEMPTS = 3;
-const RETRY_DELAYS = [5000, 15000, 30000];
+const INITIAL_MESSAGE_LIMIT = 50;
+const PAGINATION_LIMIT = 30;
+const REQUEST_TIMEOUT = 15000;
 const SCROLL_BUTTON_THRESHOLD = 200;
+const STORAGE_KEY_PREFIX = 'agent_chat_';
+const SCROLL_POSITION_KEY_SUFFIX = '_scroll_pos';
 
 const normalizeId = (id: any): string => String(id);
 
-interface ChatMessage extends CachedMessage {
+interface ChatMessage {
+  id: string;
+  content: string;
+  created_at: string;
+  timestamp: string;
+  is_system: boolean;
+  from_support: boolean;
+  message_type: string;
+  user: {
+    id: string;
+    name: string;
+    role: string;
+    avatar_url?: string;
+  };
+  metadata?: any;
+  delivered_at?: string | null;
+  read_at?: string | null;
   sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   retryCount?: number;
   tempId?: string;
@@ -82,10 +95,10 @@ export default function SupportChatScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = normalizeId(rawId);
   const { user } = useUser();
-  const [conversation, setConversation] = useState<CachedConversation | null>(null);
+  
+  const [conversation, setConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [sending, setSending] = useState(false);
   const [inputText, setInputText] = useState('');
   const [showActions, setShowActions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
@@ -105,137 +118,103 @@ export default function SupportChatScreen() {
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const [isNearBottom, setIsNearBottom] = useState(true);
-  const [shouldScrollToEnd, setShouldScrollToEnd] = useState(true);
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number | null>(null);
   
   const flatListRef = useRef<FlatList>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
-  const cacheManager = useRef(ChatCacheManager.getInstance());
-  const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
-  const conversationLoadedRef = useRef(false);
-  const conversationLoadedStorageKey = `conversation_loaded_support_${id}`;
-  const cacheTimestampKey = `cache_timestamp_support_${id}`;
-  const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const messageIdsRef = useRef<Set<string>>(new Set());
+  const pendingMessages = useRef<Map<string, ChatMessage>>(new Map());
+  const retryTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
-  const isLoadingMoreRef = useRef(false);
-  const hasScrolledToBottomRef = useRef(false);
+  const isLoadingOlder = useRef(false);
   const isChatVisible = useRef(true);
   const isChatFocused = useRef(true);
-  
-  // FIXED: Track pending messages to prevent duplicates
-  const pendingMessageIds = useRef<Set<string>>(new Set());
-  const processedMessageIds = useRef<Set<string>>(new Set());
+  const currentScrollY = useRef(0);
+  const contentHeight = useRef(0);
+  const scrollViewHeight = useRef(0);
 
-  // ============= COMPREHENSIVE CLEANUP FUNCTION =============
+  // ============= STORAGE HELPERS =============
   
-  const clearAllChatData = useCallback(async () => {
+  const getStorageKey = (suffix: string) => `${STORAGE_KEY_PREFIX}${id}${suffix}`;
+
+  const saveMessagesToStorage = useCallback(async (msgs: ChatMessage[]) => {
+    if (!id) return;
     try {
-      console.log('🧹 Clearing all support agent chat data...');
-      
-      const keys = await AsyncStorage.getAllKeys();
-      const supportKeys = keys.filter(k => 
-        k.startsWith('conversation_loaded_support_') ||
-        k.startsWith('cache_timestamp_support_') ||
-        k.includes('support_conversation')
-      );
-      
-      if (supportKeys.length > 0) {
-        await AsyncStorage.multiRemove(supportKeys);
-      }
-      
-      if (id) {
-        cacheManager.current.clearConversationCache(id);
-      }
-      
-      conversationLoadedRef.current = false;
-      hasScrolledToBottomRef.current = false;
-      lastReadMessageIdRef.current = null;
-      pendingMessageIds.current.clear();
-      processedMessageIds.current.clear();
-      
-      setMessages([]);
-      setConversation(null);
-      
-      console.log('✅ All support agent chat data cleared');
+      const key = getStorageKey('_messages');
+      await AsyncStorage.setItem(key, JSON.stringify(msgs));
+      console.log(`💾 Saved ${msgs.length} messages`);
     } catch (error) {
-      console.error('Failed to clear chat data:', error);
+      console.error('Save failed:', error);
     }
   }, [id]);
 
-  useEffect(() => {
-    const checkAuthStatus = async () => {
-      const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount && id) {
-        await clearAllChatData();
+  const loadMessagesFromStorage = useCallback(async (): Promise<ChatMessage[]> => {
+    if (!id) return [];
+    try {
+      const key = getStorageKey('_messages');
+      const stored = await AsyncStorage.getItem(key);
+      if (stored) {
+        const msgs = JSON.parse(stored) as ChatMessage[];
+        console.log(`📦 Loaded ${msgs.length} messages from storage`);
+        return msgs;
       }
-    };
-    
-    const interval = setInterval(checkAuthStatus, 1000);
-    return () => clearInterval(interval);
-  }, [id, clearAllChatData]);
-
-  // ============= STORAGE PERSISTENCE =============
-  
-  const saveConversationLoadedState = useCallback(async () => {
-    try {
-      await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
-      await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
     } catch (error) {
-      console.error('Failed to save conversation loaded state:', error);
+      console.error('Load from storage failed:', error);
     }
-  }, [conversationLoadedStorageKey, cacheTimestampKey]);
+    return [];
+  }, [id]);
 
-  const loadConversationLoadedState = useCallback(async () => {
+  const saveScrollPosition = useCallback(async (position: number) => {
+    if (!id) return;
     try {
-      const [loaded, timestamp] = await Promise.all([
-        AsyncStorage.getItem(conversationLoadedStorageKey),
-        AsyncStorage.getItem(cacheTimestampKey),
-      ]);
-      
-      if (loaded === 'true' && timestamp) {
-        const cacheAge = Date.now() - parseInt(timestamp, 10);
-        if (cacheAge < CACHE_STALE_TIME) {
-          conversationLoadedRef.current = true;
-          return true;
-        } else {
-          await clearConversationLoadedState();
-        }
+      const key = getStorageKey(SCROLL_POSITION_KEY_SUFFIX);
+      await AsyncStorage.setItem(key, String(position));
+    } catch (error) {
+      console.error('Save scroll position failed:', error);
+    }
+  }, [id]);
+
+  const loadScrollPosition = useCallback(async (): Promise<number | null> => {
+    if (!id) return null;
+    try {
+      const key = getStorageKey(SCROLL_POSITION_KEY_SUFFIX);
+      const stored = await AsyncStorage.getItem(key);
+      if (stored) {
+        return parseFloat(stored);
       }
-      return false;
     } catch (error) {
-      console.error('Failed to load conversation state:', error);
-      return false;
+      console.error('Load scroll position failed:', error);
     }
-  }, [conversationLoadedStorageKey, cacheTimestampKey]);
+    return null;
+  }, [id]);
 
-  const clearConversationLoadedState = useCallback(async () => {
+  const clearChatStorage = useCallback(async () => {
+    if (!id) return;
     try {
-      await Promise.all([
-        AsyncStorage.removeItem(conversationLoadedStorageKey),
-        AsyncStorage.removeItem(cacheTimestampKey),
-      ]);
-      conversationLoadedRef.current = false;
+      const keys = [
+        getStorageKey('_messages'),
+        getStorageKey(SCROLL_POSITION_KEY_SUFFIX),
+      ];
+      await AsyncStorage.multiRemove(keys);
+      console.log('🧹 Storage cleared');
     } catch (error) {
-      console.error('Failed to clear conversation state:', error);
+      console.error('Clear storage failed:', error);
     }
-  }, [conversationLoadedStorageKey, cacheTimestampKey]);
+  }, [id]);
 
   // ============= APP STATE MANAGEMENT =============
   
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    
-    return () => {
-      subscription.remove();
-    };
-  }, [id, isConnected]);
+    return () => subscription.remove();
+  }, [id, isConnected, messages]);
 
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
     if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
-      console.log('📱 App came to foreground');
+      console.log('📱 App foreground');
       isChatVisible.current = true;
       isChatFocused.current = true;
       
@@ -247,9 +226,15 @@ export default function SupportChatScreen() {
         await markCustomerMessagesAsReadIfVisible();
       }
     } else if (nextAppState.match(/inactive|background/)) {
-      console.log('📱 App went to background');
+      console.log('📱 App background');
       isChatVisible.current = false;
       isChatFocused.current = false;
+      
+      // Save state
+      if (id && messages.length > 0) {
+        await saveMessagesToStorage(messages);
+        await saveScrollPosition(currentScrollY.current);
+      }
       
       if (isConnected && actionCableRef.current) {
         await actionCableRef.current.updatePresence('away');
@@ -257,7 +242,7 @@ export default function SupportChatScreen() {
     }
     
     appState.current = nextAppState;
-  }, [id, isConnected]);
+  }, [id, isConnected, messages, saveMessagesToStorage, saveScrollPosition]);
 
   const reconnectActionCable = useCallback(async () => {
     try {
@@ -276,7 +261,7 @@ export default function SupportChatScreen() {
         setupActionCableSubscriptions();
       }
     } catch (error) {
-      console.error('Failed to reconnect ActionCable:', error);
+      console.error('Reconnect failed:', error);
     }
   }, [id, user]);
 
@@ -287,9 +272,7 @@ export default function SupportChatScreen() {
       return;
     }
     
-    if (appState.current !== 'active') {
-      return;
-    }
+    if (appState.current !== 'active') return;
 
     try {
       const lastUnreadCustomerMessage = messages
@@ -297,7 +280,7 @@ export default function SupportChatScreen() {
         .pop();
 
       if (lastUnreadCustomerMessage && actionCableRef.current) {
-        console.log('📖 Auto-marking customer messages as read');
+        console.log('📖 Auto-marking as read');
         
         await actionCableRef.current.perform('mark_message_read', {
           conversation_id: id,
@@ -306,7 +289,7 @@ export default function SupportChatScreen() {
         lastReadMessageIdRef.current = lastUnreadCustomerMessage.id;
       }
     } catch (error) {
-      console.error('Failed to mark messages as read:', error);
+      console.error('Mark read failed:', error);
     }
   }, [id, isConnected, messages]);
 
@@ -316,80 +299,131 @@ export default function SupportChatScreen() {
     }
   }, [messages, markCustomerMessagesAsReadIfVisible]);
 
-  // ============= FIXED: CACHE SUBSCRIPTION WITH PROPER PERSISTENCE =============
+  // Save messages whenever they change
+  useEffect(() => {
+    if (id && messages.length > 0 && !loading) {
+      saveMessagesToStorage(messages);
+    }
+  }, [id, messages, loading, saveMessagesToStorage]);
+
+  // ============= INITIALIZATION =============
   
   useEffect(() => {
-    if (!id) return;
-
-    cacheUnsubscribeRef.current = cacheManager.current.subscribe(id, (conversationId, cachedData) => {
-      console.log(`📦 Cache updated for conversation ${conversationId}, messages: ${cachedData.messages.length}`);
+    const initializeChat = async () => {
+      // Try loading from storage first
+      const storedMessages = await loadMessagesFromStorage();
+      const storedScrollPos = await loadScrollPosition();
       
-      const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
-        ...msg,
-        id: normalizeId(msg.id),
-        sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
-      }));
-      
-      setConversation(cachedData.conversation);
-      setMessages(uiMessages);
-      setHasMoreMessages(cachedData.hasMoreMessages);
-      
-      // FIXED: Save to persistent storage whenever cache updates
-      saveConversationLoadedState();
-      
-      if (shouldScrollToEnd && !hasScrolledToBottomRef.current) {
+      if (storedMessages.length > 0) {
+        console.log('✅ Loaded from storage');
+        setMessages(storedMessages);
+        storedMessages.forEach(msg => messageIdsRef.current.add(msg.id));
+        setSavedScrollPosition(storedScrollPos);
+        setLoading(false);
+        setIsInitialLoad(false);
+        
+        // Setup ActionCable and sync in background
         setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-          hasScrolledToBottomRef.current = true;
-          setShouldScrollToEnd(false);
-        }, 100);
-      }
-    });
-
-    return () => {
-      if (cacheUnsubscribeRef.current) {
-        cacheUnsubscribeRef.current();
+          if (id) {
+            setupActionCableConnection();
+            backgroundSyncMessages();
+          }
+        }, 500);
+      } else {
+        // No storage, load from API
+        loadConversation();
       }
     };
-  }, [id, shouldScrollToEnd, saveConversationLoadedState]);
+
+    initializeChat();
+  }, []);
+
+  const backgroundSyncMessages = useCallback(async () => {
+    if (!id) return;
+    try {
+      console.log('🔄 Background sync');
+      const response = await api.get(`/api/v1/conversations/${id}`, {
+        params: { limit: 20 },
+        timeout: 10000,
+      });
+
+      if (response.data.success && response.data.messages) {
+        const apiMessages = response.data.messages;
+        const newMessages: ChatMessage[] = [];
+
+        apiMessages.forEach((msg: any) => {
+          const msgId = normalizeId(msg.id);
+          if (!messageIdsRef.current.has(msgId)) {
+            newMessages.push({
+              id: msgId,
+              content: msg.content,
+              created_at: msg.created_at,
+              timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              is_system: msg.is_system || false,
+              from_support: msg.from_support,
+              message_type: msg.message_type || 'text',
+              user: msg.user,
+              metadata: msg.metadata || {},
+              delivered_at: msg.delivered_at,
+              read_at: msg.read_at,
+              sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
+            });
+            messageIdsRef.current.add(msgId);
+          }
+        });
+
+        if (newMessages.length > 0) {
+          setMessages(prev => [...prev, ...newMessages]);
+        }
+      }
+    } catch (error) {
+      console.error('Background sync failed:', error);
+    }
+  }, [id]);
 
   // ============= ACTIONCABLE SETUP =============
   
+  const setupActionCableConnection = useCallback(async () => {
+    if (!id || !user) return;
+
+    try {
+      const currentAccount = accountManager.getCurrentAccount();
+      if (!currentAccount) return;
+
+      actionCableRef.current = ActionCableService.getInstance();
+      
+      const connected = await actionCableRef.current.connect({
+        token: currentAccount.token,
+        userId: normalizeId(user.id),
+        autoReconnect: true,
+      });
+
+      if (connected) {
+        setIsConnected(true);
+        console.log('✅ ActionCable connected');
+        
+        await actionCableRef.current.joinConversation(id);
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        setSubscriptionReady(true);
+        setupActionCableSubscriptions();
+        await requestCustomerPresence();
+      }
+    } catch (error) {
+      console.error('ActionCable setup failed:', error);
+      setIsConnected(false);
+      setSubscriptionReady(false);
+    }
+  }, [id, user]);
+
   useEffect(() => {
     if (!id || !user) return;
 
-    const initActionCable = async () => {
-      try {
-        const currentAccount = accountManager.getCurrentAccount();
-        if (!currentAccount) return;
-
-        actionCableRef.current = ActionCableService.getInstance();
-        
-        const connected = await actionCableRef.current.connect({
-          token: currentAccount.token,
-          userId: normalizeId(user.id),
-          autoReconnect: true,
-        });
-
-        if (connected) {
-          setIsConnected(true);
-          console.log('✅ ActionCable connected for support chat');
-          
-          await actionCableRef.current.joinConversation(id);
-          await new Promise(resolve => setTimeout(resolve, 500));
-          
-          setSubscriptionReady(true);
-          setupActionCableSubscriptions();
-          await requestCustomerPresence();
-        }
-      } catch (error) {
-        console.error('Failed to initialize ActionCable:', error);
-        setIsConnected(false);
-        setSubscriptionReady(false);
-      }
-    };
-
-    initActionCable();
+    setupActionCableConnection();
 
     return () => {
       if (actionCableRef.current && id) {
@@ -401,20 +435,16 @@ export default function SupportChatScreen() {
       });
       actionCableSubscriptions.current = [];
       
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-      }
-      
       if (typingTimeoutRef.current) {
         clearTimeout(typingTimeoutRef.current);
       }
       
-      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
-      retryTimeoutsRef.current.clear();
+      retryTimeouts.current.forEach(timeout => clearTimeout(timeout));
+      retryTimeouts.current.clear();
       
       setSubscriptionReady(false);
     };
-  }, [user, id]);
+  }, [user, id, setupActionCableConnection]);
 
   const requestCustomerPresence = useCallback(async () => {
     if (!id) return;
@@ -427,11 +457,11 @@ export default function SupportChatScreen() {
         });
       }
     } catch (error) {
-      console.error('Failed to request customer presence:', error);
+      console.error('Presence request failed:', error);
     }
   }, [id]);
 
-  // ============= FIXED: IMPROVED DUPLICATE DETECTION =============
+  // ============= ACTIONCABLE SUBSCRIPTIONS =============
   
   const setupActionCableSubscriptions = () => {
     if (!actionCableRef.current || !id) return;
@@ -443,9 +473,8 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current = [];
 
-    // FIXED: Comprehensive duplicate detection
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
-      console.log('📨 ActionCable message received:', data);
+      console.log('📨 Message received');
       
       if (data.conversation_id !== id || !data.message) return;
       
@@ -453,45 +482,21 @@ export default function SupportChatScreen() {
       const messageId = normalizeId(messageData.id);
       const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // CRITICAL FIX: Check both message ID and temp ID for duplicates
-      if (processedMessageIds.current.has(messageId)) {
-        console.log('⏭️ Skipping duplicate message by ID:', messageId);
+      // Check if already exists
+      if (messageIdsRef.current.has(messageId)) {
+        console.log('⏭️ Duplicate - skipping');
         return;
       }
       
-      if (tempId && processedMessageIds.current.has(tempId)) {
-        console.log('⏭️ Skipping duplicate message by temp_id:', tempId);
-        return;
+      // Remove optimistic message if exists
+      if (tempId && pendingMessages.current.has(tempId)) {
+        setMessages(prev => prev.filter(m => m.tempId !== tempId));
+        pendingMessages.current.delete(tempId);
       }
       
-      // Check if message already exists in cache
-      const cachedConv = cacheManager.current.getCachedConversation(id);
-      if (cachedConv) {
-        const exists = cachedConv.messages.find(m => 
-          m.id === messageId || 
-          (tempId && m.id === tempId) ||
-          (tempId && m.metadata?.temp_id === tempId)
-        );
-        
-        if (exists) {
-          console.log('⏭️ Message already in cache:', messageId);
-          return;
-        }
-      }
+      messageIdsRef.current.add(messageId);
       
-      // Mark as processed
-      processedMessageIds.current.add(messageId);
-      if (tempId) {
-        processedMessageIds.current.add(tempId);
-        pendingMessageIds.current.delete(tempId);
-      }
-      
-      // Remove optimistic message if it exists
-      if (tempId) {
-        cacheManager.current.removeOptimisticMessages(id);
-      }
-      
-      const newMessage: CachedMessage = {
+      const newMessage: ChatMessage = {
         id: messageId,
         content: messageData.content || '',
         created_at: messageData.created_at || new Date().toISOString(),
@@ -509,13 +514,12 @@ export default function SupportChatScreen() {
           role: messageData.user?.role || 'unknown'
         },
         metadata: messageData.metadata || {},
-        optimistic: false,
         delivered_at: messageData.delivered_at,
         read_at: messageData.read_at,
+        sendStatus: messageData.read_at ? 'read' : messageData.delivered_at ? 'delivered' : 'sent',
       };
-
-      // FIXED: Immediately save to cache
-      cacheManager.current.addMessageToCache(id, newMessage);
+      
+      setMessages(prev => [...prev, newMessage]);
       
       if (messageData.user?.id !== normalizeId(user?.id)) {
         if (isNearBottom) {
@@ -557,7 +561,7 @@ export default function SupportChatScreen() {
 
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
       if (data.conversation_id === id) {
-        console.log(`📖 ${data.reader_name || 'Customer'} read the conversation`);
+        console.log('📖 Customer read messages');
         setMessages(prev => prev.map(msg => ({
           ...msg,
           read_at: msg.read_at || data.timestamp,
@@ -576,46 +580,6 @@ export default function SupportChatScreen() {
       }
     });
     actionCableSubscriptions.current.push(unsubTyping);
-
-    const unsubStatus = actionCable.subscribe('ticket_status_changed', (data) => {
-      if (data.conversation_id === id) {
-        console.log('🎫 Ticket status changed:', data.new_status);
-        
-        cacheManager.current.updateConversationMetadata(id, { status: data.new_status });
-        
-        if (data.system_message) {
-          const systemMessage: CachedMessage = {
-            id: normalizeId(data.system_message.id),
-            content: data.system_message.content,
-            created_at: data.system_message.created_at,
-            timestamp: data.system_message.timestamp,
-            is_system: true,
-            from_support: true,
-            message_type: 'system',
-            user: data.system_message.user,
-            metadata: data.system_message.metadata || {},
-            optimistic: false,
-          };
-          cacheManager.current.addMessageToCache(id, systemMessage);
-        }
-      }
-    });
-    actionCableSubscriptions.current.push(unsubStatus);
-
-    const unsubUpdate = actionCable.subscribe('conversation_updated', (data) => {
-      if (data.conversation_id === id) {
-        console.log('🔄 Conversation updated:', data);
-        
-        const updates: any = {};
-        if (data.status) updates.status = data.status;
-        if (data.priority) updates.priority = data.priority;
-        if (data.assigned_agent) updates.assigned_agent = data.assigned_agent;
-        if (data.escalated !== undefined) updates.escalated = data.escalated;
-        
-        cacheManager.current.updateConversationMetadata(id, updates);
-      }
-    });
-    actionCableSubscriptions.current.push(unsubUpdate);
 
     const unsubPresence = actionCable.subscribe('user_presence_changed', (data) => {
       if (data.conversation_id === id && normalizeId(data.user_id) !== normalizeId(user?.id)) {
@@ -639,149 +603,10 @@ export default function SupportChatScreen() {
     });
     actionCableSubscriptions.current.push(unsubLost);
 
-    console.log('✅ ActionCable subscriptions configured');
+    console.log('✅ Subscriptions configured');
   };
 
-  // ============= MESSAGE RETRY LOGIC =============
-  
-  const scheduleMessageRetry = useCallback((tempId: string, message: CachedMessage, retryCount: number) => {
-    if (retryCount >= MAX_RETRY_ATTEMPTS) {
-      console.error('Max retry attempts reached for message:', tempId);
-      
-      setMessages(prev => prev.map(msg => {
-        const chatMsg = msg as ChatMessage;
-        return chatMsg.tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg;
-      }));
-      return;
-    }
-
-    const delay = RETRY_DELAYS[retryCount] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
-    
-    console.log(`⏳ Scheduling retry ${retryCount + 1} for message in ${delay}ms`);
-    
-    const timeout = setTimeout(() => {
-      retryFailedMessage(tempId, message, retryCount + 1);
-    }, delay);
-
-    retryTimeoutsRef.current.set(tempId, timeout);
-  }, []);
-
-  const retryFailedMessage = useCallback(async (tempId: string, message: CachedMessage, retryCount: number) => {
-    if (!id || !isConnected) {
-      scheduleMessageRetry(tempId, message, retryCount);
-      return;
-    }
-
-    try {
-      console.log(`🔄 Retrying message (attempt ${retryCount}):`, tempId);
-      
-      const actionCable = actionCableRef.current;
-      if (actionCable) {
-        const success = await actionCable.perform('send_message', {
-          conversation_id: id,
-          content: message.content,
-          message_type: message.message_type,
-          metadata: message.metadata,
-          temp_id: tempId,
-        });
-
-        if (success) {
-          console.log('✅ Message retry successful');
-          retryTimeoutsRef.current.delete(tempId);
-        } else {
-          scheduleMessageRetry(tempId, message, retryCount);
-        }
-      }
-    } catch (error) {
-      console.error('Message retry failed:', error);
-      scheduleMessageRetry(tempId, message, retryCount);
-    }
-  }, [id, isConnected, scheduleMessageRetry]);
-
-  // ============= SCROLL MANAGEMENT =============
-  
-  const handleScroll = useCallback((event: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const currentOffset = contentOffset.y;
-    const maxOffset = contentSize.height - layoutMeasurement.height;
-    const distanceFromBottom = maxOffset - currentOffset;
-    const distanceFromTop = currentOffset;
-    
-    setIsNearBottom(distanceFromBottom < 100);
-    setShowScrollButton(distanceFromBottom > SCROLL_BUTTON_THRESHOLD);
-    
-    if (distanceFromBottom < 50) {
-      setUnreadCount(0);
-    }
-
-    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingMoreRef.current) {
-      loadOlderMessages();
-    }
-  }, [hasMoreMessages]);
-
-  const scrollToBottom = useCallback((animated = true) => {
-    flatListRef.current?.scrollToEnd({ animated });
-    setUnreadCount(0);
-  }, []);
-
-  useEffect(() => {
-    if (messages.length === 0) return;
-
-    if (isNearBottom) {
-      requestAnimationFrame(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      });
-    }
-  }, [messages.length, isNearBottom]);
-
-  // ============= DAY SEPARATORS =============
-  
-  const groupedMessages = useMemo(() => {
-    const groups: { [key: string]: ChatMessage[] } = {};
-    
-    messages.forEach(msg => {
-      const date = new Date(msg.created_at || msg.timestamp);
-      const dateKey = date.toDateString();
-      
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
-      groups[dateKey].push(msg);
-    });
-    
-    return groups;
-  }, [messages]);
-
-  const formatDateHeader = useCallback((dateStr: string) => {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric',
-        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
-      });
-    }
-  }, []);
-
-  const renderDateSeparator = useCallback((dateStr: string) => (
-    <View style={styles.dateSeparator} key={`date-${dateStr}`}>
-      <View style={styles.dateSeparatorLine} />
-      <View style={styles.dateSeparatorBadge}>
-        <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
-      </View>
-      <View style={styles.dateSeparatorLine} />
-    </View>
-  ), [formatDateHeader]);
-
-  // ============= FIXED: MESSAGE LOADING WITH PROPER CACHE =============
+  // ============= MESSAGE LOADING =============
   
   const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
     if (!id) {
@@ -789,59 +614,14 @@ export default function SupportChatScreen() {
       return;
     }
 
-    // FIXED: Only clear cache on explicit refresh, not on regular loads
-    if (!isRefresh && !loadOlder && conversationLoadedRef.current) {
-      const cachedData = cacheManager.current.getCachedConversation(id);
-      if (cachedData && cachedData.messages.length > 0) {
-        console.log(`📦 Loading conversation from persistent cache: ${id}, messages: ${cachedData.messages.length}`);
-        
-        const uiMessages: ChatMessage[] = cachedData.messages.map(msg => ({
-          ...msg,
-          id: normalizeId(msg.id),
-          sendStatus: msg.optimistic ? 'pending' : (msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent'),
-        }));
-        
-        // Rebuild processed IDs from cache
-        cachedData.messages.forEach(msg => {
-          processedMessageIds.current.add(msg.id);
-          if (msg.metadata?.temp_id) {
-            processedMessageIds.current.add(msg.metadata.temp_id);
-          }
-        });
-        
-        setConversation(cachedData.conversation);
-        setMessages(uiMessages);
-        setHasMoreMessages(cachedData.hasMoreMessages);
-        setLoading(false);
-        setIsInitialLoad(false);
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-          hasScrolledToBottomRef.current = true;
-        }, 100);
-        
-        setTimeout(() => backgroundSyncMessages(id), 2000);
-        return;
-      }
-    }
-
-    console.log(`🌐 Loading conversation from API: ${id}`, { isRefresh, loadOlder });
-
-    if (abortControllerRef.current) {
-      abortControllerRef.current.abort();
-    }
-
-    abortControllerRef.current = new AbortController();
-    const timeoutId = setTimeout(() => {
-      abortControllerRef.current?.abort();
-    }, REQUEST_TIMEOUT);
+    console.log('🌐 Loading conversation:', { isRefresh, loadOlder });
 
     try {
       if (isRefresh) {
         setRefreshing(true);
       } else if (loadOlder) {
         setLoadingOlder(true);
-        isLoadingMoreRef.current = true;
+        isLoadingOlder.current = true;
       } else {
         setLoading(true);
       }
@@ -852,20 +632,15 @@ export default function SupportChatScreen() {
         limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
       };
 
-      if (loadOlder) {
-        const oldestMessageId = cacheManager.current.getOldestMessageId(id);
-        if (oldestMessageId) {
-          params.older_than = oldestMessageId;
-        }
+      if (loadOlder && messages.length > 0) {
+        const oldestMessage = messages[0];
+        params.older_than = oldestMessage.id;
       }
 
       const response = await api.get(`/api/v1/conversations/${id}`, {
         params,
-        signal: abortControllerRef.current.signal,
         timeout: REQUEST_TIMEOUT,
       });
-
-      clearTimeout(timeoutId);
 
       if (response.data.success) {
         const conversationData = response.data.conversation;
@@ -873,40 +648,48 @@ export default function SupportChatScreen() {
         const pagination = response.data.pagination || {};
 
         const normalizedMessages = messagesData.map((msg: any) => ({
-          ...msg,
           id: normalizeId(msg.id),
+          content: msg.content,
+          created_at: msg.created_at,
+          timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
+            hour12: false,
+            hour: '2-digit',
+            minute: '2-digit',
+          }),
+          is_system: msg.is_system || false,
+          from_support: msg.from_support,
+          message_type: msg.message_type || 'text',
+          user: msg.user,
+          metadata: msg.metadata || {},
+          delivered_at: msg.delivered_at,
+          read_at: msg.read_at,
+          sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
         }));
 
-        // Track all message IDs from API
-        normalizedMessages.forEach((msg: any) => {
-          processedMessageIds.current.add(msg.id);
-          if (msg.metadata?.temp_id) {
-            processedMessageIds.current.add(msg.metadata.temp_id);
-          }
-        });
+        normalizedMessages.forEach((msg: any) => messageIdsRef.current.add(msg.id));
 
-        if (isRefresh || (!loadOlder && !conversationLoadedRef.current)) {
-          cacheManager.current.setCachedConversation(
-            id,
-            conversationData,
-            normalizedMessages,
-            pagination.has_more || false,
-            normalizedMessages.length > 0 ? normalizedMessages[0]?.id : null
-          );
+        if (isRefresh || (!loadOlder && messages.length === 0)) {
+          setConversation(conversationData);
+          setMessages(normalizedMessages);
+          setHasMoreMessages(pagination.has_more || false);
+          await saveMessagesToStorage(normalizedMessages);
           setIsInitialLoad(false);
-          conversationLoadedRef.current = true;
-          await saveConversationLoadedState();
 
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: false });
-            hasScrolledToBottomRef.current = true;
-          }, 100);
+          // Restore scroll position or scroll to bottom
+          if (savedScrollPosition !== null) {
+            setTimeout(() => {
+              flatListRef.current?.scrollToOffset({ offset: savedScrollPosition, animated: false });
+              setSavedScrollPosition(null);
+            }, 100);
+          } else {
+            setTimeout(() => {
+              flatListRef.current?.scrollToEnd({ animated: false });
+            }, 100);
+          }
+          
         } else if (loadOlder) {
-          cacheManager.current.prependOlderMessages(
-            id,
-            normalizedMessages,
-            pagination.has_more || false
-          );
+          setMessages(prev => [...normalizedMessages, ...prev]);
+          setHasMoreMessages(pagination.has_more || false);
         }
 
         if (conversationData?.customer?.presence) {
@@ -916,77 +699,75 @@ export default function SupportChatScreen() {
           });
         }
 
-        console.log(`✅ Loaded ${normalizedMessages.length} messages, has_more: ${pagination.has_more}`);
+        console.log(`✅ Loaded ${normalizedMessages.length} messages`);
       }
       
     } catch (error: any) {
-      clearTimeout(timeoutId);
-      
-      if (error.name === 'AbortError') {
-        return;
-      }
-
-      console.error('Failed to load conversation:', error);
+      console.error('Load failed:', error);
       setConnectionError(true);
     } finally {
       setLoading(false);
       setLoadingOlder(false);
       setRefreshing(false);
-      isLoadingMoreRef.current = false;
+      isLoadingOlder.current = false;
     }
-  }, [id, saveConversationLoadedState]);
-
-  const backgroundSyncMessages = useCallback(async (conversationId: string) => {
-    try {
-      console.log('🔄 Background syncing messages...');
-      
-      const response = await api.get(`/api/v1/conversations/${conversationId}`, {
-        params: { limit: 10 },
-        timeout: 20000,
-      });
-
-      if (response.data.success && response.data.messages) {
-        const newMessages = response.data.messages;
-        
-        newMessages.forEach((msg: any) => {
-          const messageId = normalizeId(msg.id);
-          if (!processedMessageIds.current.has(messageId)) {
-            cacheManager.current.addMessageToCache(conversationId, {
-              ...msg,
-              id: messageId,
-            });
-            processedMessageIds.current.add(messageId);
-          }
-        });
-      }
-    } catch (error) {
-      console.error('Background sync failed:', error);
-    }
-  }, []);
+  }, [id, messages, savedScrollPosition, saveMessagesToStorage]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (isLoadingMoreRef.current || !hasMoreMessages || loadingOlder) {
+    if (isLoadingOlder.current || !hasMoreMessages || loadingOlder) {
       return;
     }
     
-    console.log('Loading older messages for conversation:', id);
+    console.log('Loading older messages');
     await loadConversation(false, true);
-  }, [loadConversation, id, loadingOlder, hasMoreMessages]);
+  }, [loadConversation, loadingOlder, hasMoreMessages]);
 
   const handleRefresh = useCallback(async () => {
-    // FIXED: Only clear on explicit refresh
-    cacheManager.current.clearConversationCache(id);
-    await clearConversationLoadedState();
-    processedMessageIds.current.clear();
-    pendingMessageIds.current.clear();
-    setShouldScrollToEnd(true);
-    hasScrolledToBottomRef.current = false;
+    await clearChatStorage();
+    messageIdsRef.current.clear();
+    pendingMessages.current.clear();
     await loadConversation(true);
-  }, [loadConversation, id, clearConversationLoadedState]);
+  }, [loadConversation, clearChatStorage]);
 
+  // ============= SCROLL MANAGEMENT =============
+  
+  const handleScroll = useCallback((event: any) => {
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    currentScrollY.current = contentOffset.y;
+    contentHeight.current = contentSize.height;
+    scrollViewHeight.current = layoutMeasurement.height;
+    
+    const maxOffset = contentSize.height - layoutMeasurement.height;
+    const distanceFromBottom = maxOffset - contentOffset.y;
+    const distanceFromTop = contentOffset.y;
+    
+    setIsNearBottom(distanceFromBottom < 100);
+    setShowScrollButton(distanceFromBottom > SCROLL_BUTTON_THRESHOLD);
+    
+    if (distanceFromBottom < 50) {
+      setUnreadCount(0);
+    }
+
+    // Load older messages when near top
+    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingOlder.current) {
+      loadOlderMessages();
+    }
+  }, [hasMoreMessages, loadOlderMessages]);
+
+  const scrollToBottom = useCallback((animated = true) => {
+    flatListRef.current?.scrollToEnd({ animated });
+    setUnreadCount(0);
+  }, []);
+
+  // Auto-scroll for new messages only if near bottom
   useEffect(() => {
-    loadConversation();
-  }, [loadConversation]);
+    if (messages.length === 0) return;
+    if (isNearBottom && savedScrollPosition === null) {
+      requestAnimationFrame(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      });
+    }
+  }, [messages.length, isNearBottom, savedScrollPosition]);
 
   // ============= TYPING INDICATOR =============
   
@@ -1010,141 +791,128 @@ export default function SupportChatScreen() {
     }, 2000);
   }, [isTyping, id]);
 
-  // ============= FIXED: MESSAGE SENDING WITH PROPER DUPLICATE PREVENTION =============
+  // ============= MESSAGE SENDING (ActionCable Only) =============
   
   const sendMessage = useCallback(async () => {
-  if (!inputText.trim() || !subscriptionReady || !id) return;
+    if (!inputText.trim() || !subscriptionReady || !id) return;
 
-  const messageText = inputText.trim();
-  setInputText('');
-  
-  if (isTyping && actionCableRef.current) {
-    setIsTyping(false);
-    actionCableRef.current.stopTyping(id);
-  }
+    const messageText = inputText.trim();
+    setInputText('');
+    
+    if (isTyping && actionCableRef.current) {
+      setIsTyping(false);
+      actionCableRef.current.stopTyping(id);
+    }
 
-  const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-  
-  // CRITICAL: Track this pending message
-  pendingMessageIds.current.add(tempId);
-  processedMessageIds.current.add(tempId);
+    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-  const optimisticMessage: CachedMessage = {
-    id: tempId,
-    content: messageText,
-    created_at: new Date().toISOString(),
-    is_system: false,
-    from_support: true,
-    message_type: 'text',
-    user: {
-      id: normalizeId(user?.id) || '',
-      name: user?.display_name || user?.first_name || 'Support',
-      role: 'support',
-      avatar_url: user?.avatar_url,
-    },
-    timestamp: new Date().toLocaleTimeString('en-US', {
-      hour: '2-digit',
-      minute: '2-digit',
-      hour12: false,
-    }),
-    metadata: { temp_id: tempId },
-    optimistic: true,
-  };
-
-  // Add optimistic message immediately
-  cacheManager.current.addOptimisticMessage(id, optimisticMessage);
-  
-  setTimeout(() => scrollToBottom(), 100);
-
-  try {
-    const response = await api.post(`/api/v1/conversations/${id}/send_message`, {
+    // Create optimistic message
+    const optimisticMessage: ChatMessage = {
+      id: tempId,
+      tempId: tempId,
       content: messageText,
+      created_at: new Date().toISOString(),
+      is_system: false,
+      from_support: true,
       message_type: 'text',
-      temp_id: tempId,
-    }, {
-      timeout: REQUEST_TIMEOUT,
-    });
+      user: {
+        id: normalizeId(user?.id) || '',
+        name: user?.display_name || user?.first_name || 'Support',
+        role: 'support',
+        avatar_url: user?.avatar_url,
+      },
+      timestamp: new Date().toLocaleTimeString('en-US', {
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      }),
+      metadata: { temp_id: tempId },
+      sendStatus: 'pending',
+    };
 
-    if (response.data.success && response.data.message) {
-      const serverMessage = response.data.message;
-      const serverMessageId = normalizeId(serverMessage.id);
+    // Add to state immediately
+    setMessages(prev => [...prev, optimisticMessage]);
+    pendingMessages.current.set(tempId, optimisticMessage);
+    
+    setTimeout(() => scrollToBottom(), 100);
 
-      // CRITICAL FIX: Prevent double messages if ActionCable already added it
-      if (processedMessageIds.current.has(serverMessageId)) {
-        console.log('⏭️ Message already processed by ActionCable, removing optimistic only');
-        cacheManager.current.removeOptimisticMessages(id);
-        pendingMessageIds.current.delete(tempId);
+    try {
+      // Send via ActionCable only
+      const actionCable = actionCableRef.current;
+      if (!actionCable) throw new Error('ActionCable not ready');
+      
+      const success = await actionCable.perform('send_message', {
+        conversation_id: id,
+        content: messageText,
+        message_type: 'text',
+        metadata: { temp_id: tempId },
+      });
+
+      if (success) {
+        console.log('✅ Message sent via ActionCable');
+        // Update to "sent" status
+        setMessages(prev => prev.map(m => 
+          m.tempId === tempId ? { ...m, sendStatus: 'sent' } : m
+        ));
+      } else {
+        throw new Error('ActionCable send failed');
+      }
+    } catch (error) {
+      console.error('Send failed:', error);
+      
+      // Mark as failed and set up retry
+      setMessages(prev => prev.map(m => 
+        m.tempId === tempId ? { ...m, sendStatus: 'failed', retryCount: 0 } : m
+      ));
+      
+      scheduleRetry(tempId, optimisticMessage, 0);
+    }
+  }, [inputText, subscriptionReady, id, user, isTyping, scrollToBottom]);
+
+  const scheduleRetry = useCallback((tempId: string, message: ChatMessage, retryCount: number) => {
+    if (retryCount >= 3) {
+      console.error('Max retries reached');
+      return;
+    }
+
+    const delay = [5000, 15000, 30000][retryCount];
+    
+    const timeout = setTimeout(async () => {
+      console.log(`🔄 Retry ${retryCount + 1}`);
+      
+      if (!id || !isConnected) {
+        scheduleRetry(tempId, message, retryCount + 1);
         return;
       }
 
-      // Otherwise, add server message now
-      processedMessageIds.current.add(serverMessageId);
-      pendingMessageIds.current.delete(tempId);
-
-      cacheManager.current.removeOptimisticMessages(id);
-      cacheManager.current.addMessageToCache(id, {
-        ...serverMessage,
-        id: serverMessageId,
-      });
-
-      if (response.data.conversation) {
-        cacheManager.current.updateConversationMetadata(id, {
-          last_activity_at: response.data.conversation.last_activity_at,
-          status: response.data.conversation.status,
+      try {
+        const actionCable = actionCableRef.current;
+        if (!actionCable) throw new Error('ActionCable not ready');
+        
+        const success = await actionCable.perform('send_message', {
+          conversation_id: id,
+          content: message.content,
+          message_type: 'text',
+          metadata: { temp_id: tempId },
         });
+
+        if (success) {
+          console.log('✅ Retry successful');
+          setMessages(prev => prev.map(m => 
+            m.tempId === tempId ? { ...m, sendStatus: 'sent', retryCount: retryCount + 1 } : m
+          ));
+          retryTimeouts.current.delete(tempId);
+        } else {
+          scheduleRetry(tempId, message, retryCount + 1);
+        }
+      } catch (error) {
+        console.error('Retry failed:', error);
+        scheduleRetry(tempId, message, retryCount + 1);
       }
+    }, delay);
 
-      console.log('✅ Message sent successfully, ID:', serverMessageId);
-    }
-  } catch (error: any) {
-    console.error('Failed to send message:', error);
-    
-    const cachedConv = cacheManager.current.getCachedConversation(id);
-    const optimisticMsg = cachedConv?.messages.find(m => m.id === tempId);
-    if (optimisticMsg) {
-      scheduleMessageRetry(tempId, optimisticMsg, 0);
-    }
-  }
-}, [inputText, subscriptionReady, id, user, isTyping, scheduleMessageRetry, scrollToBottom]);
-
-  // ============= QUICK ACTIONS =============
-  
-  const handleQuickAction = async (action: string) => {
-    if (!id || !conversation) return;
-
-    try {
-      switch (action) {
-        case 'assign_to_me':
-          await api.post(`/api/v1/support/tickets/${id}/assign`, {
-            agent_id: normalizeId(user?.id)
-          });
-          console.log('Ticket assigned successfully');
-          loadConversation(true);
-          break;
-        
-        case 'escalate':
-          console.log('Escalation feature coming soon');
-          break;
-        
-        case 'close':
-          await api.patch(`/api/v1/conversations/${id}/close`);
-          console.log('Ticket closed successfully');
-          loadConversation(true);
-          break;
-        
-        case 'priority_high':
-          await api.patch(`/api/v1/support/tickets/${id}/priority`, {
-            priority: 'high'
-          });
-          console.log('Priority updated successfully');
-          loadConversation(true);
-          break;
-      }
-    } catch (error) {
-      console.error('Quick action failed:', error);
-    }
-    setShowActions(false);
-  };
+    retryTimeouts.current.set(tempId, timeout);
+  }, [id, isConnected]);
 
   // ============= HELPER FUNCTIONS =============
   
@@ -1170,6 +938,16 @@ export default function SupportChatScreen() {
     return 'Offline';
   };
 
+  const getPriorityColor = (priority: string) => {
+    switch (priority) {
+      case 'urgent': return '#dc2626';
+      case 'high': return '#f97316';
+      case 'normal': return '#6b7280';
+      case 'low': return '#10b981';
+      default: return '#6b7280';
+    }
+  };
+
   // ============= RENDER FUNCTIONS =============
   
   const renderMessageStatus = (message: ChatMessage) => {
@@ -1183,10 +961,9 @@ export default function SupportChatScreen() {
           style={styles.messageStatusContainer}
           onPress={() => {
             if (message.tempId) {
-              const cachedMsg = cacheManager.current.getCachedConversation(id)
-                ?.messages.find(m => m.id === message.tempId);
+              const cachedMsg = pendingMessages.current.get(message.tempId);
               if (cachedMsg) {
-                retryFailedMessage(message.tempId, cachedMsg, message.retryCount || 0);
+                scheduleRetry(message.tempId, cachedMsg, message.retryCount || 0);
               }
             }
           }}
@@ -1196,7 +973,7 @@ export default function SupportChatScreen() {
       );
     }
 
-    if (message.optimistic || message.sendStatus === 'pending') {
+    if (message.sendStatus === 'pending') {
       return (
         <View style={styles.messageStatusContainer}>
           <MaterialIcons name="schedule" size={16} color="rgba(255, 255, 255, 0.5)" />
@@ -1234,7 +1011,7 @@ export default function SupportChatScreen() {
           styles.messageBubble,
           item.from_support ? styles.supportMessage : styles.customerMessage,
           item.is_system && styles.systemMessage,
-          item.optimistic && styles.optimisticMessage,
+          item.sendStatus === 'pending' && styles.optimisticMessage,
           item.sendStatus === 'failed' && styles.failedMessage,
         ]}
       >
@@ -1248,7 +1025,6 @@ export default function SupportChatScreen() {
             styles.messageText,
             item.from_support ? styles.supportMessageText : styles.customerMessageText,
             item.is_system && styles.systemMessageText,
-            item.optimistic && styles.optimisticMessageText,
           ]}
         >
           {item.content}
@@ -1267,103 +1043,7 @@ export default function SupportChatScreen() {
         </View>
       </View>
     </View>
-  ), [user?.id, retryFailedMessage, id]);
-
-  const renderFlatListData = useMemo(() => {
-    const data: any[] = [];
-    const dateKeys = Object.keys(groupedMessages).sort((a, b) => 
-      new Date(a).getTime() - new Date(b).getTime()
-    );
-
-    dateKeys.forEach((dateKey) => {
-      data.push({ type: 'date', dateKey, id: `date-${dateKey}` });
-      groupedMessages[dateKey].forEach(msg => {
-        data.push({ type: 'message', message: msg, id: msg.id });
-      });
-    });
-
-    return data;
-  }, [groupedMessages]);
-
-  const renderItem = useCallback(({ item }: any) => {
-    if (item.type === 'date') {
-      return renderDateSeparator(item.dateKey);
-    }
-    return renderMessage({ item: item.message });
-  }, [renderDateSeparator, renderMessage]);
-
-  const renderHeader = () => (
-    <View style={styles.listHeader}>
-      {loadingOlder && (
-        <View style={styles.loadingOlderContainer}>
-          <ActivityIndicator size="small" color="#7B3F98" />
-          <Text style={styles.loadingOlderText}>Loading older messages...</Text>
-        </View>
-      )}
-      {!hasMoreMessages && messages.length > 0 && (
-        <View style={styles.startOfConversationContainer}>
-          <Text style={styles.startOfConversationText}>Start of conversation</Text>
-        </View>
-      )}
-    </View>
-  );
-
-  const renderQuickActionsModal = () => (
-    <Modal
-      visible={showActions}
-      transparent
-      animationType="slide"
-      onRequestClose={() => setShowActions(false)}
-    >
-      <View style={styles.modalOverlay}>
-        <TouchableOpacity 
-          style={styles.modalBackdrop}
-          activeOpacity={1}
-          onPress={() => setShowActions(false)}
-        />
-        <View style={styles.actionsModal}>
-          <View style={styles.modalHeader}>
-            <Text style={styles.modalTitle}>Quick Actions</Text>
-            <TouchableOpacity onPress={() => setShowActions(false)}>
-              <Feather name="x" size={24} color="#fff" />
-            </TouchableOpacity>
-          </View>
-          
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleQuickAction('assign_to_me')}
-          >
-            <Feather name="user" size={20} color="#7B3F98" />
-            <Text style={styles.actionButtonText}>Assign to Me</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleQuickAction('priority_high')}
-          >
-            <Feather name="alert-triangle" size={20} color="#f97316" />
-            <Text style={styles.actionButtonText}>Set High Priority</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={styles.actionButton}
-            onPress={() => handleQuickAction('escalate')}
-          >
-            <Feather name="arrow-up" size={20} color="#ef4444" />
-            <Text style={styles.actionButtonText}>Escalate Ticket</Text>
-          </TouchableOpacity>
-          
-          <TouchableOpacity
-            style={[styles.actionButton, { borderTopWidth: 1, borderTopColor: '#333' }]}
-            onPress={() => handleQuickAction('close')}
-          >
-            <Feather name="x-circle" size={20} color="#6b7280" />
-            <Text style={styles.actionButtonText}>Close Ticket</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    </Modal>
-  );
+  ), [user?.id, scheduleRetry]);
 
   // ============= MAIN RENDER =============
   
@@ -1392,9 +1072,6 @@ export default function SupportChatScreen() {
         <View style={styles.errorContainer}>
           <MaterialIcons name="error-outline" size={64} color="#ef4444" />
           <Text style={styles.errorText}>Conversation not found</Text>
-          <Text style={styles.errorSubtext}>
-            This conversation may have been deleted or you don't have access to it.
-          </Text>
           <TouchableOpacity
             style={styles.backButton}
             onPress={() => router.back()}
@@ -1431,10 +1108,10 @@ export default function SupportChatScreen() {
             style={styles.headerAvatar}
           />
           <View style={styles.headerText}>
-            <Text style={styles.headerTitle}>{conversation?.customer?.name || 'Unknown Customer'}</Text>
+            <Text style={styles.headerTitle}>{conversation?.customer?.name || 'Unknown'}</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
-                #{conversation?.ticket_id || 'Unknown'} • {conversation?.status?.replace('_', ' ') || 'Unknown Status'}
+                #{conversation?.ticket_id} • {conversation?.status?.replace('_', ' ')}
               </Text>
               {conversation?.escalated && (
                 <View style={styles.escalatedBadge}>
@@ -1479,12 +1156,6 @@ export default function SupportChatScreen() {
             <Text style={styles.ticketInfoLabel}>Category:</Text>
             <Text style={styles.ticketInfoValue}>{conversation.category || 'General'}</Text>
           </View>
-          {conversation.assigned_agent && (
-            <View style={styles.ticketInfoItem}>
-              <Text style={styles.ticketInfoLabel}>Agent:</Text>
-              <Text style={styles.ticketInfoValue}>{conversation.assigned_agent.name}</Text>
-            </View>
-          )}
           {!isConnected && (
             <View style={styles.ticketInfoItem}>
               <Feather name="wifi-off" size={12} color="#f97316" />
@@ -1500,9 +1171,9 @@ export default function SupportChatScreen() {
       >
         <FlatList
           ref={flatListRef}
-          data={renderFlatListData}
+          data={messages}
           keyExtractor={(item, index) => `${item.id}-${index}`}
-          renderItem={renderItem}
+          renderItem={renderMessage}
           style={styles.messagesList}
           contentContainerStyle={{ paddingVertical: 8 }}
           onScroll={handleScroll}
@@ -1515,18 +1186,25 @@ export default function SupportChatScreen() {
               colors={['#7B3F98']}
             />
           }
-          ListHeaderComponent={renderHeader}
+          ListHeaderComponent={() => (
+            <View style={styles.listHeader}>
+              {loadingOlder && (
+                <View style={styles.loadingOlderContainer}>
+                  <ActivityIndicator size="small" color="#7B3F98" />
+                  <Text style={styles.loadingOlderText}>Loading...</Text>
+                </View>
+              )}
+              {!hasMoreMessages && messages.length > 0 && (
+                <View style={styles.startOfConversationContainer}>
+                  <Text style={styles.startOfConversationText}>Start of conversation</Text>
+                </View>
+              )}
+            </View>
+          )}
           maintainVisibleContentPosition={{
             minIndexForVisible: 0,
             autoscrollToTopThreshold: 10,
           }}
-          ListEmptyComponent={() => (
-            <View style={styles.emptyMessagesContainer}>
-              <MaterialIcons name="chat-bubble-outline" size={48} color="#444" />
-              <Text style={styles.emptyMessagesText}>No messages yet</Text>
-              <Text style={styles.emptyMessagesSubtext}>Start the conversation!</Text>
-            </View>
-          )}
         />
 
         {showScrollButton && (
@@ -1548,9 +1226,7 @@ export default function SupportChatScreen() {
 
         <View style={[
           styles.inputContainer,
-          { 
-            paddingBottom: Platform.OS === 'ios' ? 34 : 8 
-          }
+          { paddingBottom: Platform.OS === 'ios' ? 34 : 8 }
         ]}>
           <View style={styles.inputRow}>
             <View style={styles.textInputContainer}>
@@ -1597,21 +1273,9 @@ export default function SupportChatScreen() {
           </View>
         </View>
       </KeyboardAvoidingView>
-
-      {renderQuickActionsModal()}
     </SafeAreaView>
   );
 }
-
-const getPriorityColor = (priority: string) => {
-  switch (priority) {
-    case 'urgent': return '#dc2626';
-    case 'high': return '#f97316';
-    case 'normal': return '#6b7280';
-    case 'low': return '#10b981';
-    default: return '#6b7280';
-  }
-};
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B141B' },
@@ -1645,60 +1309,44 @@ const styles = StyleSheet.create({
   loadingOlderText: { color: '#8E8E93', fontSize: 14, marginLeft: 8 },
   startOfConversationContainer: { alignItems: 'center', paddingVertical: 12 },
   startOfConversationText: { color: '#666', fontSize: 12, fontStyle: 'italic' },
-  dateSeparator: { flexDirection: 'row', alignItems: 'center', marginVertical: 20, paddingHorizontal: 16 },
-  dateSeparatorLine: { flex: 1, height: 1, backgroundColor: 'rgba(255, 255, 255, 0.15)' },
-  dateSeparatorBadge: { backgroundColor: 'rgba(31, 44, 52, 0.95)', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 12, marginHorizontal: 16, borderWidth: 1, borderColor: 'rgba(255, 255, 255, 0.1)' },
-  dateSeparatorText: { color: '#8E8E93', fontSize: 13, fontWeight: '600', textTransform: 'uppercase', letterSpacing: 0.5 },
   messageContainer: { marginVertical: 2 },
   messageBubble: { maxWidth: '80%', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, position: 'relative' },
   supportMessage: { alignSelf: 'flex-end', backgroundColor: '#7B3F98', borderBottomRightRadius: 4 },
   customerMessage: { alignSelf: 'flex-start', backgroundColor: '#1F2C34', borderBottomLeftRadius: 4 },
-  systemMessage: { alignSelf: 'center', backgroundColor: 'rgba(142, 142, 147, 0.15)', borderRadius: 12, maxWidth: '85%', paddingHorizontal: 14, paddingVertical: 10, marginHorizontal: 20, marginVertical: 6, borderWidth: 1, borderColor: 'rgba(142, 142, 147, 0.2)' },
+  systemMessage: { alignSelf: 'center', backgroundColor: 'rgba(142, 142, 147, 0.15)', borderRadius: 12, maxWidth: '85%' },
   optimisticMessage: { opacity: 0.7 },
   failedMessage: { backgroundColor: '#5A2D3D' },
   systemIndicator: { marginRight: 8, alignSelf: 'center' },
   messageText: { fontSize: 16, lineHeight: 20, flexWrap: 'wrap' },
   supportMessageText: { color: '#fff' },
   customerMessageText: { color: '#fff' },
-  systemMessageText: { color: '#8E8E93', fontSize: 14, fontStyle: 'italic', textAlign: 'center', flexShrink: 1 },
-  optimisticMessageText: { fontStyle: 'italic' },
+  systemMessageText: { color: '#8E8E93', fontSize: 14, fontStyle: 'italic', textAlign: 'center' },
   messageFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 4 },
   messageTime: { fontSize: 11 },
   supportMessageTime: { color: 'rgba(255, 255, 255, 0.7)' },
   customerMessageTime: { color: 'rgba(255, 255, 255, 0.7)' },
   systemMessageTime: { color: '#8E8E93' },
   messageStatusContainer: { marginLeft: 8 },
-  scrollToBottomButton: { position: 'absolute', bottom: 80, right: 16, backgroundColor: '#7B3F98', borderRadius: 28, width: 56, height: 56, justifyContent: 'center', alignItems: 'center', elevation: 6, shadowColor: '#000', shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6 },
+  scrollToBottomButton: { position: 'absolute', bottom: 80, right: 16, backgroundColor: '#7B3F98', borderRadius: 28, width: 56, height: 56, justifyContent: 'center', alignItems: 'center' },
   scrollToBottomContent: { justifyContent: 'center', alignItems: 'center' },
-  unreadBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', borderRadius: 12, minWidth: 24, height: 24, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6, borderWidth: 2, borderColor: '#0B141B' },
+  unreadBadge: { position: 'absolute', top: -8, right: -8, backgroundColor: '#ef4444', borderRadius: 12, minWidth: 24, height: 24, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 6 },
   unreadBadgeText: { color: '#fff', fontSize: 12, fontWeight: '700' },
-  emptyMessagesContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingTop: 100 },
-  emptyMessagesText: { color: '#8E8E93', fontSize: 16, fontWeight: '500', marginTop: 12 },
-  emptyMessagesSubtext: { color: '#666', fontSize: 14, marginTop: 4 },
   inputContainer: { backgroundColor: 'rgba(11, 20, 27, 0.95)', paddingHorizontal: 8, paddingVertical: 8 },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end' },
-  textInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 25, paddingHorizontal: 4, paddingVertical: 6, marginRight: 8, maxHeight: 100, minHeight: 45, elevation: 2, shadowColor: '#000', shadowOffset: { width: 0, height: 1 }, shadowOpacity: 0.22, shadowRadius: 2.22 },
+  textInputContainer: { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: '#1F2C34', borderRadius: 25, paddingHorizontal: 4, paddingVertical: 6, marginRight: 8, maxHeight: 100, minHeight: 45 },
   inputButton: { padding: 8, marginLeft: 4 },
   textInput: { flex: 1, color: '#fff', fontSize: 16, paddingVertical: 8, paddingHorizontal: 8, textAlignVertical: 'center', maxHeight: 80 },
   attachButton: { padding: 8 },
   cameraButton: { padding: 8, marginRight: 4 },
-  sendButton: { width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center', elevation: 3, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 3.84 },
+  sendButton: { width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center' },
   sendButtonActive: { backgroundColor: '#7B3F98' },
   voiceButton: { backgroundColor: '#7B3F98' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0, 0, 0, 0.5)', justifyContent: 'flex-end' },
-  modalBackdrop: { flex: 1 },
-  actionsModal: { backgroundColor: '#1F2C34', borderTopLeftRadius: 20, borderTopRightRadius: 20, paddingBottom: Platform.OS === 'ios' ? 34 : 20 },
-  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, borderBottomWidth: 1, borderBottomColor: '#333' },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '600' },
-  actionButton: { flexDirection: 'row', alignItems: 'center', padding: 16 },
-  actionButtonText: { color: '#fff', fontSize: 16, marginLeft: 12 },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
   retryButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
   retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
   errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
   errorText: { color: '#ef4444', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' },
-  errorSubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
   backButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 20 },
   backButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
 });
