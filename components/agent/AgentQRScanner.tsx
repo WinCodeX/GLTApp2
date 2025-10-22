@@ -1,511 +1,268 @@
 // components/agent/AgentQRScanner.tsx
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
-  ActivityIndicator,
-  Animated,
-  Dimensions,
-  Modal,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  Vibration,
   View,
+  Text,
+  StyleSheet,
+  Modal,
+  TouchableOpacity,
+  Platform,
+  Dimensions,
 } from 'react-native';
-import { Camera, CameraView } from 'expo-camera';
-import { LinearGradient } from 'expo-linear-gradient';
-import { MaterialIcons } from '@expo/vector-icons';
-import Toast from 'react-native-toast-message';
-import { useBluetooth } from '../../contexts/BluetoothContext';
-import api from '../../lib/api';
-import GlobalPrintService from '../../services/GlobalPrintService';
-import OfflineScanningService from '../../services/OfflineScanningService';
+import { CameraView, Camera } from 'expo-camera';
+import { Feather } from '@expo/vector-icons';
+import { useAlertModal } from './AlertModal';
 
 const { width } = Dimensions.get('window');
+const SCANNER_SIZE = width * 0.7;
 
 interface AgentQRScannerProps {
   visible: boolean;
   onClose: () => void;
-  actionType: 'collect' | 'print';
-  onScanSuccess?: (result: any) => void;
-  autoPrint?: boolean;
+  onScan: (code: string) => void;
+  title?: string;
 }
 
-const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
+export const AgentQRScanner: React.FC<AgentQRScannerProps> = ({
   visible,
   onClose,
-  actionType,
-  onScanSuccess,
-  autoPrint = true,
+  onScan,
+  title = 'Scan Package QR Code'
 }) => {
   const [hasPermission, setHasPermission] = useState<boolean | null>(null);
   const [scanned, setScanned] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [flashEnabled, setFlashEnabled] = useState(false);
-  const [showResultModal, setShowResultModal] = useState(false);
-  const [scanResult, setScanResult] = useState<any>(null);
-  const [isPrinting, setIsPrinting] = useState(false);
-  const [isOnline, setIsOnline] = useState(true);
-  
-  const cameraRef = useRef<CameraView>(null);
-  const cornerAnimation = useRef(new Animated.Value(0)).current;
-  const pulseAnimation = useRef(new Animated.Value(1)).current;
+  const [isProcessing, setIsProcessing] = useState(false);
 
-  const bluetoothContext = useBluetooth();
-  const printService = GlobalPrintService.getInstance();
-  const offlineService = OfflineScanningService.getInstance();
-
-  useEffect(() => {
-    requestCameraPermission();
-  }, []);
-
+  // CRITICAL: Reset all states when modal visibility changes
   useEffect(() => {
     if (visible) {
-      startAnimations();
+      console.log('📷 AgentQRScanner opened - Resetting all states');
       setScanned(false);
-      setScanResult(null);
-      setShowResultModal(false);
-      setIsPrinting(false);
-      checkConnectivity();
+      setIsProcessing(false);
+      requestCameraPermission();
     } else {
-      stopAnimations();
+      // Clean up when closing
+      console.log('📷 AgentQRScanner closed - Cleaning up');
+      setScanned(false);
+      setIsProcessing(false);
     }
   }, [visible]);
 
   const requestCameraPermission = async () => {
     try {
+      console.log('🔐 Requesting camera permission...');
       const { status } = await Camera.requestCameraPermissionsAsync();
+      console.log('📷 Camera permission status:', status);
       setHasPermission(status === 'granted');
+      
+      if (status !== 'granted') {
+        Alert.alert(
+          'Camera Permission Required',
+          'Please enable camera access in your device settings to scan QR codes.',
+          [
+            { text: 'Cancel', style: 'cancel', onPress: onClose },
+            { 
+              text: 'Open Settings', 
+              onPress: () => {
+                onClose();
+                // Optionally open settings
+              }
+            }
+          ]
+        );
+      }
     } catch (error) {
-      console.error('Permission request failed:', error);
+      console.error('❌ Error requesting camera permission:', error);
       setHasPermission(false);
+      Alert.alert(
+        'Camera Error',
+        'Failed to request camera permission. Please try again.',
+        [{ text: 'OK', onPress: onClose }]
+      );
     }
   };
 
-  const checkConnectivity = async () => {
-    try {
-      const online = await offlineService.isOnline();
-      setIsOnline(online);
-    } catch (error) {
-      setIsOnline(false);
-    }
-  };
-
-  const startAnimations = () => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(cornerAnimation, {
-          toValue: 1,
-          duration: 1500,
-          useNativeDriver: false,
-        }),
-        Animated.timing(cornerAnimation, {
-          toValue: 0,
-          duration: 1500,
-          useNativeDriver: false,
-        }),
-      ])
-    ).start();
-
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulseAnimation, {
-          toValue: 1.03,
-          duration: 1200,
-          useNativeDriver: true,
-        }),
-        Animated.timing(pulseAnimation, {
-          toValue: 1,
-          duration: 1200,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-  };
-
-  const stopAnimations = () => {
-    cornerAnimation.stopAnimation();
-    pulseAnimation.stopAnimation();
-  };
-
-  const handleBarcodeScanned = async ({ type, data }: { type: string; data: string }) => {
-    if (scanned || loading) return;
-    
-    setScanned(true);
-    Vibration.vibrate(100);
-    
-    const packageCode = extractPackageCode(data);
-    
-    if (!packageCode) {
-      Toast.show({
-        type: 'error',
-        text1: 'Invalid QR Code',
-        text2: 'This QR code does not contain valid package information.',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-      setScanned(false);
+  const handleBarCodeScanned = ({ type, data }: { type: string; data: string }) => {
+    // Prevent multiple scans
+    if (scanned || isProcessing) {
+      console.log('⚠️ Already processing scan, ignoring...');
       return;
     }
 
-    await processPackage(packageCode);
-  };
-
-  const extractPackageCode = (qrData: string): string | null => {
-    if (qrData.match(/^PKG-[A-Z0-9]+-\d{8}$/)) {
-      return qrData;
-    }
+    console.log('📷 QR Code scanned:', { type, data });
     
-    const urlMatch = qrData.match(/\/track\/([A-Z0-9-]+)$/);
-    if (urlMatch) {
-      return urlMatch[1];
-    }
-    
-    try {
-      const parsed = JSON.parse(qrData);
-      if (parsed.package_code) {
-        return parsed.package_code;
-      }
-    } catch (e) {
-      // Not JSON
-    }
-    
-    return qrData;
-  };
+    // Immediately set flags to prevent double scanning
+    setScanned(true);
+    setIsProcessing(true);
 
-  const processPackage = async (packageCode: string) => {
-    setLoading(true);
-
-    try {
-      console.log('🔍 Processing package:', packageCode, 'Action:', actionType);
+    // Extract package code from QR data
+    let packageCode = data.trim();
+    
+    // If it's a URL, extract the code
+    if (data.includes('track/') || data.includes('package/') || data.includes('p/')) {
+      const patterns = [
+        /track\/([A-Z0-9-]+)/i,
+        /package\/([A-Z0-9-]+)/i,
+        /p\/([A-Z0-9-]+)/i,
+        /code=([A-Z0-9-]+)/i
+      ];
       
-      const online = await offlineService.isOnline();
-      setIsOnline(online);
-
-      let packageData: any;
-
-      if (!online) {
-        const cached = await offlineService.getCachedPackage(packageCode);
-        if (cached) {
-          packageData = cached.package;
-          console.log('📦 Loaded from cache');
-        } else {
-          throw new Error('Package not found in offline cache');
-        }
-      } else {
-        console.log('🌐 Fetching package details from server');
-        const response = await api.get(`/api/v1/scanning/package_details?package_code=${packageCode}`);
-        
-        console.log('📊 API Response:', response.data);
-        
-        if (response.data.success) {
-          packageData = response.data.data.package;
-          
-          await offlineService.cachePackage(
-            packageCode,
-            packageData,
-            response.data.data.available_actions
-          );
-        } else {
-          throw new Error(response.data.message || 'Package not found');
+      for (const pattern of patterns) {
+        const matches = data.match(pattern);
+        if (matches && matches[1]) {
+          packageCode = matches[1];
+          break;
         }
       }
-
-      if (actionType === 'collect') {
-        await performCollect(packageData);
-      } else if (actionType === 'print') {
-        await performPrint(packageData);
-      }
-
-    } catch (error: any) {
-      console.error('❌ Failed to process package:', error);
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Error',
-        text2: error.message || 'Failed to process package',
-        position: 'top',
-        visibilityTime: 3000,
-      });
-      
-      setScanned(false);
-      setLoading(false);
     }
-  };
 
-  const performCollect = async (packageData: any) => {
-    try {
-      console.log('📦 Performing collect action for:', packageData.code);
-      
-      const online = await offlineService.isOnline();
-      
-      if (!online) {
-        const result = await offlineService.storeScanAction(
-          packageData.code,
-          'collect',
-          { id: 'agent', name: 'Agent', role: 'agent' },
-          {
-            location: null,
-            device_info: { platform: 'react-native', timestamp: new Date().toISOString() }
-          }
-        );
-        
-        if (!result.success) {
-          throw new Error(result.message);
-        }
-        
-        console.log('✅ Stored offline');
-      } else {
-        console.log('🚀 Sending collect action to server');
-        const response = await api.post('/api/v1/scanning/scan_action', {
-          package_code: packageData.code,
-          action_type: 'collect',
-          metadata: {
-            location: null,
-            device_info: { platform: 'react-native', timestamp: new Date().toISOString() }
-          }
-        });
-        
-        console.log('📊 Server response:', response.data);
-        
-        if (!response.data.success) {
-          throw new Error(response.data.message || 'Collection failed');
-        }
-      }
-
-      if (autoPrint) {
-        await performPrint(packageData);
-      } else {
-        showSuccessResult(packageData, 'collected');
-      }
-
-    } catch (error: any) {
-      console.error('❌ Collect failed:', error);
-      throw error;
-    }
-  };
-
-  const performPrint = async (packageData: any) => {
-    setIsPrinting(true);
-
-    try {
-      console.log('🖨️ Starting print process');
-      
-      const availability = await printService.isPrintingAvailable(bluetoothContext);
-      
-      if (!availability.available) {
-        throw new Error(availability.reason || 'Printer not available');
-      }
-
-      const result = await printService.printPackage(bluetoothContext, {
-        code: packageData.code,
-        receiver_name: packageData.receiver_name,
-        route_description: packageData.route_description,
-        sender_name: packageData.sender_name,
-        state_display: packageData.state_display,
-      });
-
-      if (!result.success) {
-        throw new Error(result.message || 'Print failed');
-      }
-
-      console.log('✅ Print successful');
-      showSuccessResult(packageData, 'printed');
-
-    } catch (error: any) {
-      console.error('❌ Print failed:', error);
-      
-      let errorMessage = error.message;
-      if (error.message.includes('Bluetooth not available')) {
-        errorMessage = 'Printing not available in Expo Go. Use development build.';
-      } else if (error.message.includes('No printer connected')) {
-        errorMessage = 'No printer connected. Connect printer in settings.';
-      }
-      
-      Toast.show({
-        type: 'error',
-        text1: 'Print Failed',
-        text2: errorMessage,
-        position: 'top',
-        visibilityTime: 4000,
-      });
-      
-      if (actionType === 'collect') {
-        showSuccessResult(packageData, 'collected_no_print');
-      } else {
-        setScanned(false);
-        setLoading(false);
-      }
-    } finally {
-      setIsPrinting(false);
-    }
-  };
-
-  const showSuccessResult = (packageData: any, action: string) => {
-    setScanResult({
-      package: packageData,
-      success: true,
-      action,
-    });
+    console.log('📦 Extracted package code:', packageCode);
     
-    setShowResultModal(true);
-    setLoading(false);
+    // Call the onScan callback
+    onScan(packageCode);
     
-    Vibration.vibrate([100, 50, 100]);
-    
+    // Close the scanner after a brief delay
     setTimeout(() => {
-      setShowResultModal(false);
-      setScanned(false);
-      onScanSuccess?.(packageData);
-    }, 2000);
+      handleClose();
+    }, 500);
   };
 
-  const getActionColor = () => {
-    if (actionType === 'collect') return ['#667eea', '#764ba2'];
-    if (actionType === 'print') return ['#FF9500', '#FF8C00'];
-    return ['#667eea', '#764ba2'];
+  const handleClose = () => {
+    console.log('🔚 Closing AgentQRScanner');
+    setScanned(false);
+    setIsProcessing(false);
+    setHasPermission(null);
+    onClose();
   };
 
-  const getActionLabel = () => {
-    if (actionType === 'collect') return 'Collect from Sender';
-    if (actionType === 'print') return 'Print Label';
-    return 'Scan Package';
+  const handleRetry = async () => {
+    console.log('🔄 Retrying camera permission...');
+    setScanned(false);
+    setIsProcessing(false);
+    await requestCameraPermission();
   };
 
-  const cornerColor = cornerAnimation.interpolate({
-    inputRange: [0, 0.5, 1],
-    outputRange: ['#667eea', '#764ba2', '#667eea'],
-  });
-
-  if (hasPermission === null) {
-    return (
-      <Modal visible={visible} animationType="fade">
-        <LinearGradient colors={['#1a1a2e', '#16213e']} style={styles.centeredContainer}>
-          <ActivityIndicator size="large" color="#667eea" />
-          <Text style={styles.permissionText}>Requesting camera permission...</Text>
-        </LinearGradient>
-      </Modal>
-    );
-  }
-
-  if (hasPermission === false) {
-    return (
-      <Modal visible={visible} animationType="slide">
-        <LinearGradient colors={['#1a1a2e', '#16213e']} style={styles.centeredContainer}>
-          <SafeAreaView style={styles.permissionContainer}>
-            <MaterialIcons name="camera-alt" size={64} color="#a0aec0" />
-            <Text style={styles.permissionText}>Camera permission is required</Text>
-            <TouchableOpacity style={styles.permissionButton} onPress={requestCameraPermission}>
-              <LinearGradient colors={['#667eea', '#764ba2']} style={styles.permissionButtonGradient}>
-                <Text style={styles.permissionButtonText}>Grant Permission</Text>
-              </LinearGradient>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Text style={styles.closeButtonText}>Close</Text>
-            </TouchableOpacity>
-          </SafeAreaView>
-        </LinearGradient>
-      </Modal>
-    );
+  // Don't render anything if not visible
+  if (!visible) {
+    return null;
   }
 
   return (
-    <Modal visible={visible} animationType="slide">
-      <SafeAreaView style={styles.container}>
-        <LinearGradient
-          colors={getActionColor()}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 1 }}
-          style={styles.header}
-        >
-          <TouchableOpacity onPress={onClose} style={styles.headerButton}>
-            <MaterialIcons name="close" size={24} color="#fff" />
+    <Modal
+      visible={visible}
+      animationType="slide"
+      transparent={false}
+      onRequestClose={handleClose}
+    >
+      <View style={styles.container}>
+        {/* Header */}
+        <View style={styles.header}>
+          <TouchableOpacity style={styles.closeButton} onPress={handleClose}>
+            <Feather name="x" size={24} color="#fff" />
           </TouchableOpacity>
-          <View style={styles.headerTitleContainer}>
-            <Text style={styles.headerTitle}>{getActionLabel()}</Text>
-            {!isOnline && (
-              <Text style={styles.offlineIndicator}>OFFLINE MODE</Text>
-            )}
-            {actionType !== 'print' && autoPrint && (
-              <Text style={styles.autoPrintIndicator}>
-                {bluetoothContext.isPrintReady 
-                  ? `Auto-Print: ${bluetoothContext.connectedPrinter?.name}` 
-                  : 'Auto-Print: No Printer'
-                }
-              </Text>
-            )}
-          </View>
-          <TouchableOpacity onPress={() => setFlashEnabled(!flashEnabled)} style={styles.headerButton}>
-            <MaterialIcons name={flashEnabled ? "flash-on" : "flash-off"} size={24} color="#fff" />
-          </TouchableOpacity>
-        </LinearGradient>
+          <Text style={styles.title}>{title}</Text>
+          <View style={{ width: 40 }} />
+        </View>
 
+        {/* Scanner Area */}
         <View style={styles.scannerContainer}>
-          <CameraView
-            ref={cameraRef}
-            style={styles.camera}
-            facing="back"
-            flash={flashEnabled ? 'on' : 'off'}
-            barcodeScannerSettings={{
-              barcodeTypes: ['qr'],
-            }}
-            onBarcodeScanned={scanned ? undefined : handleBarcodeScanned}
-          />
-          
-          <View style={styles.overlay}>
-            <Animated.View style={[styles.scanArea, { transform: [{ scale: pulseAnimation }] }]}>
-              <Animated.View style={[styles.corner, styles.topLeft, { borderColor: cornerColor }]} />
-              <Animated.View style={[styles.corner, styles.topRight, { borderColor: cornerColor }]} />
-              <Animated.View style={[styles.corner, styles.bottomLeft, { borderColor: cornerColor }]} />
-              <Animated.View style={[styles.corner, styles.bottomRight, { borderColor: cornerColor }]} />
-            </Animated.View>
-            
-            <Text style={styles.scanInstruction}>
-              Position QR code within frame
-            </Text>
-          </View>
-
-          {(loading || isPrinting) && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="large" color="#fff" />
-              <Text style={styles.loadingText}>
-                {isPrinting ? 'Printing...' : 'Processing...'}
-              </Text>
+          {hasPermission === null ? (
+            <View style={styles.centerContent}>
+              <Feather name="camera" size={64} color="#7B3F98" />
+              <Text style={styles.messageText}>Requesting camera permission...</Text>
             </View>
+          ) : hasPermission === false ? (
+            <View style={styles.centerContent}>
+              <Feather name="camera-off" size={64} color="#FF3B30" />
+              <Text style={styles.errorTitle}>Camera Access Denied</Text>
+              <Text style={styles.errorMessage}>
+                Please enable camera access in your device settings to scan QR codes.
+              </Text>
+              <TouchableOpacity style={styles.retryButton} onPress={handleRetry}>
+                <Feather name="refresh-cw" size={20} color="#fff" />
+                <Text style={styles.retryButtonText}>Retry</Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <CameraView
+              style={styles.camera}
+              facing="back"
+              onBarcodeScanned={scanned ? undefined : handleBarCodeScanned}
+              barcodeScannerSettings={{
+                barcodeTypes: ['qr', 'code128', 'code39', 'ean13', 'ean8', 'code93'],
+              }}
+            >
+              <View style={styles.overlay}>
+                {/* Top overlay */}
+                <View style={styles.overlaySection}>
+                  <Text style={styles.instructionText}>
+                    {scanned ? 'Processing...' : 'Position QR code within the frame'}
+                  </Text>
+                </View>
+                
+                {/* Scanner frame */}
+                <View style={styles.scannerFrameContainer}>
+                  <View style={styles.overlaySide} />
+                  <View style={styles.scannerFrame}>
+                    {/* Corner markers */}
+                    <View style={[styles.corner, styles.cornerTopLeft]} />
+                    <View style={[styles.corner, styles.cornerTopRight]} />
+                    <View style={[styles.corner, styles.cornerBottomLeft]} />
+                    <View style={[styles.corner, styles.cornerBottomRight]} />
+                    
+                    {/* Scanning line animation */}
+                    {!scanned && (
+                      <View style={styles.scanLineContainer}>
+                        <View style={styles.scanLine} />
+                      </View>
+                    )}
+                    
+                    {/* Scanned success overlay */}
+                    {scanned && (
+                      <View style={styles.scannedOverlay}>
+                        <Feather name="check-circle" size={64} color="#34C759" />
+                        <Text style={styles.scannedText}>Scanned!</Text>
+                      </View>
+                    )}
+                  </View>
+                  <View style={styles.overlaySide} />
+                </View>
+                
+                {/* Bottom overlay */}
+                <View style={styles.overlaySection}>
+                  <Text style={styles.hintText}>
+                    {scanned ? 'Please wait...' : 'Hold steady for automatic scanning'}
+                  </Text>
+                </View>
+              </View>
+            </CameraView>
           )}
         </View>
 
-        <Modal visible={showResultModal} transparent animationType="fade">
-          <View style={styles.resultOverlay}>
-            <View style={styles.compactResult}>
-              <LinearGradient
-                colors={scanResult?.success ? ['#34C759', '#28A745'] : ['#FF6B6B', '#FF5252']}
-                style={styles.compactResultGradient}
-              >
-                <View style={styles.compactResultIcon}>
-                  <MaterialIcons 
-                    name={scanResult?.success ? "check-circle" : "error"} 
-                    size={32} 
-                    color="#fff" 
-                  />
-                </View>
-                <View style={styles.compactResultContent}>
-                  <Text style={styles.compactResultCode}>{scanResult?.package?.code}</Text>
-                  <Text style={styles.compactResultRoute}>{scanResult?.package?.route_description}</Text>
-                  <Text style={styles.compactResultStatus}>
-                    {scanResult?.action === 'collected' ? '✓ Collected & Printed' : 
-                     scanResult?.action === 'collected_no_print' ? '✓ Collected (Print Failed)' :
-                     scanResult?.action === 'printed' ? '✓ Label Printed' :
-                     scanResult?.success ? '✓ Success' : '✗ Failed'}
-                  </Text>
-                </View>
-              </LinearGradient>
+        {/* Instructions */}
+        {hasPermission && (
+          <View style={styles.instructions}>
+            <View style={styles.instructionItem}>
+              <Feather name="maximize" size={20} color="#7B3F98" />
+              <Text style={styles.instructionItemText}>
+                Align QR code within the frame
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Feather name="sun" size={20} color="#7B3F98" />
+              <Text style={styles.instructionItemText}>
+                Ensure good lighting for best results
+              </Text>
+            </View>
+            <View style={styles.instructionItem}>
+              <Feather name="zap" size={20} color="#7B3F98" />
+              <Text style={styles.instructionItemText}>
+                Scanner will detect QR code automatically
+              </Text>
             </View>
           </View>
-        </Modal>
-
-        <Toast />
-      </SafeAreaView>
+        )}
+      </View>
     </Modal>
   );
 };
@@ -515,215 +272,191 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: '#000',
   },
-  centeredContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  permissionContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    paddingTop: 50,
+    paddingBottom: 16,
     paddingHorizontal: 16,
-    paddingVertical: 16,
+    backgroundColor: '#111B21',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(123, 63, 152, 0.2)',
   },
-  headerButton: {
-    padding: 8,
-  },
-  headerTitleContainer: {
-    flex: 1,
+  closeButton: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255, 255, 255, 0.1)',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  headerTitle: {
-    color: '#fff',
+  title: {
     fontSize: 18,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-  offlineIndicator: {
-    color: '#FFB000',
-    fontSize: 12,
     fontWeight: '600',
-    marginTop: 2,
-  },
-  autoPrintIndicator: {
-    color: 'rgba(255, 255, 255, 0.8)',
-    fontSize: 11,
-    fontWeight: '500',
-    marginTop: 2,
+    color: '#fff',
   },
   scannerContainer: {
     flex: 1,
-    position: 'relative',
   },
   camera: {
     flex: 1,
   },
   overlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    justifyContent: 'center',
-    alignItems: 'center',
+    flex: 1,
   },
-  scanArea: {
-    width: 300,
-    height: 300,
-    position: 'relative',
-    justifyContent: 'center',
+  overlaySection: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
     alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 20,
+  },
+  scannerFrameContainer: {
+    flexDirection: 'row',
+    height: SCANNER_SIZE,
+  },
+  overlaySide: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.7)',
+  },
+  scannerFrame: {
+    width: SCANNER_SIZE,
+    height: SCANNER_SIZE,
+    position: 'relative',
   },
   corner: {
     position: 'absolute',
     width: 40,
     height: 40,
-    borderWidth: 5,
+    borderColor: '#7B3F98',
+    borderWidth: 4,
   },
-  topLeft: {
+  cornerTopLeft: {
     top: 0,
     left: 0,
     borderRightWidth: 0,
     borderBottomWidth: 0,
-    borderTopLeftRadius: 12,
   },
-  topRight: {
+  cornerTopRight: {
     top: 0,
     right: 0,
     borderLeftWidth: 0,
     borderBottomWidth: 0,
-    borderTopRightRadius: 12,
   },
-  bottomLeft: {
+  cornerBottomLeft: {
     bottom: 0,
     left: 0,
     borderRightWidth: 0,
     borderTopWidth: 0,
-    borderBottomLeftRadius: 12,
   },
-  bottomRight: {
+  cornerBottomRight: {
     bottom: 0,
     right: 0,
     borderLeftWidth: 0,
     borderTopWidth: 0,
-    borderBottomRightRadius: 12,
   },
-  scanInstruction: {
-    color: '#fff',
-    fontSize: 16,
-    textAlign: 'center',
-    marginTop: 50,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 24,
-    fontWeight: '600',
+  scanLineContainer: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  loadingOverlay: {
+  scanLine: {
+    width: '100%',
+    height: 2,
+    backgroundColor: '#7B3F98',
+    shadowColor: '#7B3F98',
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.8,
+    shadowRadius: 4,
+  },
+  scannedOverlay: {
     position: 'absolute',
     top: 0,
     left: 0,
     right: 0,
     bottom: 0,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
-    justifyContent: 'center',
     alignItems: 'center',
+    justifyContent: 'center',
   },
-  loadingText: {
+  scannedText: {
+    color: '#34C759',
+    fontSize: 20,
+    fontWeight: '600',
+    marginTop: 16,
+  },
+  instructionText: {
     color: '#fff',
     fontSize: 16,
-    marginTop: 16,
-    fontWeight: '600',
-  },
-  permissionText: {
-    fontSize: 16,
-    textAlign: 'center',
-    color: '#a0aec0',
-    marginVertical: 24,
     fontWeight: '500',
+    textAlign: 'center',
   },
-  permissionButton: {
-    borderRadius: 12,
-    overflow: 'hidden',
-    marginTop: 16,
+  hintText: {
+    color: '#8E8E93',
+    fontSize: 14,
+    textAlign: 'center',
   },
-  permissionButtonGradient: {
-    paddingHorizontal: 32,
-    paddingVertical: 16,
-    alignItems: 'center',
+  instructions: {
+    backgroundColor: '#111B21',
+    padding: 24,
+    gap: 16,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(123, 63, 152, 0.2)',
   },
-  permissionButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '700',
-  },
-  closeButton: {
-    marginTop: 16,
-    paddingVertical: 12,
-  },
-  closeButtonText: {
-    color: '#667eea',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  resultOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0, 0, 0, 0.7)',
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 20,
-  },
-  compactResult: {
-    width: width * 0.85,
-    borderRadius: 16,
-    overflow: 'hidden',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.3,
-    shadowRadius: 20,
-    elevation: 10,
-  },
-  compactResultGradient: {
+  instructionItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 20,
-    gap: 16,
+    gap: 12,
   },
-  compactResultIcon: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
-    backgroundColor: 'rgba(255, 255, 255, 0.2)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  compactResultContent: {
+  instructionItemText: {
     flex: 1,
-  },
-  compactResultCode: {
     color: '#fff',
-    fontSize: 18,
-    fontWeight: '700',
-    marginBottom: 4,
-  },
-  compactResultRoute: {
-    color: 'rgba(255, 255, 255, 0.9)',
     fontSize: 14,
-    marginBottom: 6,
   },
-  compactResultStatus: {
+  centerContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 40,
+    backgroundColor: '#111B21',
+  },
+  messageText: {
     color: '#fff',
-    fontSize: 13,
+    fontSize: 16,
+    textAlign: 'center',
+    marginTop: 16,
+  },
+  errorTitle: {
+    fontSize: 20,
     fontWeight: '600',
+    color: '#fff',
+    marginTop: 20,
+    marginBottom: 8,
+  },
+  errorMessage: {
+    fontSize: 14,
+    color: '#8E8E93',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 24,
+  },
+  retryButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 12,
+    backgroundColor: '#7B3F98',
+    borderRadius: 8,
+  },
+  retryButtonText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#fff',
   },
 });
-
-export default AgentQRScanner;
