@@ -9,9 +9,11 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "updates": {
-      "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+      "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7",
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
-    "runtimeVersion": "1.8.4",
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.lvl0-x.gltapp2",
@@ -54,7 +56,9 @@
       "intentFilters": [
         {
           "action": "android.intent.action.VIEW",
-          "category": ["android.intent.category.DEFAULT"],
+          "category": [
+            "android.intent.category.DEFAULT"
+          ],
           "data": {
             "scheme": "content",
             "mimeType": "application/vnd.android.package-archive"
