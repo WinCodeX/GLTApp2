@@ -455,17 +455,6 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: 'rgba(124, 58, 237, 0.2)',
     marginLeft: 60,
-<<<<<<< HEAD
-=======
-  },
-  versionText: {
-    fontSize: 12,
-    color: '#888',
-    textAlign: 'center',
-    marginTop: 8,
-    marginHorizontal: 16,
-    fontStyle: 'italic',
->>>>>>> a6233a0 (OTA fix)
   },
   versionText: {
     fontSize: 12,
