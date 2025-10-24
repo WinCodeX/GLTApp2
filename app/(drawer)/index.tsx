@@ -1,41 +1,46 @@
-// app/(drawer)/index.tsx - FIXED: HomeScreen with stack navigation and anime.js animations
+// app/(drawer)/index.tsx - Using react-native-reanimated with faster animations
 
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import {
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-  TouchableOpacity,
-  TextInput,
-  Animated,
-  ScrollView,
-  Dimensions,
-  Easing,
-  Alert,
-  Platform,
-  Modal,
-  FlatList,
-  ActivityIndicator,
-  AppState,
-  Keyboard,
-  KeyboardAvoidingView,
-  PanResponder,
-} from 'react-native';
+import { Feather } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
-import { router } from 'expo-router';
-import { useFocusEffect } from '@react-navigation/native';
-import anime from 'animejs';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Alert,
+  AppState,
+  Dimensions,
+  FlatList,
+  Keyboard,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { Gesture, GestureDetector, GestureHandlerRootView } from 'react-native-gesture-handler';
+import Animated, {
+  Easing,
+  cancelAnimation,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSpring,
+  withTiming,
+} from 'react-native-reanimated';
+import ChangelogModal, { CHANGELOG_KEY, CHANGELOG_VERSION } from '../../components/ChangelogModal';
+import CollectDeliverModal from '../../components/CollectDeliverModal';
+import FragileDeliveryModal from '../../components/FragileDeliveryModal';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
-import FragileDeliveryModal from '../../components/FragileDeliveryModal';
-import CollectDeliverModal from '../../components/CollectDeliverModal';
-import ChangelogModal, { CHANGELOG_VERSION, CHANGELOG_KEY } from '../../components/ChangelogModal';
 import UpdateModal from '../../components/UpdateModal';
-import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
+import { calculatePackagePricing, createPackage, getAgents, getAreas, getPackageFormData, type PackageData } from '../../lib/helpers/packageHelpers';
 import UpdateService from '../../lib/services/updateService';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
@@ -192,7 +197,7 @@ const PACKAGE_SIZE_INFO: Record<string, PackageSizeInfo> = {
   }
 };
 
-// FIXED: Area Selection Modal Component with Keyboard Handling
+// Area Selection Modal Component
 const AreaSelectionModal: React.FC<{
   visible: boolean;
   onClose: () => void;
@@ -207,7 +212,8 @@ const AreaSelectionModal: React.FC<{
   const [selectedFilter, setSelectedFilter] = useState<'all' | 'areas' | 'offices'>('all');
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
-  const slideAnim = useRef(new Animated.Value(screenHeight)).current;
+  
+  const slideAnim = useSharedValue(screenHeight);
 
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
@@ -220,11 +226,10 @@ const AreaSelectionModal: React.FC<{
   useEffect(() => {
     if (visible) {
       loadLocationData();
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
+      slideAnim.value = withSpring(0, {
+        damping: 20,
+        stiffness: 300,
+      });
     }
   }, [visible]);
 
@@ -269,18 +274,19 @@ const AreaSelectionModal: React.FC<{
 
   const closeModal = () => {
     Keyboard.dismiss();
-    Animated.timing(slideAnim, {
-      toValue: screenHeight,
-      duration: 250,
-      useNativeDriver: true,
-    }).start(() => {
-      onClose();
-      setSearchQuery('');
-      setSelectedFilter('all');
-      setKeyboardHeight(0);
-      setIsKeyboardVisible(false);
+    slideAnim.value = withTiming(screenHeight, { duration: 250 }, () => {
+      runOnJS(onClose)();
+      runOnJS(setSearchQuery)('');
+      runOnJS(setSelectedFilter)('all');
+      runOnJS(setKeyboardHeight)(0);
+      runOnJS(setIsKeyboardVisible)(false);
     });
   };
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: slideAnim.value }],
+    height: modalHeight,
+  }));
 
   const filteredAreas = areas.filter(area => {
     if (selectedFilter === 'offices') return false;
@@ -373,15 +379,7 @@ const AreaSelectionModal: React.FC<{
           style={styles.keyboardAvoidingView}
           keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
         >
-          <Animated.View
-            style={[
-              styles.areaModalContainer,
-              { 
-                transform: [{ translateY: slideAnim }],
-                height: modalHeight,
-              }
-            ]}
-          >
+          <Animated.View style={[styles.areaModalContainer, animatedStyle]}>
             <LinearGradient
               colors={['#1a1a2e', '#2d3748', '#4a5568']}
               style={styles.areaModalContent}
@@ -510,13 +508,11 @@ export default function HomeScreen() {
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   
-  // FIXED: Enhanced animation states for anime.js
-  const [isAnimationPaused, setIsAnimationPaused] = useState(false);
-  const [currentScrollPosition, setCurrentScrollPosition] = useState(0);
-  const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
-  const animeInstance = useRef<anime.AnimeInstance | null>(null);
-  const scrollContainerRef = useRef<View | null>(null);
+  // Reanimated values for scroll animation - FASTER SPEED (8 seconds instead of 15)
+  const scrollPosition = useSharedValue(0);
+  const isAnimationPaused = useSharedValue(false);
   const locationTagWidth = 120;
+  const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
   
   const { 
     user, 
@@ -529,13 +525,13 @@ export default function HomeScreen() {
     getCurrentUserId,
   } = useUser();
   
-  // FAB Menu Animations
-  const fabRotation = useRef(new Animated.Value(0)).current;
-  const overlayOpacity = useRef(new Animated.Value(0)).current;
-  const optionsScale = useRef(new Animated.Value(0)).current;
-  const optionsTranslateY = useRef(new Animated.Value(100)).current;
-  const successModalScale = useRef(new Animated.Value(0)).current;
-  const successModalOpacity = useRef(new Animated.Value(0)).current;
+  // FAB Menu Animations with Reanimated
+  const fabRotation = useSharedValue(0);
+  const overlayOpacity = useSharedValue(0);
+  const optionsScale = useSharedValue(0);
+  const optionsTranslateY = useSharedValue(100);
+  const successModalScale = useSharedValue(0);
+  const successModalOpacity = useSharedValue(0);
 
   // Initialize app
   useEffect(() => {
@@ -546,8 +542,9 @@ export default function HomeScreen() {
     return () => {
       console.log('🏠 HomeScreen: Component unmounting, cleaning up...');
       subscription?.remove();
-      if (animeInstance.current) {
-        animeInstance.current.pause();
+      cancelAnimation(scrollPosition);
+      if (inactivityTimer.current) {
+        clearTimeout(inactivityTimer.current);
       }
     };
   }, []);
@@ -556,105 +553,93 @@ export default function HomeScreen() {
     loadFormDataInBackground();
   }, []);
 
-  // FIXED: Enhanced anime.js scroll animation with smooth interaction
+  // FASTER infinite scroll animation with Reanimated (8 seconds duration)
   useEffect(() => {
-    if (locations.length === 0 || isAnimationPaused) {
-      return;
-    }
+    if (locations.length === 0) return;
 
     const singleSetWidth = locations.length * locationTagWidth;
     
-    // Clean up previous animation
-    if (animeInstance.current) {
-      animeInstance.current.pause();
+    // Start infinite scroll animation - FASTER: 8000ms instead of 15000ms
+    if (!isAnimationPaused.value) {
+      scrollPosition.value = withRepeat(
+        withTiming(-singleSetWidth, {
+          duration: 8000, // ⚡ FASTER: 8 seconds (was 15 seconds)
+          easing: Easing.linear,
+        }),
+        -1, // Infinite repeat
+        false
+      );
     }
 
-    // Create infinite scroll animation with anime.js
-    const scrollTarget = { x: currentScrollPosition };
-    
-    animeInstance.current = anime({
-      targets: scrollTarget,
-      x: currentScrollPosition - singleSetWidth,
-      duration: 15000, // 15 seconds for smooth, consistent scrolling
-      easing: 'linear',
-      loop: true,
-      update: function(anim) {
-        const newX = scrollTarget.x;
-        // Normalize position for seamless infinite loop
-        const normalizedX = ((newX % singleSetWidth) + singleSetWidth) % singleSetWidth;
-        setCurrentScrollPosition(-normalizedX);
-      },
-    });
-
     return () => {
-      if (animeInstance.current) {
-        animeInstance.current.pause();
-      }
+      cancelAnimation(scrollPosition);
     };
-  }, [locations, isAnimationPaused, currentScrollPosition]);
+  }, [locations.length, isAnimationPaused.value]);
 
-  // FIXED: Enhanced pan responder with anime.js integration
-  const locationPanResponder = useRef(
-    PanResponder.create({
-      onStartShouldSetPanResponder: () => true,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 5;
-      },
-      onPanResponderGrant: () => {
-        // Pause anime.js animation
-        if (animeInstance.current) {
-          animeInstance.current.pause();
-        }
-        setIsAnimationPaused(true);
-        
+  // Animated style for location tags
+  const animatedScrollStyle = useAnimatedStyle(() => ({
+    transform: [{ translateX: scrollPosition.value }],
+  }));
+
+  // Pan gesture for location tags with Reanimated
+  const panGesture = Gesture.Pan()
+    .onStart(() => {
+      // Pause animation
+      isAnimationPaused.value = true;
+      cancelAnimation(scrollPosition);
+      
+      runOnJS(() => {
         if (inactivityTimer.current) {
           clearTimeout(inactivityTimer.current);
         }
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const singleSetWidth = locations.length * locationTagWidth;
-        const sensitivity = 1.0; // Direct 1:1 mapping for responsive feel
-        const newPosition = currentScrollPosition + (gestureState.dx * sensitivity);
-        
-        // Smooth infinite loop with proper normalization
-        const normalizedPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
-        setCurrentScrollPosition(-normalizedPosition);
-      },
-      onPanResponderRelease: (_, gestureState) => {
-        const singleSetWidth = locations.length * locationTagWidth;
-        
-        // Apply subtle momentum with damping
-        const momentum = gestureState.vx * 50; // Reduced for smoother deceleration
-        const finalPosition = currentScrollPosition + momentum;
-        
-        // Normalize final position
-        const normalizedPosition = ((finalPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
-        
-        // Animate to final position smoothly
-        anime({
-          targets: { pos: currentScrollPosition },
-          pos: -normalizedPosition,
-          duration: 400,
-          easing: 'easeOutCubic',
-          update: function(anim) {
-            const target = anim.animations[0].currentValue;
-            setCurrentScrollPosition(target);
-          },
-          complete: () => {
-            setCurrentScrollPosition(-normalizedPosition);
-            
-            // Resume auto-scroll after delay
-            if (inactivityTimer.current) {
-              clearTimeout(inactivityTimer.current);
-            }
-            inactivityTimer.current = setTimeout(() => {
-              setIsAnimationPaused(false);
-            }, 2000);
-          }
-        });
-      },
+      })();
     })
-  ).current;
+    .onUpdate((event) => {
+      const singleSetWidth = locations.length * locationTagWidth;
+      const newPosition = scrollPosition.value + event.translationX;
+      
+      // Normalize for infinite loop
+      const normalizedPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+      scrollPosition.value = -normalizedPosition;
+    })
+    .onEnd((event) => {
+      const singleSetWidth = locations.length * locationTagWidth;
+      
+      // Apply momentum
+      const momentum = event.velocityX * 0.05;
+      const finalPosition = scrollPosition.value + momentum;
+      
+      // Normalize final position
+      const normalizedPosition = ((finalPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+      
+      // Animate to final position with spring
+      scrollPosition.value = withSpring(-normalizedPosition, {
+        damping: 15,
+        stiffness: 150,
+        velocity: event.velocityX * 0.001,
+      }, () => {
+        // Resume auto-scroll after delay
+        runOnJS(() => {
+          if (inactivityTimer.current) {
+            clearTimeout(inactivityTimer.current);
+          }
+          inactivityTimer.current = setTimeout(() => {
+            isAnimationPaused.value = false;
+            
+            // Restart animation
+            const singleSetWidth = locations.length * locationTagWidth;
+            scrollPosition.value = withRepeat(
+              withTiming(-singleSetWidth, {
+                duration: 8000, // ⚡ FASTER: 8 seconds
+                easing: Easing.linear,
+              }),
+              -1,
+              false
+            );
+          }, 2000);
+        })();
+      });
+    });
 
   const getVersionPostponementKey = (version: string): string => {
     return `user_postponed_update_${version}`;
@@ -947,62 +932,18 @@ export default function HomeScreen() {
   const openFabMenu = () => {
     setFabMenuOpen(true);
     
-    Animated.parallel([
-      Animated.timing(fabRotation, {
-        toValue: 1,
-        duration: 150,
-        easing: Easing.bezier(0.4, 0.0, 0.2, 1),
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: 1,
-        duration: 150,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsScale, {
-        toValue: 1,
-        duration: 180,
-        easing: Easing.bezier(0.34, 1.56, 0.64, 1),
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsTranslateY, {
-        toValue: 0,
-        duration: 180,
-        easing: Easing.bezier(0.34, 1.56, 0.64, 1),
-        useNativeDriver: true,
-      }),
-    ]).start();
+    fabRotation.value = withTiming(1, { duration: 150, easing: Easing.bezier(0.4, 0.0, 0.2, 1) });
+    overlayOpacity.value = withTiming(1, { duration: 150, easing: Easing.out(Easing.quad) });
+    optionsScale.value = withSpring(1, { damping: 15, stiffness: 150 });
+    optionsTranslateY.value = withSpring(0, { damping: 15, stiffness: 150 });
   };
 
   const closeFabMenu = () => {
-    Animated.parallel([
-      Animated.timing(fabRotation, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.bezier(0.4, 0.0, 0.2, 1),
-        useNativeDriver: true,
-      }),
-      Animated.timing(overlayOpacity, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsScale, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(optionsTranslateY, {
-        toValue: 100,
-        duration: 250,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setFabMenuOpen(false);
+    fabRotation.value = withTiming(0, { duration: 250, easing: Easing.bezier(0.4, 0.0, 0.2, 1) });
+    overlayOpacity.value = withTiming(0, { duration: 250, easing: Easing.in(Easing.quad) });
+    optionsScale.value = withTiming(0, { duration: 250, easing: Easing.in(Easing.quad) });
+    optionsTranslateY.value = withTiming(100, { duration: 250, easing: Easing.in(Easing.quad) }, () => {
+      runOnJS(setFabMenuOpen)(false);
     });
   };
 
@@ -1038,20 +979,8 @@ export default function HomeScreen() {
     setSuccessModalData(data);
     setShowSuccessModal(true);
     
-    Animated.parallel([
-      Animated.spring(successModalScale, {
-        toValue: 1,
-        tension: 150,
-        friction: 8,
-        useNativeDriver: true,
-      }),
-      Animated.timing(successModalOpacity, {
-        toValue: 1,
-        duration: 300,
-        easing: Easing.out(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start();
+    successModalScale.value = withSpring(1, { damping: 10, stiffness: 100 });
+    successModalOpacity.value = withTiming(1, { duration: 300, easing: Easing.out(Easing.quad) });
 
     setTimeout(() => {
       closeSuccessModal();
@@ -1059,24 +988,12 @@ export default function HomeScreen() {
   };
 
   const closeSuccessModal = () => {
-    Animated.parallel([
-      Animated.timing(successModalScale, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-      Animated.timing(successModalOpacity, {
-        toValue: 0,
-        duration: 250,
-        easing: Easing.in(Easing.quad),
-        useNativeDriver: true,
-      }),
-    ]).start(() => {
-      setShowSuccessModal(false);
-      setSuccessModalData(null);
-      successModalScale.setValue(0);
-      successModalOpacity.setValue(0);
+    successModalScale.value = withTiming(0, { duration: 250, easing: Easing.in(Easing.quad) });
+    successModalOpacity.value = withTiming(0, { duration: 250, easing: Easing.in(Easing.quad) }, () => {
+      runOnJS(setShowSuccessModal)(false);
+      runOnJS(setSuccessModalData)(null);
+      successModalScale.value = 0;
+      successModalOpacity.value = 0;
     });
   };
 
@@ -1304,31 +1221,30 @@ export default function HomeScreen() {
     );
   };
 
-  const renderFabOption = (option: FABOption, index: number) => {
-    const optionOpacity = overlayOpacity.interpolate({
-      inputRange: [0, 1],
-      outputRange: [0, 1],
-    });
+  const fabOverlayStyle = useAnimatedStyle(() => ({
+    opacity: overlayOpacity.value,
+  }));
 
-    const optionTranslateY = optionsTranslateY.interpolate({
-      inputRange: [0, 100],
-      outputRange: [0, 100 + (index * 20)],
-    });
+  const fabIconStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${fabRotation.value * 45}deg` }],
+  }));
+
+  const successModalAnimatedStyle = useAnimatedStyle(() => ({
+    opacity: successModalOpacity.value,
+    transform: [{ scale: successModalScale.value }],
+  }));
+
+  const renderFabOption = (option: FABOption, index: number) => {
+    const optionAnimatedStyle = useAnimatedStyle(() => ({
+      opacity: overlayOpacity.value,
+      transform: [
+        { scale: optionsScale.value },
+        { translateY: optionsTranslateY.value + (index * 20) },
+      ],
+    }));
 
     return (
-      <Animated.View
-        key={option.id}
-        style={[
-          styles.fabOptionWrapper,
-          {
-            opacity: optionOpacity,
-            transform: [
-              { scale: optionsScale },
-              { translateY: optionTranslateY },
-            ],
-          },
-        ]}
-      >
+      <Animated.View key={option.id} style={[styles.fabOptionWrapper, optionAnimatedStyle]}>
         <TouchableOpacity
           style={styles.fabOptionContainer}
           onPress={option.action}
@@ -1380,376 +1296,347 @@ export default function HomeScreen() {
     );
   };
 
-  const fabIconRotation = fabRotation.interpolate({
-    inputRange: [0, 1],
-    outputRange: ['0deg', '45deg'],
-  });
-
-  // FIXED: Render location tags with anime.js transform
-  const singleSetWidth = locations.length * locationTagWidth;
+  // Triple locations for infinite scroll
   const tripleLocations = [...locations, ...locations, ...locations];
 
   return (
-    <SafeAreaView style={styles.container}>
-      <GLTHeader />
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <SafeAreaView style={styles.container}>
+        <GLTHeader />
 
-      {/* FIXED: Enhanced Currently Reaching Section with anime.js */}
-      <View style={styles.locationsContainer}>
-        <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
-        <View style={styles.animatedContainer}>
-          <View
-            ref={scrollContainerRef}
-            style={[
-              styles.animatedContent,
-              { 
-                transform: [{ translateX: currentScrollPosition }],
-              },
-            ]}
-            {...locationPanResponder.panHandlers}
-          >
-            {tripleLocations.map((location, index) => (
-              <LocationTag key={`${location.id || location.name}-${index}`} location={location} />
-            ))}
-          </View>
-        </View>
-      </View>
-
-      <ScrollView 
-        style={styles.scrollContainer} 
-        contentContainerStyle={styles.scrollContentContainer}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.calculatorContainer}>
-          <Text style={styles.calculatorTitle}>Cost Calculator</Text>
-          
-          <View style={styles.inputSection}>
-            <Text style={styles.sectionLabel}>Where are you sending from?</Text>
-            <TouchableOpacity 
-              style={[styles.locationInput, selectedOriginLocation && styles.locationInputSelected]}
-              onPress={() => setShowOriginModal(true)}
-            >
-              <Text style={[styles.locationText, selectedOriginLocation && styles.locationTextSelected]}>
-                {selectedOriginLocation ? 
-                  `${selectedOriginLocation.name}${selectedOriginLocation.locationName ? ` (${selectedOriginLocation.locationName})` : ''}${selectedOriginLocation.type === 'office' ? ` - ${selectedOriginLocation.agentName}` : ''}` : 
-                  'Tap to select origin location'
-                }
-              </Text>
-              <View style={styles.locationInputIcon}>
-                {selectedOriginLocation?.type === 'office' && (
-                  <View style={styles.officeTypeTag}>
-                    <Text style={styles.officeTypeText}>OFFICE</Text>
-                  </View>
-                )}
-                {selectedOriginLocation?.type === 'area' && (
-                  <View style={styles.areaTypeTag}>
-                    <Text style={styles.areaTypeText}>AREA</Text>
-                  </View>
-                )}
-                <Feather name="map-pin" size={20} color={selectedOriginLocation ? "#8B5CF6" : "#666"} />
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.inputSection}>
-            <Text style={styles.sectionLabel}>Where are you sending to?</Text>
-            <TouchableOpacity 
-              style={[styles.locationInput, selectedDestinationLocation && styles.locationInputSelected]}
-              onPress={() => setShowDestinationModal(true)}
-            >
-              <Text style={[styles.locationText, selectedDestinationLocation && styles.locationTextSelected]}>
-                {selectedDestinationLocation ? 
-                  `${selectedDestinationLocation.name}${selectedDestinationLocation.locationName ? ` (${selectedDestinationLocation.locationName})` : ''}${selectedDestinationLocation.type === 'office' ? ` - ${selectedDestinationLocation.agentName}` : ''}` : 
-                  'Tap to select destination location'
-                }
-              </Text>
-              <View style={styles.locationInputIcon}>
-                {selectedDestinationLocation?.type === 'office' && (
-                  <View style={styles.officeTypeTag}>
-                    <Text style={styles.officeTypeText}>OFFICE</Text>
-                  </View>
-                )}
-                {selectedDestinationLocation?.type === 'area' && (
-                  <View style={styles.areaTypeTag}>
-                    <Text style={styles.areaTypeText}>AREA</Text>
-                  </View>
-                )}
-                <Feather name="map-pin" size={20} color={selectedDestinationLocation ? "#8B5CF6" : "#666"} />
-              </View>
-            </TouchableOpacity>
-          </View>
-
-          {renderPackageSizes()}
-
-          <TouchableOpacity 
-            onPress={calculateCost} 
-            activeOpacity={0.8}
-            disabled={loading || !selectedOriginLocation || !selectedDestinationLocation || !selectedPackageSize}
-            style={[
-              styles.calculateButton,
-              (!selectedOriginLocation || !selectedDestinationLocation || !selectedPackageSize) && styles.calculateButtonDisabled
-            ]}
-          >
-            <LinearGradient 
-              colors={['#7c3aed', '#3b82f6', '#10b981']} 
-              style={styles.calculateButtonGradient}
-            >
-              <Text style={styles.calculateButtonText}>
-                {loading ? 'Calculating...' : 'Calculate Cost'}
-              </Text>
-            </LinearGradient>
-          </TouchableOpacity>
-
-          {renderPricingResults()}
-        </View>
-      </ScrollView>
-
-      {fabMenuOpen && (
-        <Animated.View
-          style={[
-            styles.fabOverlay,
-            { opacity: overlayOpacity },
-          ]}
-        >
-          <TouchableOpacity
-            style={styles.fabOverlayTouchable}
-            onPress={closeFabMenu}
-            activeOpacity={1}
-          />
-        </Animated.View>
-      )}
-
-      {fabMenuOpen && (
-        <View style={styles.fabOptionsContainer}>
-          {fabOptions.map((option, index) => renderFabOption(option, index))}
-        </View>
-      )}
-
-      <View style={styles.fabContainer}>
-        <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
-          <TouchableOpacity
-            style={styles.fabTouchable}
-            onPress={handleFabPress}
-            activeOpacity={0.8}
-          >
-            <Animated.View
-              style={[
-                styles.fabIconContainer,
-                { transform: [{ rotate: fabIconRotation }] },
-              ]}
-            >
-              <Feather 
-                name="plus" 
-                size={24} 
-                color="white" 
-                style={styles.fabIcon}
-              />
-            </Animated.View>
-          </TouchableOpacity>
-        </LinearGradient>
-      </View>
-
-      <AreaSelectionModal
-        visible={showOriginModal}
-        onClose={() => setShowOriginModal(false)}
-        onSelect={setSelectedOriginLocation}
-        title="Select Origin Location"
-        type="origin"
-      />
-      
-      <AreaSelectionModal
-        visible={showDestinationModal}
-        onClose={() => setShowDestinationModal(false)}
-        onSelect={setSelectedDestinationLocation}
-        title="Select Destination Location"
-        type="destination"
-      />
-
-      <ChangelogModal
-        visible={showChangelogModal}
-        onClose={handleChangelogClose}
-      />
-
-      <UpdateModal
-        visible={showUpdateModal}
-        onClose={(wasPostponed) => handleUpdateModalClose(wasPostponed)}
-        metadata={updateMetadata}
-        onUpdateStart={handleUpdateStart}
-        onUpdateComplete={handleUpdateComplete}
-      />
-
-      <Modal
-        visible={showInfoModal}
-        transparent
-        animationType="fade"
-        onRequestClose={closeInfoModal}
-      >
-        <View style={styles.infoModalOverlay}>
-          <View style={styles.infoModalContainer}>
-            <LinearGradient
-              colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
-              style={styles.infoModalContent}
-            >
-              <View style={styles.infoModalHeader}>
-                <Text style={styles.infoModalTitle}>{selectedInfo?.title}</Text>
-                <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalClose}>
-                  <Feather name="x" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
-              <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
-                <View style={styles.infoModalButtonBackground}>
-                  <Text style={styles.infoModalButtonText}>Got it</Text>
-                </View>
-              </TouchableOpacity>
-            </LinearGradient>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={showPackageSizeInfoModal}
-        transparent
-        animationType="fade"
-        onRequestClose={closePackageSizeInfoModal}
-      >
-        <View style={styles.infoModalOverlay}>
-          <View style={styles.infoModalContainer}>
-            <LinearGradient
-              colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
-              style={styles.infoModalContent}
-            >
-              <View style={styles.infoModalHeader}>
-                <Text style={styles.infoModalTitle}>{selectedPackageSizeInfo?.title}</Text>
-                <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalClose}>
-                  <Feather name="x" size={24} color="#fff" />
-                </TouchableOpacity>
-              </View>
-              <Text style={styles.infoModalText}>{selectedPackageSizeInfo?.description}</Text>
-              <View style={styles.deliveryOptionsContainer}>
-                <Text style={styles.deliveryOptionsTitle}>Available Delivery Options:</Text>
-                {selectedPackageSizeInfo?.deliveryOptions.map((option, index) => (
-                  <Text key={index} style={styles.deliveryOption}>• {option}</Text>
+        {/* ⚡ FASTER Currently Reaching Section with Reanimated */}
+        <View style={styles.locationsContainer}>
+          <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
+          <View style={styles.animatedContainer}>
+            <GestureDetector gesture={panGesture}>
+              <Animated.View style={[styles.animatedContent, animatedScrollStyle]}>
+                {tripleLocations.map((location, index) => (
+                  <LocationTag key={`${location.id || location.name}-${index}`} location={location} />
                 ))}
-              </View>
-              <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalButton}>
-                <View style={styles.infoModalButtonBackground}>
-                  <Text style={styles.infoModalButtonText}>Got it</Text>
-                </View>
-              </TouchableOpacity>
-            </LinearGradient>
+              </Animated.View>
+            </GestureDetector>
           </View>
         </View>
-      </Modal>
 
-      <Modal
-        visible={showSuccessModal}
-        transparent
-        animationType="none"
-        onRequestClose={closeSuccessModal}
-      >
-        <View style={styles.successModalOverlay}>
-          <TouchableOpacity 
-            style={styles.successModalTouchable}
-            onPress={closeSuccessModal}
-            activeOpacity={1}
-          >
-            <Animated.View
+        <ScrollView 
+          style={styles.scrollContainer} 
+          contentContainerStyle={styles.scrollContentContainer}
+          showsVerticalScrollIndicator={false}
+        >
+          <View style={styles.calculatorContainer}>
+            <Text style={styles.calculatorTitle}>Cost Calculator</Text>
+            
+            <View style={styles.inputSection}>
+              <Text style={styles.sectionLabel}>Where are you sending from?</Text>
+              <TouchableOpacity 
+                style={[styles.locationInput, selectedOriginLocation && styles.locationInputSelected]}
+                onPress={() => setShowOriginModal(true)}
+              >
+                <Text style={[styles.locationText, selectedOriginLocation && styles.locationTextSelected]}>
+                  {selectedOriginLocation ? 
+                    `${selectedOriginLocation.name}${selectedOriginLocation.locationName ? ` (${selectedOriginLocation.locationName})` : ''}${selectedOriginLocation.type === 'office' ? ` - ${selectedOriginLocation.agentName}` : ''}` : 
+                    'Tap to select origin location'
+                  }
+                </Text>
+                <View style={styles.locationInputIcon}>
+                  {selectedOriginLocation?.type === 'office' && (
+                    <View style={styles.officeTypeTag}>
+                      <Text style={styles.officeTypeText}>OFFICE</Text>
+                    </View>
+                  )}
+                  {selectedOriginLocation?.type === 'area' && (
+                    <View style={styles.areaTypeTag}>
+                      <Text style={styles.areaTypeText}>AREA</Text>
+                    </View>
+                  )}
+                  <Feather name="map-pin" size={20} color={selectedOriginLocation ? "#8B5CF6" : "#666"} />
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.inputSection}>
+              <Text style={styles.sectionLabel}>Where are you sending to?</Text>
+              <TouchableOpacity 
+                style={[styles.locationInput, selectedDestinationLocation && styles.locationInputSelected]}
+                onPress={() => setShowDestinationModal(true)}
+              >
+                <Text style={[styles.locationText, selectedDestinationLocation && styles.locationTextSelected]}>
+                  {selectedDestinationLocation ? 
+                    `${selectedDestinationLocation.name}${selectedDestinationLocation.locationName ? ` (${selectedDestinationLocation.locationName})` : ''}${selectedDestinationLocation.type === 'office' ? ` - ${selectedDestinationLocation.agentName}` : ''}` : 
+                    'Tap to select destination location'
+                  }
+                </Text>
+                <View style={styles.locationInputIcon}>
+                  {selectedDestinationLocation?.type === 'office' && (
+                    <View style={styles.officeTypeTag}>
+                      <Text style={styles.officeTypeText}>OFFICE</Text>
+                    </View>
+                  )}
+                  {selectedDestinationLocation?.type === 'area' && (
+                    <View style={styles.areaTypeTag}>
+                      <Text style={styles.areaTypeText}>AREA</Text>
+                    </View>
+                  )}
+                  <Feather name="map-pin" size={20} color={selectedDestinationLocation ? "#8B5CF6" : "#666"} />
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            {renderPackageSizes()}
+
+            <TouchableOpacity 
+              onPress={calculateCost} 
+              activeOpacity={0.8}
+              disabled={loading || !selectedOriginLocation || !selectedDestinationLocation || !selectedPackageSize}
               style={[
-                styles.successModalContainer,
-                {
-                  opacity: successModalOpacity,
-                  transform: [{ scale: successModalScale }],
-                },
+                styles.calculateButton,
+                (!selectedOriginLocation || !selectedDestinationLocation || !selectedPackageSize) && styles.calculateButtonDisabled
               ]}
             >
-              <LinearGradient
-                colors={[
-                  `${successModalData?.color}15`,
-                  `${successModalData?.color}25`,
-                  `${successModalData?.color}15`,
-                ]}
-                style={[
-                  styles.successModalContent,
-                  {
-                    borderColor: `${successModalData?.color}40`,
-                    shadowColor: successModalData?.color,
-                  }
-                ]}
+              <LinearGradient 
+                colors={['#7c3aed', '#3b82f6', '#10b981']} 
+                style={styles.calculateButtonGradient}
               >
-                <View style={styles.successModalHeader}>
-                  <View 
-                    style={[
-                      styles.successModalIconContainer,
-                      { 
-                        backgroundColor: `${successModalData?.color}20`,
-                        shadowColor: successModalData?.color,
-                      }
-                    ]}
-                  >
-                    <Feather 
-                      name={successModalData?.icon as any} 
-                      size={28} 
-                      color={successModalData?.color} 
-                    />
-                  </View>
-                  <TouchableOpacity 
-                    onPress={closeSuccessModal} 
-                    style={styles.successModalClose}
-                  >
-                    <Feather name="x" size={20} color="#fff" />
+                <Text style={styles.calculateButtonText}>
+                  {loading ? 'Calculating...' : 'Calculate Cost'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {renderPricingResults()}
+          </View>
+        </ScrollView>
+
+        {fabMenuOpen && (
+          <Animated.View style={[styles.fabOverlay, fabOverlayStyle]}>
+            <TouchableOpacity
+              style={styles.fabOverlayTouchable}
+              onPress={closeFabMenu}
+              activeOpacity={1}
+            />
+          </Animated.View>
+        )}
+
+        {fabMenuOpen && (
+          <View style={styles.fabOptionsContainer}>
+            {fabOptions.map((option, index) => renderFabOption(option, index))}
+          </View>
+        )}
+
+        <View style={styles.fabContainer}>
+          <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
+            <TouchableOpacity
+              style={styles.fabTouchable}
+              onPress={handleFabPress}
+              activeOpacity={0.8}
+            >
+              <Animated.View style={[styles.fabIconContainer, fabIconStyle]}>
+                <Feather 
+                  name="plus" 
+                  size={24} 
+                  color="white" 
+                  style={styles.fabIcon}
+                />
+              </Animated.View>
+            </TouchableOpacity>
+          </LinearGradient>
+        </View>
+
+        <AreaSelectionModal
+          visible={showOriginModal}
+          onClose={() => setShowOriginModal(false)}
+          onSelect={setSelectedOriginLocation}
+          title="Select Origin Location"
+          type="origin"
+        />
+        
+        <AreaSelectionModal
+          visible={showDestinationModal}
+          onClose={() => setShowDestinationModal(false)}
+          onSelect={setSelectedDestinationLocation}
+          title="Select Destination Location"
+          type="destination"
+        />
+
+        <ChangelogModal
+          visible={showChangelogModal}
+          onClose={handleChangelogClose}
+        />
+
+        <UpdateModal
+          visible={showUpdateModal}
+          onClose={(wasPostponed) => handleUpdateModalClose(wasPostponed)}
+          metadata={updateMetadata}
+          onUpdateStart={handleUpdateStart}
+          onUpdateComplete={handleUpdateComplete}
+        />
+
+        <Modal
+          visible={showInfoModal}
+          transparent
+          animationType="fade"
+          onRequestClose={closeInfoModal}
+        >
+          <View style={styles.infoModalOverlay}>
+            <View style={styles.infoModalContainer}>
+              <LinearGradient
+                colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+                style={styles.infoModalContent}
+              >
+                <View style={styles.infoModalHeader}>
+                  <Text style={styles.infoModalTitle}>{selectedInfo?.title}</Text>
+                  <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalClose}>
+                    <Feather name="x" size={24} color="#fff" />
                   </TouchableOpacity>
                 </View>
-                
-                <Text style={[styles.successModalTitle, { color: successModalData?.color }]}>
-                  {successModalData?.title}
-                </Text>
-                
-                <Text style={styles.successModalMessage}>
-                  {successModalData?.message}
-                </Text>
-                
-                <View style={styles.successModalDetails}>
-                  <Text style={styles.successModalDetailLabel}>Tracking Code:</Text>
-                  <Text style={[styles.successModalDetailValue, { color: successModalData?.color }]}>
-                    {successModalData?.trackingNumber}
-                  </Text>
-                </View>
-                
-                <View style={styles.successModalDetails}>
-                  <Text style={styles.successModalDetailLabel}>Status:</Text>
-                  <Text style={styles.successModalDetailValue}>
-                    {successModalData?.status}
-                  </Text>
-                </View>
+                <Text style={styles.infoModalText}>{selectedInfo?.description}</Text>
+                <TouchableOpacity onPress={closeInfoModal} style={styles.infoModalButton}>
+                  <View style={styles.infoModalButtonBackground}>
+                    <Text style={styles.infoModalButtonText}>Got it</Text>
+                  </View>
+                </TouchableOpacity>
               </LinearGradient>
-            </Animated.View>
-          </TouchableOpacity>
-        </View>
-      </Modal>
+            </View>
+          </View>
+        </Modal>
 
-      <PackageCreationModal
-        visible={showPackageModal}
-        onClose={() => setShowPackageModal(false)}
-        onSubmit={handlePackageSubmit}
-        mode="create"
-      />
+        <Modal
+          visible={showPackageSizeInfoModal}
+          transparent
+          animationType="fade"
+          onRequestClose={closePackageSizeInfoModal}
+        >
+          <View style={styles.infoModalOverlay}>
+            <View style={styles.infoModalContainer}>
+              <LinearGradient
+                colors={['rgba(26, 26, 46, 0.95)', 'rgba(22, 33, 62, 0.95)']}
+                style={styles.infoModalContent}
+              >
+                <View style={styles.infoModalHeader}>
+                  <Text style={styles.infoModalTitle}>{selectedPackageSizeInfo?.title}</Text>
+                  <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalClose}>
+                    <Feather name="x" size={24} color="#fff" />
+                  </TouchableOpacity>
+                </View>
+                <Text style={styles.infoModalText}>{selectedPackageSizeInfo?.description}</Text>
+                <View style={styles.deliveryOptionsContainer}>
+                  <Text style={styles.deliveryOptionsTitle}>Available Delivery Options:</Text>
+                  {selectedPackageSizeInfo?.deliveryOptions.map((option, index) => (
+                    <Text key={index} style={styles.deliveryOption}>• {option}</Text>
+                  ))}
+                </View>
+                <TouchableOpacity onPress={closePackageSizeInfoModal} style={styles.infoModalButton}>
+                  <View style={styles.infoModalButtonBackground}>
+                    <Text style={styles.infoModalButtonText}>Got it</Text>
+                  </View>
+                </TouchableOpacity>
+              </LinearGradient>
+            </View>
+          </View>
+        </Modal>
 
-      <FragileDeliveryModal
-        visible={showFragileModal}
-        onClose={() => setShowFragileModal(false)}
-        onSubmit={handleFragileSubmit}
-        currentLocation={null}
-        mode="create"
-      />
+        <Modal
+          visible={showSuccessModal}
+          transparent
+          animationType="none"
+          onRequestClose={closeSuccessModal}
+        >
+          <View style={styles.successModalOverlay}>
+            <TouchableOpacity 
+              style={styles.successModalTouchable}
+              onPress={closeSuccessModal}
+              activeOpacity={1}
+            >
+              <Animated.View style={[styles.successModalContainer, successModalAnimatedStyle]}>
+                <LinearGradient
+                  colors={[
+                    `${successModalData?.color}15`,
+                    `${successModalData?.color}25`,
+                    `${successModalData?.color}15`,
+                  ]}
+                  style={[
+                    styles.successModalContent,
+                    {
+                      borderColor: `${successModalData?.color}40`,
+                      shadowColor: successModalData?.color,
+                    }
+                  ]}
+                >
+                  <View style={styles.successModalHeader}>
+                    <View 
+                      style={[
+                        styles.successModalIconContainer,
+                        { 
+                          backgroundColor: `${successModalData?.color}20`,
+                          shadowColor: successModalData?.color,
+                        }
+                      ]}
+                    >
+                      <Feather 
+                        name={successModalData?.icon as any} 
+                        size={28} 
+                        color={successModalData?.color} 
+                      />
+                    </View>
+                    <TouchableOpacity 
+                      onPress={closeSuccessModal} 
+                      style={styles.successModalClose}
+                    >
+                      <Feather name="x" size={20} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
+                  
+                  <Text style={[styles.successModalTitle, { color: successModalData?.color }]}>
+                    {successModalData?.title}
+                  </Text>
+                  
+                  <Text style={styles.successModalMessage}>
+                    {successModalData?.message}
+                  </Text>
+                  
+                  <View style={styles.successModalDetails}>
+                    <Text style={styles.successModalDetailLabel}>Tracking Code:</Text>
+                    <Text style={[styles.successModalDetailValue, { color: successModalData?.color }]}>
+                      {successModalData?.trackingNumber}
+                    </Text>
+                  </View>
+                  
+                  <View style={styles.successModalDetails}>
+                    <Text style={styles.successModalDetailLabel}>Status:</Text>
+                    <Text style={styles.successModalDetailValue}>
+                      {successModalData?.status}
+                    </Text>
+                  </View>
+                </LinearGradient>
+              </Animated.View>
+            </TouchableOpacity>
+          </View>
+        </Modal>
 
-      <CollectDeliverModal
-        visible={showCollectModal}
-        onClose={() => setShowCollectModal(false)}
-        onSubmit={handleCollectSubmit}
-        currentLocation={null}
-        mode="create"
-      />
-    </SafeAreaView>
+        <PackageCreationModal
+          visible={showPackageModal}
+          onClose={() => setShowPackageModal(false)}
+          onSubmit={handlePackageSubmit}
+          mode="create"
+        />
+
+        <FragileDeliveryModal
+          visible={showFragileModal}
+          onClose={() => setShowFragileModal(false)}
+          onSubmit={handleFragileSubmit}
+          currentLocation={null}
+          mode="create"
+        />
+
+        <CollectDeliverModal
+          visible={showCollectModal}
+          onClose={() => setShowCollectModal(false)}
+          onSubmit={handleCollectSubmit}
+          currentLocation={null}
+          mode="create"
+        />
+      </SafeAreaView>
+    </GestureHandlerRootView>
   );
 }
 

@@ -1,34 +1,32 @@
-// app/(drawer)/cart.tsx - ENHANCED: Added Edit functionality with modal routing
-import React, { useState, useEffect, useCallback } from 'react';
-import {
-  StyleSheet,
-  Text,
-  View,
-  ScrollView,
-  TouchableOpacity,
-  ActivityIndicator,
-  RefreshControl,
-  StatusBar,
-} from 'react-native';
-import { LinearGradient } from 'expo-linear-gradient';
-import { Feather } from '@expo/vector-icons';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import Toast from 'react-native-toast-message';
-import api from '@/lib/api';
-import colors from '@/theme/colors';
+// app/(drawer)/cart.tsx - FIXED: Proper navigation integration
+import CollectDeliverModal from '@/components/CollectDeliverModal';
+import FragileDeliveryModal from '@/components/FragileDeliveryModal';
 import GLTHeader from '@/components/GLTHeader';
 import MpesaPaymentModal from '@/components/MpesaPaymentModal';
-import PackageTypeSelectionModal from '@/components/PackageTypeSelectionModal';
-
-// ENHANCED: Import modal components for edit functionality
 import PackageCreationModal from '@/components/PackageCreationModal';
-import FragileDeliveryModal from '@/components/FragileDeliveryModal';
-import CollectDeliverModal from '@/components/CollectDeliverModal';
+import PackageTypeSelectionModal from '@/components/PackageTypeSelectionModal';
+import api from '@/lib/api';
+import colors from '@/theme/colors';
+import { Feather } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
+import React, { useCallback, useEffect, useState } from 'react';
+import {
+  ActivityIndicator,
+  RefreshControl,
+  ScrollView,
+  StatusBar,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import Toast from 'react-native-toast-message';
 
-// Import Enhanced NavigationHelper
+// FIXED: Import simplified NavigationHelper
 import { NavigationHelper } from '@/lib/helpers/navigation';
 
-// ENHANCED: Comprehensive Package interface matching track.tsx
+// Comprehensive Package interface
 interface Package {
   id: string;
   code: string;
@@ -43,13 +41,13 @@ interface Package {
   created_at: string;
   updated_at?: string;
   
-  // CRITICAL: Area and agent IDs for proper auto-population
+  // Area and agent IDs for proper auto-population
   origin_area_id?: string;
   destination_area_id?: string;
   origin_agent_id?: string;
   destination_agent_id?: string;
   
-  // Area and agent relationship objects (may contain nested IDs)
+  // Area and agent relationship objects
   origin_area?: {
     id: string;
     name: string;
@@ -97,7 +95,7 @@ interface Package {
   business_phone?: string;
   business_id?: string;
   
-  // Receiver name variations (for compatibility)
+  // Receiver name variations
   recipient_name?: string;
   receiver?: { name: string };
   recipient?: { name: string };
@@ -125,11 +123,10 @@ interface Package {
   delivery_longitude?: number;
 }
 
-// ENHANCED: Modal management with comprehensive type support
+// Modal management types
 type ModalType = 'package' | 'fragile' | 'collection';
 type ModalAction = 'create' | 'edit' | 'resubmit';
 
-// Enhanced modal state interface
 interface ModalState {
   type: ModalType | null;
   action: ModalAction;
@@ -147,7 +144,6 @@ export default function CartPage() {
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showPackageTypeModal, setShowPackageTypeModal] = useState(false);
 
-  // ENHANCED: Modal state management with comprehensive support
   const [modalState, setModalState] = useState<ModalState>({
     type: null,
     action: 'create',
@@ -155,32 +151,22 @@ export default function CartPage() {
     isVisible: false
   });
 
-  // Enhanced back navigation using NavigationHelper
-  const handleGoBack = useCallback(async () => {
+  // FIXED: Simplified back navigation handler
+  const handleGoBack = useCallback(() => {
     console.log('🔙 Cart: Going back...');
     
-    try {
-      const success = await NavigationHelper.goBack({
-        fallbackRoute: '/(drawer)/',
-        replaceIfNoHistory: true
-      });
-      
-      if (!success) {
-        console.log('🔙 Cart: Back navigation used fallback');
-      }
-    } catch (error) {
-      console.error('🔙 Cart: Back navigation failed:', error);
-    }
+    // Use simplified NavigationHelper.goBack with fallback
+    NavigationHelper.goBack('/(drawer)/');
   }, []);
 
-  // Calculate total cost for selected packages
+  // Calculate total cost
   const getTotalCost = useCallback(() => {
     return packages
       .filter(pkg => selectedPackages.has(pkg.id))
       .reduce((total, pkg) => total + pkg.cost, 0);
   }, [packages, selectedPackages]);
 
-  // ENHANCED: Intelligent modal routing with comprehensive package type detection
+  // Intelligent modal routing
   const determineModalType = useCallback((packageItem: Package): ModalType => {
     console.log('🎯 Determining modal type for package:', {
       code: packageItem.code,
@@ -191,14 +177,14 @@ export default function CartPage() {
       has_coordinates: !!(packageItem.pickup_latitude && packageItem.pickup_longitude)
     });
 
-    // Priority 1: Explicit delivery type matching
+    // Priority 1: Explicit delivery type
     if (packageItem.delivery_type === 'fragile') {
-      console.log('➡️ Explicit fragile delivery type - routing to FragileDeliveryModal');
+      console.log('➡️ Fragile delivery type - routing to FragileDeliveryModal');
       return 'fragile';
     }
     
     if (packageItem.delivery_type === 'collection') {
-      console.log('➡️ Explicit collection delivery type - routing to CollectDeliverModal');
+      console.log('➡️ Collection delivery type - routing to CollectDeliverModal');
       return 'collection';
     }
 
@@ -223,12 +209,12 @@ export default function CartPage() {
     // Priority 4: Package description analysis
     const description = packageItem.package_description?.toLowerCase() || '';
     if (description.includes('collection') || description.includes('collect')) {
-      console.log('➡️ Collection keywords in description - routing to CollectDeliverModal');
+      console.log('➡️ Collection keywords - routing to CollectDeliverModal');
       return 'collection';
     }
 
     if (description.includes('fragile') || description.includes('delicate') || description.includes('careful')) {
-      console.log('➡️ Fragile keywords in description - routing to FragileDeliveryModal');
+      console.log('➡️ Fragile keywords - routing to FragileDeliveryModal');
       return 'fragile';
     }
     
@@ -240,11 +226,11 @@ export default function CartPage() {
     }
 
     // Default fallback
-    console.log('➡️ No specific indicators found - defaulting to PackageCreationModal');
+    console.log('➡️ Defaulting to PackageCreationModal');
     return 'package';
   }, []);
 
-  // ENHANCED: Edit package handler with comprehensive modal routing and logging
+  // Edit package handler
   const handleEditPackage = useCallback((packageItem: Package) => {
     console.log('🔧 ==================== EDIT PACKAGE ====================');
     console.log('📦 Package details:', {
@@ -294,7 +280,7 @@ export default function CartPage() {
     });
   }, []);
 
-  // ENHANCED: Package submission handler with comprehensive success tracking
+  // Package submission handler
   const handlePackageSubmitted = useCallback(async (packageData?: any) => {
     console.log('✅ ================ PACKAGE SUBMISSION SUCCESS ================');
     console.log('📦 Submission details:', {
@@ -311,7 +297,7 @@ export default function CartPage() {
     console.log('🔄 Refreshing packages list...');
     loadUnpaidPackages(true);
     
-    // Show success message based on action
+    // Show success message
     const actionText = modalState.action === 'edit' ? 'updated' : 
                       modalState.action === 'resubmit' ? 'resubmitted' : 'created';
     
@@ -333,9 +319,8 @@ export default function CartPage() {
     console.log('✅ =======================================================');
   }, [modalState, handleCloseModal]);
 
-  // ENHANCED: Package data transformation with comprehensive field mapping
+  // Package data transformation
   const transformPackageData = useCallback((pkg: any): Package => {
-    // CRITICAL: Extract and normalize area/agent IDs for auto-population
     const extractAreaId = (area: any): string | undefined => {
       if (typeof area === 'string') return area;
       if (area && typeof area === 'object') return area.id || area.area_id;
@@ -362,31 +347,26 @@ export default function CartPage() {
       created_at: pkg.created_at || new Date().toISOString(),
       updated_at: pkg.updated_at || pkg.created_at || new Date().toISOString(),
       
-      // CRITICAL: Area and agent IDs for modal auto-population
       origin_area_id: pkg.origin_area_id || extractAreaId(pkg.origin_area) || extractAreaId(pkg.origin_agent?.area),
       destination_area_id: pkg.destination_area_id || extractAreaId(pkg.destination_area) || extractAreaId(pkg.destination_agent?.area),
       origin_agent_id: pkg.origin_agent_id || extractAgentId(pkg.origin_agent),
       destination_agent_id: pkg.destination_agent_id || extractAgentId(pkg.destination_agent),
       
-      // Area and agent relationship objects
       origin_area: pkg.origin_area,
       destination_area: pkg.destination_area,
       origin_agent: pkg.origin_agent,
       destination_agent: pkg.destination_agent,
       
-      // Location and delivery details
       delivery_location: pkg.delivery_location,
       pickup_location: pkg.pickup_location,
       sender_phone: pkg.sender_phone,
       sender_email: pkg.sender_email,
       receiver_email: pkg.receiver_email,
       
-      // Business information
       business_name: pkg.business_name,
       business_phone: pkg.business_phone,
       business_id: pkg.business_id,
       
-      // Receiver name variations (for compatibility)
       recipient_name: pkg.recipient_name || pkg.receiver_name,
       receiver: pkg.receiver || { name: pkg.receiver_name },
       recipient: pkg.recipient || { name: pkg.receiver_name },
@@ -394,12 +374,10 @@ export default function CartPage() {
       from_location: pkg.from_location || pkg.origin_area?.name,
       to_location: pkg.to_location || pkg.destination_area?.name,
       
-      // Package details
       package_description: pkg.package_description,
       package_size: pkg.package_size,
       special_instructions: pkg.special_instructions,
       
-      // Collection service specific fields
       shop_name: pkg.shop_name,
       shop_contact: pkg.shop_contact,
       collection_address: pkg.collection_address,
@@ -407,7 +385,6 @@ export default function CartPage() {
       item_value: pkg.item_value,
       item_description: pkg.item_description,
       
-      // Fragile service specific fields
       pickup_latitude: pkg.pickup_latitude,
       pickup_longitude: pkg.pickup_longitude,
       delivery_latitude: pkg.delivery_latitude,
@@ -415,7 +392,7 @@ export default function CartPage() {
     };
   }, []);
 
-  // ENHANCED: Load ALL unpaid packages with comprehensive data transformation
+  // Load unpaid packages
   const loadUnpaidPackages = useCallback(async (isRefresh = false) => {
     try {
       if (isRefresh) {
@@ -424,28 +401,26 @@ export default function CartPage() {
         setIsLoading(true);
       }
 
-      // FIXED: Request all packages by setting a high per_page limit
       const response = await api.get('/api/v1/packages', {
         params: {
           state: 'pending_unpaid',
-          per_page: 1000, // Set high limit to get all packages
+          per_page: 1000,
           page: 1
         }
       });
       
       if (response.data.success) {
-        // ENHANCED: Transform packages with comprehensive field mapping
         const unpaidPackages = response.data.data.map((pkg: any) => transformPackageData(pkg));
         
         setPackages(unpaidPackages);
-        console.log(`Loaded ${unpaidPackages.length} unpaid packages`);
+        console.log(`✅ Loaded ${unpaidPackages.length} unpaid packages`);
         
-        // Auto-select all packages by default
+        // Auto-select all packages
         const allPackageIds = new Set(unpaidPackages.map(pkg => pkg.id));
         setSelectedPackages(allPackageIds);
       }
     } catch (error: any) {
-      console.error('Failed to load unpaid packages:', error);
+      console.error('❌ Failed to load unpaid packages:', error);
       Toast.show({
         type: 'error',
         text1: 'Failed to Load Packages',
@@ -462,7 +437,7 @@ export default function CartPage() {
     loadUnpaidPackages();
   }, [loadUnpaidPackages]);
 
-  // Handle package selection
+  // Package selection handlers
   const togglePackageSelection = (packageId: string) => {
     const newSelected = new Set(selectedPackages);
     if (newSelected.has(packageId)) {
@@ -473,18 +448,16 @@ export default function CartPage() {
     setSelectedPackages(newSelected);
   };
 
-  // Select all packages
   const selectAllPackages = () => {
     const allPackageIds = new Set(packages.map(pkg => pkg.id));
     setSelectedPackages(allPackageIds);
   };
 
-  // Deselect all packages
   const deselectAllPackages = () => {
     setSelectedPackages(new Set());
   };
 
-  // Handle payment
+  // Payment handlers
   const handlePayment = () => {
     if (selectedPackages.size === 0) {
       Toast.show({
@@ -498,12 +471,10 @@ export default function CartPage() {
     setShowPaymentModal(true);
   };
 
-  // Get selected packages for payment
   const getSelectedPackages = () => {
     return packages.filter(pkg => selectedPackages.has(pkg.id));
   };
 
-  // Handle payment success
   const handlePaymentSuccess = () => {
     setShowPaymentModal(false);
     loadUnpaidPackages(true);
@@ -515,7 +486,7 @@ export default function CartPage() {
     });
   };
 
-  // Get delivery type display
+  // Delivery type helpers
   const getDeliveryTypeDisplay = (deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return 'Home';
@@ -526,7 +497,6 @@ export default function CartPage() {
     }
   };
 
-  // Get delivery type color
   const getDeliveryTypeColor = (deliveryType: string) => {
     switch (deliveryType) {
       case 'doorstep': return '#8b5cf6';
@@ -537,7 +507,7 @@ export default function CartPage() {
     }
   };
 
-  // ENHANCED: Render package item with edit button
+  // Render package item
   const renderPackageItem = (pkg: Package) => {
     const isSelected = selectedPackages.has(pkg.id);
     
@@ -556,7 +526,7 @@ export default function CartPage() {
           }
           style={styles.packageCardGradient}
         >
-          {/* Selection Indicator */}
+          {/* Package Header */}
           <View style={styles.packageHeader}>
             <View style={styles.packageInfo}>
               <Text style={styles.packageCode}>{pkg.code}</Text>
@@ -595,12 +565,12 @@ export default function CartPage() {
             <Text style={styles.costValue}>KES {pkg.cost.toLocaleString()}</Text>
           </View>
 
-          {/* ENHANCED: Action buttons section with Edit button */}
+          {/* Edit Button */}
           <View style={styles.actionButtonsSection}>
             <TouchableOpacity 
               style={styles.editButton}
               onPress={(e) => {
-                e.stopPropagation(); // Prevent triggering package selection
+                e.stopPropagation();
                 handleEditPackage(pkg);
               }}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -642,7 +612,7 @@ export default function CartPage() {
     <View style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor={colors.background} />
       
-      {/* Header with Enhanced Navigation */}
+      {/* Header with Fixed Navigation */}
       <GLTHeader 
         title="Cart"
         showBackButton={true}
@@ -764,7 +734,7 @@ export default function CartPage() {
         onClose={() => setShowPackageTypeModal(false)}
       />
 
-      {/* ENHANCED: Modal rendering with comprehensive auto-population support */}
+      {/* Edit Modals */}
       <PackageCreationModal
         visible={modalState.isVisible && modalState.type === 'package'}
         onClose={handleCloseModal}
@@ -803,7 +773,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   
-  // Loading
   loadingContainer: {
     flex: 1,
     alignItems: 'center',
@@ -816,7 +785,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
   
-  // Selection Controls
   selectionControls: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(124, 58, 237, 0.2)',
@@ -860,7 +828,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Package List
   packagesList: {
     flex: 1,
   },
@@ -869,7 +836,6 @@ const styles = StyleSheet.create({
     paddingVertical: 16,
   },
   
-  // Package Card
   packageCard: {
     marginBottom: 12,
     borderRadius: 12,
@@ -947,7 +913,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   
-  // ENHANCED: Action buttons section with Edit button
   actionButtonsSection: {
     alignItems: 'flex-end',
   },
@@ -968,7 +933,6 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   
-  // Add Package Button
   addPackageButton: {
     marginTop: 8,
     marginBottom: 16,
@@ -995,7 +959,6 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   
-  // Bottom Payment Bar
   bottomBar: {
     borderTopWidth: 1,
     borderTopColor: 'rgba(124, 58, 237, 0.2)',
@@ -1026,7 +989,6 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   
-  // Empty State
   emptyStateContainer: {
     flex: 1,
     alignItems: 'center',

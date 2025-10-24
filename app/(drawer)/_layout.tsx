@@ -1,24 +1,23 @@
-// app/(drawer)/_layout.tsx - Fixed role detection logic
-import React, { useEffect, useState, useCallback } from 'react';
-import { Dimensions, AppState, AppStateStatus } from 'react-native';
-import { useRouter, useSegments } from 'expo-router';
+// app/(drawer)/_layout.tsx - Fixed role detection logic and removed non-existent NavigationHelper calls
 import { useFocusEffect } from '@react-navigation/native';
+import { useRouter, useSegments } from 'expo-router';
+import React, { useCallback, useEffect, useState } from 'react';
+import { AppState, AppStateStatus, Dimensions } from 'react-native';
 
-import { Drawer } from 'expo-router/drawer';
 import {
   Feather,
   Ionicons,
   MaterialIcons,
 } from '@expo/vector-icons';
+import { Drawer } from 'expo-router/drawer';
 import { ColorValue } from 'react-native';
 
-import colors from '@/theme/colors';
 import CustomDrawerContent from '@/components/CustomDrawerContent';
-import { bootstrapApp } from '@/lib/bootstrap';
-import api from '@/lib/api';
 import LoadingSplashScreen from '@/components/LoadingSplashScreen';
 import { accountManager } from '@/lib/AccountManager';
-import { NavigationHelper } from '@/lib/helpers/navigation';
+import api from '@/lib/api';
+import { bootstrapApp } from '@/lib/bootstrap';
+import colors from '@/theme/colors';
 
 const drawerIcons: Record<string, { name: string; lib: any }> = {
   index: { name: 'home', lib: Feather },
@@ -38,7 +37,7 @@ type AuthState = 'loading' | 'authenticated' | 'redirect_admin' | 'redirect_supp
 
 // Helper function to determine effective role from user data - FIXED
 const getEffectiveRole = (userData: any): string => {
-  // First priority: use primary_role if it exists (removed the !== 'client' condition)
+  // First priority: use primary_role if it exists
   if (userData.primary_role) {
     return userData.primary_role;
   }
@@ -251,14 +250,8 @@ export default function DrawerLayout() {
       console.log('🧭 Client role - entering drawer layout');
       setAuthState('authenticated');
       
-      setTimeout(async () => {
-        try {
-          await NavigationHelper.trackRouteChange('/', {});
-          console.log('✅ Home screen tracked');
-        } catch (error) {
-          console.error('❌ Failed to track home screen:', error);
-        }
-      }, 1000);
+      // FIXED: Removed NavigationHelper.trackRouteChange call as it doesn't exist
+      console.log('✅ Home screen ready');
     }
   };
 
@@ -334,20 +327,11 @@ export default function DrawerLayout() {
     }
   }, [authState, router]);
 
+  // FIXED: Removed NavigationHelper.getCurrentRoute call as it doesn't exist
   useFocusEffect(
     useCallback(() => {
       if (authState === 'authenticated') {
-        setTimeout(async () => {
-          try {
-            const currentRoute = NavigationHelper.getCurrentRoute();
-            if (!currentRoute || currentRoute === null) {
-              await NavigationHelper.trackRouteChange('/', {});
-              console.log('✅ Home screen re-tracked on focus');
-            }
-          } catch (error) {
-            console.error('❌ Failed to re-track home screen:', error);
-          }
-        }, 500);
+        console.log('✅ Home screen focused and ready');
       }
     }, [authState])
   );
