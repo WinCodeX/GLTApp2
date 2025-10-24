@@ -1,8 +1,8 @@
-// app/settings.tsx - Updated with Updates Section and Toast Messages
+// app/settings.tsx - Updated with Custom Update Modal
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useCallback, useState } from 'react';
-import { ActivityIndicator, Alert, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Modal, ScrollView, SectionList, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 
 import { useAppNavigation, useHardwareBackButton, useStackNavigation } from '../../lib/hooks/useStackNavigation';
 import UpdateService from '../../lib/services/updateService';
@@ -40,10 +40,27 @@ const SETTINGS_SECTIONS = [
   },
 ];
 
+interface UpdateModalState {
+  visible: boolean;
+  type: 'checking' | 'available' | 'upToDate' | 'error' | 'downloading' | 'installing';
+  title: string;
+  message: string;
+  metadata?: any;
+  downloadProgress?: number;
+  icon?: string;
+  iconColor?: string;
+}
+
 export default function SettingsScreen() {
   const [search, setSearch] = useState('');
   const [isCheckingUpdates, setIsCheckingUpdates] = useState(false);
   const [currentVersion, setCurrentVersion] = useState<string>('');
+  const [modalState, setModalState] = useState<UpdateModalState>({
+    visible: false,
+    type: 'checking',
+    title: '',
+    message: '',
+  });
   
   const { goBack, push } = useStackNavigation();
   const navigation = useAppNavigation();
@@ -69,24 +86,27 @@ export default function SettingsScreen() {
     goBack('/(drawer)/');
   }, [goBack]);
 
-  const showToast = useCallback((title: string, message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const iconMap = {
-      success: '✅',
-      error: '❌',
-      info: 'ℹ️',
-    };
+  const closeModal = useCallback(() => {
+    setModalState(prev => ({ ...prev, visible: false }));
+  }, []);
 
-    Alert.alert(
-      `${iconMap[type]} ${title}`,
-      message,
-      [{ text: 'OK', style: 'default' }],
-      { cancelable: true }
-    );
+  const showModal = useCallback((state: Partial<UpdateModalState>) => {
+    setModalState(prev => ({
+      ...prev,
+      ...state,
+      visible: true,
+    }));
   }, []);
 
   const handleCheckForUpdates = useCallback(async () => {
     if (isCheckingUpdates) {
-      showToast('Update Check', 'Update check already in progress...', 'info');
+      showModal({
+        type: 'error',
+        title: 'Update Check',
+        message: 'Update check already in progress...',
+        icon: 'info',
+        iconColor: '#8b5cf6',
+      });
       return;
     }
 
@@ -94,13 +114,24 @@ export default function SettingsScreen() {
       setIsCheckingUpdates(true);
       console.log('🔄 Settings: Checking for updates...');
 
+      // Show checking modal
+      showModal({
+        type: 'checking',
+        title: 'Checking for Updates',
+        message: 'Please wait while we check for available updates...',
+        icon: 'refresh',
+        iconColor: '#8b5cf6',
+      });
+
       // Check if updates are supported
       if (!updateService.isUpdateSupported()) {
-        showToast(
-          'Updates Not Supported',
-          'Your device or platform does not support automatic updates. Please check the app store manually.',
-          'error'
-        );
+        showModal({
+          type: 'error',
+          title: 'Updates Not Supported',
+          message: 'Your device or platform does not support automatic updates. Please check the app store manually.',
+          icon: 'alert-circle',
+          iconColor: '#ef4444',
+        });
         return;
       }
 
@@ -118,32 +149,22 @@ export default function SettingsScreen() {
         const changelogText = metadata.changelog?.join('\n• ') || 'Bug fixes and improvements';
         const sizeText = metadata.file_size ? ` (${formatFileSize(metadata.file_size)})` : '';
 
-        Alert.alert(
-          `${metadata.force_update ? '⚠️ Required Update' : '🎉 Update Available'}`,
-          `${updateType} Update - Version ${metadata.version}${sizeText}\n\n` +
-          `What's New:\n• ${changelogText}\n\n` +
-          `${isOTA ? 'This will update your app instantly without changing the APK version.' : 'This will download and install a new APK file.'}`,
-          [
-            ...(metadata.force_update ? [] : [
-              {
-                text: 'Later',
-                style: 'cancel',
-                onPress: () => showToast('Update Postponed', 'You can check for updates anytime from Settings.', 'info'),
-              }
-            ]),
-            {
-              text: isOTA ? 'Update Now' : 'Download',
-              onPress: () => handleInstallUpdate(metadata),
-            }
-          ],
-          { cancelable: !metadata.force_update }
-        );
+        showModal({
+          type: 'available',
+          title: metadata.force_update ? '⚠️ Required Update' : '🎉 Update Available',
+          message: `${updateType} Update - Version ${metadata.version}${sizeText}\n\nWhat's New:\n• ${changelogText}\n\n${isOTA ? 'This will update your app instantly without changing the APK version.' : 'This will download and install a new APK file.'}`,
+          metadata,
+          icon: metadata.force_update ? 'alert-circle' : 'download',
+          iconColor: metadata.force_update ? '#f59e0b' : '#10b981',
+        });
       } else {
-        showToast(
-          'You\'re Up to Date!',
-          `GLT version ${currentVersion} is the latest version available. No updates needed.`,
-          'success'
-        );
+        showModal({
+          type: 'upToDate',
+          title: 'You\'re Up to Date!',
+          message: `GLT version ${currentVersion} is the latest version available. No updates needed.`,
+          icon: 'check-circle',
+          iconColor: '#10b981',
+        });
       }
     } catch (error: any) {
       console.error('❌ Settings: Update check failed:', error);
@@ -171,12 +192,18 @@ export default function SettingsScreen() {
         errorMessage = `Error: ${error.message}`;
       }
 
-      showToast(errorTitle, errorMessage, 'error');
+      showModal({
+        type: 'error',
+        title: errorTitle,
+        message: errorMessage,
+        icon: 'x-circle',
+        iconColor: '#ef4444',
+      });
     } finally {
       setIsCheckingUpdates(false);
       console.log('✅ Settings: Update check completed');
     }
-  }, [isCheckingUpdates, currentVersion, showToast, updateService]);
+  }, [isCheckingUpdates, currentVersion, showModal, updateService]);
 
   const handleInstallUpdate = async (metadata: any) => {
     try {
@@ -184,22 +211,39 @@ export default function SettingsScreen() {
 
       if (metadata.update_type === 'ota') {
         console.log('🔄 Settings: Installing OTA update...');
-        showToast('Installing Update', 'Applying OTA update... The app will reload automatically.', 'info');
+        
+        showModal({
+          type: 'installing',
+          title: 'Installing Update',
+          message: 'Applying OTA update... The app will reload automatically.',
+          icon: 'download-cloud',
+          iconColor: '#8b5cf6',
+        });
         
         await updateService.installUpdate(metadata);
         // App reloads automatically after OTA
       } else {
         console.log('⬇️ Settings: Downloading APK update...');
-        showToast('Downloading Update', 'Starting download... You will be notified when ready to install.', 'info');
+        
+        showModal({
+          type: 'downloading',
+          title: 'Downloading Update',
+          message: 'Starting download... You will be notified when ready to install.',
+          downloadProgress: 0,
+          icon: 'download',
+          iconColor: '#8b5cf6',
+        });
         
         const success = await updateService.downloadUpdate(metadata);
         
         if (success) {
-          showToast(
-            'Download Complete',
-            `GLT version ${metadata.version} is ready to install. Tap the notification to install now.`,
-            'success'
-          );
+          showModal({
+            type: 'upToDate',
+            title: 'Download Complete',
+            message: `GLT version ${metadata.version} is ready to install. The APK has been saved to your Downloads folder.`,
+            icon: 'check-circle',
+            iconColor: '#10b981',
+          });
         } else {
           throw new Error('Download failed');
         }
@@ -226,7 +270,13 @@ export default function SettingsScreen() {
         errorMessage = `Error: ${error.message}`;
       }
 
-      showToast(errorTitle, errorMessage, 'error');
+      showModal({
+        type: 'error',
+        title: errorTitle,
+        message: errorMessage,
+        icon: 'x-circle',
+        iconColor: '#ef4444',
+      });
     } finally {
       setIsCheckingUpdates(false);
     }
@@ -244,7 +294,6 @@ export default function SettingsScreen() {
     
     try {
       if (item.type === 'action') {
-        // Handle action items (like Check for Updates)
         switch (item.action) {
           case 'checkUpdates':
             handleCheckForUpdates();
@@ -253,15 +302,20 @@ export default function SettingsScreen() {
             console.warn('Unknown action:', item.action);
         }
       } else {
-        // Handle navigation items
         push(item.route);
         console.log('✅ Settings: Successfully navigated to:', item.route);
       }
     } catch (error) {
       console.error('❌ Settings: Action/Navigation failed for:', item.label, error);
-      showToast('Error', `Failed to ${item.type === 'action' ? 'perform action' : 'navigate'}: ${item.label}`, 'error');
+      showModal({
+        type: 'error',
+        title: 'Error',
+        message: `Failed to ${item.type === 'action' ? 'perform action' : 'navigate'}: ${item.label}`,
+        icon: 'x-circle',
+        iconColor: '#ef4444',
+      });
     }
-  }, [push, handleCheckForUpdates, showToast]);
+  }, [push, handleCheckForUpdates, showModal]);
 
   const filterSettings = (sections: any) => {
     if (!search) return sections;
@@ -306,6 +360,107 @@ export default function SettingsScreen() {
     </View>
   );
 
+  const renderModalContent = () => {
+    const { type, title, message, metadata, downloadProgress, icon, iconColor } = modalState;
+
+    return (
+      <View style={styles.modalContent}>
+        {/* Icon */}
+        {icon && (
+          <View style={[styles.modalIconContainer, { backgroundColor: `${iconColor}20` }]}>
+            <Feather name={icon as any} size={48} color={iconColor} />
+          </View>
+        )}
+
+        {/* Title */}
+        <Text style={styles.modalTitle}>{title}</Text>
+
+        {/* Message */}
+        <ScrollView style={styles.modalMessageContainer} showsVerticalScrollIndicator={false}>
+          <Text style={styles.modalMessage}>{message}</Text>
+        </ScrollView>
+
+        {/* Download Progress */}
+        {type === 'downloading' && downloadProgress !== undefined && (
+          <View style={styles.progressContainer}>
+            <View style={styles.progressBarBg}>
+              <View style={[styles.progressBarFill, { width: `${downloadProgress}%` }]} />
+            </View>
+            <Text style={styles.progressText}>{downloadProgress}%</Text>
+          </View>
+        )}
+
+        {/* Loading Indicator */}
+        {(type === 'checking' || type === 'installing') && (
+          <ActivityIndicator size="large" color="#8b5cf6" style={styles.modalLoader} />
+        )}
+
+        {/* Action Buttons */}
+        <View style={styles.modalButtonContainer}>
+          {type === 'available' && metadata && (
+            <>
+              {!metadata.force_update && (
+                <TouchableOpacity
+                  style={[styles.modalButton, styles.modalButtonSecondary]}
+                  onPress={() => {
+                    closeModal();
+                    updateService.scheduleInstallForLater();
+                  }}
+                >
+                  <Text style={styles.modalButtonTextSecondary}>Later</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={() => {
+                  closeModal();
+                  handleInstallUpdate(metadata);
+                }}
+              >
+                <Text style={styles.modalButtonTextPrimary}>
+                  {metadata.update_type === 'ota' ? 'Update Now' : 'Download'}
+                </Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {type === 'error' && (
+            <>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonSecondary]}
+                onPress={closeModal}
+              >
+                <Text style={styles.modalButtonTextSecondary}>Close</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalButton, styles.modalButtonPrimary]}
+                onPress={() => {
+                  closeModal();
+                  setTimeout(() => handleCheckForUpdates(), 300);
+                }}
+              >
+                <Text style={styles.modalButtonTextPrimary}>Retry</Text>
+              </TouchableOpacity>
+            </>
+          )}
+
+          {(type === 'upToDate' || type === 'downloading') && (
+            <TouchableOpacity
+              style={[styles.modalButton, styles.modalButtonPrimary, { flex: 1 }]}
+              onPress={closeModal}
+            >
+              <Text style={styles.modalButtonTextPrimary}>OK</Text>
+            </TouchableOpacity>
+          )}
+
+          {(type === 'checking' || type === 'installing') && (
+            <View style={styles.modalLoadingPlaceholder} />
+          )}
+        </View>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <LinearGradient
@@ -348,6 +503,20 @@ export default function SettingsScreen() {
         contentContainerStyle={styles.listContainer}
         stickySectionHeadersEnabled={false}
       />
+
+      {/* Update Modal */}
+      <Modal
+        visible={modalState.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={closeModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContainer}>
+            {renderModalContent()}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -463,5 +632,113 @@ const styles = StyleSheet.create({
     marginTop: 8,
     marginHorizontal: 16,
     fontStyle: 'italic',
+  },
+
+  // Modal Styles
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0, 0, 0, 0.85)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 20,
+  },
+  modalContainer: {
+    width: '100%',
+    maxWidth: 400,
+    backgroundColor: '#1a1a2e',
+    borderRadius: 20,
+    borderWidth: 2,
+    borderColor: 'rgba(124, 58, 237, 0.6)',
+    shadowColor: '#7c3aed',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    elevation: 20,
+  },
+  modalContent: {
+    padding: 24,
+  },
+  modalIconContainer: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    justifyContent: 'center',
+    alignItems: 'center',
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  modalTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#fff',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  modalMessageContainer: {
+    maxHeight: 300,
+    marginBottom: 20,
+  },
+  modalMessage: {
+    fontSize: 15,
+    color: '#d1d5db',
+    textAlign: 'center',
+    lineHeight: 22,
+  },
+  modalLoader: {
+    marginVertical: 20,
+  },
+  progressContainer: {
+    marginVertical: 16,
+  },
+  progressBarBg: {
+    height: 8,
+    backgroundColor: 'rgba(124, 58, 237, 0.2)',
+    borderRadius: 4,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    backgroundColor: '#8b5cf6',
+    borderRadius: 4,
+  },
+  progressText: {
+    fontSize: 14,
+    color: '#8b5cf6',
+    textAlign: 'center',
+    fontWeight: '600',
+  },
+  modalButtonContainer: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+  },
+  modalButton: {
+    flex: 1,
+    paddingVertical: 14,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modalButtonPrimary: {
+    backgroundColor: '#8b5cf6',
+  },
+  modalButtonSecondary: {
+    backgroundColor: 'transparent',
+    borderWidth: 2,
+    borderColor: '#8b5cf6',
+  },
+  modalButtonTextPrimary: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalButtonTextSecondary: {
+    color: '#8b5cf6',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  modalLoadingPlaceholder: {
+    height: 48,
   },
 });
