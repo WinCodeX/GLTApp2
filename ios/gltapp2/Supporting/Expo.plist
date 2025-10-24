@@ -10,5 +10,7 @@
     <integer>0</integer>
     <key>EXUpdatesURL</key>
     <string>https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7</string>
+    <key>EXUpdatesRuntimeVersion</key>
+    <string>1.0.0</string>
   </dict>
 </plist>
