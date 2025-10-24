@@ -1,4 +1,4 @@
-// lib/services/updateService.ts - With proper OTA version tracking
+// lib/services/updateService.ts - Fixed OTA version checking
 
 import * as FileSystem from 'expo-file-system';
 import * as IntentLauncher from 'expo-intent-launcher';
@@ -21,7 +21,7 @@ interface UpdateMetadata {
   download_url?: string;
   file_size?: number;
   update_type?: 'ota' | 'apk';
-  bundle_version?: string; // New: separate bundle version for OTA
+  bundle_version?: string;
 }
 
 interface DownloadProgress {
@@ -70,20 +70,20 @@ class UpdateService {
       this.otaUpdatesAvailable = !this.isExpoGo && Updates.isEnabled;
       
       if (this.isExpoGo) {
-        console.log('UpdateService: Running in Expo Go - OTA updates NOT available, APK updates only');
+        console.log('UpdateService: Running in Expo Go - OTA updates NOT available');
       } else if (this.otaUpdatesAvailable) {
-        console.log('UpdateService: Running in standalone build - Full OTA and APK update support available');
+        console.log('UpdateService: Running in standalone build - OTA updates available');
+        console.log('UpdateService: Current runtime version:', Updates.runtimeVersion);
+        console.log('UpdateService: Current update ID:', Updates.updateId);
       } else {
-        console.log('UpdateService: OTA updates disabled - APK updates only');
+        console.log('UpdateService: OTA updates disabled');
       }
       
       await this.initializeVersionTracking();
       this.setupAppStateMonitoring();
-      
-      // Check if we just applied an OTA update
       await this.checkForOTAUpdateApplication();
       
-      console.log('UpdateService: Initialization completed successfully');
+      console.log('UpdateService: Initialization completed');
     } catch (error) {
       console.error('UpdateService: Initialization failed:', error);
     }
@@ -91,19 +91,18 @@ class UpdateService {
 
   /**
    * Check if an OTA update was just applied
-   * This runs on app startup to detect OTA bundle changes
    */
   private async checkForOTAUpdateApplication(): Promise<void> {
     if (!this.otaUpdatesAvailable) return;
 
     try {
-      const currentBundleId = await this.getCurrentBundleId();
-      const lastKnownBundleId = await AsyncStorage.getItem('last_known_bundle_id');
+      const currentUpdateId = Updates.updateId;
+      const lastKnownUpdateId = await AsyncStorage.getItem('last_known_update_id');
       
-      console.log('UpdateService: Current bundle ID:', currentBundleId);
-      console.log('UpdateService: Last known bundle ID:', lastKnownBundleId);
+      console.log('UpdateService: Current update ID:', currentUpdateId);
+      console.log('UpdateService: Last known update ID:', lastKnownUpdateId);
       
-      if (lastKnownBundleId && lastKnownBundleId !== currentBundleId) {
+      if (lastKnownUpdateId && lastKnownUpdateId !== currentUpdateId) {
         console.log('UpdateService: OTA update detected - bundle changed');
         
         Alert.alert(
@@ -113,31 +112,11 @@ class UpdateService {
         );
       }
       
-      await AsyncStorage.setItem('last_known_bundle_id', currentBundleId);
+      if (currentUpdateId) {
+        await AsyncStorage.setItem('last_known_update_id', currentUpdateId);
+      }
     } catch (error) {
       console.error('UpdateService: Failed to check OTA update application:', error);
-    }
-  }
-
-  /**
-   * Get the current bundle/update ID from Expo Updates
-   * This changes with each OTA update, even if APK version stays the same
-   */
-  private async getCurrentBundleId(): Promise<string> {
-    if (!this.otaUpdatesAvailable) {
-      return 'no-ota-support';
-    }
-
-    try {
-      // Updates.updateId is unique per bundle
-      // Updates.createdAt shows when this bundle was created
-      const updateId = Updates.updateId || 'unknown';
-      const createdAt = Updates.createdAt ? Updates.createdAt.getTime() : Date.now();
-      
-      return `${updateId}_${createdAt}`;
-    } catch (error) {
-      console.error('UpdateService: Failed to get bundle ID:', error);
-      return 'error';
     }
   }
 
@@ -145,7 +124,6 @@ class UpdateService {
     try {
       console.log('UpdateService: Initializing version tracking...');
       
-      // Track APK version separately from bundle version
       const currentAPKVersion = await this.getCurrentAPKVersion();
       const lastKnownAPKVersion = await AsyncStorage.getItem('last_known_apk_version');
       
@@ -182,7 +160,6 @@ class UpdateService {
     if (nextAppState === 'active') {
       await this.checkPostInstallation();
       
-      // Check for OTA bundle changes when app becomes active
       if (this.otaUpdatesAvailable) {
         await this.checkForOTAUpdateApplication();
       }
@@ -225,10 +202,10 @@ class UpdateService {
   }
 
   /**
-   * Check for Expo OTA updates
-   * OTA updates change the JavaScript bundle, not the APK
+   * ✅ FIXED: Check for Expo OTA updates by comparing REMOTE manifest with CURRENT
+   * This properly checks the remote server for new bundles
    */
-  async checkForOTAUpdates(): Promise<{ hasUpdate: boolean; isAvailable?: boolean }> {
+  async checkForOTAUpdates(): Promise<{ hasUpdate: boolean; isAvailable?: boolean; manifest?: any }> {
     if (this.isExpoGo) {
       console.log('UpdateService: Skipping OTA check - running in Expo Go');
       return { hasUpdate: false };
@@ -240,29 +217,45 @@ class UpdateService {
     }
 
     try {
-      console.log('UpdateService: Checking for Expo OTA updates...');
-      console.log('UpdateService: Current bundle ID:', await this.getCurrentBundleId());
+      console.log('UpdateService: ===== CHECKING FOR OTA UPDATES =====');
+      console.log('UpdateService: Current runtime version:', Updates.runtimeVersion);
+      console.log('UpdateService: Current update ID:', Updates.updateId);
+      console.log('UpdateService: Current channel:', Updates.channel);
       
+      // ✅ This checks the REMOTE server for new manifests
       const update = await Updates.checkForUpdateAsync();
       
+      console.log('UpdateService: Remote update check result:', {
+        isAvailable: update.isAvailable,
+        manifest: update.manifest ? 'present' : 'null'
+      });
+      
       if (update.isAvailable) {
-        console.log('UpdateService: OTA update IS available');
-        console.log('UpdateService: This will update JavaScript bundle, NOT the APK');
-        return { hasUpdate: true, isAvailable: true };
+        console.log('UpdateService: ✅ NEW OTA UPDATE AVAILABLE');
+        console.log('UpdateService: Remote manifest ID:', update.manifest?.id);
+        console.log('UpdateService: Remote manifest createdAt:', update.manifest?.createdAt);
+        console.log('UpdateService: This is a DIFFERENT bundle than currently running');
+        
+        return { 
+          hasUpdate: true, 
+          isAvailable: true,
+          manifest: update.manifest
+        };
       } else {
-        console.log('UpdateService: No OTA updates available');
+        console.log('UpdateService: ❌ No OTA updates available');
+        console.log('UpdateService: Current bundle is the latest available');
         return { hasUpdate: false, isAvailable: false };
       }
     } catch (error) {
       console.error('UpdateService: OTA update check failed:', error);
+      console.error('UpdateService: Error details:', JSON.stringify(error, null, 2));
       return { hasUpdate: false };
     }
   }
 
   /**
-   * Fetch and apply Expo OTA update
-   * This updates the JavaScript bundle and reloads the app
-   * The APK version number DOES NOT CHANGE
+   * ✅ FIXED: Fetch and apply the REMOTE OTA update
+   * This downloads the new bundle from the server and applies it
    */
   async fetchAndApplyOTAUpdate(): Promise<boolean> {
     if (this.isExpoGo) {
@@ -276,32 +269,40 @@ class UpdateService {
     }
 
     try {
-      console.log('UpdateService: Fetching OTA update...');
-      console.log('UpdateService: NOTE - This will NOT change the APK version');
-      console.log('UpdateService: Only JavaScript bundle will update');
+      console.log('UpdateService: ===== FETCHING OTA UPDATE =====');
+      console.log('UpdateService: Current update ID before fetch:', Updates.updateId);
       
-      const update = await Updates.fetchUpdateAsync();
+      // ✅ This fetches the NEW bundle from the server
+      const fetchResult = await Updates.fetchUpdateAsync();
       
-      if (update.isNew) {
-        console.log('UpdateService: New OTA bundle fetched');
+      console.log('UpdateService: Fetch result:', {
+        isNew: fetchResult.isNew,
+        manifest: fetchResult.manifest ? 'present' : 'null'
+      });
+      
+      if (fetchResult.isNew) {
+        console.log('UpdateService: ✅ NEW BUNDLE FETCHED SUCCESSFULLY');
+        console.log('UpdateService: New manifest ID:', fetchResult.manifest?.id);
         console.log('UpdateService: Reloading app with new bundle...');
         
-        // This reloads the app with the new JavaScript bundle
-        // The APK stays the same, only the bundle changes
+        // This reloads the app with the NEW bundle we just fetched
         await Updates.reloadAsync();
         return true;
       } else {
-        console.log('UpdateService: No new bundle to apply');
+        console.log('UpdateService: ❌ No new bundle to apply (already up to date)');
         return false;
       }
     } catch (error) {
       console.error('UpdateService: Failed to fetch OTA update:', error);
+      console.error('UpdateService: Error details:', JSON.stringify(error, null, 2));
       return false;
     }
   }
 
   /**
-   * Check for available updates - OTA first, then APK
+   * ✅ FIXED: Check for updates - properly handles both OTA and APK
+   * OTA: Checks REMOTE server manifest vs CURRENT running bundle
+   * APK: Checks REMOTE API version vs CURRENT installed version
    */
   async checkForUpdates(): Promise<{ hasUpdate: boolean; metadata?: UpdateMetadata }> {
     if (this.updateCheckInProgress) {
@@ -311,54 +312,82 @@ class UpdateService {
 
     try {
       this.updateCheckInProgress = true;
-      console.log('UpdateService: Starting update check...');
-      console.log('UpdateService: Current APK version:', await this.getCurrentAPKVersion());
+      console.log('UpdateService: ===== STARTING UPDATE CHECK =====');
       
-      // Check OTA first (instant, no download)
+      const currentAPKVersion = await this.getCurrentAPKVersion();
+      console.log('UpdateService: Current APK version:', currentAPKVersion);
+      
+      // ✅ Check OTA first (instant, no download) by comparing REMOTE vs CURRENT
       if (this.otaUpdatesAvailable) {
-        console.log('UpdateService: Checking for OTA (JavaScript bundle) updates...');
+        console.log('UpdateService: Step 1: Checking REMOTE server for OTA updates...');
+        
         const otaResult = await this.checkForOTAUpdates();
+        
         if (otaResult.hasUpdate) {
-          const currentBundleId = await this.getCurrentBundleId();
+          console.log('UpdateService: ✅ OTA UPDATE FOUND ON REMOTE SERVER');
+          
+          // Get manifest details from the remote update
+          const remoteManifestId = otaResult.manifest?.id || 'unknown';
+          const remoteCreatedAt = otaResult.manifest?.createdAt || new Date().toISOString();
+          
           return {
             hasUpdate: true,
             metadata: {
               available: true,
               update_type: 'ota',
-              version: await this.getCurrentAPKVersion(), // APK version stays same
-              bundle_version: currentBundleId,
-              changelog: ['JavaScript bundle update available', 'No APK download required'],
+              version: currentAPKVersion, // APK version stays same
+              bundle_version: remoteManifestId,
+              changelog: [
+                'JavaScript bundle update available',
+                'No APK download required',
+                'Update will apply instantly'
+              ],
             }
           };
+        } else {
+          console.log('UpdateService: ❌ No OTA updates on remote server');
         }
       } else {
         console.log('UpdateService: Skipping OTA check - not available');
       }
       
-      // Check for APK updates
-      const currentAPKVersion = await this.getCurrentAPKVersion();
-      console.log('UpdateService: Checking for APK updates via API...');
+      // ✅ Check for APK updates via API (REMOTE server vs CURRENT)
+      console.log('UpdateService: Step 2: Checking REMOTE API for APK updates...');
+      console.log('UpdateService: Querying API with current version:', currentAPKVersion);
       
-      const response = await api.get(`/api/v1/updates/info?current_version=${currentAPKVersion}`);
-      const data: UpdateMetadata = response.data;
-      
-      console.log('UpdateService: APK update available:', data.available);
-      if (data.available) {
-        console.log('UpdateService: New APK version available:', data.version);
+      try {
+        const response = await api.get(`/api/v1/updates/info?current_version=${currentAPKVersion}`);
+        const data: UpdateMetadata = response.data;
+        
+        console.log('UpdateService: API response:', {
+          available: data.available,
+          remoteVersion: data.version,
+          currentVersion: currentAPKVersion
+        });
+        
+        if (data.available === true) {
+          console.log('UpdateService: ✅ APK UPDATE FOUND ON REMOTE SERVER');
+          console.log('UpdateService: Remote version:', data.version);
+          console.log('UpdateService: Current version:', currentAPKVersion);
+          
+          return { 
+            hasUpdate: true, 
+            metadata: { 
+              ...data, 
+              update_type: 'apk' 
+            } 
+          };
+        } else {
+          console.log('UpdateService: ❌ No APK updates on remote server');
+        }
+      } catch (apiError) {
+        console.error('UpdateService: API check failed:', apiError);
+        // Continue without throwing - just log the error
       }
       
-      if (data.available === true) {
-        return { 
-          hasUpdate: true, 
-          metadata: { 
-            ...data, 
-            update_type: 'apk' 
-          } 
-        };
-      } else {
-        console.log('UpdateService: No updates available');
-        return { hasUpdate: false };
-      }
+      console.log('UpdateService: ===== NO UPDATES AVAILABLE =====');
+      console.log('UpdateService: Current versions are up to date');
+      return { hasUpdate: false };
       
     } catch (error) {
       console.error('UpdateService: Update check failed:', error);
@@ -386,7 +415,6 @@ class UpdateService {
 
     try {
       console.log('UpdateService: Starting APK download for version:', metadata.version);
-      console.log('UpdateService: This WILL change the APK version when installed');
       
       this.downloadInProgress = true;
       this.downloadProgressCallback = progressCallback || null;
@@ -901,10 +929,6 @@ class UpdateService {
     });
   }
 
-  /**
-   * Get current APK version
-   * This is the native app version that only changes with new APK installs
-   */
   async getCurrentAPKVersion(): Promise<string> {
     try {
       const storedVersion = await this.getStoredCurrentVersion();
@@ -918,10 +942,10 @@ class UpdateService {
         return configVersion;
       }
       
-      return '1.8.3';
+      return '1.8.5';
     } catch (error) {
       console.error('Failed to get APK version:', error);
-      return '1.8.3';
+      return '1.8.5';
     }
   }
 
