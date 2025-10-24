@@ -51,38 +51,9 @@
         "android.permission.READ_EXTERNAL_STORAGE",
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.MANAGE_EXTERNAL_STORAGE",
-        "com.google.android.c2dm.permission.RECEIVE",
-        "android.permission.BLUETOOTH",
-        "android.permission.BLUETOOTH_ADMIN",
-        "android.permission.BLUETOOTH_CONNECT",
-        "android.permission.BLUETOOTH_SCAN",
-        "android.permission.BLUETOOTH_ADVERTISE",
-        "android.permission.ACCESS_FINE_LOCATION",
-        "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.CAMERA",
-        "android.permission.INTERNET",
-        "android.permission.ACCESS_NETWORK_STATE",
-        "android.permission.VIBRATE",
-        "android.permission.WAKE_LOCK",
-        "android.permission.REQUEST_INSTALL_PACKAGES",
-        "android.permission.INSTALL_PACKAGES",
-        "android.permission.RECEIVE_BOOT_COMPLETED",
-        "android.permission.READ_EXTERNAL_STORAGE",
-        "android.permission.WRITE_EXTERNAL_STORAGE",
-        "android.permission.MANAGE_EXTERNAL_STORAGE",
         "com.google.android.c2dm.permission.RECEIVE"
       ],
       "intentFilters": [
-        {
-          "action": "android.intent.action.VIEW",
-          "category": [
-            "android.intent.category.DEFAULT"
-          ],
-          "data": {
-            "scheme": "content",
-            "mimeType": "application/vnd.android.package-archive"
-          }
-        },
         {
           "action": "android.intent.action.VIEW",
           "category": [
