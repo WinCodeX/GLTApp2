@@ -53,16 +53,6 @@
         <data android:scheme="exp+gltapp2"/>
         <data android:scheme="https"/>
       </intent-filter>
-      <intent-filter data-generated="true">
-        <action android:name="android.intent.action.android.intent.action.VIEW"/>
-        <data android:scheme="content" android:mimeType="application/vnd.android.package-archive"/>
-        <category android:name="android.intent.category.android.intent.category.DEFAULT"/>
-      </intent-filter>
-      <intent-filter data-generated="true">
-        <action android:name="android.intent.action.android.intent.action.VIEW"/>
-        <data android:scheme="content" android:mimeType="application/vnd.android.package-archive"/>
-        <category android:name="android.intent.category.android.intent.category.DEFAULT"/>
-      </intent-filter>
     </activity>
   </application>
 </manifest>
