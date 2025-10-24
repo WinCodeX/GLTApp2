@@ -1,28 +1,27 @@
 // components/CustomDrawerContent.tsx - Fixed navigation paths
 import {
   Feather,
-  FontAwesome5,
   Ionicons,
-  MaterialIcons,
+  MaterialIcons
 } from '@expo/vector-icons';
 import {
   DrawerContentScrollView,
   DrawerItem,
 } from '@react-navigation/drawer';
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  Alert,
   Image,
   StyleSheet,
   Text,
   TouchableOpacity,
   View,
-  Alert,
 } from 'react-native';
 import Toast from 'react-native-toast-message';
 import { useUser } from '../context/UserContext';
 import { getFullAvatarUrl } from '../lib/api';
-import { SafeLogo } from './SafeLogo';
 import colors from '../theme/colors';
+import { SafeLogo } from './SafeLogo';
 
 // CRITICAL: Import NavigationHelper for proper navigation tracking
 import { NavigationHelper } from '../lib/helpers/navigation';
@@ -554,7 +553,7 @@ export default function CustomDrawerContent(props: any) {
           >
             <View style={styles.trackHeader}>
               <Feather name="info" size={20} color={colors.primary} style={styles.trackIcon} />
-              <Text style={styles.trackLabel}>FAQs and Ts and Cs</Text>
+              <Text style={styles.trackLabel}>FAQs and Ts & Cs</Text>
               <Feather
                 name={showFaqsDropdown ? 'chevron-up' : 'chevron-down'}
                 size={20}
