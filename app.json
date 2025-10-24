@@ -22,6 +22,9 @@
         "NSBluetoothAlwaysUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
         "NSBluetoothPeripheralUsageDescription": "This app uses Bluetooth to connect to printers and scanners for package management.",
         "NSLocationWhenInUseUsageDescription": "This app uses location services to discover nearby Bluetooth devices."
+      },
+      "runtimeVersion": {
+        "policy": "appVersion"
       }
     },
     "android": {
@@ -51,7 +54,10 @@
         "android.permission.WRITE_EXTERNAL_STORAGE",
         "android.permission.MANAGE_EXTERNAL_STORAGE",
         "com.google.android.c2dm.permission.RECEIVE"
-      ]
+      ],
+      "runtimeVersion": {
+        "policy": "appVersion"
+      }
     },
     "web": {
       "bundler": "metro",
