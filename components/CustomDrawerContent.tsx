@@ -554,7 +554,7 @@ export default function CustomDrawerContent(props: any) {
           >
             <View style={styles.trackHeader}>
               <Feather name="info" size={20} color={colors.primary} style={styles.trackIcon} />
-              <Text style={styles.trackLabel}>FAQs and Our Terms</Text>
+              <Text style={styles.trackLabel}>FAQs and Ts and Cs</Text>
               <Feather
                 name={showFaqsDropdown ? 'chevron-up' : 'chevron-down'}
                 size={20}
