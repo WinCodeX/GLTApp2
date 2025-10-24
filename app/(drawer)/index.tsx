@@ -1,4 +1,4 @@
-// app/(drawer)/index.tsx - FIXED: HomeScreen with proper mode parameter passing
+// app/(drawer)/index.tsx - FIXED: HomeScreen with stack navigation and anime.js animations
 
 import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
@@ -25,7 +25,9 @@ import {
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Feather } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
+import anime from 'animejs';
 import GLTHeader from '../../components/GLTHeader';
 import PackageCreationModal from '../../components/PackageCreationModal';
 import FragileDeliveryModal from '../../components/FragileDeliveryModal';
@@ -35,7 +37,6 @@ import UpdateModal from '../../components/UpdateModal';
 import { createPackage, type PackageData, getPackageFormData, calculatePackagePricing, getAreas, getAgents } from '../../lib/helpers/packageHelpers';
 import { useUser } from '../../context/UserContext';
 import UpdateService from '../../lib/services/updateService';
-import { NavigationHelper, useNavigation } from '../../lib/helpers/navigation';
 
 const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
 
@@ -208,7 +209,6 @@ const AreaSelectionModal: React.FC<{
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const slideAnim = useRef(new Animated.Value(screenHeight)).current;
 
-  // FIXED: Calculate modal height based on keyboard state
   const modalHeight = useMemo(() => {
     if (isKeyboardVisible) {
       const maxHeightWithKeyboard = screenHeight - keyboardHeight - (Platform.OS === 'ios' ? 100 : 80);
@@ -228,7 +228,6 @@ const AreaSelectionModal: React.FC<{
     }
   }, [visible]);
 
-  // FIXED: Separate keyboard effect with proper listeners
   useEffect(() => {
     const keyboardDidShowListener = Keyboard.addListener(
       'keyboardDidShow',
@@ -491,7 +490,6 @@ export default function HomeScreen() {
   const [pricing, setPricing] = useState<PricingResult | null>(null);
   const [loading, setLoading] = useState(false);
   
-  // Data from API - starts with default locations for immediate display
   const [locations, setLocations] = useState<Location[]>(DEFAULT_LOCATIONS);
   
   // Modal states
@@ -506,22 +504,19 @@ export default function HomeScreen() {
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [successModalData, setSuccessModalData] = useState<SuccessModalData | null>(null);
   const [showChangelogModal, setShowChangelogModal] = useState(false);
-
-  // Update modal states
   const [showUpdateModal, setShowUpdateModal] = useState(false);
   const [updateMetadata, setUpdateMetadata] = useState<UpdateMetadata | null>(null);
   
-  // New modal states for area selection
   const [showOriginModal, setShowOriginModal] = useState(false);
   const [showDestinationModal, setShowDestinationModal] = useState(false);
   
-  // FIXED: Add navigation tracking state
-  const [navigationRegistered, setNavigationRegistered] = useState(false);
-  
-  // FIXED: Animation interaction states
+  // FIXED: Enhanced animation states for anime.js
   const [isAnimationPaused, setIsAnimationPaused] = useState(false);
-  const [manualScrollPosition, setManualScrollPosition] = useState(0);
+  const [currentScrollPosition, setCurrentScrollPosition] = useState(0);
   const inactivityTimer = useRef<NodeJS.Timeout | null>(null);
+  const animeInstance = useRef<anime.AnimeInstance | null>(null);
+  const scrollContainerRef = useRef<View | null>(null);
+  const locationTagWidth = 120;
   
   const { 
     user, 
@@ -534,11 +529,6 @@ export default function HomeScreen() {
     getCurrentUserId,
   } = useUser();
   
-  // FIXED: Use navigation hook for better integration
-  const navigation = useNavigation();
-  
-  const scrollX = useRef(new Animated.Value(0)).current;
-  
   // FAB Menu Animations
   const fabRotation = useRef(new Animated.Value(0)).current;
   const overlayOpacity = useRef(new Animated.Value(0)).current;
@@ -547,53 +537,7 @@ export default function HomeScreen() {
   const successModalScale = useRef(new Animated.Value(0)).current;
   const successModalOpacity = useRef(new Animated.Value(0)).current;
 
-  // FIXED: Register home screen with navigation system on mount
-  useEffect(() => {
-    const registerWithNavigationSystem = async () => {
-      try {
-        if (!navigationRegistered) {
-          console.log('🏠 HomeScreen: Registering with navigation system...');
-          
-          // Ensure NavigationHelper is initialized
-          await NavigationHelper.initialize();
-          
-          // Register this screen as the home route
-          await NavigationHelper.trackRouteChange('/', {});
-          
-          setNavigationRegistered(true);
-          console.log('✅ HomeScreen: Successfully registered with navigation system');
-        }
-      } catch (error) {
-        console.error('❌ HomeScreen: Failed to register with navigation system:', error);
-        // Continue anyway - non-critical error
-        setNavigationRegistered(true);
-      }
-    };
-
-    registerWithNavigationSystem();
-  }, [navigationRegistered]);
-
-  // FIXED: Re-register when screen gains focus to ensure navigation consistency
-  useFocusEffect(
-    useCallback(() => {
-      const reRegisterOnFocus = async () => {
-        try {
-          console.log('🏠 HomeScreen: Screen gained focus, re-registering...');
-          
-          // Always track when home screen gains focus to ensure it's in navigation history
-          await NavigationHelper.trackRouteChange('/', {});
-          
-          console.log('✅ HomeScreen: Successfully re-registered on focus');
-        } catch (error) {
-          console.error('❌ HomeScreen: Failed to re-register on focus:', error);
-        }
-      };
-
-      reRegisterOnFocus();
-    }, [])
-  );
-
-  // Initialize app with APK update system - ENHANCED WITH LOGGING
+  // Initialize app
   useEffect(() => {
     console.log('🏠 HomeScreen: Component mounted, initializing app...');
     initializeApp();
@@ -602,111 +546,116 @@ export default function HomeScreen() {
     return () => {
       console.log('🏠 HomeScreen: Component unmounting, cleaning up...');
       subscription?.remove();
+      if (animeInstance.current) {
+        animeInstance.current.pause();
+      }
     };
   }, []);
 
-  // Load additional data in background while showing default locations immediately
   useEffect(() => {
     loadFormDataInBackground();
   }, []);
 
-  // Fixed: Enhanced location scrolling animation with consistent speed and smooth interaction
+  // FIXED: Enhanced anime.js scroll animation with smooth interaction
   useEffect(() => {
-    if (locations.length === 0) return;
-    
-    const locationTagWidth = 120; // Updated to match new pill width
-    const singleSetWidth = locations.length * locationTagWidth;
-    const ANIMATION_DURATION = 10000; // Consistent 10 seconds for full cycle
-
-    const startContinuousLoop = () => {
-      if (isAnimationPaused) return;
-      
-      // Improved position normalization to prevent glitches
-      const normalizedPosition = ((manualScrollPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
-      const startPosition = -normalizedPosition;
-      
-      scrollX.setValue(startPosition);
-      
-      // Always animate for consistent duration regardless of starting position
-      Animated.loop(
-        Animated.timing(scrollX, {
-          toValue: startPosition - singleSetWidth,
-          duration: ANIMATION_DURATION,
-          easing: Easing.linear,
-          useNativeDriver: true,
-        }),
-        { iterations: -1 }
-      ).start();
-    };
-
-    if (!isAnimationPaused) {
-      startContinuousLoop();
+    if (locations.length === 0 || isAnimationPaused) {
+      return;
     }
 
-    return () => {
-      scrollX.stopAnimation();
-    };
-  }, [scrollX, locations, isAnimationPaused, manualScrollPosition]);
+    const singleSetWidth = locations.length * locationTagWidth;
+    
+    // Clean up previous animation
+    if (animeInstance.current) {
+      animeInstance.current.pause();
+    }
 
-  // Fixed: Enhanced pan responder with smooth glitch-free scrolling
+    // Create infinite scroll animation with anime.js
+    const scrollTarget = { x: currentScrollPosition };
+    
+    animeInstance.current = anime({
+      targets: scrollTarget,
+      x: currentScrollPosition - singleSetWidth,
+      duration: 15000, // 15 seconds for smooth, consistent scrolling
+      easing: 'linear',
+      loop: true,
+      update: function(anim) {
+        const newX = scrollTarget.x;
+        // Normalize position for seamless infinite loop
+        const normalizedX = ((newX % singleSetWidth) + singleSetWidth) % singleSetWidth;
+        setCurrentScrollPosition(-normalizedX);
+      },
+    });
+
+    return () => {
+      if (animeInstance.current) {
+        animeInstance.current.pause();
+      }
+    };
+  }, [locations, isAnimationPaused, currentScrollPosition]);
+
+  // FIXED: Enhanced pan responder with anime.js integration
   const locationPanResponder = useRef(
     PanResponder.create({
       onStartShouldSetPanResponder: () => true,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Only respond to horizontal movement to avoid conflicts
         return Math.abs(gestureState.dx) > Math.abs(gestureState.dy) && Math.abs(gestureState.dx) > 5;
       },
       onPanResponderGrant: () => {
-        // Stop animation when user touches
+        // Pause anime.js animation
+        if (animeInstance.current) {
+          animeInstance.current.pause();
+        }
         setIsAnimationPaused(true);
-        scrollX.stopAnimation((value) => {
-          // Improved normalization to prevent glitches
-          const locationTagWidth = 120; // Updated to match new pill size
-          const singleSetWidth = locations.length * locationTagWidth;
-          const normalizedValue = ((value % singleSetWidth) + singleSetWidth) % singleSetWidth;
-          setManualScrollPosition(-normalizedValue);
-        });
         
-        // Clear existing timer
         if (inactivityTimer.current) {
           clearTimeout(inactivityTimer.current);
         }
       },
       onPanResponderMove: (_, gestureState) => {
-        // Handle smooth manual scrolling with proper bounds
-        const locationTagWidth = 120; // Updated to match new pill size
         const singleSetWidth = locations.length * locationTagWidth;
-        const sensitivity = 0.8; // Reduced sensitivity for smoother, less wobbly scrolling
-        const newPosition = manualScrollPosition + (gestureState.dx * sensitivity);
+        const sensitivity = 1.0; // Direct 1:1 mapping for responsive feel
+        const newPosition = currentScrollPosition + (gestureState.dx * sensitivity);
         
-        // Smooth infinite loop constraint with better modulo handling
-        const constrainedPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
-        scrollX.setValue(-constrainedPosition);
+        // Smooth infinite loop with proper normalization
+        const normalizedPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+        setCurrentScrollPosition(-normalizedPosition);
       },
       onPanResponderRelease: (_, gestureState) => {
-        // Calculate final position with controlled momentum
-        const locationTagWidth = 120; // Updated to match new pill size
         const singleSetWidth = locations.length * locationTagWidth;
-        const momentum = Math.min(Math.max(gestureState.vx * 0.2, -200), 200); // Clamped momentum
-        const finalDx = gestureState.dx + momentum;
-        let newPosition = manualScrollPosition + (finalDx * 0.8);
         
-        // Normalize position for seamless infinite loop
-        newPosition = ((newPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
-        setManualScrollPosition(-newPosition);
+        // Apply subtle momentum with damping
+        const momentum = gestureState.vx * 50; // Reduced for smoother deceleration
+        const finalPosition = currentScrollPosition + momentum;
         
-        // Start inactivity timer to resume animation
-        if (inactivityTimer.current) {
-          clearTimeout(inactivityTimer.current);
-        }
-        inactivityTimer.current = setTimeout(() => {
-          setIsAnimationPaused(false);
-        }, 1500); // Reduced for quicker resumption
+        // Normalize final position
+        const normalizedPosition = ((finalPosition % singleSetWidth) + singleSetWidth) % singleSetWidth;
+        
+        // Animate to final position smoothly
+        anime({
+          targets: { pos: currentScrollPosition },
+          pos: -normalizedPosition,
+          duration: 400,
+          easing: 'easeOutCubic',
+          update: function(anim) {
+            const target = anim.animations[0].currentValue;
+            setCurrentScrollPosition(target);
+          },
+          complete: () => {
+            setCurrentScrollPosition(-normalizedPosition);
+            
+            // Resume auto-scroll after delay
+            if (inactivityTimer.current) {
+              clearTimeout(inactivityTimer.current);
+            }
+            inactivityTimer.current = setTimeout(() => {
+              setIsAnimationPaused(false);
+            }, 2000);
+          }
+        });
       },
     })
   ).current;
 
-  // FIXED: Version-specific postponement helper functions
   const getVersionPostponementKey = (version: string): string => {
     return `user_postponed_update_${version}`;
   };
@@ -739,10 +688,7 @@ export default function HomeScreen() {
     try {
       console.log('🧹 HomeScreen: Clearing old postponement flags for versions other than:', currentVersion);
       
-      // Get all AsyncStorage keys
       const allKeys = await AsyncStorage.getAllKeys();
-      
-      // Find postponement keys for other versions
       const postponementKeys = allKeys.filter(key => 
         key.startsWith('user_postponed_update_') && 
         key !== getVersionPostponementKey(currentVersion)
@@ -753,7 +699,6 @@ export default function HomeScreen() {
         await AsyncStorage.multiRemove(postponementKeys);
       }
       
-      // Also clear the generic postponement flag if it exists
       await AsyncStorage.removeItem('user_postponed_update');
       
       console.log('✅ HomeScreen: Old postponement flags cleared successfully');
@@ -762,22 +707,18 @@ export default function HomeScreen() {
     }
   };
 
-  // Initialize app with APK update system - ENHANCED WITH LOGGING
   const initializeApp = async () => {
     try {
       console.log('🚀 HomeScreen: Starting app initialization...');
       
-      // Initialize APK update service
       console.log('🔧 HomeScreen: Initializing UpdateService...');
       const updateService = UpdateService.getInstance();
       await updateService.initialize();
       console.log('✅ HomeScreen: UpdateService initialized successfully');
 
-      // Check if changelog should be shown
       console.log('📖 HomeScreen: Checking changelog display requirements...');
       await checkChangelogDisplay();
       
-      // Check for APK updates on app start (delay to not block UI)
       console.log('⏰ HomeScreen: Scheduling APK update check in 2 seconds...');
       setTimeout(() => {
         console.log('🔍 HomeScreen: Starting scheduled APK update check...');
@@ -790,7 +731,6 @@ export default function HomeScreen() {
     }
   };
 
-  // Check if user has seen the current changelog version - ENHANCED WITH LOGGING
   const checkChangelogDisplay = async () => {
     try {
       console.log('📖 HomeScreen: Checking if user has seen changelog for version:', CHANGELOG_VERSION);
@@ -812,14 +752,12 @@ export default function HomeScreen() {
     }
   };
 
-  // FIXED: Check for APK updates with proper version-specific postponement logic
   const checkForAPKUpdates = async () => {
     try {
       console.log('🔍 HomeScreen: Starting APK update check...');
       
       const updateService = UpdateService.getInstance();
       
-      // Only check for updates on Android devices
       if (!updateService.isUpdateSupported()) {
         console.log('❌ HomeScreen: APK updates not supported on this platform (Platform:', Platform.OS, ')');
         return;
@@ -839,12 +777,10 @@ export default function HomeScreen() {
           changelog: metadata.changelog
         });
         
-        // FIXED: Check if user previously postponed THIS SPECIFIC VERSION
         console.log('🔍 HomeScreen: Checking if user previously postponed version:', metadata.version);
         const hasPostponedThisVersion = await hasUserPostponedSpecificVersion(metadata.version);
         console.log('📋 HomeScreen: User postponed status for version', metadata.version, ':', hasPostponedThisVersion);
         
-        // FIXED: Clear old postponement flags for different versions
         await clearAllOldPostponements(metadata.version);
         
         if (hasPostponedThisVersion && !metadata.force_update) {
@@ -852,14 +788,11 @@ export default function HomeScreen() {
           return;
         }
         
-        // Show update modal instead of alert
         console.log('📱 HomeScreen: Showing update modal to user...');
         setUpdateMetadata(metadata);
         setShowUpdateModal(true);
       } else {
         console.log('✅ HomeScreen: No APK updates available');
-        
-        // Clear any old postponement flags when no updates are available
         await clearAllOldPostponements('none');
       }
     } catch (error) {
@@ -867,17 +800,14 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle app state changes - ENHANCED WITH LOGGING
   const handleAppStateChange = (nextAppState: string) => {
     console.log('🔄 HomeScreen: App state changed to:', nextAppState);
     
     if (nextAppState === 'background' || nextAppState === 'inactive') {
       console.log('📱 HomeScreen: App going to background/inactive, handling background tasks...');
-      // App going to background - schedule any pending downloads
       handleAppGoingBackground();
     } else if (nextAppState === 'active') {
       console.log('📱 HomeScreen: App becoming active, checking for updates...');
-      // App coming to foreground - check for updates and download status
       setTimeout(() => {
         console.log('🔍 HomeScreen: Starting update check after app became active...');
         checkForAPKUpdates();
@@ -885,7 +815,6 @@ export default function HomeScreen() {
     }
   };
 
-  // FIXED: Handle changelog modal close - ENHANCED WITH LOGGING
   const handleChangelogClose = async () => {
     try {
       console.log('📖 HomeScreen: User closing changelog modal, marking as seen...');
@@ -898,12 +827,10 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle app going to background - ENHANCED WITH LOGGING
   const handleAppGoingBackground = async () => {
     try {
       console.log('📱 HomeScreen: Handling app going to background...');
       
-      // If user has seen an update but didn't download, schedule background download
       if (updateMetadata && !showUpdateModal) {
         console.log('📥 HomeScreen: Scheduling background download for version:', updateMetadata.version);
         const updateService = UpdateService.getInstance();
@@ -917,17 +844,14 @@ export default function HomeScreen() {
     }
   };
 
-  // Handle update modal events - ENHANCED WITH LOGGING
   const handleUpdateStart = () => {
     console.log('📥 HomeScreen: Update download started');
   };
 
   const handleUpdateComplete = () => {
     console.log('✅ HomeScreen: Update download completed');
-    // Metadata will be cleared when modal closes
   };
 
-  // FIXED: Handle update modal close with proper version-specific postponement
   const handleUpdateModalClose = async (wasPostponed: boolean = false) => {
     console.log('📱 HomeScreen: Update modal closing, clearing metadata...');
     
@@ -940,7 +864,6 @@ export default function HomeScreen() {
     setUpdateMetadata(null);
   };
 
-  // Load form data in background without blocking UI
   const loadFormDataInBackground = async () => {
     try {
       console.log('📊 HomeScreen: Loading additional location data in background...');
@@ -1021,7 +944,6 @@ export default function HomeScreen() {
     return true;
   };
 
-  // FAB Menu Handlers
   const openFabMenu = () => {
     setFabMenuOpen(true);
     
@@ -1158,7 +1080,6 @@ export default function HomeScreen() {
     });
   };
 
-  // FIXED: FAB handlers with proper mode parameter passing
   const handleFragileDelivery = () => {
     if (!validateUserForPackageCreation()) return;
     closeFabMenu();
@@ -1307,20 +1228,16 @@ export default function HomeScreen() {
     }
   };
 
-  const LocationTag = React.memo(({ location }) => (
+  const LocationTag = React.memo(({ location }: { location: Location }) => (
     <LinearGradient
       colors={['rgba(124, 58, 237, 0.8)', 'rgba(59, 130, 246, 0.8)', 'rgba(16, 185, 129, 0.8)']}
       start={{ x: 0, y: 0 }}
       end={{ x: 1, y: 1 }}
       style={styles.locationTagGradient}
     >
-      <TouchableOpacity
-        style={styles.locationTag}
-        activeOpacity={0.8}
-        pointerEvents="none" // Disable touch to prevent conflicts during scrolling
-      >
+      <View style={styles.locationTag}>
         <Text style={styles.locationText}>{location.name}</Text>
-      </TouchableOpacity>
+      </View>
     </LinearGradient>
   ));
 
@@ -1468,35 +1385,35 @@ export default function HomeScreen() {
     outputRange: ['0deg', '45deg'],
   });
 
+  // FIXED: Render location tags with anime.js transform
+  const singleSetWidth = locations.length * locationTagWidth;
+  const tripleLocations = [...locations, ...locations, ...locations];
+
   return (
     <SafeAreaView style={styles.container}>
       <GLTHeader />
 
-      {/* Enhanced Interactive Currently Reaching Section with smooth animations */}
+      {/* FIXED: Enhanced Currently Reaching Section with anime.js */}
       <View style={styles.locationsContainer}>
         <Text style={styles.mainSectionTitle}>Currently Reaching</Text>
         <View style={styles.animatedContainer}>
-          <Animated.View
+          <View
+            ref={scrollContainerRef}
             style={[
               styles.animatedContent,
               { 
-                transform: [{ translateX: scrollX }],
-                // Add hardware acceleration hints for smoother performance
-                opacity: 1,
-                elevation: 0,
+                transform: [{ translateX: currentScrollPosition }],
               },
             ]}
             {...locationPanResponder.panHandlers}
           >
-            {/* Render multiple copies for seamless infinite scroll */}
-            {Array(8).fill(locations).flat().map((location, index) => (
+            {tripleLocations.map((location, index) => (
               <LocationTag key={`${location.id || location.name}-${index}`} location={location} />
             ))}
-          </Animated.View>
+          </View>
         </View>
       </View>
 
-      {/* Enhanced Cost Calculator with proper bottom padding */}
       <ScrollView 
         style={styles.scrollContainer} 
         contentContainerStyle={styles.scrollContentContainer}
@@ -1505,7 +1422,6 @@ export default function HomeScreen() {
         <View style={styles.calculatorContainer}>
           <Text style={styles.calculatorTitle}>Cost Calculator</Text>
           
-          {/* Origin Selection */}
           <View style={styles.inputSection}>
             <Text style={styles.sectionLabel}>Where are you sending from?</Text>
             <TouchableOpacity 
@@ -1534,7 +1450,6 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Destination Selection */}
           <View style={styles.inputSection}>
             <Text style={styles.sectionLabel}>Where are you sending to?</Text>
             <TouchableOpacity 
@@ -1563,10 +1478,8 @@ export default function HomeScreen() {
             </TouchableOpacity>
           </View>
 
-          {/* Package Size Selection */}
           {renderPackageSizes()}
 
-          {/* Calculate Button */}
           <TouchableOpacity 
             onPress={calculateCost} 
             activeOpacity={0.8}
@@ -1586,12 +1499,10 @@ export default function HomeScreen() {
             </LinearGradient>
           </TouchableOpacity>
 
-          {/* Pricing Results */}
           {renderPricingResults()}
         </View>
       </ScrollView>
 
-      {/* FAB Menu Overlay */}
       {fabMenuOpen && (
         <Animated.View
           style={[
@@ -1607,14 +1518,12 @@ export default function HomeScreen() {
         </Animated.View>
       )}
 
-      {/* FAB Options */}
       {fabMenuOpen && (
         <View style={styles.fabOptionsContainer}>
           {fabOptions.map((option, index) => renderFabOption(option, index))}
         </View>
       )}
 
-      {/* Main FAB */}
       <View style={styles.fabContainer}>
         <LinearGradient colors={['#7c3aed', '#3b82f6']} style={styles.fabGradient}>
           <TouchableOpacity
@@ -1639,7 +1548,6 @@ export default function HomeScreen() {
         </LinearGradient>
       </View>
 
-      {/* Area Selection Modals */}
       <AreaSelectionModal
         visible={showOriginModal}
         onClose={() => setShowOriginModal(false)}
@@ -1656,13 +1564,11 @@ export default function HomeScreen() {
         type="destination"
       />
 
-      {/* Enhanced Changelog Modal for APK Updates */}
       <ChangelogModal
         visible={showChangelogModal}
         onClose={handleChangelogClose}
       />
 
-      {/* FIXED: Enhanced Update Modal with proper postponement callback */}
       <UpdateModal
         visible={showUpdateModal}
         onClose={(wasPostponed) => handleUpdateModalClose(wasPostponed)}
@@ -1671,7 +1577,6 @@ export default function HomeScreen() {
         onUpdateComplete={handleUpdateComplete}
       />
 
-      {/* Info Modal */}
       <Modal
         visible={showInfoModal}
         transparent
@@ -1701,7 +1606,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Package Size Info Modal */}
       <Modal
         visible={showPackageSizeInfoModal}
         transparent
@@ -1737,7 +1641,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* Success Modal */}
       <Modal
         visible={showSuccessModal}
         transparent
@@ -1824,7 +1727,6 @@ export default function HomeScreen() {
         </View>
       </Modal>
 
-      {/* FIXED: Package Creation Modal with proper mode parameter */}
       <PackageCreationModal
         visible={showPackageModal}
         onClose={() => setShowPackageModal(false)}
@@ -1832,7 +1734,6 @@ export default function HomeScreen() {
         mode="create"
       />
 
-      {/* FIXED: Fragile Delivery Modal with proper mode parameter */}
       <FragileDeliveryModal
         visible={showFragileModal}
         onClose={() => setShowFragileModal(false)}
@@ -1841,7 +1742,6 @@ export default function HomeScreen() {
         mode="create"
       />
 
-      {/* FIXED: Collect & Deliver Modal with proper mode parameter */}
       <CollectDeliverModal
         visible={showCollectModal}
         onClose={() => setShowCollectModal(false)}
@@ -1876,23 +1776,17 @@ const styles = StyleSheet.create({
   animatedContainer: { 
     height: 60, 
     overflow: 'hidden',
-    backgroundColor: 'transparent', // Ensure no background flickering
+    backgroundColor: 'transparent',
   },
   animatedContent: { 
     flexDirection: 'row', 
     alignItems: 'center', 
     paddingHorizontal: 16,
-    // Performance optimizations for smooth scrolling
-    shouldRasterizeIOS: true,
-    renderToHardwareTextureAndroid: true,
   },
   locationTagGradient: { 
     borderRadius: 25, 
     padding: 2, 
     marginHorizontal: 8,
-    // Add performance hints
-    shouldRasterizeIOS: true,
-    renderToHardwareTextureAndroid: true,
   },
   locationTag: {
     backgroundColor: '#1a1a2e',
@@ -1901,8 +1795,7 @@ const styles = StyleSheet.create({
     borderRadius: 25, 
     minWidth: 100, 
     alignItems: 'center',
-    // Prevent layout shifts during animation
-    width: 120, // Increased width to handle longer text
+    width: 120,
   },
   locationText: { 
     color: '#fff', 
@@ -2077,7 +1970,6 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
   },
   
-  // FAB Styles
   fabContainer: {
     position: 'absolute',
     right: 20,
@@ -2171,7 +2063,6 @@ const styles = StyleSheet.create({
     marginLeft: 8,
   },
 
-  // FIXED: Enhanced Modal Styles with Keyboard Handling
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -2359,7 +2250,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 
-  // Info Modal Styles
   infoModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.8)',
@@ -2441,7 +2331,6 @@ const styles = StyleSheet.create({
     color: '#fff',
   },
 
-  // Success Modal Styles
   successModalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.75)',
