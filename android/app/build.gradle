@@ -62,8 +62,13 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         
+<<<<<<< HEAD
         // App versioning
         versionCode appVersionCode
+=======
+        // ✅ FIXED: Use defined variables instead of hardcoded values
+        versionCode 1
+>>>>>>> a2c152b (fix)
         versionName appVersionName
         
         // App display name and metadata
