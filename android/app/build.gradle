@@ -2,7 +2,8 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: 'com.google.gms.google-services'
-apply plugin: 'expo-updates'  // ✅ ADDED: Enables Expo OTA updates
+// ✅ REMOVED: apply plugin: 'expo-updates' - this plugin doesn't exist
+// expo-updates is configured via AndroidManifest.xml instead
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -89,6 +90,12 @@ def appVersionName = "1.8.5"  // ✅ Updated for APK updates - increment this
 def appVersionCode = 1       // ✅ Updated for APK updates - increment this
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
+// ✅ EXPO UPDATES CONFIGURATION - Used in AndroidManifest.xml
+def expoUpdatesUrl = "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+def expoUpdatesChannel = "production"
+def expoUpdatesRuntimeVersion = appVersionName
+def expoUpdatesEnabled = "true"
+
 android {
     ndkVersion rootProject.ext.ndkVersion
 
@@ -121,11 +128,21 @@ android {
         // Enable multidex for better compatibility
         multiDexEnabled true
         
-        // OAuth redirect scheme configuration
-        manifestPlaceholders = [
+        // ✅ EXPO UPDATES CONFIGURATION through manifestPlaceholders
+        // This is how expo-updates is configured in bare workflow
+        manifestPlaceholders += [
+            // OAuth redirect scheme configuration
             appAuthRedirectScheme: 'com.lvl0_x.gltapp2',
             oauthRedirectHost: 'oauth',
-            oauthRedirectScheme: 'https'
+            oauthRedirectScheme: 'https',
+            
+            // Expo Updates configuration
+            EXPO_UPDATES_URL: expoUpdatesUrl,
+            EXPO_UPDATES_CHANNEL: expoUpdatesChannel,
+            EXPO_UPDATES_RUNTIME_VERSION: expoUpdatesRuntimeVersion,
+            EXPO_UPDATES_ENABLED: expoUpdatesEnabled,
+            EXPO_UPDATES_CHECK_ON_LAUNCH: 'ALWAYS',
+            EXPO_UPDATES_LAUNCH_WAIT_MS: '0'
         ]
     }
     signingConfigs {
@@ -213,31 +230,6 @@ android {
     }
 }
 
-// ✅ EXPO UPDATES CONFIGURATION
-// This block configures Expo OTA updates for Gradle builds
-// Without this, Updates.isEnabled will be false and OTA won't work
-expoUpdates {
-    // Update server URL from your Expo project
-    updateUrl = "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
-    
-    // Runtime version MUST match what you publish with eas update
-    // This should always match appVersionName above
-    runtimeVersion = appVersionName
-    
-    // Channel determines which updates this build will receive
-    // Must match the channel you publish to with: eas update --branch production
-    channel = "production"
-    
-    // Enable updates (critical - without this, OTA updates won't work)
-    enabled = true
-    
-    // Check for updates on app launch
-    checkOnLaunch = "ALWAYS"
-    
-    // Fallback to bundled assets if update fails
-    fallbackToCacheTimeout = 0
-}
-
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
 // Accepts values in comma delimited lists, example:
 // android.packagingOptions.pickFirsts=/LICENSE,**/picasa.ini
@@ -307,12 +299,15 @@ dependencies {
  * - All Firebase notifications use existing notification-icon.png
  * 
  * EXPO OTA UPDATES:
- * - expo-updates plugin applied (line 5)
- * - expoUpdates configuration block added (after android block)
+ * - Configured through manifestPlaceholders (correct method for bare workflow)
  * - Update URL: https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7
  * - Runtime version: Dynamically set to appVersionName (1.8.5)
  * - Channel: production (matches eas.json)
  * - Updates enabled: true
+ * - Check on launch: ALWAYS
+ * 
+ * ⚠️  IMPORTANT: You MUST also update AndroidManifest.xml to read these placeholders!
+ * See the AndroidManifest.xml instructions file.
  * 
  * APK VERSIONING:
  * - Version name: 1.8.5 (from appVersionName variable)
@@ -320,7 +315,7 @@ dependencies {
  * - Output APK: GLT-1.8.5-1.apk
  * 
  * 🎯 NEXT STEPS:
- * 1. Update android/build.gradle with expo-updates-gradle-plugin classpath
+ * 1. Update AndroidManifest.xml with expo-updates meta-data tags
  * 2. Clean build: cd android && ./gradlew clean
  * 3. Build: ./gradlew assembleRelease
  * 4. Publish update: eas update --branch production --message "Test OTA"
