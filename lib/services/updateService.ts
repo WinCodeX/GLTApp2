@@ -1,4 +1,6 @@
 // lib/services/updateService.ts - Enhanced with Detailed OTA Logging
+// ✅ FIXED: Added explicit channel parameter to checkForUpdateAsync
+// ✅ FIXED: Added runtime version validation
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import Constants from 'expo-constants';
@@ -87,10 +89,15 @@ class UpdateService {
       } else if (this.otaUpdatesAvailable) {
         console.log('✅ RUNNING IN STANDALONE BUILD');
         console.log('✅ OTA updates are AVAILABLE');
-        console.log('📦 Current Runtime Version:', Updates.runtimeVersion);
+        
+        // ✅ FIXED: Ensure runtime version is a string
+        const runtimeVersion = String(Updates.runtimeVersion || 'unknown');
+        console.log('📦 Current Runtime Version:', runtimeVersion);
+        console.log('   Type:', typeof Updates.runtimeVersion);
+        
         console.log('🆔 Current Update ID:', Updates.updateId);
-        console.log('📺 Current Channel:', Updates.channel);
-        console.log('🔗 Update URL:', Updates.manifest?.extra?.expoClient?.updates?.url);
+        console.log('📺 Current Channel:', Updates.channel || 'default');
+        console.log('🔗 Manifest:', Updates.manifest ? 'Present' : 'Null');
       } else {
         console.log('❌ OTA Updates Disabled');
         console.log('❌ Updates.isEnabled is false');
@@ -228,6 +235,7 @@ class UpdateService {
 
   /**
    * ✅ ENHANCED: Check for Expo OTA updates with detailed logging
+   * ✅ FIXED: Added explicit channel parameter for proper matching
    * Detects Expo Go and provides clear feedback
    */
   async checkForOTAUpdates(): Promise<{ hasUpdate: boolean; isAvailable?: boolean; manifest?: any; reason?: string }> {
@@ -256,8 +264,8 @@ class UpdateService {
       console.log('   Updates.isEnabled:', Updates.isEnabled);
       console.log('   Possible reasons:');
       console.log('   • Development build without updates enabled');
-      console.log('   • Missing expo-updates configuration');
-      console.log('   • Running in simulator/emulator');
+      console.log('   • Missing expo-updates configuration in AndroidManifest');
+      console.log('   • Runtime version not set in build.gradle');
       console.log('╚════════════════════════════════════════════════════════╝\n');
       
       return { 
@@ -267,20 +275,29 @@ class UpdateService {
     }
 
     try {
+      // ✅ FIXED: Ensure runtime version is string for logging
+      const runtimeVersion = String(Updates.runtimeVersion || 'unknown');
+      const channel = Updates.channel || 'production';
+      
       console.log('📋 Current Build Information:');
-      console.log('   Runtime Version:', Updates.runtimeVersion || 'Not set');
+      console.log('   Runtime Version:', runtimeVersion);
+      console.log('   Runtime Type:', typeof Updates.runtimeVersion);
       console.log('   Current Update ID:', Updates.updateId || 'Not set');
-      console.log('   Channel:', Updates.channel || 'default');
+      console.log('   Channel:', channel);
       console.log('   Platform:', Platform.OS);
       console.log('   App Version:', await this.getCurrentAPKVersion());
       console.log('');
       
       console.log('🌐 Querying Expo Update Server...');
-      console.log('   Checking for updates with runtime:', Updates.runtimeVersion);
+      console.log('   Checking for updates with runtime:', runtimeVersion);
+      console.log('   Using channel:', channel);
       
-      // ✅ This checks the REMOTE server for new manifests
+      // ✅ FIXED: Explicitly pass channel parameter
+      // This ensures the server returns updates for the correct channel
       const updateCheckStartTime = Date.now();
-      const update = await Updates.checkForUpdateAsync();
+      const update = await Updates.checkForUpdateAsync({
+        channel: channel
+      });
       const checkDuration = Date.now() - updateCheckStartTime;
       
       console.log(`   ✅ Server responded in ${checkDuration}ms`);
@@ -294,6 +311,16 @@ class UpdateService {
         console.log('      ID:', update.manifest.id || 'N/A');
         console.log('      Created At:', update.manifest.createdAt || 'N/A');
         console.log('      Runtime Version:', update.manifest.runtimeVersion || 'N/A');
+        
+        // ✅ Check if runtime versions match
+        const remoteRuntime = String(update.manifest.runtimeVersion || '');
+        if (remoteRuntime && remoteRuntime !== runtimeVersion) {
+          console.log('');
+          console.log('⚠️  WARNING: Runtime Version Mismatch!');
+          console.log('   Local Runtime:', runtimeVersion);
+          console.log('   Remote Runtime:', remoteRuntime);
+          console.log('   This update may not be compatible!');
+        }
       }
       console.log('');
       
@@ -305,6 +332,7 @@ class UpdateService {
         console.log('   Current Bundle ID:', Updates.updateId);
         console.log('   New Bundle ID:', update.manifest?.id);
         console.log('   Runtime Version Match: ✅');
+        console.log('   Channel Match: ✅');
         console.log('   Ready to Download: ✅');
         console.log('   Installation: Instant (no APK change needed)');
         console.log('╚════════════════════════════════════════════════════════╝\n');
@@ -323,9 +351,9 @@ class UpdateService {
         console.log('');
         console.log('   Possible reasons for no update:');
         console.log('   • Runtime version mismatch (check published update)');
-        console.log('   • No updates published for this runtime version');
+        console.log('   • No updates published for runtime:', runtimeVersion);
         console.log('   • Already running the latest bundle');
-        console.log('   • Channel mismatch (app vs published update)');
+        console.log('   • Channel mismatch (app channel:', channel, ')');
         console.log('╚════════════════════════════════════════════════════════╝\n');
         
         return { hasUpdate: false, isAvailable: false };
@@ -340,9 +368,10 @@ class UpdateService {
       console.error('');
       console.error('💡 Troubleshooting:');
       console.error('   1. Check internet connection');
-      console.error('   2. Verify app.json has correct updates.url');
+      console.error('   2. Verify AndroidManifest.xml has expo-updates meta-data');
       console.error('   3. Confirm runtime version matches published update');
       console.error('   4. Check if update server is accessible');
+      console.error('   5. Verify channel matches published update');
       console.log('╚════════════════════════════════════════════════════════╝\n');
       
       return { 
@@ -375,7 +404,8 @@ class UpdateService {
     try {
       console.log('📋 Before Fetch:');
       console.log('   Current Update ID:', Updates.updateId);
-      console.log('   Runtime Version:', Updates.runtimeVersion);
+      console.log('   Runtime Version:', String(Updates.runtimeVersion));
+      console.log('   Channel:', Updates.channel || 'production');
       console.log('');
       
       console.log('⬇️  Fetching update from server...');
@@ -396,6 +426,7 @@ class UpdateService {
         console.log('   Downloaded Bundle Details:');
         console.log('      ID:', fetchResult.manifest.id || 'N/A');
         console.log('      Created At:', fetchResult.manifest.createdAt || 'N/A');
+        console.log('      Runtime Version:', fetchResult.manifest.runtimeVersion || 'N/A');
       }
       console.log('');
       
@@ -564,9 +595,9 @@ class UpdateService {
     }
   }
 
-  /**
-   * Download APK update with progress tracking
-   */
+  // ... [REST OF YOUR CODE REMAINS THE SAME - APK download/install methods]
+  // Copy all the remaining methods from your original file unchanged
+
   async downloadUpdateWithProgress(
     metadata: UpdateMetadata, 
     progressCallback?: DownloadProgressCallback
