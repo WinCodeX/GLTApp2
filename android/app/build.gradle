@@ -1,8 +1,8 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
-// ✅ Add Firebase Google Services plugin
 apply plugin: 'com.google.gms.google-services'
+apply plugin: 'expo-updates'  // ✅ ADDED: Enables Expo OTA updates
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -102,8 +102,8 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         
         // ✅ FIXED: Use defined variables instead of hardcoded values
-        versionCode 1
-        versionName appVersionName    // Now uses variable
+        versionCode appVersionCode
+        versionName appVersionName
         
         // App display name and metadata
         resValue "string", "app_name", appName
@@ -188,10 +188,10 @@ android {
             def versionCode = variant.versionCode
             
             if (buildType == "release") {
-                // Release APK: GLT-1.4.0-4.apk (perfect for update tracking)
+                // Release APK: GLT-1.8.5-1.apk (perfect for update tracking)
                 outputFileName = "${appName}-${versionName}-${versionCode}.apk"
             } else if (buildType == "debug") {
-                // Debug APK: GLT-1.4.0-debug-20250910-1430-4.apk
+                // Debug APK: GLT-1.8.5-debug-20250910-1430-1.apk
                 outputFileName = "${appName}-${versionName}-debug-${buildTimestamp}-${versionCode}.apk"
             }
             
@@ -211,6 +211,31 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+}
+
+// ✅ EXPO UPDATES CONFIGURATION
+// This block configures Expo OTA updates for Gradle builds
+// Without this, Updates.isEnabled will be false and OTA won't work
+expoUpdates {
+    // Update server URL from your Expo project
+    updateUrl = "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+    
+    // Runtime version MUST match what you publish with eas update
+    // This should always match appVersionName above
+    runtimeVersion = appVersionName
+    
+    // Channel determines which updates this build will receive
+    // Must match the channel you publish to with: eas update --branch production
+    channel = "production"
+    
+    // Enable updates (critical - without this, OTA updates won't work)
+    enabled = true
+    
+    // Check for updates on app launch
+    checkOnLaunch = "ALWAYS"
+    
+    // Fallback to bundled assets if update fails
+    fallbackToCacheTimeout = 0
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
@@ -274,14 +299,30 @@ dependencies {
 }
 
 /*
- * ✅ FIREBASE FCM CONFIGURATION SUMMARY:
- * - Added Firebase BOM and messaging dependencies
+ * ✅ COMPLETE CONFIGURATION SUMMARY:
+ * 
+ * FIREBASE FCM:
+ * - Firebase BOM and messaging dependencies added
  * - Google Services plugin applied for google-services.json processing
- * - Maintains existing APK update system with version tracking
- * - All Firebase notifications will use existing notification-icon.png
+ * - All Firebase notifications use existing notification-icon.png
+ * 
+ * EXPO OTA UPDATES:
+ * - expo-updates plugin applied (line 5)
+ * - expoUpdates configuration block added (after android block)
+ * - Update URL: https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7
+ * - Runtime version: Dynamically set to appVersionName (1.8.5)
+ * - Channel: production (matches eas.json)
+ * - Updates enabled: true
+ * 
+ * APK VERSIONING:
+ * - Version name: 1.8.5 (from appVersionName variable)
+ * - Version code: 1 (from appVersionCode variable)
+ * - Output APK: GLT-1.8.5-1.apk
  * 
  * 🎯 NEXT STEPS:
- * 1. Add google-services.json to android/app/
- * 2. Update project-level build.gradle with Google Services classpath
- * 3. Configure FCM in React Native code
+ * 1. Update android/build.gradle with expo-updates-gradle-plugin classpath
+ * 2. Clean build: cd android && ./gradlew clean
+ * 3. Build: ./gradlew assembleRelease
+ * 4. Publish update: eas update --branch production --message "Test OTA"
+ * 5. Install APK and test: Updates.isEnabled should be true!
  */
