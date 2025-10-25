@@ -6,18 +6,16 @@ buildscript {
     mavenCentral()
   }
   dependencies {
-    // ✅ Google Services for Firebase (existing)
+    // ✅ Google Services for Firebase
     classpath 'com.google.gms:google-services:4.4.1'
     
-    // ✅ ADDED: Expo Updates Gradle Plugin
-    // This is required for the expo-updates plugin to work in app/build.gradle
-    // Without this, OTA updates won't be configured properly
-   
-    
-    // Standard React Native dependencies
+    // ✅ Standard React Native dependencies
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
+    
+    // ❌ REMOVED: classpath for expo-updates-gradle-plugin
+    // Not needed - expo-updates is configured via manifestPlaceholders instead
   }
 }
 
@@ -29,32 +27,28 @@ allprojects {
   }
 }
 
+// ✅ Expo plugins for bare workflow
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
 
 /*
- * ✅ EXPO UPDATES GRADLE PLUGIN ADDED
+ * ✅ EXPO UPDATES CONFIGURATION METHOD FOR BARE WORKFLOW:
  * 
- * What this does:
- * - Enables the expo-updates plugin in app/build.gradle
- * - Allows the expoUpdates {} configuration block to work
- * - Embeds update configuration into the APK at build time
- * - Makes Updates.isEnabled = true in the compiled app
+ * In bare workflow Expo apps, expo-updates is NOT configured via a Gradle plugin.
+ * Instead, it's configured through:
  * 
- * Without this classpath:
- * ❌ expo-updates plugin won't be recognized
- * ❌ expoUpdates {} block will fail
- * ❌ Updates.isEnabled will be false
- * ❌ OTA updates won't work
+ * 1. manifestPlaceholders in app/build.gradle (✓ Done)
+ * 2. Meta-data tags in AndroidManifest.xml (⚠️ Required)
  * 
- * With this classpath:
- * ✅ expo-updates plugin works correctly
- * ✅ expoUpdates {} block is processed
- * ✅ Updates.isEnabled will be true
- * ✅ OTA updates work as expected
+ * The expo-updates package is autolinked through expo-modules-core,
+ * so no additional classpath or plugin is needed here.
  * 
- * Version: latest.release
- * - Automatically uses the latest stable version
- * - You can also pin to a specific version like: '3.0.0'
- * - Check available versions: https://github.com/expo/expo/releases
+ * Configuration values are passed via manifestPlaceholders:
+ * - EXPO_UPDATES_URL
+ * - EXPO_UPDATES_CHANNEL  
+ * - EXPO_UPDATES_RUNTIME_VERSION
+ * - EXPO_UPDATES_ENABLED
+ * - EXPO_UPDATES_CHECK_ON_LAUNCH
+ * 
+ * These are then read by expo-updates at runtime through AndroidManifest.xml.
  */
