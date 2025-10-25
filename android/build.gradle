@@ -12,7 +12,7 @@ buildscript {
     // ✅ ADDED: Expo Updates Gradle Plugin
     // This is required for the expo-updates plugin to work in app/build.gradle
     // Without this, OTA updates won't be configured properly
-    classpath 'expo-updates-gradle-plugin:latest.release'
+   
     
     // Standard React Native dependencies
     classpath('com.android.tools.build:gradle')
