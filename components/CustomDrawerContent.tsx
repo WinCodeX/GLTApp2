@@ -628,7 +628,7 @@ export default function CustomDrawerContent(props: any) {
 
           {/* Invite Friends */}    
           <DrawerItem    
-            label="Invite Friends"    
+            label="Invite a Friend"    
             labelStyle={styles.label}    
             icon={() => <Feather name="user-plus" size={24} color={colors.primary} />}    
             onPress={async () => {

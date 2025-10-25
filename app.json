@@ -8,9 +8,9 @@
     "scheme": "https",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
-    "runtimeVersion": "1.8.5",
     "updates": {
-      "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+      "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7",
+      "runtimeVersion": "1.8.5"
     },
     "ios": {
       "supportsTablet": true,
@@ -149,6 +149,6 @@
       }
     },
     "owner": "lvl0_x",
-    "runtimeVersion": "1.0.0"
+    "runtimeVersion": "1.8.5"
   }
 }
