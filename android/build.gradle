@@ -6,16 +6,13 @@ buildscript {
     mavenCentral()
   }
   dependencies {
-    // ✅ Google Services for Firebase
+    // Google Services for Firebase
     classpath 'com.google.gms:google-services:4.4.1'
     
-    // ✅ Standard React Native dependencies
+    // Standard React Native dependencies
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
-    
-    // ❌ REMOVED: classpath for expo-updates-gradle-plugin
-    // Not needed - expo-updates is configured via manifestPlaceholders instead
   }
 }
 
@@ -27,28 +24,21 @@ allprojects {
   }
 }
 
-// ✅ Expo plugins for bare workflow
+// Expo plugins for bare workflow
+// These plugins are autolinked and configured through expo-modules-core
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
 
 /*
- * ✅ EXPO UPDATES CONFIGURATION METHOD FOR BARE WORKFLOW:
+ * CONFIGURATION NOTES:
  * 
- * In bare workflow Expo apps, expo-updates is NOT configured via a Gradle plugin.
- * Instead, it's configured through:
+ * EXPO UPDATES:
+ * - The expo-updates-gradle-plugin is NOT added as a classpath dependency
+ * - It's autolinked through expo-modules-core's autolinking system
+ * - Configuration comes from app.json automatically
+ * - The plugin applies itself when you use: apply plugin: 'expo-updates' in app/build.gradle
  * 
- * 1. manifestPlaceholders in app/build.gradle (✓ Done)
- * 2. Meta-data tags in AndroidManifest.xml (⚠️ Required)
- * 
- * The expo-updates package is autolinked through expo-modules-core,
- * so no additional classpath or plugin is needed here.
- * 
- * Configuration values are passed via manifestPlaceholders:
- * - EXPO_UPDATES_URL
- * - EXPO_UPDATES_CHANNEL  
- * - EXPO_UPDATES_RUNTIME_VERSION
- * - EXPO_UPDATES_ENABLED
- * - EXPO_UPDATES_CHECK_ON_LAUNCH
- * 
- * These are then read by expo-updates at runtime through AndroidManifest.xml.
+ * FIREBASE:
+ * - Google Services plugin is applied for google-services.json processing
+ * - Firebase dependencies are managed in app/build.gradle
  */
