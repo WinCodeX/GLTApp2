@@ -27,6 +27,7 @@
     "actioncable": "^5.2.8-1",
     "animejs": "^4.2.2",
     "axios": "^1.11.0",
+    "dotenv": "^17.2.3",
     "expo": "~54.0.0",
     "expo-auth-session": "~7.0.8",
     "expo-background-fetch": "~14.0.7",

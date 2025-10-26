@@ -70,7 +70,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         
         // ✅ App versioning
-        versionCode appVersionCode
+        versionCode 1
         versionName appVersionName
         
         // ✅ App metadata - accessible at runtime

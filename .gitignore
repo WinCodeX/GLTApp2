@@ -36,8 +36,8 @@ yarn-error.*
 # typescript
 *.tsbuildinfo
 # Firebase Config
-android/app/google-services.json
-GoogleService-Info.plist
+#android/app/google-services.json
+#GoogleService-Info.plist
 glt-logistics-auth-07ab1b60c9d1.json
 .env
 app-example
