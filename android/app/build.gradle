@@ -2,13 +2,19 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: 'com.google.gms.google-services'
-apply plugin: 'expo-updates'  // ✅ CRITICAL: This plugin is required for expo-updates to work
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
 /**
- * This is the configuration block to customize your React Native Android app.
- * By default you don't need to apply any configuration, just uncomment the lines you need.
+ * ✅ EXPO UPDATES CONFIGURATION
+ * The expo-updates plugin is autolinked through expo-modules-autolinking.
+ * Configuration comes from app.json automatically.
+ * DO NOT manually apply 'expo-updates' plugin - it's handled by autolinking.
+ */
+
+/**
+ * React Native Configuration
+ * Uses Expo CLI for bundling to ensure proper expo-updates integration
  */
 react {
     entryFile = file(["node", "-e", "require('expo/scripts/resolveAppEntry')", projectRoot, "android", "absolute"].execute(null, rootDir).text.trim())
@@ -16,69 +22,70 @@ react {
     hermesCommand = new File(["node", "--print", "require.resolve('react-native/package.json')"].execute(null, rootDir).text.trim()).getParentFile().getAbsolutePath() + "/sdks/hermesc/%OS-BIN%/hermesc"
     codegenDir = new File(["node", "--print", "require.resolve('@react-native/codegen/package.json', { paths: [require.resolve('react-native/package.json')] })"].execute(null, rootDir).text.trim()).getParentFile().getAbsoluteFile()
 
-    enableBundleCompression = (findProperty('android.enableBundleCompression') ?: false).toBoolean()
-    // Use Expo CLI to bundle the app, this ensures the Metro config
-    // works correctly with Expo projects.
+    // ✅ CRITICAL: Use Expo CLI for bundling to enable expo-updates
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
+    
+    // Bundle compression for smaller APK size
+    enableBundleCompression = (findProperty('android.enableBundleCompression') ?: true).toBoolean()
 
-    /* Autolinking */
+    /* Autolinking - this includes expo-updates automatically */
     autolinkLibrariesWithApp()
 }
 
 /**
- * Set this to true in release builds to optimize the app using [R8](https://developer.android.com/topic/performance/app-optimization/enable-app-optimization).
+ * ✅ VERSION MANAGEMENT
+ * Update these values for each release:
+ * - appVersionName: Semantic version (e.g., "1.8.5")
+ * - appVersionCode: Incremental integer (e.g., 1, 2, 3...)
+ * 
+ * IMPORTANT: appVersionName MUST match "runtimeVersion" in app.json
  */
-def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBuilds') ?: false).toBoolean()
+def appName = "GLT"
+def appVersionName = "1.8.5"  // ⚠️ Must match app.json runtimeVersion
+def appVersionCode = 1        // ⚠️ Increment for each release
+def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
 /**
- * The preferred build flavor of JavaScriptCore (JSC)
- *
- * For example, to use the international variant, you can use:
- * `def jscFlavor = 'org.webkit:android-jsc-intl:+'`
- *
- * The international variant includes ICU i18n library and necessary data
- * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
- * give correct results when using with locales other than en-US. Note that
- * this variant is about 6MiB larger per architecture than default.
+ * Build Optimization Settings
  */
-def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+def enableProguardInReleaseBuilds = (findProperty('android.enableProguardInReleaseBuilds') ?: true).toBoolean()
+def enableShrinkResourcesInReleaseBuilds = (findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: true).toBoolean()
 
-// ✅ VERSION MANAGEMENT - Increment these for each APK release
-def appName = "GLT"
-def appVersionName = "1.8.5"  // Update for new APK versions
-def appVersionCode = 2        // Update for new APK versions
-def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
+/**
+ * JavaScriptCore Flavor
+ */
+def jscFlavor = 'io.github.react-native-community:jsc-android:+'
 
 android {
     ndkVersion rootProject.ext.ndkVersion
-
     buildToolsVersion rootProject.ext.buildToolsVersion
     compileSdk rootProject.ext.compileSdkVersion
 
     namespace 'com.lvl0_x.gltapp2'
+    
     defaultConfig {
         applicationId 'com.lvl0_x.gltapp2'
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         
-        // App versioning
+        // ✅ App versioning
         versionCode appVersionCode
         versionName appVersionName
         
-        // App display name and metadata
+        // ✅ App metadata - accessible at runtime
         resValue "string", "app_name", appName
         resValue "string", "app_version", appVersionName
         resValue "string", "build_number", appVersionCode.toString()
         resValue "string", "build_timestamp", buildTimestamp
         
-        // Build config fields for runtime access
+        // ✅ BuildConfig fields for programmatic access
         buildConfigField "String", "VERSION_NAME", "\"${appVersionName}\""
         buildConfigField "int", "VERSION_CODE", "${appVersionCode}"
         buildConfigField "String", "APP_NAME", "\"${appName}\""
         buildConfigField "String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\""
         
-        // Enable multidex for better compatibility
+        // ✅ Enable multidex for better compatibility
         multiDexEnabled true
         
         // ✅ OAuth redirect scheme configuration
@@ -88,9 +95,8 @@ android {
             oauthRedirectScheme: 'https'
         ]
         
-        // ⚠️ NOTE: expo-updates configuration is NOT done here!
-        // The expo-updates plugin reads from app.json automatically.
-        // Do NOT add EXPO_UPDATES_* to manifestPlaceholders manually.
+        // ⚠️ IMPORTANT: DO NOT manually add EXPO_UPDATES_* here
+        // expo-updates plugin handles this automatically from app.json
     }
     
     signingConfigs {
@@ -100,78 +106,102 @@ android {
             keyAlias 'androiddebugkey'
             keyPassword 'android'
         }
+        
+        // ✅ TODO: Add release signing config for production
+        // release {
+        //     storeFile file('release.keystore')
+        //     storePassword System.getenv("RELEASE_STORE_PASSWORD")
+        //     keyAlias System.getenv("RELEASE_KEY_ALIAS")
+        //     keyPassword System.getenv("RELEASE_KEY_PASSWORD")
+        // }
     }
     
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
             
-            // Debug identification through app name and version
+            // ✅ Debug identification
             resValue "string", "app_name", "${appName} (Debug)"
             versionNameSuffix "-debug-${buildTimestamp}"
             
-            // Debug-specific build config
+            // ✅ Debug build config
             buildConfigField "boolean", "IS_DEBUG", "true"
-            buildConfigField "String", "BUILD_TYPE", '"debug"'
+            buildConfigField "String", "BUILD_TYPE", "\"debug\""
             
-            // Debug-specific OAuth environment flag
+            // ✅ Debug OAuth environment
             manifestPlaceholders += [
                 oauthEnvironment: 'development'
             ]
+            
+            // Disable minification for faster debug builds
+            minifyEnabled false
+            shrinkResources false
         }
+        
         release {
-            // Production keystore configuration
+            // ✅ Use debug signing for now (change to signingConfigs.release in production)
             signingConfig signingConfigs.debug
-            def enableShrinkResources = findProperty('android.enableShrinkResourcesInReleaseBuilds') ?: 'false'
-            shrinkResources enableShrinkResources.toBoolean()
-            minifyEnabled enableMinifyInReleaseBuilds
-            proguardFiles getDefaultProguardFile("proguard-android.txt"), "proguard-rules.pro"
-            def enablePngCrunchInRelease = findProperty('android.enablePngCrunchInReleaseBuilds') ?: 'true'
-            crunchPngs enablePngCrunchInRelease.toBoolean()
             
-            // Release-specific build config
+            // ✅ Release optimization
+            minifyEnabled enableProguardInReleaseBuilds
+            shrinkResources enableShrinkResourcesInReleaseBuilds
+            proguardFiles getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro"
+            
+            // ✅ PNG optimization
+            crunchPngs true
+            
+            // ✅ Release build config
             buildConfigField "boolean", "IS_DEBUG", "false"
-            buildConfigField "String", "BUILD_TYPE", '"release"'
+            buildConfigField "String", "BUILD_TYPE", "\"release\""
             
-            // Production OAuth environment flag
+            // ✅ Production OAuth environment
             manifestPlaceholders += [
                 oauthEnvironment: 'production'
             ]
         }
     }
     
-    // Java compatibility
+    // ✅ Java compatibility
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_1_8
-        targetCompatibility JavaVersion.VERSION_1_8
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
     }
     
-    // ✅ APK naming for updates - includes version for tracking
+    kotlinOptions {
+        jvmTarget = '17'
+    }
+    
+    // ✅ APK Output Configuration
     applicationVariants.all { variant ->
-        variant.outputs.all {
+        variant.outputs.all { output ->
             def buildType = variant.buildType.name
             def versionName = variant.versionName
             def versionCode = variant.versionCode
             
             if (buildType == "release") {
-                // Release APK: GLT-1.8.5-1.apk
-                outputFileName = "${appName}-${versionName}-${versionCode}.apk"
+                // ✅ Release APK: GLT-1.8.5-1.apk
+                outputFileName = "${appName}-${appVersionName}-${versionCode}.apk"
             } else if (buildType == "debug") {
-                // Debug APK: GLT-1.8.5-debug-20250910-1430-1.apk
-                outputFileName = "${appName}-${versionName}-debug-${buildTimestamp}-${versionCode}.apk"
+                // ✅ Debug APK: GLT-1.8.5-debug-20250126-1430-1.apk
+                outputFileName = "${appName}-${appVersionName}-debug-${buildTimestamp}-${versionCode}.apk"
             }
             
-            // Log the output for verification
-            println "Generated APK: ${outputFileName}"
-            println "Package: com.lvl0_x.gltapp2"
-            println "Version: ${versionName} (${versionCode})"
+            // ✅ Log build information
+            println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            println "📦 Build Output Configuration"
+            println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            println "APK Name:    ${outputFileName}"
+            println "Package:     com.lvl0_x.gltapp2"
+            println "Version:     ${versionName} (${versionCode})"
+            println "Build Type:  ${buildType}"
+            println "Output Path: ${output.outputFile.parentFile}"
+            println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         }
     }
     
     packagingOptions {
         jniLibs {
-            def enableLegacyPackaging = findProperty('expo.useLegacyPackaging') ?: 'false'
-            useLegacyPackaging enableLegacyPackaging.toBoolean()
+            useLegacyPackaging (findProperty('expo.useLegacyPackaging')?.toBoolean() ?: false)
         }
     }
     
@@ -180,20 +210,14 @@ android {
     }
 }
 
-// Apply static values from `gradle.properties` to the `android.packagingOptions`
-// Accepts values in comma delimited lists, example:
-// android.packagingOptions.pickFirsts=/LICENSE,**/picasa.ini
+// ✅ Apply static values from gradle.properties to packagingOptions
 ["pickFirsts", "excludes", "merges", "doNotStrip"].each { prop ->
-    // Split option: 'foo,bar' -> ['foo', 'bar']
     def options = (findProperty("android.packagingOptions.$prop") ?: "").split(",");
-    // Trim all elements in place.
     for (i in 0..<options.size()) options[i] = options[i].trim();
-    // `[] - ""` is essentially `[""].filter(Boolean)` removing all empty strings.
     options -= ""
 
     if (options.length > 0) {
         println "android.packagingOptions.$prop += $options ($options.length)"
-        // Ex: android.packagingOptions.pickFirsts += '**/SCCS/**'
         options.each {
             android.packagingOptions[prop] += it
         }
@@ -201,7 +225,7 @@ android {
 }
 
 dependencies {
-    // The version of react-native is set by the React Native Gradle Plugin
+    // ✅ React Native core
     implementation("com.facebook.react:react-android")
 
     // ✅ Firebase Dependencies
@@ -213,75 +237,123 @@ dependencies {
     // ✅ Google Play Services (required for FCM)
     implementation 'com.google.android.gms:play-services-base:18.2.0'
 
-    def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
-    def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";
-    def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true";
+    // ✅ Image format support
+    def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true"
+    def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true"
+    def isWebpAnimatedEnabled = (findProperty('expo.webp.animated') ?: "") == "true"
 
     if (isGifEnabled) {
-        // For animated gif support
-        implementation("com.facebook.fresco:animated-gif:${expoLibs.versions.fresco.get()}")
+        implementation("com.facebook.fresco:animated-gif:3.1.3")
     }
 
     if (isWebpEnabled) {
-        // For webp support
-        implementation("com.facebook.fresco:webpsupport:${expoLibs.versions.fresco.get()}")
+        implementation("com.facebook.fresco:webpsupport:3.1.3")
         if (isWebpAnimatedEnabled) {
-            // Animated webp support
-            implementation("com.facebook.fresco:animated-webp:${expoLibs.versions.fresco.get()}")
+            implementation("com.facebook.fresco:animated-webp:3.1.3")
         }
     }
 
+    // ✅ JavaScript engine
     if (hermesEnabled.toBoolean()) {
         implementation("com.facebook.react:hermes-android")
     } else {
         implementation jscFlavor
     }
     
+    // ✅ Multidex support
     implementation 'androidx.multidex:multidex:2.0.1'
 }
 
+// ✅ Verify expo-updates is enabled after evaluation
+afterEvaluate {
+    println ""
+    println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    println "🔍 Expo Updates Configuration Check"
+    println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    
+    // Check if expo-updates tasks are available
+    def hasUpdatesTask = tasks.findByName('createReleaseUpdatesResources') != null
+    
+    if (hasUpdatesTask) {
+        println "✅ expo-updates is ENABLED and configured"
+        println "   Task found: createReleaseUpdatesResources"
+        println "   Configuration source: app.json"
+        println "   Runtime version: ${appVersionName}"
+    } else {
+        println "⚠️  WARNING: expo-updates tasks not found!"
+        println "   Expected task: createReleaseUpdatesResources"
+        println "   This means OTA updates will NOT work."
+        println ""
+        println "   Troubleshooting steps:"
+        println "   1. Ensure expo-updates is installed: npm list expo-updates"
+        println "   2. Clean build: ./gradlew clean"
+        println "   3. Check app.json has updates.enabled = true"
+        println "   4. Verify autolinking: npx expo-modules-autolinking resolve --platform android"
+    }
+    
+    println "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    println ""
+}
+
 /*
- * ✅ CONFIGURATION SUMMARY:
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * 📋 CONFIGURATION SUMMARY
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 
- * EXPO UPDATES:
- * - Plugin applied: apply plugin: 'expo-updates' (line 5)
- * - Configuration source: app.json (automatic)
- * - Runtime version: Read from app.json "runtimeVersion" field
- * - Update URL: Read from app.json "updates.url" field
- * - Channel: Specified in eas.json for EAS builds
- * - The plugin generates all required metadata automatically
+ * ✅ EXPO UPDATES (Autolinked via expo-modules-autolinking):
+ *    - Plugin: Automatically applied through autolinking
+ *    - Configuration: Read from app.json
+ *    - Runtime Version: Must match appVersionName (${appVersionName})
+ *    - Update URL: From app.json updates.url
+ *    - Build Task: createReleaseUpdatesResources (auto-generated)
  * 
- * REQUIRED IN app.json:
- * {
- *   "expo": {
- *     "runtimeVersion": "1.8.5",  // Must match appVersionName
- *     "updates": {
- *       "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
- *     }
- *   }
- * }
+ * ✅ REQUIRED IN app.json:
+ *    {
+ *      "expo": {
+ *        "runtimeVersion": "1.8.5",  // ⚠️ MUST match appVersionName
+ *        "updates": {
+ *          "enabled": true,
+ *          "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+ *        }
+ *      }
+ *    }
  * 
- * FIREBASE FCM:
- * - Firebase BOM and messaging dependencies added
- * - Google Services plugin applied for google-services.json processing
- * - Uses notification-icon.png from android/app/src/main/res/
+ * ✅ APK OUTPUTS:
+ *    - Release: android/app/build/outputs/apk/release/GLT-1.8.5-1.apk
+ *    - Debug:   android/app/build/outputs/apk/debug/GLT-1.8.5-debug-YYYYMMDD-HHMM-1.apk
  * 
- * APK VERSIONING:
- * - Version name: 1.8.5 (update appVersionName variable)
- * - Version code: 1 (update appVersionCode variable)
- * - Output APK: GLT-1.8.5-1.apk
+ * ✅ FIREBASE FCM:
+ *    - Configuration: android/app/google-services.json
+ *    - Dependencies: firebase-bom, firebase-messaging
+ *    - Notification Icon: android/app/src/main/res/drawable/notification_icon.png
  * 
- * 🎯 NEXT STEPS TO VERIFY:
- * 1. Ensure app.json has runtimeVersion and updates.url
- * 2. Clean build: cd android && ./gradlew clean
- * 3. Build: ./gradlew assembleRelease
- * 4. You should see: "Task :app:createReleaseUpdatesResources" in build output
- * 5. Install APK and verify: Updates.isEnabled should be true
- * 6. Publish update: eas update --branch production --message "Test"
- * 7. Reopen app and update should download
+ * ✅ BUILD COMMANDS:
+ *    - Clean:   cd android && ./gradlew clean
+ *    - Debug:   cd android && ./gradlew assembleDebug
+ *    - Release: cd android && ./gradlew assembleRelease
+ *    - Bundle:  cd android && ./gradlew bundleRelease
  * 
- * ⚠️ CRITICAL:
- * - Do NOT manually add EXPO_UPDATES_* to manifestPlaceholders
- * - Do NOT remove the expo-updates plugin
- * - The plugin handles everything automatically from app.json
+ * ✅ VERIFY EXPO UPDATES:
+ *    1. Build the app: ./gradlew assembleRelease
+ *    2. Check for task: grep "createReleaseUpdatesResources" in build output
+ *    3. Install APK and check: Updates.isEnabled === true
+ *    4. Publish update: eas update --branch production
+ *    5. Relaunch app - update should download
+ * 
+ * ⚠️ CRITICAL NOTES:
+ *    - DO NOT manually add: apply plugin: 'expo-updates'
+ *    - DO NOT manually set EXPO_UPDATES_* in manifestPlaceholders
+ *    - Ensure app.json runtimeVersion matches appVersionName
+ *    - expo-updates is configured through expo-modules-autolinking
+ *    - If updates don't work, check afterEvaluate output above
+ * 
+ * 🔧 TROUBLESHOOTING:
+ *    If expo-updates is not working:
+ *    1. rm -rf android/.gradle android/build android/app/build
+ *    2. ./gradlew clean
+ *    3. Check: npx expo-modules-autolinking resolve --platform android
+ *    4. Verify expo-updates appears in autolinking output
+ *    5. ./gradlew assembleRelease --info | grep "expo-updates"
+ * 
+ * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
