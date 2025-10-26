@@ -2,8 +2,7 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 apply plugin: 'com.google.gms.google-services'
-// ✅ REMOVED: apply plugin: 'expo-updates' - this plugin doesn't exist
-// expo-updates is configured via AndroidManifest.xml instead
+apply plugin: 'expo-updates'  // ✅ CRITICAL: This plugin is required for expo-updates to work
 
 def projectRoot = rootDir.getAbsoluteFile().getParentFile().getAbsolutePath()
 
@@ -22,45 +21,6 @@ react {
     // works correctly with Expo projects.
     cliFile = new File(["node", "--print", "require.resolve('@expo/cli', { paths: [require.resolve('expo/package.json')] })"].execute(null, rootDir).text.trim())
     bundleCommand = "export:embed"
-
-    /* Folders */
-     //   The root of your project, i.e. where "package.json" lives. Default is '../..'
-    // root = file("../../")
-    //   The folder where the react-native NPM package is. Default is ../../node_modules/react-native
-    // reactNativeDir = file("../../node_modules/react-native")
-    //   The folder where the react-native Codegen package is. Default is ../../node_modules/@react-native/codegen
-    // codegenDir = file("../../node_modules/@react-native/codegen")
-
-    /* Variants */
-    //   The list of variants to that are debuggable. For those we're going to
-    //   skip the bundling of the JS bundle and the assets. By default is just 'debug'.
-    //   If you add flavors like lite, prod, etc. you'll have to list your debuggableVariants.
-    // debuggableVariants = ["liteDebug", "prodDebug"]
-
-    /* Bundling */
-    //   A list containing the node command and its flags. Default is just 'node'.
-    // nodeExecutableAndArgs = ["node"]
-
-    //
-    //   The path to the CLI configuration file. Default is empty.
-    // bundleConfig = file(../rn-cli.config.js)
-    //
-    //   The name of the generated asset file containing your JS bundle
-    // bundleAssetName = "MyApplication.android.bundle"
-    //
-    //   The entry file for bundle generation. Default is 'index.android.js' or 'index.js'
-    // entryFile = file("../js/MyApplication.android.js")
-    //
-    //   A list of extra flags to pass to the 'bundle' commands.
-    //   See https://github.com/react-native-community/cli/blob/main/docs/commands.md#bundle
-    // extraPackagerArgs = []
-
-    /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
-    //
-    //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
-    // hermesFlags = ["-O", "-output-source-map"]
 
     /* Autolinking */
     autolinkLibrariesWithApp()
@@ -84,17 +44,11 @@ def enableMinifyInReleaseBuilds = (findProperty('android.enableMinifyInReleaseBu
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 
-// ✅ UNIFIED VERSION MANAGEMENT - Increment these for each APK release
+// ✅ VERSION MANAGEMENT - Increment these for each APK release
 def appName = "GLT"
-def appVersionName = "1.8.5"  // ✅ Updated for APK updates - increment this
-def appVersionCode = 1       // ✅ Updated for APK updates - increment this
+def appVersionName = "1.8.5"  // Update for new APK versions
+def appVersionCode = 1        // Update for new APK versions
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
-
-// ✅ EXPO UPDATES CONFIGURATION - Used in AndroidManifest.xml
-def expoUpdatesUrl = "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
-def expoUpdatesChannel = "production"
-def expoUpdatesRuntimeVersion = appVersionName
-def expoUpdatesEnabled = "true"
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -108,7 +62,7 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         
-        // ✅ FIXED: Use defined variables instead of hardcoded values
+        // App versioning
         versionCode appVersionCode
         versionName appVersionName
         
@@ -118,33 +72,27 @@ android {
         resValue "string", "build_number", appVersionCode.toString()
         resValue "string", "build_timestamp", buildTimestamp
         
-        // Add version info to build config for runtime access
+        // Build config fields for runtime access
         buildConfigField "String", "VERSION_NAME", "\"${appVersionName}\""
         buildConfigField "int", "VERSION_CODE", "${appVersionCode}"
         buildConfigField "String", "APP_NAME", "\"${appName}\""
         buildConfigField "String", "BUILD_TIMESTAMP", "\"${buildTimestamp}\""
-        buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"${findProperty('reactNativeReleaseLevel') ?: 'stable'}\""
         
         // Enable multidex for better compatibility
         multiDexEnabled true
         
-        // ✅ EXPO UPDATES CONFIGURATION through manifestPlaceholders
-        // This is how expo-updates is configured in bare workflow
+        // ✅ OAuth redirect scheme configuration
         manifestPlaceholders += [
-            // OAuth redirect scheme configuration
             appAuthRedirectScheme: 'com.lvl0_x.gltapp2',
             oauthRedirectHost: 'oauth',
-            oauthRedirectScheme: 'https',
-            
-            // Expo Updates configuration
-            EXPO_UPDATES_URL: expoUpdatesUrl,
-            EXPO_UPDATES_CHANNEL: expoUpdatesChannel,
-            EXPO_UPDATES_RUNTIME_VERSION: expoUpdatesRuntimeVersion,
-            EXPO_UPDATES_ENABLED: expoUpdatesEnabled,
-            EXPO_UPDATES_CHECK_ON_LAUNCH: 'ALWAYS',
-            EXPO_UPDATES_LAUNCH_WAIT_MS: '0'
+            oauthRedirectScheme: 'https'
         ]
+        
+        // ⚠️ NOTE: expo-updates configuration is NOT done here!
+        // The expo-updates plugin reads from app.json automatically.
+        // Do NOT add EXPO_UPDATES_* to manifestPlaceholders manually.
     }
+    
     signingConfigs {
         debug {
             storeFile file('debug.keystore')
@@ -153,6 +101,7 @@ android {
             keyPassword 'android'
         }
     }
+    
     buildTypes {
         debug {
             signingConfig signingConfigs.debug
@@ -197,7 +146,7 @@ android {
         targetCompatibility JavaVersion.VERSION_1_8
     }
     
-    // ✅ APK naming for updates - now includes version for tracking
+    // ✅ APK naming for updates - includes version for tracking
     applicationVariants.all { variant ->
         variant.outputs.all {
             def buildType = variant.buildType.name
@@ -205,7 +154,7 @@ android {
             def versionCode = variant.versionCode
             
             if (buildType == "release") {
-                // Release APK: GLT-1.8.5-1.apk (perfect for update tracking)
+                // Release APK: GLT-1.8.5-1.apk
                 outputFileName = "${appName}-${versionName}-${versionCode}.apk"
             } else if (buildType == "debug") {
                 // Debug APK: GLT-1.8.5-debug-20250910-1430-1.apk
@@ -225,6 +174,7 @@ android {
             useLegacyPackaging enableLegacyPackaging.toBoolean()
         }
     }
+    
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
@@ -291,33 +241,47 @@ dependencies {
 }
 
 /*
- * ✅ COMPLETE CONFIGURATION SUMMARY:
+ * ✅ CONFIGURATION SUMMARY:
+ * 
+ * EXPO UPDATES:
+ * - Plugin applied: apply plugin: 'expo-updates' (line 5)
+ * - Configuration source: app.json (automatic)
+ * - Runtime version: Read from app.json "runtimeVersion" field
+ * - Update URL: Read from app.json "updates.url" field
+ * - Channel: Specified in eas.json for EAS builds
+ * - The plugin generates all required metadata automatically
+ * 
+ * REQUIRED IN app.json:
+ * {
+ *   "expo": {
+ *     "runtimeVersion": "1.8.5",  // Must match appVersionName
+ *     "updates": {
+ *       "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+ *     }
+ *   }
+ * }
  * 
  * FIREBASE FCM:
  * - Firebase BOM and messaging dependencies added
  * - Google Services plugin applied for google-services.json processing
- * - All Firebase notifications use existing notification-icon.png
- * 
- * EXPO OTA UPDATES:
- * - Configured through manifestPlaceholders (correct method for bare workflow)
- * - Update URL: https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7
- * - Runtime version: Dynamically set to appVersionName (1.8.5)
- * - Channel: production (matches eas.json)
- * - Updates enabled: true
- * - Check on launch: ALWAYS
- * 
- * ⚠️  IMPORTANT: You MUST also update AndroidManifest.xml to read these placeholders!
- * See the AndroidManifest.xml instructions file.
+ * - Uses notification-icon.png from android/app/src/main/res/
  * 
  * APK VERSIONING:
- * - Version name: 1.8.5 (from appVersionName variable)
- * - Version code: 1 (from appVersionCode variable)
+ * - Version name: 1.8.5 (update appVersionName variable)
+ * - Version code: 1 (update appVersionCode variable)
  * - Output APK: GLT-1.8.5-1.apk
  * 
- * 🎯 NEXT STEPS:
- * 1. Update AndroidManifest.xml with expo-updates meta-data tags
+ * 🎯 NEXT STEPS TO VERIFY:
+ * 1. Ensure app.json has runtimeVersion and updates.url
  * 2. Clean build: cd android && ./gradlew clean
  * 3. Build: ./gradlew assembleRelease
- * 4. Publish update: eas update --branch production --message "Test OTA"
- * 5. Install APK and test: Updates.isEnabled should be true!
+ * 4. You should see: "Task :app:createReleaseUpdatesResources" in build output
+ * 5. Install APK and verify: Updates.isEnabled should be true
+ * 6. Publish update: eas update --branch production --message "Test"
+ * 7. Reopen app and update should download
+ * 
+ * ⚠️ CRITICAL:
+ * - Do NOT manually add EXPO_UPDATES_* to manifestPlaceholders
+ * - Do NOT remove the expo-updates plugin
+ * - The plugin handles everything automatically from app.json
  */
