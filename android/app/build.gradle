@@ -47,7 +47,7 @@ def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
 // ✅ VERSION MANAGEMENT - Increment these for each APK release
 def appName = "GLT"
 def appVersionName = "1.8.5"  // Update for new APK versions
-def appVersionCode = 1        // Update for new APK versions
+def appVersionCode = 2        // Update for new APK versions
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
 android {
