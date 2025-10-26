@@ -43,7 +43,7 @@ react {
  */
 def appName = "GLT"
 def appVersionName = "1.8.5"  // ⚠️ Must match app.json runtimeVersion
-def appVersionCode = 1        // ⚠️ Increment for each release
+def appVersionCode = 2        // ⚠️ Increment for each release
 def buildTimestamp = new Date().format('yyyyMMdd-HHmm')
 
 /**
