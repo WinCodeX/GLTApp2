@@ -40,17 +40,13 @@ class MainApplication : Application(), ReactApplication {
 
   override fun onCreate() {
     super.onCreate()
-    DefaultNewArchitectureEntryPoint.releaseLevel = try {
-      ReleaseLevel.valueOf(BuildConfig.REACT_NATIVE_RELEASE_LEVEL.uppercase())
-    } catch (e: IllegalArgumentException) {
-      ReleaseLevel.STABLE
-    }
+    DefaultNewArchitectureEntryPoint.releaseLevel = ReleaseLevel.STABLE
     loadReactNative(this)
     ApplicationLifecycleDispatcher.onApplicationCreate(this)
   }
 
   override fun onConfigurationChanged(newConfig: Configuration) {
-    super.onConfigurationChanged(newConfig)
+    super.onConfigurationChanged(this, newConfig)
     ApplicationLifecycleDispatcher.onConfigurationChanged(this, newConfig)
   }
 }
