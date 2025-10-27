@@ -38,8 +38,7 @@ react {
  * Update these values for each release:
  * - appVersionName: Semantic version (e.g., "1.8.5")
  * - appVersionCode: Incremental integer (e.g., 1, 2, 3...)
- * 
- * IMPORTANT: appVersionName MUST match "runtimeVersion" in app.json
+ * * IMPORTANT: appVersionName MUST match "runtimeVersion" in app.json
  */
 def appName = "GLT"
 def appVersionName = "1.8.5"  // ⚠️ Must match app.json runtimeVersion
@@ -70,7 +69,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         
         // ✅ App versioning
-        versionCode 1
+        versionCode appVersionCode
         versionName appVersionName
         
         // ✅ App metadata - accessible at runtime
@@ -128,6 +127,9 @@ android {
             buildConfigField "boolean", "IS_DEBUG", "true"
             buildConfigField "String", "BUILD_TYPE", "\"debug\""
             
+            // ⬇️ FIXED: Manually add missing field for expo-updates/dev-launcher
+            buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"DEBUG\""
+            
             // ✅ Debug OAuth environment
             manifestPlaceholders += [
                 oauthEnvironment: 'development'
@@ -154,6 +156,9 @@ android {
             buildConfigField "boolean", "IS_DEBUG", "false"
             buildConfigField "String", "BUILD_TYPE", "\"release\""
             
+            // ⬇️ FIXED: Manually add missing field for expo-updates
+            buildConfigField "String", "REACT_NATIVE_RELEASE_LEVEL", "\"RELEASE\""
+
             // ✅ Production OAuth environment
             manifestPlaceholders += [
                 oauthEnvironment: 'production'
@@ -299,61 +304,52 @@ afterEvaluate {
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  * 📋 CONFIGURATION SUMMARY
  * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
- * 
- * ✅ EXPO UPDATES (Autolinked via expo-modules-autolinking):
- *    - Plugin: Automatically applied through autolinking
- *    - Configuration: Read from app.json
- *    - Runtime Version: Must match appVersionName (${appVersionName})
- *    - Update URL: From app.json updates.url
- *    - Build Task: createReleaseUpdatesResources (auto-generated)
- * 
- * ✅ REQUIRED IN app.json:
- *    {
- *      "expo": {
- *        "runtimeVersion": "1.8.5",  // ⚠️ MUST match appVersionName
- *        "updates": {
- *          "enabled": true,
- *          "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
- *        }
- *      }
- *    }
- * 
- * ✅ APK OUTPUTS:
- *    - Release: android/app/build/outputs/apk/release/GLT-1.8.5-1.apk
- *    - Debug:   android/app/build/outputs/apk/debug/GLT-1.8.5-debug-YYYYMMDD-HHMM-1.apk
- * 
- * ✅ FIREBASE FCM:
- *    - Configuration: android/app/google-services.json
- *    - Dependencies: firebase-bom, firebase-messaging
- *    - Notification Icon: android/app/src/main/res/drawable/notification_icon.png
- * 
- * ✅ BUILD COMMANDS:
- *    - Clean:   cd android && ./gradlew clean
- *    - Debug:   cd android && ./gradlew assembleDebug
- *    - Release: cd android && ./gradlew assembleRelease
- *    - Bundle:  cd android && ./gradlew bundleRelease
- * 
- * ✅ VERIFY EXPO UPDATES:
- *    1. Build the app: ./gradlew assembleRelease
- *    2. Check for task: grep "createReleaseUpdatesResources" in build output
- *    3. Install APK and check: Updates.isEnabled === true
- *    4. Publish update: eas update --branch production
- *    5. Relaunch app - update should download
- * 
- * ⚠️ CRITICAL NOTES:
- *    - DO NOT manually add: apply plugin: 'expo-updates'
- *    - DO NOT manually set EXPO_UPDATES_* in manifestPlaceholders
- *    - Ensure app.json runtimeVersion matches appVersionName
- *    - expo-updates is configured through expo-modules-autolinking
- *    - If updates don't work, check afterEvaluate output above
- * 
- * 🔧 TROUBLESHOOTING:
- *    If expo-updates is not working:
- *    1. rm -rf android/.gradle android/build android/app/build
- *    2. ./gradlew clean
- *    3. Check: npx expo-modules-autolinking resolve --platform android
- *    4. Verify expo-updates appears in autolinking output
- *    5. ./gradlew assembleRelease --info | grep "expo-updates"
- * 
- * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+ * * ✅ EXPO UPDATES (Autolinked via expo-modules-autolinking):
+ * - Plugin: Automatically applied through autolinking
+ * - Configuration: Read from app.json
+ * - Runtime Version: Must match appVersionName (${appVersionName})
+ * - Update URL: From app.json updates.url
+ * - Build Task: createReleaseUpdatesResources (auto-generated)
+ * * ✅ REQUIRED IN app.json:
+ * {
+ * "expo": {
+ * "runtimeVersion": "1.8.5",  // ⚠️ MUST match appVersionName
+ * "updates": {
+ * "enabled": true,
+ * "url": "https://u.expo.dev/cd8db67e-8126-40ba-9bb0-aaadbb5bbbf7"
+ * }
+ * }
+ * }
+ * * ✅ APK OUTPUTS:
+ * - Release: android/app/build/outputs/apk/release/GLT-1.8.5-1.apk
+ * - Debug:   android/app/build/outputs/apk/debug/GLT-1.8.5-debug-YYYYMMDD-HHMM-1.apk
+ * * ✅ FIREBASE FCM:
+ * - Configuration: android/app/google-services.json
+ * - Dependencies: firebase-bom, firebase-messaging
+ * - Notification Icon: android/app/src/main/res/drawable/notification_icon.png
+ * * ✅ BUILD COMMANDS:
+ * - Clean:   cd android && ./gradlew clean
+ * - Debug:   cd android && ./gradlew assembleDebug
+ * - Release: cd android && ./gradlew assembleRelease
+ * - Bundle:  cd android && ./gradlew bundleRelease
+ * * ✅ VERIFY EXPO UPDATES:
+ * 1. Build the app: ./gradlew assembleRelease
+ * 2. Check for task: grep "createReleaseUpdatesResources" in build output
+ * 3. Install APK and check: Updates.isEnabled === true
+ * 4. Publish update: eas update --branch production
+ * 5. Relaunch app - update should download
+ * * ⚠️ CRITICAL NOTES:
+ * - DO NOT manually add: apply plugin: 'expo-updates'
+ * - DO NOT manually set EXPO_UPDATES_* in manifestPlaceholders
+ * - Ensure app.json runtimeVersion matches appVersionName
+ * - expo-updates is configured through expo-modules-autolinking
+ * - If updates don't work, check afterEvaluate output above
+ * * 🔧 TROUBLESHOOTING:
+ * If expo-updates is not working:
+ * 1. rm -rf android/.gradle android/build android/app/build
+ * 2. ./gradlew clean
+ * 3. Check: npx expo-modules-autolinking resolve --platform android
+ * 4. Verify expo-updates appears in autolinking output
+ * 5. ./gradlew assembleRelease --info | grep "expo-updates"
+ * * ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  */
