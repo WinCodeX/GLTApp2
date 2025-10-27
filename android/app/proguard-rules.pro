@@ -12,3 +12,13 @@
 -keep class com.facebook.react.turbomodule.** { *; }
 
 # Add any project specific keep options here:
+
+# Fresco - Keep animated image cache classes
+-keep class com.facebook.imagepipeline.cache.AnimatedCache { *; }
+-keep class com.facebook.imagepipeline.cache.AnimationFrames { *; }
+-keep class com.facebook.imagepipeline.nativecode.WebpTranscoder { *; }
+-keep class com.facebook.imagepipeline.nativecode.WebpTranscoderImpl { *; }
+
+# Fresco - Keep all classes in animated packages
+-keep class com.facebook.fresco.animation.** { *; }
+-keep class com.facebook.imagepipeline.animated.** { *; }
