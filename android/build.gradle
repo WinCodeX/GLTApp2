@@ -6,7 +6,10 @@ buildscript {
     mavenCentral()
   }
   dependencies {
-        classpath 'com.google.gms:google-services:4.4.1'
+    // Google Services for Firebase
+    classpath 'com.google.gms:google-services:4.4.1'
+    
+    // Standard React Native dependencies
     classpath('com.android.tools.build:gradle')
     classpath('com.facebook.react:react-native-gradle-plugin')
     classpath('org.jetbrains.kotlin:kotlin-gradle-plugin')
@@ -17,9 +20,23 @@ allprojects {
   repositories {
     google()
     mavenCentral()
-    maven { url 'https://www.jitpack.io' }
+    maven { url = uri('https://www.jitpack.io') }
   }
 }
 
+// Expo plugins for bare workflow
+// These plugins are autolinked and configured through expo-modules-core
 apply plugin: "expo-root-project"
 apply plugin: "com.facebook.react.rootproject"
+
+/*
+ * CONFIGURATION NOTES:
+ * * EXPO UPDATES:
+ * - The expo-updates-gradle-plugin is NOT added as a classpath dependency
+ * - It's autolinked through expo-modules-core's autolinking system
+ * - Configuration comes from app.json automatically
+ * - The plugin applies itself when you use: apply plugin: 'expo-updates' in app/build.gradle
+ * * FIREBASE:
+ * - Google Services plugin is applied for google-services.json processing
+ * - Firebase dependencies are managed in app/build.gradle
+ */
