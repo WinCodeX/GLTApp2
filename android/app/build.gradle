@@ -68,8 +68,13 @@ android {
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         
+<<<<<<< HEAD
         // ✅ App versioning
         versionCode appVersionCode
+=======
+        // App versioning
+        versionCode 1
+>>>>>>> f8564d6 (fix)
         versionName appVersionName
         
         // ✅ App metadata - accessible at runtime
