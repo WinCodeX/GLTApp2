@@ -4,7 +4,7 @@ import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -20,7 +20,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
 import { useUser } from '../../../context/UserContext';
 import { accountManager } from '../../../lib/AccountManager';
@@ -31,7 +31,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const INITIAL_MESSAGE_LIMIT = 50;
 const PAGINATION_LIMIT = 30;
-const REQUEST_TIMEOUT = 20000; // FIXED: Increased to 20 seconds
+const REQUEST_TIMEOUT = 20000;
 const SCROLL_BUTTON_THRESHOLD = 200;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAYS = [5000, 15000, 30000];

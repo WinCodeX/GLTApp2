@@ -10,5 +10,10 @@
 # react-native-reanimated
 -keep class com.swmansion.reanimated.** { *; }
 -keep class com.facebook.react.turbomodule.** { *; }
+# Please add these rules to your existing keep rules in order to suppress warnings.
+# This is generated automatically by the Android Gradle plugin.
+-dontwarn com.facebook.imagepipeline.cache.AnimatedCache
+-dontwarn com.facebook.imagepipeline.cache.AnimationFrames
+-dontwarn com.facebook.imagepipeline.nativecode.WebpTranscoder
 
 # Add any project specific keep options here:
