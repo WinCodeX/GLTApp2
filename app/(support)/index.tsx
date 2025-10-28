@@ -1,5 +1,4 @@
-// app/(support)/index.tsx - FIXED: Proper ID passing, improved filtering, real-time updates
-
+// app/(support)/index.tsx - FIXED: Proper conversation ID navigation
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View,
@@ -32,6 +31,7 @@ import firebase from '../../config/firebase';
 
 interface SupportTicket {
   id: string;
+  conversation_id: string; // FIXED: Added conversation_id field
   ticket_id: string;
   title: string;
   status: 'pending' | 'assigned' | 'in_progress' | 'resolved' | 'closed';
@@ -95,6 +95,8 @@ const STATUS_FILTERS = [
 
 const BACKGROUND_SYNC_INTERVAL = 30000;
 const MIN_SYNC_INTERVAL = 30000;
+const CACHE_KEY_PREFIX = 'support_tickets_';
+const CACHE_EXPIRY = 5 * 60 * 1000; // 5 minutes
 
 const normalizeId = (id: any): string => String(id);
 
@@ -125,11 +127,54 @@ export default function SupportDashboard() {
   const syncFailureCount = useRef<number>(0);
   const flatListRef = useRef<FlatList>(null);
 
-  // ============= APP STATE MANAGEMENT =============
-  
+  // FIXED: Load cached tickets immediately on mount
+  useEffect(() => {
+    loadCachedTickets();
+  }, [activeFilter]);
+
+  const loadCachedTickets = async () => {
+    try {
+      const cacheKey = `${CACHE_KEY_PREFIX}${activeFilter}`;
+      const cachedData = await AsyncStorage.getItem(cacheKey);
+      
+      if (cachedData) {
+        const parsed = JSON.parse(cachedData);
+        const cacheAge = Date.now() - (parsed.timestamp || 0);
+        
+        if (cacheAge < CACHE_EXPIRY) {
+          setTickets(parsed.tickets || []);
+          if (parsed.agentStats) {
+            setAgentStats(parsed.agentStats);
+          }
+          setLoading(false);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load cached tickets:', error);
+    }
+  };
+
+  const saveCachedTickets = async (ticketsData: SupportTicket[], agentStatsData?: AgentStats) => {
+    try {
+      const cacheKey = `${CACHE_KEY_PREFIX}${activeFilter}`;
+      const cacheData = {
+        tickets: ticketsData,
+        agentStats: agentStatsData || agentStats,
+        timestamp: Date.now(),
+      };
+      await AsyncStorage.setItem(cacheKey, JSON.stringify(cacheData));
+    } catch (error) {
+      console.error('Failed to cache tickets:', error);
+    }
+  };
+
+  // App State Management
   useEffect(() => {
     const subscription = AppState.addEventListener('change', handleAppStateChange);
-    return () => subscription.remove();
+    
+    return () => {
+      subscription.remove();
+    };
   }, [isConnected]);
 
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
@@ -205,9 +250,10 @@ export default function SupportDashboard() {
       if (response.data.success) {
         const newTickets = response.data.data.tickets || [];
         
-        const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
+        const normalizedTickets = newTickets.map((ticket: any) => ({
           ...ticket,
           id: normalizeId(ticket.id),
+          conversation_id: normalizeId(ticket.conversation_id || ticket.id), // FIXED: Ensure conversation_id is present
         }));
         
         setTickets(prev => {
@@ -217,6 +263,8 @@ export default function SupportDashboard() {
               ? { ...newTicket, typing_user: existingTicket.typing_user }
               : newTicket;
           });
+          
+          saveCachedTickets(updatedTickets);
           return updatedTickets;
         });
         
@@ -237,8 +285,7 @@ export default function SupportDashboard() {
     }
   }, [activeFilter]);
 
-  // ============= FIREBASE MESSAGING =============
-  
+  // Firebase Messaging Setup
   useEffect(() => {
     setupFirebaseMessaging();
     
@@ -251,10 +298,10 @@ export default function SupportDashboard() {
 
   const setupFirebaseMessaging = async () => {
     try {
-      console.log('🔥 Setting up Firebase messaging...');
+      console.log('🔥 Setting up Firebase messaging for support dashboard...');
       
       if (!firebase.isNative || !firebase.messaging()) {
-        console.log('🔥 Skipping Firebase - not native or unavailable');
+        console.log('🔥 Skipping Firebase messaging setup');
         return;
       }
 
@@ -268,7 +315,7 @@ export default function SupportDashboard() {
       console.log('✅ Firebase messaging setup complete');
       
     } catch (error) {
-      console.error('❌ Firebase setup failed:', error);
+      console.error('❌ Failed to setup Firebase messaging:', error);
     }
   };
 
@@ -280,23 +327,19 @@ export default function SupportDashboard() {
       const authStatus = await messaging.requestPermission();
       const enabled = authStatus === 1 || authStatus === 2;
 
-      if (enabled) {
-        console.log('✅ Firebase permissions granted');
-        return true;
-      } else {
-        console.log('❌ Firebase permissions denied');
+      if (!enabled) {
         Alert.alert(
           'Notifications Required',
-          'Enable notifications to receive real-time updates.',
+          'GLT Support needs notification permissions to send you important updates about support tickets.',
           [
-            { text: 'Later', style: 'cancel' },
-            { text: 'Settings', onPress: () => Linking.openSettings() }
+            { text: 'Maybe Later', style: 'cancel' },
+            { text: 'Open Settings', onPress: () => Linking.openSettings() }
           ]
         );
-        return false;
       }
+      return enabled;
     } catch (error) {
-      console.error('❌ Firebase permissions error:', error);
+      console.error('Error requesting permissions:', error);
       return false;
     }
   };
@@ -307,26 +350,24 @@ export default function SupportDashboard() {
       if (!messaging) return;
       
       const token = await messaging.getToken();
-      console.log('🔥 FCM token received');
+      console.log('🔥 FCM Token received:', token?.substring(0, 50) + '...');
       setFcmToken(token);
 
       await registerFCMTokenWithBackend(token);
       
       unsubscribeTokenRefresh.current = messaging.onTokenRefresh(async (newToken) => {
-        console.log('🔥 FCM token refreshed');
+        console.log('🔥 FCM Token refreshed');
         setFcmToken(newToken);
         await registerFCMTokenWithBackend(newToken);
       });
       
     } catch (error) {
-      console.error('❌ FCM token error:', error);
+      console.error('FCM Token error:', error);
     }
   };
 
   const registerFCMTokenWithBackend = async (token: string) => {
     try {
-      console.log('🔥 Registering FCM token...');
-      
       const response = await api.post('/api/v1/push_tokens', {
         push_token: token,
         platform: 'fcm',
@@ -339,13 +380,11 @@ export default function SupportDashboard() {
       });
       
       if (response.data?.success) {
-        console.log('✅ FCM token registered');
         await AsyncStorage.setItem('fcm_token', token);
         await AsyncStorage.setItem('fcm_token_registered', 'true');
       }
-      
     } catch (error: any) {
-      console.error('❌ FCM registration failed:', error.response?.data || error);
+      console.error('FCM registration failed:', error.response?.data || error);
     }
   };
 
@@ -354,13 +393,13 @@ export default function SupportDashboard() {
     if (!messaging) return;
 
     unsubscribeOnMessage.current = messaging.onMessage(async (remoteMessage) => {
-      console.log('🔥 Foreground message received');
+      console.log('🔥 Foreground message received:', remoteMessage);
       loadTickets(true);
       loadDashboardData();
     });
 
     unsubscribeOnNotificationOpenedApp.current = messaging.onNotificationOpenedApp((remoteMessage) => {
-      console.log('🔥 Notification opened app');
+      console.log('🔥 Notification opened app:', remoteMessage);
       handleNotificationData(remoteMessage.data);
     });
   };
@@ -379,45 +418,43 @@ export default function SupportDashboard() {
         }, 2000);
       }
     } catch (error) {
-      console.error('🔥 Initial notification error:', error);
+      console.error('Initial notification error:', error);
     }
   };
 
+  // FIXED: Use conversation_id for navigation
   const handleNotificationData = async (data: any) => {
     console.log('🔥 Handling notification data:', data);
     
     try {
       if (data?.conversation_id) {
-        // FIXED: Properly normalize and navigate with conversation ID
-        const conversationId = normalizeId(data.conversation_id);
-        router.push(`/(support)/chat/${conversationId}`);
+        router.push(`/(support)/chat/${normalizeId(data.conversation_id)}`);
       } else if (data?.ticket_id) {
         const ticket = tickets.find(t => t.ticket_id === data.ticket_id);
-        if (ticket) {
-          router.push(`/(support)/chat/${normalizeId(ticket.id)}`);
+        if (ticket && ticket.conversation_id) {
+          router.push(`/(support)/chat/${normalizeId(ticket.conversation_id)}`);
         }
       }
     } catch (error) {
-      console.error('🔥 Notification handling error:', error);
+      console.error('Navigation error:', error);
     }
   };
 
-  // ============= ACTIONCABLE SETUP =============
-  
+  // ActionCable Setup
   const setupActionCableConnection = useCallback(async () => {
     try {
       if (!user) {
-        console.log('📡 No user available');
+        console.log('📡 No user available for ActionCable');
         return;
       }
 
       const currentAccount = accountManager.getCurrentAccount();
       if (!currentAccount) {
-        console.log('📡 No account available');
+        console.log('📡 No account available for ActionCable');
         return;
       }
 
-      console.log('📡 Setting up ActionCable...');
+      console.log('📡 Setting up ActionCable connection...');
 
       const actionCable = ActionCableService.getInstance();
       
@@ -442,7 +479,7 @@ export default function SupportDashboard() {
         setIsConnected(false);
       }
     } catch (error) {
-      console.error('❌ ActionCable setup failed:', error);
+      console.error('ActionCable setup failed:', error);
       setIsConnected(false);
     }
   }, [user, backgroundSync]);
@@ -452,6 +489,7 @@ export default function SupportDashboard() {
 
     const actionCable = ActionCableService.getInstance();
 
+    // Connection status
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       console.log('📡 ActionCable connected');
       setIsConnected(true);
@@ -464,19 +502,9 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubLost);
 
-    const unsubInitialState = actionCable.subscribe('initial_state', (data) => {
-      console.log('📊 Received initial state');
-      if (data.dashboard_stats) {
-        setDashboardStats(data.dashboard_stats);
-      }
-      if (data.agent_stats) {
-        setAgentStats(data.agent_stats);
-      }
-    });
-    actionCableSubscriptions.current.push(unsubInitialState);
-
+    // Dashboard stats
     const unsubDashboardStats = actionCable.subscribe('dashboard_stats_update', (data) => {
-      console.log('📊 Dashboard stats update');
+      console.log('📊 Dashboard stats update:', data);
       if (data.stats) {
         setDashboardStats(prev => ({
           ...(prev || {
@@ -494,43 +522,54 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubDashboardStats);
 
+    // New ticket
     const unsubNewTicket = actionCable.subscribe('new_support_ticket', (data) => {
-      console.log('🎫 New support ticket');
+      console.log('🎫 New support ticket:', data);
       if (data.ticket) {
         const normalizedTicket = {
           ...data.ticket,
           id: normalizeId(data.ticket.id),
+          conversation_id: normalizeId(data.ticket.conversation_id || data.ticket.id),
         };
         
         if (normalizedTicket.assigned_agent?.id === normalizeId(user?.id)) {
-          setTickets(prev => [normalizedTicket, ...prev]);
+          setTickets(prev => {
+            const updated = [normalizedTicket, ...prev];
+            saveCachedTickets(updated);
+            return updated;
+          });
           loadDashboardData();
         }
       }
     });
     actionCableSubscriptions.current.push(unsubNewTicket);
 
+    // Ticket status update
     const unsubTicketStatus = actionCable.subscribe('ticket_status_update', (data) => {
-      console.log('🎫 Ticket status update');
+      console.log('🎫 Ticket status update:', data);
       if (data.ticket_id && data.status) {
         const normalizedTicketId = normalizeId(data.ticket_id);
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === normalizedTicketId 
-            ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
-            : ticket
-        ));
+        setTickets(prev => {
+          const updated = prev.map(ticket => 
+            ticket.id === normalizedTicketId 
+              ? { ...ticket, status: data.status, last_activity_at: new Date().toISOString() }
+              : ticket
+          );
+          saveCachedTickets(updated);
+          return updated;
+        });
         loadDashboardData();
       }
     });
     actionCableSubscriptions.current.push(unsubTicketStatus);
 
+    // New message
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
-      console.log('📨 New message received');
+      console.log('📨 New message received:', data);
       if (data.conversation_id && data.message) {
         const normalizedConversationId = normalizeId(data.conversation_id);
         
         if (processingTickets.current.has(normalizedConversationId)) {
-          console.log('Skipping - already processing');
           return;
         }
         
@@ -538,7 +577,7 @@ export default function SupportDashboard() {
         
         setTickets(prev => {
           const updatedTickets = prev.map(ticket => {
-            if (ticket.id === normalizedConversationId) {
+            if (ticket.conversation_id === normalizedConversationId || ticket.id === normalizedConversationId) {
               const updatedTicket = { ...ticket };
               updatedTicket.last_message = {
                 content: data.message.content,
@@ -562,32 +601,42 @@ export default function SupportDashboard() {
             return ticket;
           });
           
-          const ticket = updatedTickets.find(t => t.id === normalizedConversationId);
+          const ticket = updatedTickets.find(t => 
+            t.conversation_id === normalizedConversationId || t.id === normalizedConversationId
+          );
+          
           if (ticket) {
-            const others = updatedTickets.filter(t => t.id !== normalizedConversationId);
+            const others = updatedTickets.filter(t => 
+              t.conversation_id !== normalizedConversationId && t.id !== normalizedConversationId
+            );
             
             setTimeout(() => {
               processingTickets.current.delete(normalizedConversationId);
             }, 1000);
             
-            return [ticket, ...others];
+            const final = [ticket, ...others];
+            saveCachedTickets(final);
+            return final;
           }
           
           setTimeout(() => {
             processingTickets.current.delete(normalizedConversationId);
           }, 1000);
           
+          saveCachedTickets(updatedTickets);
           return updatedTickets;
         });
       }
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
+    // Typing indicator
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
+      console.log('⌨️ Typing indicator:', data);
       if (data.conversation_id && data.user_id !== user?.id) {
         const normalizedConversationId = normalizeId(data.conversation_id);
         setTickets(prev => prev.map(ticket => {
-          if (ticket.id === normalizedConversationId) {
+          if (ticket.conversation_id === normalizedConversationId || ticket.id === normalizedConversationId) {
             if (data.typing) {
               return {
                 ...ticket,
@@ -624,50 +673,28 @@ export default function SupportDashboard() {
     });
     actionCableSubscriptions.current.push(unsubTyping);
 
+    // Conversation read
     const unsubRead = actionCable.subscribe('conversation_read', (data) => {
+      console.log('📖 Conversation read:', data);
       if (data.conversation_id && data.reader_id === normalizeId(user?.id)) {
         const normalizedConversationId = normalizeId(data.conversation_id);
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === normalizedConversationId 
-            ? { ...ticket, unread_count: 0 }
-            : ticket
-        ));
+        setTickets(prev => {
+          const updated = prev.map(ticket => 
+            (ticket.conversation_id === normalizedConversationId || ticket.id === normalizedConversationId)
+              ? { ...ticket, unread_count: 0 }
+              : ticket
+          );
+          saveCachedTickets(updated);
+          return updated;
+        });
       }
     });
     actionCableSubscriptions.current.push(unsubRead);
 
-    const unsubAgentAssignment = actionCable.subscribe('agent_assignment_update', (data) => {
-      console.log('👤 Agent assignment update');
-      if (data.ticket_id && data.agent) {
-        const normalizedTicketId = normalizeId(data.ticket_id);
-        
-        if (normalizeId(data.agent.id) === normalizeId(user?.id)) {
-          loadTickets();
-        } else {
-          setTickets(prev => prev.filter(ticket => ticket.id !== normalizedTicketId));
-        }
-      }
-    });
-    actionCableSubscriptions.current.push(unsubAgentAssignment);
-
-    const unsubTicketEscalated = actionCable.subscribe('ticket_escalated', (data) => {
-      console.log('🚨 Ticket escalated');
-      if (data.ticket_id) {
-        const normalizedTicketId = normalizeId(data.ticket_id);
-        setTickets(prev => prev.map(ticket => 
-          ticket.id === normalizedTicketId 
-            ? { ...ticket, escalated: true, priority: 'high' }
-            : ticket
-        ));
-      }
-    });
-    actionCableSubscriptions.current.push(unsubTicketEscalated);
-
     console.log('✅ ActionCable subscriptions configured');
   };
 
-  // ============= DATA LOADING =============
-  
+  // Data Loading
   const loadDashboardData = useCallback(async () => {
     try {
       const response = await api.get('/api/v1/support/dashboard');
@@ -691,14 +718,15 @@ export default function SupportDashboard() {
         setAgentStats(agentPerformance);
       }
     } catch (error) {
-      console.error('Dashboard load failed:', error);
+      console.error('Failed to load dashboard stats:', error);
     }
   }, []);
 
+  // FIXED: Load tickets with proper conversation_id mapping
   const loadTickets = useCallback(async (refresh = false) => {
     try {
       if (refresh) setRefreshing(true);
-      else setLoading(true);
+      else if (!tickets.length) setLoading(true);
 
       const endpoint = '/api/v1/support/my_tickets';
       const params: any = {
@@ -721,7 +749,7 @@ export default function SupportDashboard() {
         params.search = searchQuery.trim();
       }
 
-      console.log('Loading tickets:', params);
+      console.log('Loading tickets with params:', params);
 
       const response = await api.get(endpoint, { params });
 
@@ -729,18 +757,23 @@ export default function SupportDashboard() {
         const newTickets = response.data.data.tickets || [];
         console.log(`Received ${newTickets.length} tickets`);
         
-        const normalizedTickets = newTickets.map((ticket: SupportTicket) => ({
+        // FIXED: Ensure conversation_id is properly mapped
+        const normalizedTickets = newTickets.map((ticket: any) => ({
           ...ticket,
           id: normalizeId(ticket.id),
+          conversation_id: normalizeId(ticket.conversation_id || ticket.id), // Fallback to ID if conversation_id missing
         }));
         
         setTickets(prevTickets => {
-          return normalizedTickets.map((newTicket: SupportTicket) => {
+          const updated = normalizedTickets.map((newTicket: SupportTicket) => {
             const existingTicket = prevTickets.find(t => t.id === newTicket.id);
             return existingTicket?.typing_user 
               ? { ...newTicket, typing_user: existingTicket.typing_user }
               : newTicket;
           });
+          
+          saveCachedTickets(updated, response.data.data.agent_stats);
+          return updated;
         });
         
         lastSyncTime.current = Date.now();
@@ -750,13 +783,13 @@ export default function SupportDashboard() {
         }
       }
     } catch (error) {
-      console.error('Ticket load failed:', error);
-      Alert.alert('Error', 'Failed to load tickets');
+      console.error('Failed to load tickets:', error);
+      Alert.alert('Error', 'Failed to load your support tickets');
     } finally {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [activeFilter, searchQuery]);
+  }, [activeFilter, searchQuery, tickets.length]);
 
   useEffect(() => {
     setupActionCableConnection();
@@ -782,37 +815,54 @@ export default function SupportDashboard() {
     loadTickets();
   }, [loadTickets]);
 
-  // ============= ACTIONS =============
-  
-  const handleTicketRead = useCallback(async (ticketId: string) => {
+  // Actions
+  const handleTicketRead = useCallback(async (ticketId: string, conversationId: string) => {
     try {
-      const normalizedTicketId = normalizeId(ticketId);
+      const normalizedConversationId = normalizeId(conversationId);
       
-      setTickets(prev => prev.map(ticket => 
-        ticket.id === normalizedTicketId 
-          ? { ...ticket, unread_count: 0 }
-          : ticket
-      ));
+      // Optimistically clear unread count
+      setTickets(prev => {
+        const updated = prev.map(ticket => 
+          (ticket.conversation_id === normalizedConversationId || ticket.id === normalizedConversationId)
+            ? { ...ticket, unread_count: 0 }
+            : ticket
+        );
+        saveCachedTickets(updated);
+        return updated;
+      });
 
       const actionCable = ActionCableService.getInstance();
-      await actionCable.markMessageRead(normalizedTicketId);
+      await actionCable.markMessageRead(normalizedConversationId);
       
     } catch (error) {
-      console.error('Mark read failed:', error);
+      console.error('Failed to mark ticket as read:', error);
     }
   }, []);
 
-  // FIXED: Navigate with properly normalized ID
-  const handleTicketPress = useCallback((ticket: SupportTicket) => {
-    console.log('Opening chat for ticket:', ticket.id);
-    handleTicketRead(ticket.id);
-    // Ensure ID is string and properly formatted
-    const conversationId = normalizeId(ticket.id);
-    router.push(`/(support)/chat/${conversationId}`);
-  }, [handleTicketRead]);
+  // Render functions
+  const getFilteredTickets = useCallback(() => {
+    return tickets;
+  }, [tickets]);
 
-  // ============= RENDER FUNCTIONS =============
-  
+  const getFilteredTicketCount = (filterKey: string) => {
+    if (filterKey === activeFilter) {
+      return tickets.length;
+    }
+    
+    switch (filterKey) {
+      case 'active':
+        return agentStats?.active_tickets || 0;
+      case 'pending':
+        return 0;
+      case 'resolved':
+        return agentStats?.tickets_resolved_today || 0;
+      case 'all':
+        return 0;
+      default:
+        return 0;
+    }
+  };
+
   const renderStatsOverview = () => {
     if (!dashboardStats || !showStats) return null;
 
@@ -833,7 +883,7 @@ export default function SupportDashboard() {
             <>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.active_tickets || 0}</Text>
-                <Text style={styles.statLabel}>Active</Text>
+                <Text style={styles.statLabel}>My Active</Text>
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.tickets_resolved_today || 0}</Text>
@@ -841,11 +891,11 @@ export default function SupportDashboard() {
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{agentStats.avg_resolution_time || '0m'}</Text>
-                <Text style={styles.statLabel}>Avg Time</Text>
+                <Text style={styles.statLabel}>Avg Resolution</Text>
               </View>
               <View style={styles.statCard}>
                 <Text style={styles.statNumber}>{(agentStats.satisfaction_rating || 0).toFixed(1)}</Text>
-                <Text style={styles.statLabel}>Rating</Text>
+                <Text style={styles.statLabel}>My Rating</Text>
               </View>
             </>
           )}
@@ -854,10 +904,16 @@ export default function SupportDashboard() {
     );
   };
 
+  // FIXED: Navigate with conversation_id
   const renderTicketItem = ({ item }: { item: SupportTicket }) => (
     <TouchableOpacity
       style={styles.ticketItem}
-      onPress={() => handleTicketPress(item)}
+      onPress={() => {
+        const conversationId = item.conversation_id || item.id;
+        console.log('Navigating to chat with conversation ID:', conversationId);
+        handleTicketRead(item.id, conversationId);
+        router.push(`/(support)/chat/${normalizeId(conversationId)}`);
+      }}
     >
       <View style={styles.ticketContent}>
         <View style={styles.ticketHeader}>
@@ -923,7 +979,7 @@ export default function SupportDashboard() {
     </TouchableOpacity>
   );
 
-  const filteredTickets = tickets;
+  const filteredTickets = getFilteredTickets();
 
   return (
     <SafeAreaView style={styles.container}>
@@ -938,7 +994,7 @@ export default function SupportDashboard() {
             <Text style={styles.headerTitle}>GLT Support</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
-                Welcome, {user?.first_name || 'Agent'}
+                Welcome back, {user?.first_name || 'Agent'}
               </Text>
               {isConnected && (
                 <View style={styles.connectionStatus}>
@@ -948,7 +1004,7 @@ export default function SupportDashboard() {
               )}
             </View>
             <Text style={styles.headerDescription}>
-              {agentStats ? `${agentStats.active_tickets || 0} active tickets` : 'Loading...'}
+              {agentStats ? `${agentStats.active_tickets || 0} active tickets assigned to you` : 'Loading your tickets...'}
             </Text>
           </View>
           <View style={styles.headerRight}>
@@ -976,7 +1032,7 @@ export default function SupportDashboard() {
         <View style={styles.connectionBanner}>
           <MaterialIcons name="wifi-off" size={16} color="#f97316" />
           <Text style={styles.connectionBannerText}>
-            Reconnecting...
+            Real-time updates unavailable. Reconnecting...
           </Text>
         </View>
       )}
@@ -986,7 +1042,7 @@ export default function SupportDashboard() {
           <Feather name="search" size={20} color="#8E8E93" />
           <TextInput
             style={styles.searchInput}
-            placeholder="Search tickets..."
+            placeholder="Search your tickets..."
             placeholderTextColor="#8E8E93"
             value={searchQuery}
             onChangeText={setSearchQuery}
@@ -1045,16 +1101,16 @@ export default function SupportDashboard() {
       </View>
 
       <View style={styles.listContainer}>
-        {loading ? (
+        {loading && !tickets.length ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7B3F98" />
-            <Text style={styles.loadingText}>Loading tickets...</Text>
+            <Text style={styles.loadingText}>Loading your tickets...</Text>
           </View>
         ) : (
           <FlatList
             ref={flatListRef}
             data={filteredTickets}
-            keyExtractor={(item) => item.id}
+            keyExtractor={(item, index) => `${item.id}-${index}`}
             renderItem={renderTicketItem}
             refreshControl={
               <RefreshControl
@@ -1073,14 +1129,14 @@ export default function SupportDashboard() {
                 <Text style={styles.emptyText}>No tickets found</Text>
                 <Text style={styles.emptySubtext}>
                   {activeFilter === 'active' 
-                    ? 'No active tickets'
+                    ? 'You have no active tickets'
                     : activeFilter === 'pending'
-                    ? 'No pending tickets'
+                    ? 'You have no pending tickets'
                     : activeFilter === 'resolved'
-                    ? 'No resolved tickets'
+                    ? 'You have no resolved tickets'
                     : searchQuery
-                    ? `No results for "${searchQuery}"`
-                    : 'No tickets assigned'
+                    ? `No tickets match "${searchQuery}"`
+                    : 'You have no assigned tickets'
                   }
                 </Text>
                 {searchQuery && (
@@ -1094,6 +1150,9 @@ export default function SupportDashboard() {
               </View>
             )}
             contentContainerStyle={filteredTickets.length === 0 ? styles.emptyListContent : undefined}
+            scrollEnabled={true}
+            nestedScrollEnabled={true}
+            removeClippedSubviews={false}
           />
         )}
       </View>
