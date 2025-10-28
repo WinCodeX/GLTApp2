@@ -1,4 +1,4 @@
-// app/(support)/chat/[id].tsx - FIXED: ActionCable-only, storage-first, scroll memory
+// app/(support)/chat/[id].tsx - FIXED: Duplicate prevention, storage-first, ActionCable-only, proper loading
 
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -13,7 +13,6 @@ import {
   FlatList,
   Image,
   KeyboardAvoidingView,
-  Modal,
   Platform,
   RefreshControl,
   SafeAreaView,
@@ -32,8 +31,10 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const INITIAL_MESSAGE_LIMIT = 50;
 const PAGINATION_LIMIT = 30;
-const REQUEST_TIMEOUT = 15000;
+const REQUEST_TIMEOUT = 20000; // FIXED: Increased to 20 seconds
 const SCROLL_BUTTON_THRESHOLD = 200;
+const MAX_RETRY_ATTEMPTS = 3;
+const RETRY_DELAYS = [5000, 15000, 30000];
 const STORAGE_KEY_PREFIX = 'agent_chat_';
 const SCROLL_POSITION_KEY_SUFFIX = '_scroll_pos';
 
@@ -59,6 +60,11 @@ interface ChatMessage {
   sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   retryCount?: number;
   tempId?: string;
+  retryData?: {
+    content: string;
+    messageType: string;
+    metadata?: any;
+  };
 }
 
 interface ChatConversation {
@@ -91,6 +97,13 @@ interface CustomerPresence {
   is_typing?: boolean;
 }
 
+interface PendingMessage {
+  tempId: string;
+  message: ChatMessage;
+  retryCount: number;
+  lastAttempt: number;
+}
+
 export default function SupportChatScreen() {
   const { id: rawId } = useLocalSearchParams<{ id: string }>();
   const id = normalizeId(rawId);
@@ -98,9 +111,9 @@ export default function SupportChatScreen() {
   
   const [conversation, setConversation] = useState<ChatConversation | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadingConversation, setLoadingConversation] = useState(true);
+  const [loadingMessages, setLoadingMessages] = useState(false);
   const [inputText, setInputText] = useState('');
-  const [showActions, setShowActions] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
   
   const [loadingOlder, setLoadingOlder] = useState(false);
@@ -124,17 +137,18 @@ export default function SupportChatScreen() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
-  const messageIdsRef = useRef<Set<string>>(new Set());
-  const pendingMessages = useRef<Map<string, ChatMessage>>(new Map());
-  const retryTimeouts = useRef<Map<string, NodeJS.Timeout>>(new Map());
+  const messageIdsRef = useRef<Set<string>>(new Set()); // FIXED: Track message IDs to prevent duplicates
+  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map()); // FIXED: Retry queue
+  const retryQueueRef = useRef<PendingMessage[]>([]);
+  const isProcessingRetryRef = useRef(false);
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
-  const isLoadingOlder = useRef(false);
+  const isLoadingOlderRef = useRef(false);
+  const hasFetchedInitialMessages = useRef(false);
   const isChatVisible = useRef(true);
   const isChatFocused = useRef(true);
   const currentScrollY = useRef(0);
-  const contentHeight = useRef(0);
-  const scrollViewHeight = useRef(0);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // ============= STORAGE HELPERS =============
   
@@ -144,7 +158,11 @@ export default function SupportChatScreen() {
     if (!id) return;
     try {
       const key = getStorageKey('_messages');
-      await AsyncStorage.setItem(key, JSON.stringify(msgs));
+      const data = {
+        messages: msgs.slice(-100), // Keep last 100 messages
+        timestamp: Date.now(),
+      };
+      await AsyncStorage.setItem(key, JSON.stringify(data));
       console.log(`💾 Saved ${msgs.length} messages`);
     } catch (error) {
       console.error('Save failed:', error);
@@ -157,7 +175,8 @@ export default function SupportChatScreen() {
       const key = getStorageKey('_messages');
       const stored = await AsyncStorage.getItem(key);
       if (stored) {
-        const msgs = JSON.parse(stored) as ChatMessage[];
+        const data = JSON.parse(stored);
+        const msgs = data.messages || [];
         console.log(`📦 Loaded ${msgs.length} messages from storage`);
         return msgs;
       }
@@ -165,6 +184,33 @@ export default function SupportChatScreen() {
       console.error('Load from storage failed:', error);
     }
     return [];
+  }, [id]);
+
+  const saveConversationToStorage = useCallback(async (conv: ChatConversation) => {
+    if (!id) return;
+    try {
+      const key = getStorageKey('_conversation');
+      await AsyncStorage.setItem(key, JSON.stringify(conv));
+      console.log('💾 Saved conversation metadata');
+    } catch (error) {
+      console.error('Save conversation failed:', error);
+    }
+  }, [id]);
+
+  const loadConversationFromStorage = useCallback(async (): Promise<ChatConversation | null> => {
+    if (!id) return null;
+    try {
+      const key = getStorageKey('_conversation');
+      const stored = await AsyncStorage.getItem(key);
+      if (stored) {
+        const conv = JSON.parse(stored);
+        console.log('📦 Loaded conversation from storage');
+        return conv;
+      }
+    } catch (error) {
+      console.error('Load conversation from storage failed:', error);
+    }
+    return null;
   }, [id]);
 
   const saveScrollPosition = useCallback(async (position: number) => {
@@ -196,6 +242,7 @@ export default function SupportChatScreen() {
     try {
       const keys = [
         getStorageKey('_messages'),
+        getStorageKey('_conversation'),
         getStorageKey(SCROLL_POSITION_KEY_SUFFIX),
       ];
       await AsyncStorage.multiRemove(keys);
@@ -225,6 +272,10 @@ export default function SupportChatScreen() {
       if (id && isChatVisible.current) {
         await markCustomerMessagesAsReadIfVisible();
       }
+
+      // FIXED: Process retry queue
+      await processRetryQueue();
+      
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App background');
       isChatVisible.current = false;
@@ -235,6 +286,10 @@ export default function SupportChatScreen() {
         await saveMessagesToStorage(messages);
         await saveScrollPosition(currentScrollY.current);
       }
+
+      if (conversation) {
+        await saveConversationToStorage(conversation);
+      }
       
       if (isConnected && actionCableRef.current) {
         await actionCableRef.current.updatePresence('away');
@@ -242,7 +297,7 @@ export default function SupportChatScreen() {
     }
     
     appState.current = nextAppState;
-  }, [id, isConnected, messages, saveMessagesToStorage, saveScrollPosition]);
+  }, [id, isConnected, messages, conversation, saveMessagesToStorage, saveScrollPosition, saveConversationToStorage]);
 
   const reconnectActionCable = useCallback(async () => {
     try {
@@ -259,11 +314,126 @@ export default function SupportChatScreen() {
       if (connected && id) {
         await actionCableRef.current.joinConversation(id);
         setupActionCableSubscriptions();
+        setIsConnected(true);
+        setSubscriptionReady(true);
+
+        // FIXED: Process retry queue
+        await processRetryQueue();
       }
     } catch (error) {
       console.error('Reconnect failed:', error);
     }
   }, [id, user]);
+
+  // ============= MESSAGE RETRY LOGIC =============
+  
+  const addToPendingQueue = useCallback((tempId: string, message: ChatMessage) => {
+    const pendingMessage: PendingMessage = {
+      tempId,
+      message,
+      retryCount: 0,
+      lastAttempt: Date.now(),
+    };
+    
+    pendingMessagesRef.current.set(tempId, pendingMessage);
+    retryQueueRef.current.push(pendingMessage);
+    
+    console.log(`📝 Added message ${tempId} to pending queue`);
+  }, []);
+
+  const processRetryQueue = useCallback(async () => {
+    if (!isConnected || !id || isProcessingRetryRef.current) return;
+    if (retryQueueRef.current.length === 0) return;
+    
+    isProcessingRetryRef.current = true;
+    console.log(`🔄 Processing ${retryQueueRef.current.length} pending messages`);
+    
+    const queue = [...retryQueueRef.current];
+    retryQueueRef.current = [];
+    
+    for (const pendingMessage of queue) {
+      if (pendingMessage.retryCount >= MAX_RETRY_ATTEMPTS) {
+        // Mark as failed
+        setMessages(prev => prev.map(msg => 
+          msg.tempId === pendingMessage.tempId 
+            ? { ...msg, sendStatus: 'failed' }
+            : msg
+        ));
+        pendingMessagesRef.current.delete(pendingMessage.tempId);
+        continue;
+      }
+      
+      const timeSinceLastAttempt = Date.now() - pendingMessage.lastAttempt;
+      const requiredDelay = RETRY_DELAYS[pendingMessage.retryCount] || RETRY_DELAYS[0];
+      
+      if (timeSinceLastAttempt < requiredDelay) {
+        // Re-add to queue for later
+        retryQueueRef.current.push(pendingMessage);
+        continue;
+      }
+      
+      try {
+        console.log(`🔄 Retrying message ${pendingMessage.tempId} (attempt ${pendingMessage.retryCount + 1})`);
+        
+        const actionCable = actionCableRef.current;
+        if (!actionCable) throw new Error('ActionCable not ready');
+        
+        await actionCable.perform('send_message', {
+          conversation_id: id,
+          content: pendingMessage.message.retryData?.content || pendingMessage.message.content,
+          message_type: pendingMessage.message.retryData?.messageType || 'text',
+          metadata: pendingMessage.message.retryData?.metadata,
+          temp_id: pendingMessage.tempId,
+        });
+        
+        // Successfully sent
+        pendingMessagesRef.current.delete(pendingMessage.tempId);
+        
+      } catch (error) {
+        console.error(`Failed to retry message ${pendingMessage.tempId}:`, error);
+        
+        pendingMessage.retryCount++;
+        pendingMessage.lastAttempt = Date.now();
+        
+        if (pendingMessage.retryCount < MAX_RETRY_ATTEMPTS) {
+          retryQueueRef.current.push(pendingMessage);
+        } else {
+          // Mark as failed
+          setMessages(prev => prev.map(msg => 
+            msg.tempId === pendingMessage.tempId 
+              ? { ...msg, sendStatus: 'failed' }
+              : msg
+          ));
+          pendingMessagesRef.current.delete(pendingMessage.tempId);
+        }
+      }
+    }
+    
+    isProcessingRetryRef.current = false;
+    
+    // Schedule next retry if queue is not empty
+    if (retryQueueRef.current.length > 0) {
+      setTimeout(() => processRetryQueue(), 5000);
+    }
+  }, [isConnected, id]);
+
+  const retryFailedMessage = useCallback(async (tempId: string) => {
+    const pendingMessage = pendingMessagesRef.current.get(tempId);
+    if (!pendingMessage) return;
+    
+    pendingMessage.retryCount = 0;
+    pendingMessage.lastAttempt = 0;
+    retryQueueRef.current.push(pendingMessage);
+    
+    // Update UI to show pending
+    setMessages(prev => prev.map(msg => 
+      msg.tempId === tempId 
+        ? { ...msg, sendStatus: 'pending' }
+        : msg
+    ));
+    
+    await processRetryQueue();
+  }, [processRetryQueue]);
 
   // ============= AUTO MARK AS READ =============
   
@@ -301,47 +471,135 @@ export default function SupportChatScreen() {
 
   // Save messages whenever they change
   useEffect(() => {
-    if (id && messages.length > 0 && !loading) {
+    if (id && messages.length > 0 && !loadingMessages) {
       saveMessagesToStorage(messages);
     }
-  }, [id, messages, loading, saveMessagesToStorage]);
+  }, [id, messages, loadingMessages, saveMessagesToStorage]);
+
+  // Save conversation whenever it changes
+  useEffect(() => {
+    if (conversation) {
+      saveConversationToStorage(conversation);
+    }
+  }, [conversation, saveConversationToStorage]);
 
   // ============= INITIALIZATION =============
   
   useEffect(() => {
     const initializeChat = async () => {
-      // Try loading from storage first
+      // FIXED: Load conversation and messages from storage first
+      const storedConversation = await loadConversationFromStorage();
       const storedMessages = await loadMessagesFromStorage();
       const storedScrollPos = await loadScrollPosition();
       
+      if (storedConversation) {
+        console.log('✅ Loaded conversation from storage');
+        setConversation(storedConversation);
+        setLoadingConversation(false);
+      }
+
       if (storedMessages.length > 0) {
-        console.log('✅ Loaded from storage');
+        console.log('✅ Loaded messages from storage');
         setMessages(storedMessages);
         storedMessages.forEach(msg => messageIdsRef.current.add(msg.id));
         setSavedScrollPosition(storedScrollPos);
-        setLoading(false);
         setIsInitialLoad(false);
+        hasFetchedInitialMessages.current = true;
         
         // Setup ActionCable and sync in background
         setTimeout(() => {
           if (id) {
             setupActionCableConnection();
+            // FIXED: Background sync after loading from storage
+            backgroundSyncConversation();
             backgroundSyncMessages();
           }
         }, 500);
+
+        // Restore scroll position or scroll to bottom
+        setTimeout(() => {
+          if (storedScrollPos !== null) {
+            flatListRef.current?.scrollToOffset({ offset: storedScrollPos, animated: false });
+          } else {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }
+        }, 200);
       } else {
         // No storage, load from API
-        loadConversation();
+        loadConversationMetadata();
       }
     };
 
     initializeChat();
   }, []);
 
+  // FIXED: Separate conversation metadata loading
+  const loadConversationMetadata = useCallback(async () => {
+    if (!id) return;
+
+    console.log('🌐 Loading conversation metadata');
+    setLoadingConversation(true);
+
+    try {
+      const response = await api.get(`/api/v1/conversations/${id}`, {
+        params: { limit: 0 }, // Just metadata, no messages
+        timeout: REQUEST_TIMEOUT,
+      });
+
+      if (response.data.success && response.data.conversation) {
+        const conversationData = response.data.conversation;
+        setConversation(conversationData);
+        
+        if (conversationData?.customer?.presence) {
+          setCustomerPresence({
+            status: conversationData.customer.presence.status || 'offline',
+            last_seen: conversationData.customer.presence.last_seen,
+          });
+        }
+
+        console.log('✅ Conversation metadata loaded');
+        
+        // Now load messages
+        await loadMessages();
+      }
+    } catch (error) {
+      console.error('Failed to load conversation:', error);
+      setConnectionError(true);
+    } finally {
+      setLoadingConversation(false);
+    }
+  }, [id]);
+
+  // FIXED: Background sync conversation metadata
+  const backgroundSyncConversation = useCallback(async () => {
+    if (!id) return;
+    try {
+      console.log('🔄 Background sync conversation');
+      const response = await api.get(`/api/v1/conversations/${id}`, {
+        params: { limit: 0 },
+        timeout: 10000,
+      });
+
+      if (response.data.success && response.data.conversation) {
+        setConversation(response.data.conversation);
+        
+        if (response.data.conversation?.customer?.presence) {
+          setCustomerPresence({
+            status: response.data.conversation.customer.presence.status || 'offline',
+            last_seen: response.data.conversation.customer.presence.last_seen,
+          });
+        }
+      }
+    } catch (error) {
+      console.error('Background sync conversation failed:', error);
+    }
+  }, [id]);
+
+  // FIXED: Background sync messages
   const backgroundSyncMessages = useCallback(async () => {
     if (!id) return;
     try {
-      console.log('🔄 Background sync');
+      console.log('🔄 Background sync messages');
       const response = await api.get(`/api/v1/conversations/${id}`, {
         params: { limit: 20 },
         timeout: 10000,
@@ -353,6 +611,7 @@ export default function SupportChatScreen() {
 
         apiMessages.forEach((msg: any) => {
           const msgId = normalizeId(msg.id);
+          // FIXED: Check for duplicates
           if (!messageIdsRef.current.has(msgId)) {
             newMessages.push({
               id: msgId,
@@ -381,7 +640,7 @@ export default function SupportChatScreen() {
         }
       }
     } catch (error) {
-      console.error('Background sync failed:', error);
+      console.error('Background sync messages failed:', error);
     }
   }, [id]);
 
@@ -412,18 +671,23 @@ export default function SupportChatScreen() {
         setSubscriptionReady(true);
         setupActionCableSubscriptions();
         await requestCustomerPresence();
+
+        // FIXED: Process retry queue
+        await processRetryQueue();
       }
     } catch (error) {
       console.error('ActionCable setup failed:', error);
       setIsConnected(false);
       setSubscriptionReady(false);
     }
-  }, [id, user]);
+  }, [id, user, processRetryQueue]);
 
   useEffect(() => {
     if (!id || !user) return;
 
-    setupActionCableConnection();
+    if (!isConnected && conversation) {
+      setupActionCableConnection();
+    }
 
     return () => {
       if (actionCableRef.current && id) {
@@ -439,23 +703,17 @@ export default function SupportChatScreen() {
         clearTimeout(typingTimeoutRef.current);
       }
       
-      retryTimeouts.current.forEach(timeout => clearTimeout(timeout));
-      retryTimeouts.current.clear();
-      
       setSubscriptionReady(false);
     };
-  }, [user, id, setupActionCableConnection]);
+  }, [user, id, isConnected, conversation, setupActionCableConnection]);
 
   const requestCustomerPresence = useCallback(async () => {
-    if (!id) return;
+    if (!id || !actionCableRef.current) return;
 
     try {
-      const actionCable = actionCableRef.current;
-      if (actionCable) {
-        await actionCable.perform('get_user_presence', {
-          conversation_id: id,
-        });
-      }
+      await actionCableRef.current.perform('get_user_presence', {
+        conversation_id: id,
+      });
     } catch (error) {
       console.error('Presence request failed:', error);
     }
@@ -482,19 +740,19 @@ export default function SupportChatScreen() {
       const messageId = normalizeId(messageData.id);
       const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // Check if already exists
+      // FIXED: Check for duplicates
       if (messageIdsRef.current.has(messageId)) {
         console.log('⏭️ Duplicate - skipping');
         return;
       }
       
-      // Remove optimistic message if exists
-      if (tempId && pendingMessages.current.has(tempId)) {
-        setMessages(prev => prev.filter(m => m.tempId !== tempId));
-        pendingMessages.current.delete(tempId);
-      }
-      
       messageIdsRef.current.add(messageId);
+      
+      // Remove optimistic message if exists
+      if (tempId) {
+        setMessages(prev => prev.filter(m => m.tempId !== tempId));
+        pendingMessagesRef.current.delete(tempId);
+      }
       
       const newMessage: ChatMessage = {
         id: messageId,
@@ -541,7 +799,7 @@ export default function SupportChatScreen() {
       if (data.message_id) {
         const normalizedMessageId = normalizeId(data.message_id);
         setMessages(prev => prev.map(msg => {
-          if (msg.id === normalizedMessageId) {
+          if (msg.id === normalizedMessageId || msg.tempId === normalizedMessageId) {
             if (data.status === 'delivered') {
               return { ...msg, delivered_at: data.timestamp, sendStatus: 'delivered' };
             } else if (data.status === 'read') {
@@ -594,6 +852,8 @@ export default function SupportChatScreen() {
 
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       setIsConnected(true);
+      setSubscriptionReady(true);
+      processRetryQueue();
     });
     actionCableSubscriptions.current.push(unsubConnected);
 
@@ -608,22 +868,34 @@ export default function SupportChatScreen() {
 
   // ============= MESSAGE LOADING =============
   
-  const loadConversation = useCallback(async (isRefresh = false, loadOlder = false) => {
-    if (!id) {
-      setLoading(false);
+  const loadMessages = useCallback(async (isRefresh = false, loadOlder = false) => {
+    if (!id) return;
+
+    // Skip if already have messages and not refresh/loadOlder
+    if (!isRefresh && !loadOlder && hasFetchedInitialMessages.current && messages.length > 0) {
+      console.log('Skipping - already have messages');
       return;
     }
 
-    console.log('🌐 Loading conversation:', { isRefresh, loadOlder });
+    console.log('🌐 Loading messages:', { isRefresh, loadOlder });
 
     try {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+      }
+
+      abortControllerRef.current = new AbortController();
+      const timeoutId = setTimeout(() => {
+        abortControllerRef.current?.abort();
+      }, REQUEST_TIMEOUT);
+
       if (isRefresh) {
         setRefreshing(true);
       } else if (loadOlder) {
         setLoadingOlder(true);
-        isLoadingOlder.current = true;
+        isLoadingOlderRef.current = true;
       } else {
-        setLoading(true);
+        setLoadingMessages(true);
       }
 
       setConnectionError(false);
@@ -639,15 +911,17 @@ export default function SupportChatScreen() {
 
       const response = await api.get(`/api/v1/conversations/${id}`, {
         params,
+        signal: abortControllerRef.current.signal,
         timeout: REQUEST_TIMEOUT,
       });
 
+      clearTimeout(timeoutId);
+
       if (response.data.success) {
-        const conversationData = response.data.conversation;
         const messagesData = response.data.messages || [];
         const pagination = response.data.pagination || {};
 
-        const normalizedMessages = messagesData.map((msg: any) => ({
+        const normalizedMessages: ChatMessage[] = messagesData.map((msg: any) => ({
           id: normalizeId(msg.id),
           content: msg.content,
           created_at: msg.created_at,
@@ -666,12 +940,14 @@ export default function SupportChatScreen() {
           sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
         }));
 
+        // FIXED: Track message IDs
         normalizedMessages.forEach((msg: any) => messageIdsRef.current.add(msg.id));
 
-        if (isRefresh || (!loadOlder && messages.length === 0)) {
-          setConversation(conversationData);
+        if (isRefresh || (!loadOlder && !hasFetchedInitialMessages.current)) {
           setMessages(normalizedMessages);
           setHasMoreMessages(pagination.has_more || false);
+          
+          hasFetchedInitialMessages.current = true;
           await saveMessagesToStorage(normalizedMessages);
           setIsInitialLoad(false);
 
@@ -688,54 +964,70 @@ export default function SupportChatScreen() {
           }
           
         } else if (loadOlder) {
-          setMessages(prev => [...normalizedMessages, ...prev]);
+          setMessages(prev => {
+            const combined = [...normalizedMessages, ...prev];
+            // FIXED: Remove duplicates
+            const uniqueMessages = Array.from(
+              new Map(combined.map(m => [m.id, m])).values()
+            );
+            return uniqueMessages;
+          });
           setHasMoreMessages(pagination.has_more || false);
         }
 
-        if (conversationData?.customer?.presence) {
-          setCustomerPresence({
-            status: conversationData.customer.presence.status || 'offline',
-            last_seen: conversationData.customer.presence.last_seen,
-          });
+        // Update conversation with latest data
+        if (response.data.conversation) {
+          setConversation(response.data.conversation);
+          
+          if (response.data.conversation?.customer?.presence) {
+            setCustomerPresence({
+              status: response.data.conversation.customer.presence.status || 'offline',
+              last_seen: response.data.conversation.customer.presence.last_seen,
+            });
+          }
         }
 
         console.log(`✅ Loaded ${normalizedMessages.length} messages`);
       }
       
     } catch (error: any) {
-      console.error('Load failed:', error);
+      if (error.name === 'AbortError') {
+        return;
+      }
+
+      console.error('Load messages failed:', error);
       setConnectionError(true);
     } finally {
-      setLoading(false);
+      setLoadingMessages(false);
       setLoadingOlder(false);
       setRefreshing(false);
-      isLoadingOlder.current = false;
+      isLoadingOlderRef.current = false;
     }
   }, [id, messages, savedScrollPosition, saveMessagesToStorage]);
 
   const loadOlderMessages = useCallback(async () => {
-    if (isLoadingOlder.current || !hasMoreMessages || loadingOlder) {
+    if (isLoadingOlderRef.current || !hasMoreMessages || loadingOlder) {
       return;
     }
     
     console.log('Loading older messages');
-    await loadConversation(false, true);
-  }, [loadConversation, loadingOlder, hasMoreMessages]);
+    await loadMessages(false, true);
+  }, [loadMessages, loadingOlder, hasMoreMessages]);
 
   const handleRefresh = useCallback(async () => {
     await clearChatStorage();
     messageIdsRef.current.clear();
-    pendingMessages.current.clear();
-    await loadConversation(true);
-  }, [loadConversation, clearChatStorage]);
+    pendingMessagesRef.current.clear();
+    retryQueueRef.current = [];
+    hasFetchedInitialMessages.current = false;
+    await loadMessages(true);
+  }, [loadMessages, clearChatStorage]);
 
   // ============= SCROLL MANAGEMENT =============
   
   const handleScroll = useCallback((event: any) => {
     const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
     currentScrollY.current = contentOffset.y;
-    contentHeight.current = contentSize.height;
-    scrollViewHeight.current = layoutMeasurement.height;
     
     const maxOffset = contentSize.height - layoutMeasurement.height;
     const distanceFromBottom = maxOffset - contentOffset.y;
@@ -749,7 +1041,7 @@ export default function SupportChatScreen() {
     }
 
     // Load older messages when near top
-    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingOlder.current) {
+    if (distanceFromTop < 300 && hasMoreMessages && !isLoadingOlderRef.current) {
       loadOlderMessages();
     }
   }, [hasMoreMessages, loadOlderMessages]);
@@ -828,91 +1120,43 @@ export default function SupportChatScreen() {
       }),
       metadata: { temp_id: tempId },
       sendStatus: 'pending',
+      retryData: {
+        content: messageText,
+        messageType: 'text',
+      },
     };
 
     // Add to state immediately
     setMessages(prev => [...prev, optimisticMessage]);
-    pendingMessages.current.set(tempId, optimisticMessage);
     
     setTimeout(() => scrollToBottom(), 100);
 
     try {
-      // Send via ActionCable only
+      // FIXED: ActionCable-only sending
       const actionCable = actionCableRef.current;
-      if (!actionCable) throw new Error('ActionCable not ready');
+      if (!actionCable || !isConnected) {
+        // Add to retry queue
+        console.log('📝 Connection not ready, adding to retry queue');
+        addToPendingQueue(tempId, optimisticMessage);
+        return;
+      }
       
-      const success = await actionCable.perform('send_message', {
+      await actionCable.perform('send_message', {
         conversation_id: id,
         content: messageText,
         message_type: 'text',
         metadata: { temp_id: tempId },
+        temp_id: tempId,
       });
 
-      if (success) {
-        console.log('✅ Message sent via ActionCable');
-        // Update to "sent" status
-        setMessages(prev => prev.map(m => 
-          m.tempId === tempId ? { ...m, sendStatus: 'sent' } : m
-        ));
-      } else {
-        throw new Error('ActionCable send failed');
-      }
+      console.log('✅ Message sent via ActionCable');
+      
     } catch (error) {
       console.error('Send failed:', error);
-      
-      // Mark as failed and set up retry
-      setMessages(prev => prev.map(m => 
-        m.tempId === tempId ? { ...m, sendStatus: 'failed', retryCount: 0 } : m
-      ));
-      
-      scheduleRetry(tempId, optimisticMessage, 0);
+      // Add to retry queue
+      addToPendingQueue(tempId, optimisticMessage);
     }
-  }, [inputText, subscriptionReady, id, user, isTyping, scrollToBottom]);
-
-  const scheduleRetry = useCallback((tempId: string, message: ChatMessage, retryCount: number) => {
-    if (retryCount >= 3) {
-      console.error('Max retries reached');
-      return;
-    }
-
-    const delay = [5000, 15000, 30000][retryCount];
-    
-    const timeout = setTimeout(async () => {
-      console.log(`🔄 Retry ${retryCount + 1}`);
-      
-      if (!id || !isConnected) {
-        scheduleRetry(tempId, message, retryCount + 1);
-        return;
-      }
-
-      try {
-        const actionCable = actionCableRef.current;
-        if (!actionCable) throw new Error('ActionCable not ready');
-        
-        const success = await actionCable.perform('send_message', {
-          conversation_id: id,
-          content: message.content,
-          message_type: 'text',
-          metadata: { temp_id: tempId },
-        });
-
-        if (success) {
-          console.log('✅ Retry successful');
-          setMessages(prev => prev.map(m => 
-            m.tempId === tempId ? { ...m, sendStatus: 'sent', retryCount: retryCount + 1 } : m
-          ));
-          retryTimeouts.current.delete(tempId);
-        } else {
-          scheduleRetry(tempId, message, retryCount + 1);
-        }
-      } catch (error) {
-        console.error('Retry failed:', error);
-        scheduleRetry(tempId, message, retryCount + 1);
-      }
-    }, delay);
-
-    retryTimeouts.current.set(tempId, timeout);
-  }, [id, isConnected]);
+  }, [inputText, subscriptionReady, id, user, isTyping, isConnected, scrollToBottom, addToPendingQueue]);
 
   // ============= HELPER FUNCTIONS =============
   
@@ -961,10 +1205,7 @@ export default function SupportChatScreen() {
           style={styles.messageStatusContainer}
           onPress={() => {
             if (message.tempId) {
-              const cachedMsg = pendingMessages.current.get(message.tempId);
-              if (cachedMsg) {
-                scheduleRetry(message.tempId, cachedMsg, message.retryCount || 0);
-              }
+              retryFailedMessage(message.tempId);
             }
           }}
         >
@@ -1043,41 +1284,17 @@ export default function SupportChatScreen() {
         </View>
       </View>
     </View>
-  ), [user?.id, scheduleRetry]);
+  ), [user?.id, retryFailedMessage]);
 
   // ============= MAIN RENDER =============
   
-  if (loading && isInitialLoad) {
+  // FIXED: Show loading only for initial load, not "conversation not found"
+  if (loadingConversation && !conversation && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#7B3F98" />
           <Text style={styles.loadingText}>Loading conversation...</Text>
-          {connectionError && (
-            <TouchableOpacity
-              style={styles.retryButton}
-              onPress={() => loadConversation()}
-            >
-              <Text style={styles.retryButtonText}>Retry</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </SafeAreaView>
-    );
-  }
-
-  if (!conversation && !loading) {
-    return (
-      <SafeAreaView style={styles.container}>
-        <View style={styles.errorContainer}>
-          <MaterialIcons name="error-outline" size={64} color="#ef4444" />
-          <Text style={styles.errorText}>Conversation not found</Text>
-          <TouchableOpacity
-            style={styles.backButton}
-            onPress={() => router.back()}
-          >
-            <Text style={styles.backButtonText}>Go Back</Text>
-          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -1108,10 +1325,10 @@ export default function SupportChatScreen() {
             style={styles.headerAvatar}
           />
           <View style={styles.headerText}>
-            <Text style={styles.headerTitle}>{conversation?.customer?.name || 'Unknown'}</Text>
+            <Text style={styles.headerTitle}>{conversation?.customer?.name || 'Customer'}</Text>
             <View style={styles.headerSubtitleRow}>
               <Text style={styles.headerSubtitle}>
-                #{conversation?.ticket_id} • {conversation?.status?.replace('_', ' ')}
+                {conversation ? `#${conversation.ticket_id} • ${conversation.status?.replace('_', ' ')}` : 'Loading...'}
               </Text>
               {conversation?.escalated && (
                 <View style={styles.escalatedBadge}>
@@ -1137,7 +1354,6 @@ export default function SupportChatScreen() {
         <View style={styles.headerActions}>
           <TouchableOpacity
             style={styles.headerActionButton}
-            onPress={() => setShowActions(true)}
           >
             <Feather name="more-vertical" size={20} color="#fff" />
           </TouchableOpacity>
@@ -1169,109 +1385,118 @@ export default function SupportChatScreen() {
         style={styles.messagesContainer}
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       >
-        <FlatList
-          ref={flatListRef}
-          data={messages}
-          keyExtractor={(item, index) => `${item.id}-${index}`}
-          renderItem={renderMessage}
-          style={styles.messagesList}
-          contentContainerStyle={{ paddingVertical: 8 }}
-          onScroll={handleScroll}
-          scrollEventThrottle={16}
-          refreshControl={
-            <RefreshControl
-              refreshing={refreshing}
-              onRefresh={handleRefresh}
-              tintColor="#7B3F98"
-              colors={['#7B3F98']}
-            />
-          }
-          ListHeaderComponent={() => (
-            <View style={styles.listHeader}>
-              {loadingOlder && (
-                <View style={styles.loadingOlderContainer}>
-                  <ActivityIndicator size="small" color="#7B3F98" />
-                  <Text style={styles.loadingOlderText}>Loading...</Text>
-                </View>
-              )}
-              {!hasMoreMessages && messages.length > 0 && (
-                <View style={styles.startOfConversationContainer}>
-                  <Text style={styles.startOfConversationText}>Start of conversation</Text>
-                </View>
-              )}
-            </View>
-          )}
-          maintainVisibleContentPosition={{
-            minIndexForVisible: 0,
-            autoscrollToTopThreshold: 10,
-          }}
-        />
-
-        {showScrollButton && (
-          <TouchableOpacity
-            style={styles.scrollToBottomButton}
-            onPress={() => scrollToBottom(true)}
-            activeOpacity={0.8}
-          >
-            <View style={styles.scrollToBottomContent}>
-              <Feather name="arrow-down" size={20} color="#fff" />
-              {unreadCount > 0 && (
-                <View style={styles.unreadBadge}>
-                  <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
-                </View>
-              )}
-            </View>
-          </TouchableOpacity>
-        )}
-
-        <View style={[
-          styles.inputContainer,
-          { paddingBottom: Platform.OS === 'ios' ? 34 : 8 }
-        ]}>
-          <View style={styles.inputRow}>
-            <View style={styles.textInputContainer}>
-              <TouchableOpacity style={styles.inputButton}>
-                <Feather name="smile" size={20} color="#8E8E93" />
-              </TouchableOpacity>
-              
-              <TextInput
-                style={styles.textInput}
-                placeholder="Type a message..."
-                placeholderTextColor="#8E8E93"
-                value={inputText}
-                onChangeText={handleTextChange}
-                multiline
-                maxLength={1000}
-                returnKeyType="send"
-                onSubmitEditing={sendMessage}
-                blurOnSubmit={false}
-                onFocus={() => setTimeout(() => scrollToBottom(), 100)}
-              />
-              
-              <TouchableOpacity style={styles.attachButton}>
-                <Feather name="paperclip" size={18} color="#8E8E93" />
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.cameraButton}>
-                <Feather name="camera" size={18} color="#8E8E93" />
-              </TouchableOpacity>
-            </View>
-            
-            <TouchableOpacity
-              style={[
-                styles.sendButton,
-                inputText.trim() && subscriptionReady ? styles.sendButtonActive : styles.voiceButton,
-              ]}
-              onPress={inputText.trim() && subscriptionReady ? sendMessage : undefined}
-              disabled={!inputText.trim() || !subscriptionReady}
-            >
-              {inputText.trim() ? (
-                <Feather name="send" size={18} color="#fff" />
-              ) : (
-                <Feather name="mic" size={18} color="#fff" />
-              )}
-            </TouchableOpacity>
+        {loadingMessages && isInitialLoad ? (
+          <View style={styles.loadingContainer}>
+            <ActivityIndicator size="large" color="#7B3F98" />
+            <Text style={styles.loadingText}>Loading messages...</Text>
           </View>
-        </View>
+        ) : (
+          <>
+            <FlatList
+              ref={flatListRef}
+              data={messages}
+              keyExtractor={(item, index) => `${item.id}-${index}`}
+              renderItem={renderMessage}
+              style={styles.messagesList}
+              contentContainerStyle={{ paddingVertical: 8 }}
+              onScroll={handleScroll}
+              scrollEventThrottle={16}
+              refreshControl={
+                <RefreshControl
+                  refreshing={refreshing}
+                  onRefresh={handleRefresh}
+                  tintColor="#7B3F98"
+                  colors={['#7B3F98']}
+                />
+              }
+              ListHeaderComponent={() => (
+                <View style={styles.listHeader}>
+                  {loadingOlder && (
+                    <View style={styles.loadingOlderContainer}>
+                      <ActivityIndicator size="small" color="#7B3F98" />
+                      <Text style={styles.loadingOlderText}>Loading...</Text>
+                    </View>
+                  )}
+                  {!hasMoreMessages && messages.length > 0 && (
+                    <View style={styles.startOfConversationContainer}>
+                      <Text style={styles.startOfConversationText}>Start of conversation</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+              maintainVisibleContentPosition={{
+                minIndexForVisible: 0,
+                autoscrollToTopThreshold: 10,
+              }}
+            />
+
+            {showScrollButton && (
+              <TouchableOpacity
+                style={styles.scrollToBottomButton}
+                onPress={() => scrollToBottom(true)}
+                activeOpacity={0.8}
+              >
+                <View style={styles.scrollToBottomContent}>
+                  <Feather name="arrow-down" size={20} color="#fff" />
+                  {unreadCount > 0 && (
+                    <View style={styles.unreadBadge}>
+                      <Text style={styles.unreadBadgeText}>{unreadCount}</Text>
+                    </View>
+                  )}
+                </View>
+              </TouchableOpacity>
+            )}
+
+            <View style={[
+              styles.inputContainer,
+              { paddingBottom: Platform.OS === 'ios' ? 34 : 8 }
+            ]}>
+              <View style={styles.inputRow}>
+                <View style={styles.textInputContainer}>
+                  <TouchableOpacity style={styles.inputButton}>
+                    <Feather name="smile" size={20} color="#8E8E93" />
+                  </TouchableOpacity>
+                  
+                  <TextInput
+                    style={styles.textInput}
+                    placeholder="Type a message..."
+                    placeholderTextColor="#8E8E93"
+                    value={inputText}
+                    onChangeText={handleTextChange}
+                    multiline
+                    maxLength={1000}
+                    returnKeyType="send"
+                    onSubmitEditing={sendMessage}
+                    blurOnSubmit={false}
+                    onFocus={() => setTimeout(() => scrollToBottom(), 100)}
+                  />
+                  
+                  <TouchableOpacity style={styles.attachButton}>
+                    <Feather name="paperclip" size={18} color="#8E8E93" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={styles.cameraButton}>
+                    <Feather name="camera" size={18} color="#8E8E93" />
+                  </TouchableOpacity>
+                </View>
+                
+                <TouchableOpacity
+                  style={[
+                    styles.sendButton,
+                    inputText.trim() && subscriptionReady ? styles.sendButtonActive : styles.voiceButton,
+                  ]}
+                  onPress={inputText.trim() && subscriptionReady ? sendMessage : undefined}
+                  disabled={!inputText.trim() || !subscriptionReady}
+                >
+                  {inputText.trim() ? (
+                    <Feather name="send" size={18} color="#fff" />
+                  ) : (
+                    <Feather name="mic" size={18} color="#fff" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            </View>
+          </>
+        )}
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1343,10 +1568,4 @@ const styles = StyleSheet.create({
   voiceButton: { backgroundColor: '#7B3F98' },
   loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
   loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
-  retryButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
-  retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
-  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
-  errorText: { color: '#ef4444', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' },
-  backButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 20 },
-  backButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
 });
