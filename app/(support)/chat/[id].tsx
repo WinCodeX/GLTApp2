@@ -1,10 +1,10 @@
-// app/(support)/chat/[id].tsx - FIXED: Duplicate prevention, storage-first, ActionCable-only, proper loading
+// app/(support)/chat/[id].tsx - FIXED: Conversation switching and server connection
 
 import { Feather, MaterialIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   AppState,
@@ -20,7 +20,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
-  View
+  View,
 } from 'react-native';
 import { useUser } from '../../../context/UserContext';
 import { accountManager } from '../../../lib/AccountManager';
@@ -121,6 +121,7 @@ export default function SupportChatScreen() {
   const [refreshing, setRefreshing] = useState(false);
   const [isInitialLoad, setIsInitialLoad] = useState(true);
   const [connectionError, setConnectionError] = useState(false);
+  const [errorMessage, setErrorMessage] = useState<string>('');
   
   const [isConnected, setIsConnected] = useState(false);
   const [subscriptionReady, setSubscriptionReady] = useState(false);
@@ -137,8 +138,8 @@ export default function SupportChatScreen() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const actionCableRef = useRef<ActionCableService | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
-  const messageIdsRef = useRef<Set<string>>(new Set()); // FIXED: Track message IDs to prevent duplicates
-  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map()); // FIXED: Retry queue
+  const messageIdsRef = useRef<Set<string>>(new Set());
+  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
   const retryQueueRef = useRef<PendingMessage[]>([]);
   const isProcessingRetryRef = useRef(false);
   const appState = useRef(AppState.currentState);
@@ -149,6 +150,7 @@ export default function SupportChatScreen() {
   const isChatFocused = useRef(true);
   const currentScrollY = useRef(0);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const currentConversationIdRef = useRef<string>(id); // FIXED: Track current conversation ID
 
   // ============= STORAGE HELPERS =============
   
@@ -159,7 +161,7 @@ export default function SupportChatScreen() {
     try {
       const key = getStorageKey('_messages');
       const data = {
-        messages: msgs.slice(-100), // Keep last 100 messages
+        messages: msgs.slice(-100),
         timestamp: Date.now(),
       };
       await AsyncStorage.setItem(key, JSON.stringify(data));
@@ -252,6 +254,44 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
+  // FIXED: Reset state when conversation ID changes
+  const resetConversationState = useCallback(() => {
+    console.log('🔄 Resetting conversation state for new ID:', id);
+    
+    // Clear all state
+    setMessages([]);
+    setConversation(null);
+    setLoadingConversation(true);
+    setLoadingMessages(false);
+    setIsInitialLoad(true);
+    setConnectionError(false);
+    setErrorMessage('');
+    setInputText('');
+    setIsTyping(false);
+    setHasMoreMessages(true);
+    setSavedScrollPosition(null);
+    setShowScrollButton(false);
+    setUnreadCount(0);
+    setIsNearBottom(true);
+    
+    // Clear refs
+    messageIdsRef.current.clear();
+    pendingMessagesRef.current.clear();
+    retryQueueRef.current = [];
+    hasFetchedInitialMessages.current = false;
+    isLoadingOlderRef.current = false;
+    lastReadMessageIdRef.current = null;
+    
+    // Clear abort controller
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+    
+    // Update current conversation ref
+    currentConversationIdRef.current = id;
+  }, [id]);
+
   // ============= APP STATE MANAGEMENT =============
   
   useEffect(() => {
@@ -273,7 +313,6 @@ export default function SupportChatScreen() {
         await markCustomerMessagesAsReadIfVisible();
       }
 
-      // FIXED: Process retry queue
       await processRetryQueue();
       
     } else if (nextAppState.match(/inactive|background/)) {
@@ -281,7 +320,6 @@ export default function SupportChatScreen() {
       isChatVisible.current = false;
       isChatFocused.current = false;
       
-      // Save state
       if (id && messages.length > 0) {
         await saveMessagesToStorage(messages);
         await saveScrollPosition(currentScrollY.current);
@@ -317,7 +355,6 @@ export default function SupportChatScreen() {
         setIsConnected(true);
         setSubscriptionReady(true);
 
-        // FIXED: Process retry queue
         await processRetryQueue();
       }
     } catch (error) {
@@ -353,7 +390,6 @@ export default function SupportChatScreen() {
     
     for (const pendingMessage of queue) {
       if (pendingMessage.retryCount >= MAX_RETRY_ATTEMPTS) {
-        // Mark as failed
         setMessages(prev => prev.map(msg => 
           msg.tempId === pendingMessage.tempId 
             ? { ...msg, sendStatus: 'failed' }
@@ -367,7 +403,6 @@ export default function SupportChatScreen() {
       const requiredDelay = RETRY_DELAYS[pendingMessage.retryCount] || RETRY_DELAYS[0];
       
       if (timeSinceLastAttempt < requiredDelay) {
-        // Re-add to queue for later
         retryQueueRef.current.push(pendingMessage);
         continue;
       }
@@ -386,7 +421,6 @@ export default function SupportChatScreen() {
           temp_id: pendingMessage.tempId,
         });
         
-        // Successfully sent
         pendingMessagesRef.current.delete(pendingMessage.tempId);
         
       } catch (error) {
@@ -398,7 +432,6 @@ export default function SupportChatScreen() {
         if (pendingMessage.retryCount < MAX_RETRY_ATTEMPTS) {
           retryQueueRef.current.push(pendingMessage);
         } else {
-          // Mark as failed
           setMessages(prev => prev.map(msg => 
             msg.tempId === pendingMessage.tempId 
               ? { ...msg, sendStatus: 'failed' }
@@ -411,7 +444,6 @@ export default function SupportChatScreen() {
     
     isProcessingRetryRef.current = false;
     
-    // Schedule next retry if queue is not empty
     if (retryQueueRef.current.length > 0) {
       setTimeout(() => processRetryQueue(), 5000);
     }
@@ -425,7 +457,6 @@ export default function SupportChatScreen() {
     pendingMessage.lastAttempt = 0;
     retryQueueRef.current.push(pendingMessage);
     
-    // Update UI to show pending
     setMessages(prev => prev.map(msg => 
       msg.tempId === tempId 
         ? { ...msg, sendStatus: 'pending' }
@@ -469,25 +500,30 @@ export default function SupportChatScreen() {
     }
   }, [messages, markCustomerMessagesAsReadIfVisible]);
 
-  // Save messages whenever they change
   useEffect(() => {
     if (id && messages.length > 0 && !loadingMessages) {
       saveMessagesToStorage(messages);
     }
   }, [id, messages, loadingMessages, saveMessagesToStorage]);
 
-  // Save conversation whenever it changes
   useEffect(() => {
     if (conversation) {
       saveConversationToStorage(conversation);
     }
   }, [conversation, saveConversationToStorage]);
 
-  // ============= INITIALIZATION =============
+  // ============= INITIALIZATION - FIXED: Reset and reload on ID change =============
   
   useEffect(() => {
+    // FIXED: Check if conversation ID has changed
+    if (currentConversationIdRef.current !== id) {
+      console.log('🔄 Conversation ID changed, resetting state');
+      resetConversationState();
+    }
+    
     const initializeChat = async () => {
-      // FIXED: Load conversation and messages from storage first
+      console.log('🚀 Initializing chat for conversation:', id);
+      
       const storedConversation = await loadConversationFromStorage();
       const storedMessages = await loadMessagesFromStorage();
       const storedScrollPos = await loadScrollPosition();
@@ -506,17 +542,14 @@ export default function SupportChatScreen() {
         setIsInitialLoad(false);
         hasFetchedInitialMessages.current = true;
         
-        // Setup ActionCable and sync in background
         setTimeout(() => {
           if (id) {
             setupActionCableConnection();
-            // FIXED: Background sync after loading from storage
             backgroundSyncConversation();
             backgroundSyncMessages();
           }
         }, 500);
 
-        // Restore scroll position or scroll to bottom
         setTimeout(() => {
           if (storedScrollPos !== null) {
             flatListRef.current?.scrollToOffset({ offset: storedScrollPos, animated: false });
@@ -525,29 +558,48 @@ export default function SupportChatScreen() {
           }
         }, 200);
       } else {
-        // No storage, load from API
+        // FIXED: Always try to load from API
+        console.log('📡 No cached data, loading from API');
         loadConversationMetadata();
       }
     };
 
     initializeChat();
-  }, []);
+  }, [id]); // FIXED: Added id to dependency array
 
-  // FIXED: Separate conversation metadata loading
+  // FIXED: Cleanup ActionCable when conversation changes
+  useEffect(() => {
+    return () => {
+      if (actionCableRef.current && currentConversationIdRef.current) {
+        console.log('🧹 Cleaning up ActionCable for conversation:', currentConversationIdRef.current);
+        actionCableRef.current.leaveConversation(currentConversationIdRef.current);
+      }
+      
+      actionCableSubscriptions.current.forEach(unsub => {
+        if (unsub) unsub();
+      });
+      actionCableSubscriptions.current = [];
+    };
+  }, [id]);
+
   const loadConversationMetadata = useCallback(async () => {
     if (!id) return;
 
-    console.log('🌐 Loading conversation metadata');
+    console.log('🌐 Loading conversation metadata for ID:', id);
     setLoadingConversation(true);
+    setConnectionError(false);
+    setErrorMessage('');
 
     try {
+      // FIXED: Don't abort this request
       const response = await api.get(`/api/v1/conversations/${id}`, {
-        params: { limit: 0 }, // Just metadata, no messages
+        params: { limit: 0 },
         timeout: REQUEST_TIMEOUT,
       });
 
       if (response.data.success && response.data.conversation) {
         const conversationData = response.data.conversation;
+        console.log('✅ Conversation metadata loaded:', conversationData.ticket_id);
         setConversation(conversationData);
         
         if (conversationData?.customer?.presence) {
@@ -557,20 +609,32 @@ export default function SupportChatScreen() {
           });
         }
 
-        console.log('✅ Conversation metadata loaded');
-        
         // Now load messages
         await loadMessages();
+      } else {
+        console.error('❌ Invalid response:', response.data);
+        setConnectionError(true);
+        setErrorMessage('Failed to load conversation');
       }
-    } catch (error) {
-      console.error('Failed to load conversation:', error);
+    } catch (error: any) {
+      console.error('❌ Failed to load conversation:', error);
       setConnectionError(true);
+      
+      // FIXED: Better error messages
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        setErrorMessage('Request timed out. Please check your connection and try again.');
+      } else if (error.response?.status === 404) {
+        setErrorMessage('Conversation not found');
+      } else if (error.response?.status === 403) {
+        setErrorMessage('You do not have access to this conversation');
+      } else {
+        setErrorMessage('Unable to load conversation. Please try again.');
+      }
     } finally {
       setLoadingConversation(false);
     }
   }, [id]);
 
-  // FIXED: Background sync conversation metadata
   const backgroundSyncConversation = useCallback(async () => {
     if (!id) return;
     try {
@@ -595,7 +659,6 @@ export default function SupportChatScreen() {
     }
   }, [id]);
 
-  // FIXED: Background sync messages
   const backgroundSyncMessages = useCallback(async () => {
     if (!id) return;
     try {
@@ -611,7 +674,6 @@ export default function SupportChatScreen() {
 
         apiMessages.forEach((msg: any) => {
           const msgId = normalizeId(msg.id);
-          // FIXED: Check for duplicates
           if (!messageIdsRef.current.has(msgId)) {
             newMessages.push({
               id: msgId,
@@ -653,6 +715,7 @@ export default function SupportChatScreen() {
       const currentAccount = accountManager.getCurrentAccount();
       if (!currentAccount) return;
 
+      console.log('📡 Setting up ActionCable for conversation:', id);
       actionCableRef.current = ActionCableService.getInstance();
       
       const connected = await actionCableRef.current.connect({
@@ -672,7 +735,6 @@ export default function SupportChatScreen() {
         setupActionCableSubscriptions();
         await requestCustomerPresence();
 
-        // FIXED: Process retry queue
         await processRetryQueue();
       }
     } catch (error) {
@@ -740,7 +802,6 @@ export default function SupportChatScreen() {
       const messageId = normalizeId(messageData.id);
       const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // FIXED: Check for duplicates
       if (messageIdsRef.current.has(messageId)) {
         console.log('⏭️ Duplicate - skipping');
         return;
@@ -748,7 +809,6 @@ export default function SupportChatScreen() {
       
       messageIdsRef.current.add(messageId);
       
-      // Remove optimistic message if exists
       if (tempId) {
         setMessages(prev => prev.filter(m => m.tempId !== tempId));
         pendingMessagesRef.current.delete(tempId);
@@ -871,7 +931,6 @@ export default function SupportChatScreen() {
   const loadMessages = useCallback(async (isRefresh = false, loadOlder = false) => {
     if (!id) return;
 
-    // Skip if already have messages and not refresh/loadOlder
     if (!isRefresh && !loadOlder && hasFetchedInitialMessages.current && messages.length > 0) {
       console.log('Skipping - already have messages');
       return;
@@ -880,13 +939,16 @@ export default function SupportChatScreen() {
     console.log('🌐 Loading messages:', { isRefresh, loadOlder });
 
     try {
+      // FIXED: Create new abort controller for this request
       if (abortControllerRef.current) {
         abortControllerRef.current.abort();
       }
-
       abortControllerRef.current = new AbortController();
+
       const timeoutId = setTimeout(() => {
-        abortControllerRef.current?.abort();
+        if (abortControllerRef.current) {
+          abortControllerRef.current.abort();
+        }
       }, REQUEST_TIMEOUT);
 
       if (isRefresh) {
@@ -899,6 +961,7 @@ export default function SupportChatScreen() {
       }
 
       setConnectionError(false);
+      setErrorMessage('');
 
       const params: any = {
         limit: loadOlder ? PAGINATION_LIMIT : INITIAL_MESSAGE_LIMIT,
@@ -940,7 +1003,6 @@ export default function SupportChatScreen() {
           sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
         }));
 
-        // FIXED: Track message IDs
         normalizedMessages.forEach((msg: any) => messageIdsRef.current.add(msg.id));
 
         if (isRefresh || (!loadOlder && !hasFetchedInitialMessages.current)) {
@@ -951,7 +1013,6 @@ export default function SupportChatScreen() {
           await saveMessagesToStorage(normalizedMessages);
           setIsInitialLoad(false);
 
-          // Restore scroll position or scroll to bottom
           if (savedScrollPosition !== null) {
             setTimeout(() => {
               flatListRef.current?.scrollToOffset({ offset: savedScrollPosition, animated: false });
@@ -966,7 +1027,6 @@ export default function SupportChatScreen() {
         } else if (loadOlder) {
           setMessages(prev => {
             const combined = [...normalizedMessages, ...prev];
-            // FIXED: Remove duplicates
             const uniqueMessages = Array.from(
               new Map(combined.map(m => [m.id, m])).values()
             );
@@ -975,7 +1035,6 @@ export default function SupportChatScreen() {
           setHasMoreMessages(pagination.has_more || false);
         }
 
-        // Update conversation with latest data
         if (response.data.conversation) {
           setConversation(response.data.conversation);
           
@@ -991,12 +1050,20 @@ export default function SupportChatScreen() {
       }
       
     } catch (error: any) {
-      if (error.name === 'AbortError') {
+      if (error.name === 'AbortError' || error.name === 'CanceledError') {
+        console.log('Request was aborted');
         return;
       }
 
       console.error('Load messages failed:', error);
       setConnectionError(true);
+      
+      // FIXED: Better error messages
+      if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
+        setErrorMessage('Request timed out. The server is taking longer than expected.');
+      } else {
+        setErrorMessage('Unable to load messages. Please try again.');
+      }
     } finally {
       setLoadingMessages(false);
       setLoadingOlder(false);
@@ -1040,7 +1107,6 @@ export default function SupportChatScreen() {
       setUnreadCount(0);
     }
 
-    // Load older messages when near top
     if (distanceFromTop < 300 && hasMoreMessages && !isLoadingOlderRef.current) {
       loadOlderMessages();
     }
@@ -1051,7 +1117,6 @@ export default function SupportChatScreen() {
     setUnreadCount(0);
   }, []);
 
-  // Auto-scroll for new messages only if near bottom
   useEffect(() => {
     if (messages.length === 0) return;
     if (isNearBottom && savedScrollPosition === null) {
@@ -1098,7 +1163,6 @@ export default function SupportChatScreen() {
 
     const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 
-    // Create optimistic message
     const optimisticMessage: ChatMessage = {
       id: tempId,
       tempId: tempId,
@@ -1126,16 +1190,13 @@ export default function SupportChatScreen() {
       },
     };
 
-    // Add to state immediately
     setMessages(prev => [...prev, optimisticMessage]);
     
     setTimeout(() => scrollToBottom(), 100);
 
     try {
-      // FIXED: ActionCable-only sending
       const actionCable = actionCableRef.current;
       if (!actionCable || !isConnected) {
-        // Add to retry queue
         console.log('📝 Connection not ready, adding to retry queue');
         addToPendingQueue(tempId, optimisticMessage);
         return;
@@ -1153,7 +1214,6 @@ export default function SupportChatScreen() {
       
     } catch (error) {
       console.error('Send failed:', error);
-      // Add to retry queue
       addToPendingQueue(tempId, optimisticMessage);
     }
   }, [inputText, subscriptionReady, id, user, isTyping, isConnected, scrollToBottom, addToPendingQueue]);
@@ -1288,13 +1348,41 @@ export default function SupportChatScreen() {
 
   // ============= MAIN RENDER =============
   
-  // FIXED: Show loading only for initial load, not "conversation not found"
   if (loadingConversation && !conversation && isInitialLoad) {
     return (
       <SafeAreaView style={styles.container}>
         <View style={styles.loadingContainer}>
           <ActivityIndicator size="large" color="#7B3F98" />
           <Text style={styles.loadingText}>Loading conversation...</Text>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  // FIXED: Show error with retry option instead of "not found"
+  if (connectionError && !conversation && !loadingConversation) {
+    return (
+      <SafeAreaView style={styles.container}>
+        <View style={styles.errorContainer}>
+          <MaterialIcons name="error-outline" size={64} color="#ef4444" />
+          <Text style={styles.errorText}>{errorMessage || 'Unable to load conversation'}</Text>
+          <Text style={styles.errorSubtext}>Please check your connection and try again</Text>
+          <TouchableOpacity
+            style={styles.retryButton}
+            onPress={() => {
+              setConnectionError(false);
+              setErrorMessage('');
+              loadConversationMetadata();
+            }}
+          >
+            <Text style={styles.retryButtonText}>Retry</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={styles.backButton}
+            onPress={() => router.back()}
+          >
+            <Text style={styles.backButtonText}>Go Back</Text>
+          </TouchableOpacity>
         </View>
       </SafeAreaView>
     );
@@ -1389,6 +1477,9 @@ export default function SupportChatScreen() {
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#7B3F98" />
             <Text style={styles.loadingText}>Loading messages...</Text>
+            {connectionError && (
+              <Text style={styles.errorSubtext}>{errorMessage}</Text>
+            )}
           </View>
         ) : (
           <>
@@ -1566,6 +1657,13 @@ const styles = StyleSheet.create({
   sendButton: { width: 45, height: 45, borderRadius: 22.5, justifyContent: 'center', alignItems: 'center' },
   sendButtonActive: { backgroundColor: '#7B3F98' },
   voiceButton: { backgroundColor: '#7B3F98' },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
+  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16, textAlign: 'center' },
+  errorContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingHorizontal: 20 },
+  errorText: { color: '#ef4444', fontSize: 18, fontWeight: '600', marginTop: 16, textAlign: 'center' },
+  errorSubtext: { color: '#8E8E93', fontSize: 14, marginTop: 8, textAlign: 'center' },
+  retryButton: { backgroundColor: '#7B3F98', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, marginTop: 20 },
+  retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  backButton: { backgroundColor: 'rgba(123, 63, 152, 0.2)', paddingHorizontal: 24, paddingVertical: 12, borderRadius: 8, marginTop: 12 },
+  backButtonText: { color: '#7B3F98', fontSize: 16, fontWeight: '500' },
 });
