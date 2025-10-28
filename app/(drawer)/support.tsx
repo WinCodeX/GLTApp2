@@ -1,4 +1,4 @@
-// app/(drawer)/support.tsx - FIXED: Double messages & immediate cache persistence
+// app/(drawer)/support.tsx - FIXED: ActionCable-only message sending with retry logic
 
 import {
   Feather,
@@ -33,7 +33,6 @@ import {
 import { useUser } from '../../context/UserContext';
 import { accountManager } from '../../lib/AccountManager';
 import api from '../../lib/api';
-import ChatCacheManager from '../../lib/cache/ChatCacheManager';
 import { NavigationHelper } from '../../lib/helpers/navigation';
 import ActionCableService from '../../lib/services/ActionCableService';
 
@@ -47,7 +46,9 @@ const CACHE_STALE_TIME = 5 * 60 * 1000;
 const MAX_RETRY_ATTEMPTS = 3;
 const RETRY_DELAYS = [5000, 15000, 30000];
 const SCROLL_BUTTON_THRESHOLD = 200;
-const LOAD_MORE_THRESHOLD = 3;
+const MESSAGES_CACHE_KEY = 'support_customer_messages_';
+const CONVERSATION_CACHE_KEY = 'support_customer_conversation_';
+const SCROLL_POSITION_KEY = 'support_scroll_position_';
 
 const normalizeId = (id: any): string => String(id);
 
@@ -67,6 +68,11 @@ interface Message {
   sendStatus?: 'pending' | 'sent' | 'delivered' | 'read' | 'failed';
   retryCount?: number;
   created_at?: string;
+  retryData?: {
+    content: string;
+    messageType: string;
+    metadata?: any;
+  };
 }
 
 interface Package {
@@ -85,6 +91,13 @@ interface AgentPresence {
   status: 'online' | 'offline' | 'away';
   last_seen?: string;
   is_typing?: boolean;
+}
+
+interface PendingMessage {
+  tempId: string;
+  message: Message;
+  retryCount: number;
+  lastAttempt: number;
 }
 
 type InquiryType = 'basic' | 'package';
@@ -132,6 +145,7 @@ export default function SupportScreen() {
   const [isNearBottom, setIsNearBottom] = useState(true);
   const [currentScrollOffset, setCurrentScrollOffset] = useState(0);
   const [shouldScrollToEnd, setShouldScrollToEnd] = useState(true);
+  const [savedScrollPosition, setSavedScrollPosition] = useState<number | null>(null);
   
   const [showTicketModal, setShowTicketModal] = useState(false);
   const [showInquiryModal, setShowInquiryModal] = useState(false);
@@ -152,14 +166,9 @@ export default function SupportScreen() {
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
   const messageIdsRef = useRef<Set<string>>(new Set());
-  const cacheManager = useRef(ChatCacheManager.getInstance());
   const cacheUnsubscribeRef = useRef<(() => void) | null>(null);
   const actionCableSubscriptions = useRef<Array<() => void>>([]);
   const conversationLoadedRef = useRef(false);
-  const conversationIdStorageKey = 'active_support_conversation_id';
-  const conversationMessagesStorageKey = 'support_conversation_messages';
-  const conversationLoadedStorageKey = 'conversation_loaded_state';
-  const cacheTimestampKey = 'cache_timestamp';
   const retryTimeoutsRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
   const appState = useRef(AppState.currentState);
   const lastReadMessageIdRef = useRef<string | null>(null);
@@ -171,155 +180,144 @@ export default function SupportScreen() {
   const isChatVisible = useRef(true);
   const isChatFocused = useRef(true);
   
-  // FIXED: Add duplicate tracking
-  const pendingMessageIds = useRef<Set<string>>(new Set());
-  const processedMessageIds = useRef<Set<string>>(new Set());
+  // FIXED: Pending messages queue for retry logic
+  const pendingMessagesRef = useRef<Map<string, PendingMessage>>(new Map());
+  const retryQueueRef = useRef<PendingMessage[]>([]);
+  const isProcessingRetryRef = useRef(false);
 
-  // ============= COMPREHENSIVE CLEANUP FUNCTION =============
+  // ============= STORAGE MANAGEMENT =============
   
-  const clearAllChatData = useCallback(async () => {
+  const saveConversationToStorage = useCallback(async () => {
+    if (!conversationId || messages.length === 0) return;
+    
     try {
-      console.log('🧹 Clearing all support chat data...');
+      const cacheData = {
+        conversationId,
+        hasActiveTicket,
+        ticketStatus,
+        selectedPackage,
+        inquiryType,
+        timestamp: Date.now(),
+      };
       
+      const messagesData = {
+        messages: messages.slice(-100), // Keep last 100 messages
+        hasMoreMessages,
+        timestamp: Date.now(),
+      };
+      
+      await AsyncStorage.multiSet([
+        [`${CONVERSATION_CACHE_KEY}${user?.id}`, JSON.stringify(cacheData)],
+        [`${MESSAGES_CACHE_KEY}${conversationId}`, JSON.stringify(messagesData)],
+      ]);
+      
+      console.log('💾 Saved conversation to storage');
+    } catch (error) {
+      console.error('Failed to save conversation:', error);
+    }
+  }, [conversationId, messages, hasActiveTicket, ticketStatus, selectedPackage, inquiryType, hasMoreMessages, user?.id]);
+
+  const loadConversationFromStorage = useCallback(async (): Promise<boolean> => {
+    try {
+      const keys = await AsyncStorage.multiGet([
+        `${CONVERSATION_CACHE_KEY}${user?.id}`,
+      ]);
+      
+      const conversationData = keys[0][1] ? JSON.parse(keys[0][1]) : null;
+      
+      if (!conversationData) return false;
+      
+      const cacheAge = Date.now() - conversationData.timestamp;
+      if (cacheAge > CACHE_STALE_TIME) {
+        await clearStoredConversation();
+        return false;
+      }
+      
+      setConversationId(conversationData.conversationId);
+      setHasActiveTicket(conversationData.hasActiveTicket);
+      setTicketStatus(conversationData.ticketStatus);
+      setSelectedPackage(conversationData.selectedPackage);
+      setInquiryType(conversationData.inquiryType);
+      
+      // Load messages
+      const messagesData = await AsyncStorage.getItem(`${MESSAGES_CACHE_KEY}${conversationData.conversationId}`);
+      if (messagesData) {
+        const parsed = JSON.parse(messagesData);
+        setMessages(parsed.messages);
+        setHasMoreMessages(parsed.hasMoreMessages);
+        
+        parsed.messages.forEach((msg: Message) => {
+          messageIdsRef.current.add(normalizeId(msg.id));
+        });
+        
+        conversationLoadedRef.current = true;
+        hasFetchedInitialMessages.current = true;
+      }
+      
+      console.log('✅ Loaded conversation from storage');
+      return true;
+    } catch (error) {
+      console.error('Failed to load conversation from storage:', error);
+      return false;
+    }
+  }, [user?.id]);
+
+  const clearStoredConversation = async () => {
+    try {
       const keys = await AsyncStorage.getAllKeys();
-      const supportKeys = keys.filter(k => 
-        k.startsWith('active_support_conversation') ||
-        k.startsWith('support_conversation_messages') ||
-        k.startsWith('conversation_loaded_support') ||
-        k.startsWith('cache_timestamp_support') ||
-        k === conversationIdStorageKey ||
-        k === conversationLoadedStorageKey ||
-        k === cacheTimestampKey
+      const supportKeys = keys.filter(key => 
+        key.startsWith(CONVERSATION_CACHE_KEY) ||
+        key.startsWith(MESSAGES_CACHE_KEY) ||
+        key.startsWith(SCROLL_POSITION_KEY)
       );
       
       if (supportKeys.length > 0) {
         await AsyncStorage.multiRemove(supportKeys);
       }
       
-      if (conversationId) {
-        cacheManager.current.clearConversationCache(conversationId);
-      }
-      
-      conversationLoadedRef.current = false;
-      hasFetchedInitialMessages.current = false;
-      hasScrolledToBottomRef.current = false;
-      messageIdsRef.current.clear();
-      lastReadMessageIdRef.current = null;
-      pendingMessageIds.current.clear();
-      processedMessageIds.current.clear();
-      
-      setMessages([]);
-      setConversationId(null);
-      setHasActiveTicket(false);
-      setTicketStatus('none');
-      
-      console.log('✅ All support chat data cleared');
+      console.log('🧹 Cleared stored conversation');
     } catch (error) {
-      console.error('Failed to clear chat data:', error);
+      console.error('Failed to clear stored conversation:', error);
+    }
+  };
+
+  const saveScrollPosition = useCallback(async () => {
+    if (!conversationId) return;
+    
+    try {
+      await AsyncStorage.setItem(
+        `${SCROLL_POSITION_KEY}${conversationId}`,
+        JSON.stringify({
+          offset: currentScrollOffset,
+          timestamp: Date.now(),
+        })
+      );
+    } catch (error) {
+      console.error('Failed to save scroll position:', error);
+    }
+  }, [conversationId, currentScrollOffset]);
+
+  const loadScrollPosition = useCallback(async () => {
+    if (!conversationId) return;
+    
+    try {
+      const data = await AsyncStorage.getItem(`${SCROLL_POSITION_KEY}${conversationId}`);
+      if (data) {
+        const parsed = JSON.parse(data);
+        const age = Date.now() - parsed.timestamp;
+        
+        // Only restore position if less than 1 hour old
+        if (age < 60 * 60 * 1000) {
+          setSavedScrollPosition(parsed.offset);
+          setShouldScrollToEnd(false);
+        } else {
+          setShouldScrollToEnd(true);
+        }
+      }
+    } catch (error) {
+      console.error('Failed to load scroll position:', error);
     }
   }, [conversationId]);
-
-  useEffect(() => {
-    const checkAuthStatus = async () => {
-      const currentAccount = accountManager.getCurrentAccount();
-      if (!currentAccount && conversationId) {
-        await clearAllChatData();
-      }
-    };
-    
-    const interval = setInterval(checkAuthStatus, 1000);
-    return () => clearInterval(interval);
-  }, [conversationId, clearAllChatData]);
-
-  // ============= FIXED: STORAGE PERSISTENCE WITH IMMEDIATE SAVES =============
-  
-  const saveConversationState = useCallback(async (convId: string, msgs: Message[]) => {
-    try {
-      await AsyncStorage.setItem(conversationIdStorageKey, String(convId));
-      
-      const messagesToSave = msgs.slice(0, 50);
-      await AsyncStorage.setItem(
-        `${conversationMessagesStorageKey}_${String(convId)}`,
-        JSON.stringify(messagesToSave)
-      );
-      
-      await AsyncStorage.setItem(conversationLoadedStorageKey, 'true');
-      await AsyncStorage.setItem(cacheTimestampKey, String(Date.now()));
-      
-      conversationLoadedRef.current = true;
-      
-      console.log(`💾 Saved ${msgs.length} messages to storage`);
-    } catch (error) {
-      console.error('Failed to save conversation state:', error);
-    }
-  }, []);
-
-  const loadSavedConversationState = useCallback(async (): Promise<boolean> => {
-    try {
-      const savedId = await AsyncStorage.getItem(conversationIdStorageKey);
-      if (!savedId) return false;
-
-      const [loaded, timestamp, savedMessages] = await Promise.all([
-        AsyncStorage.getItem(conversationLoadedStorageKey),
-        AsyncStorage.getItem(cacheTimestampKey),
-        AsyncStorage.getItem(`${conversationMessagesStorageKey}_${savedId}`),
-      ]);
-      
-      if (loaded === 'true' && timestamp && savedMessages) {
-        const cacheAge = Date.now() - parseInt(timestamp, 10);
-        
-        const messages = JSON.parse(savedMessages) as Message[];
-        
-        setConversationId(normalizeId(savedId));
-        setHasActiveTicket(true);
-        setMessages(messages);
-        
-        messageIdsRef.current.clear();
-        processedMessageIds.current.clear();
-        messages.forEach(msg => {
-          messageIdsRef.current.add(normalizeId(msg.id));
-          processedMessageIds.current.add(normalizeId(msg.id));
-          if (msg.tempId) {
-            processedMessageIds.current.add(msg.tempId);
-          }
-        });
-        
-        conversationLoadedRef.current = true;
-        hasFetchedInitialMessages.current = true;
-        
-        console.log('✅ Loaded saved conversation state with', messages.length, 'messages');
-        
-        if (cacheAge > CACHE_STALE_TIME) {
-          setTimeout(() => backgroundSyncMessages(savedId), 2000);
-        }
-        
-        return true;
-      }
-      
-      return false;
-    } catch (error) {
-      console.error('Failed to load conversation state:', error);
-      return false;
-    }
-  }, []);
-
-  const clearConversationState = useCallback(async () => {
-    try {
-      const savedId = await AsyncStorage.getItem(conversationIdStorageKey);
-      
-      await Promise.all([
-        AsyncStorage.removeItem(conversationIdStorageKey),
-        AsyncStorage.removeItem(conversationLoadedStorageKey),
-        AsyncStorage.removeItem(cacheTimestampKey),
-        savedId ? AsyncStorage.removeItem(`${conversationMessagesStorageKey}_${savedId}`) : Promise.resolve(),
-      ]);
-      
-      conversationLoadedRef.current = false;
-      hasFetchedInitialMessages.current = false;
-    } catch (error) {
-      console.error('Failed to clear conversation state:', error);
-    }
-  }, []);
 
   // ============= APP STATE MANAGEMENT =============
   
@@ -329,7 +327,7 @@ export default function SupportScreen() {
     return () => {
       subscription.remove();
     };
-  }, [conversationId, isConnected]);
+  }, [conversationId, isConnected, messages]);
 
   const handleAppStateChange = useCallback(async (nextAppState: AppStateStatus) => {
     if (appState.current.match(/inactive|background/) && nextAppState === 'active') {
@@ -344,14 +342,17 @@ export default function SupportScreen() {
       if (conversationId && isChatVisible.current) {
         await markMessagesAsReadIfVisible();
       }
+      
+      // Process retry queue
+      await processRetryQueue();
+      
     } else if (nextAppState.match(/inactive|background/)) {
       console.log('📱 App went to background');
       isChatVisible.current = false;
       isChatFocused.current = false;
       
-      if (conversationId && messages.length > 0) {
-        await saveConversationState(conversationId, messages);
-      }
+      await saveConversationToStorage();
+      await saveScrollPosition();
       
       if (isConnected) {
         const actionCable = ActionCableService.getInstance();
@@ -360,7 +361,7 @@ export default function SupportScreen() {
     }
     
     appState.current = nextAppState;
-  }, [conversationId, isConnected, messages, saveConversationState]);
+  }, [conversationId, isConnected, messages]);
 
   const reconnectActionCable = useCallback(async () => {
     try {
@@ -379,6 +380,9 @@ export default function SupportScreen() {
         setupActionCableSubscriptions();
         setIsConnected(true);
         setSubscriptionReady(true);
+        
+        // Process any pending messages
+        await processRetryQueue();
       }
     } catch (error) {
       console.error('Failed to reconnect ActionCable:', error);
@@ -389,6 +393,152 @@ export default function SupportScreen() {
       reconnectTimeoutRef.current = setTimeout(() => reconnectActionCable(), 5000);
     }
   }, [conversationId, user]);
+
+  // ============= MESSAGE RETRY LOGIC =============
+  
+  const addToPendingQueue = useCallback((tempId: string, message: Message) => {
+    const pendingMessage: PendingMessage = {
+      tempId,
+      message,
+      retryCount: 0,
+      lastAttempt: Date.now(),
+    };
+    
+    pendingMessagesRef.current.set(tempId, pendingMessage);
+    retryQueueRef.current.push(pendingMessage);
+    
+    console.log(`📝 Added message ${tempId} to pending queue`);
+  }, []);
+
+  const processRetryQueue = useCallback(async () => {
+    if (!isConnected || !conversationId || isProcessingRetryRef.current) return;
+    if (retryQueueRef.current.length === 0) return;
+    
+    isProcessingRetryRef.current = true;
+    console.log(`🔄 Processing ${retryQueueRef.current.length} pending messages`);
+    
+    const queue = [...retryQueueRef.current];
+    retryQueueRef.current = [];
+    
+    for (const pendingMessage of queue) {
+      if (pendingMessage.retryCount >= MAX_RETRY_ATTEMPTS) {
+        // Mark as failed
+        setMessages(prev => prev.map(msg => 
+          msg.tempId === pendingMessage.tempId 
+            ? { ...msg, sendStatus: 'failed' }
+            : msg
+        ));
+        pendingMessagesRef.current.delete(pendingMessage.tempId);
+        continue;
+      }
+      
+      const timeSinceLastAttempt = Date.now() - pendingMessage.lastAttempt;
+      const requiredDelay = RETRY_DELAYS[pendingMessage.retryCount] || RETRY_DELAYS[0];
+      
+      if (timeSinceLastAttempt < requiredDelay) {
+        // Re-add to queue for later
+        retryQueueRef.current.push(pendingMessage);
+        continue;
+      }
+      
+      try {
+        console.log(`🔄 Retrying message ${pendingMessage.tempId} (attempt ${pendingMessage.retryCount + 1})`);
+        
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.perform('send_message', {
+          conversation_id: conversationId,
+          content: pendingMessage.message.retryData?.content || pendingMessage.message.text,
+          message_type: pendingMessage.message.retryData?.messageType || 'text',
+          metadata: pendingMessage.message.retryData?.metadata,
+          temp_id: pendingMessage.tempId,
+        });
+        
+        // Successfully sent
+        pendingMessagesRef.current.delete(pendingMessage.tempId);
+        
+      } catch (error) {
+        console.error(`Failed to retry message ${pendingMessage.tempId}:`, error);
+        
+        pendingMessage.retryCount++;
+        pendingMessage.lastAttempt = Date.now();
+        
+        if (pendingMessage.retryCount < MAX_RETRY_ATTEMPTS) {
+          retryQueueRef.current.push(pendingMessage);
+        } else {
+          // Mark as failed
+          setMessages(prev => prev.map(msg => 
+            msg.tempId === pendingMessage.tempId 
+              ? { ...msg, sendStatus: 'failed' }
+              : msg
+          ));
+          pendingMessagesRef.current.delete(pendingMessage.tempId);
+        }
+      }
+    }
+    
+    isProcessingRetryRef.current = false;
+    
+    // Schedule next retry if queue is not empty
+    if (retryQueueRef.current.length > 0) {
+      setTimeout(() => processRetryQueue(), 5000);
+    }
+  }, [isConnected, conversationId]);
+
+  const retryFailedMessage = useCallback(async (tempId: string) => {
+    const pendingMessage = pendingMessagesRef.current.get(tempId);
+    if (!pendingMessage) return;
+    
+    pendingMessage.retryCount = 0;
+    pendingMessage.lastAttempt = 0;
+    retryQueueRef.current.push(pendingMessage);
+    
+    // Update UI to show pending
+    setMessages(prev => prev.map(msg => 
+      msg.tempId === tempId 
+        ? { ...msg, sendStatus: 'pending' }
+        : msg
+    ));
+    
+    await processRetryQueue();
+  }, [processRetryQueue]);
+
+  // ============= INITIALIZATION =============
+  
+  useEffect(() => {
+    const initializeConversation = async () => {
+      const hasSavedState = await loadConversationFromStorage();
+      
+      if (hasSavedState) {
+        setLoadingMessages(false);
+        setIsInitialLoad(false);
+        
+        await loadScrollPosition();
+        
+        setTimeout(() => {
+          if (conversationId) {
+            setupActionCableConnection();
+          }
+        }, 100);
+        
+        // Restore scroll position or scroll to bottom
+        setTimeout(() => {
+          if (savedScrollPosition !== null && !shouldScrollToEnd) {
+            flatListRef.current?.scrollToOffset({ 
+              offset: savedScrollPosition, 
+              animated: false 
+            });
+          } else {
+            flatListRef.current?.scrollToEnd({ animated: false });
+          }
+          hasScrolledToBottomRef.current = true;
+        }, 200);
+      } else {
+        checkActiveTicket();
+      }
+    };
+
+    initializeConversation();
+  }, []);
 
   // ============= AUTO MARK AS READ =============
   
@@ -427,40 +577,12 @@ export default function SupportScreen() {
     }
   }, [messages, markMessagesAsReadIfVisible]);
 
-  // FIXED: Save to storage whenever messages change
+  // Save messages whenever they change
   useEffect(() => {
     if (conversationId && messages.length > 0 && !loadingMessages) {
-      saveConversationState(conversationId, messages);
+      saveConversationToStorage();
     }
-  }, [conversationId, messages, loadingMessages, saveConversationState]);
-
-  // ============= INITIALIZATION =============
-  
-  useEffect(() => {
-    const initializeConversation = async () => {
-      const hasSavedState = await loadSavedConversationState();
-      
-      if (hasSavedState) {
-        setLoadingMessages(false);
-        setIsInitialLoad(false);
-        
-        setTimeout(() => {
-          if (conversationId) {
-            setupActionCableConnection();
-          }
-        }, 500);
-        
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: false });
-          hasScrolledToBottomRef.current = true;
-        }, 100);
-      } else {
-        checkActiveTicket();
-      }
-    };
-
-    initializeConversation();
-  }, []);
+  }, [conversationId, messages, loadingMessages, saveConversationToStorage]);
 
   // ============= ACTIONCABLE SETUP =============
   
@@ -496,6 +618,9 @@ export default function SupportScreen() {
         presenceCheckInterval.current = setInterval(() => {
           requestAgentPresence();
         }, 30000);
+        
+        // Process any pending messages
+        await processRetryQueue();
       }
     } catch (error) {
       console.error('Failed to setup ActionCable:', error);
@@ -506,7 +631,7 @@ export default function SupportScreen() {
       }
       reconnectTimeoutRef.current = setTimeout(() => setupActionCableConnection(), 5000);
     }
-  }, [conversationId, user]);
+  }, [conversationId, user, processRetryQueue]);
 
   useEffect(() => {
     if (conversationId && user && !isConnected) {
@@ -549,7 +674,7 @@ export default function SupportScreen() {
     }
   }, [conversationId, isConnected]);
 
-  // ============= FIXED: ACTIONCABLE SUBSCRIPTIONS WITH DUPLICATE PREVENTION =============
+  // ============= ACTIONCABLE SUBSCRIPTIONS =============
   
   const setupActionCableSubscriptions = () => {
     if (!conversationId) return;
@@ -561,7 +686,7 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current = [];
 
-    // FIXED: Comprehensive duplicate detection
+    // New message subscription
     const unsubNewMessage = actionCable.subscribe('new_message', (data) => {
       console.log('📨 Message received:', data);
       
@@ -571,34 +696,12 @@ export default function SupportScreen() {
       const messageId = normalizeId(messageData.id);
       const tempId = messageData.temp_id || messageData.metadata?.temp_id;
       
-      // CRITICAL: Check both message ID and temp ID for duplicates
-      if (processedMessageIds.current.has(messageId)) {
-        console.log('⏭️ Skipping duplicate message by ID:', messageId);
+      // Check for duplicates
+      if (messageIdsRef.current.has(messageId)) {
+        console.log('⏭️ Skipping duplicate message:', messageId);
         return;
       }
       
-      if (tempId && processedMessageIds.current.has(tempId)) {
-        console.log('⏭️ Skipping duplicate message by temp_id:', tempId);
-        return;
-      }
-      
-      // Check if message already exists in state
-      const exists = messages.find(m => 
-        m.id === messageId || 
-        (tempId && (m.id === tempId || m.tempId === tempId))
-      );
-      
-      if (exists) {
-        console.log('⏭️ Message already in state:', messageId);
-        return;
-      }
-      
-      // Mark as processed
-      processedMessageIds.current.add(messageId);
-      if (tempId) {
-        processedMessageIds.current.add(tempId);
-        pendingMessageIds.current.delete(tempId);
-      }
       messageIdsRef.current.add(messageId);
       
       setMessages(prev => {
@@ -607,6 +710,7 @@ export default function SupportScreen() {
         // Remove optimistic message if temp_id matches
         if (tempId) {
           updatedMessages = prev.filter(msg => msg.tempId !== tempId);
+          pendingMessagesRef.current.delete(tempId);
         }
         
         const newMessage: Message = {
@@ -627,14 +731,7 @@ export default function SupportScreen() {
           created_at: messageData.created_at || new Date().toISOString(),
         };
         
-        const newMessages = [...updatedMessages, newMessage];
-        
-        // FIXED: Save immediately to storage
-        if (conversationId) {
-          saveConversationState(conversationId, newMessages);
-        }
-        
-        return newMessages;
+        return [...updatedMessages, newMessage];
       });
       
       if (messageData.from_support) {
@@ -653,6 +750,7 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubNewMessage);
 
+    // Message acknowledged subscription
     const unsubAcknowledged = actionCable.subscribe('message_acknowledged', (data) => {
       if (data.message_id) {
         const normalizedId = normalizeId(data.message_id);
@@ -675,6 +773,7 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubAcknowledged);
 
+    // Other subscriptions (typing, presence, etc.)
     const unsubTyping = actionCable.subscribe('typing_indicator', (data) => {
       if (data.conversation_id === conversationId && normalizeId(data.user_id) !== normalizeId(user?.id)) {
         setAgentPresence(prev => ({
@@ -697,24 +796,10 @@ export default function SupportScreen() {
     });
     actionCableSubscriptions.current.push(unsubPresence);
 
-    const unsubUsersPresence = actionCable.subscribe('users_presence_data', (data) => {
-      console.log('👥 Users presence data:', data);
-      if (data.presence_data && Array.isArray(data.presence_data)) {
-        const agentData = data.presence_data.find(p => normalizeId(p.user_id) !== normalizeId(user?.id));
-        if (agentData) {
-          setAgentPresence({
-            status: agentData.status || 'offline',
-            last_seen: agentData.last_seen_at,
-            is_typing: false,
-          });
-        }
-      }
-    });
-    actionCableSubscriptions.current.push(unsubUsersPresence);
-
     const unsubConnected = actionCable.subscribe('connection_established', () => {
       setIsConnected(true);
       setSubscriptionReady(true);
+      processRetryQueue();
     });
     actionCableSubscriptions.current.push(unsubConnected);
 
@@ -835,9 +920,8 @@ export default function SupportScreen() {
           created_at: msg.created_at,
         }));
 
-        // Track all message IDs from API
+        // Track all message IDs
         newMessages.forEach(msg => {
-          processedMessageIds.current.add(msg.id);
           messageIdsRef.current.add(msg.id);
         });
 
@@ -846,7 +930,7 @@ export default function SupportScreen() {
           setHasMoreMessages(pagination.has_more || false);
           
           hasFetchedInitialMessages.current = true;
-          await saveConversationState(conversationId, newMessages);
+          await saveConversationToStorage();
           
           setTimeout(() => {
             flatListRef.current?.scrollToEnd({ animated: false });
@@ -920,7 +1004,6 @@ export default function SupportScreen() {
         };
         setMessages([defaultMessage]);
         messageIdsRef.current.add('1');
-        processedMessageIds.current.add('1');
       }
     } finally {
       setLoadingMessages(false);
@@ -929,60 +1012,7 @@ export default function SupportScreen() {
       setIsInitialLoad(false);
       isLoadingMoreRef.current = false;
     }
-  }, [messages, saveConversationState]);
-
-  const backgroundSyncMessages = useCallback(async (conversationId: string) => {
-    try {
-      console.log('🔄 Background syncing messages...');
-      
-      const response = await api.get(`/api/v1/conversations/${conversationId}`, {
-        params: { limit: 10 },
-        timeout: 10000,
-      });
-
-      if (response.data.success && response.data.messages) {
-        const newMessages = response.data.messages;
-        
-        setMessages(prev => {
-          const toAdd = newMessages
-            .filter((msg: any) => !processedMessageIds.current.has(normalizeId(msg.id)))
-            .map((msg: any) => {
-              const msgId = normalizeId(msg.id);
-              processedMessageIds.current.add(msgId);
-              messageIdsRef.current.add(msgId);
-              
-              return {
-                id: msgId,
-                text: msg.content,
-                timestamp: msg.timestamp || new Date(msg.created_at).toLocaleTimeString('en-US', {
-                  hour12: false,
-                  hour: '2-digit',
-                  minute: '2-digit',
-                }),
-                isSupport: msg.from_support,
-                type: msg.message_type || 'text',
-                packageCode: msg.metadata?.package_code,
-                isTagged: !!msg.metadata?.package_code,
-                delivered_at: msg.delivered_at,
-                read_at: msg.read_at,
-                sendStatus: msg.read_at ? 'read' : msg.delivered_at ? 'delivered' : 'sent',
-                created_at: msg.created_at,
-              };
-            });
-          
-          if (toAdd.length > 0) {
-            const updated = [...prev, ...toAdd];
-            saveConversationState(conversationId, updated);
-            return updated;
-          }
-          
-          return prev;
-        });
-      }
-    } catch (error) {
-      console.error('Background sync failed:', error);
-    }
-  }, [saveConversationState]);
+  }, [messages, saveConversationToStorage]);
 
   const loadOlderMessages = useCallback(async () => {
     if (isLoadingMoreRef.current || !conversationId || !hasMoreMessages || loadingOlder) {
@@ -996,13 +1026,13 @@ export default function SupportScreen() {
     if (!conversationId) return;
     
     messageIdsRef.current.clear();
-    processedMessageIds.current.clear();
-    pendingMessageIds.current.clear();
+    pendingMessagesRef.current.clear();
+    retryQueueRef.current = [];
     hasFetchedInitialMessages.current = false;
     hasScrolledToBottomRef.current = false;
-    await clearConversationState();
+    await clearStoredConversation();
     await loadConversationMessages(conversationId, true);
-  }, [loadConversationMessages, conversationId, clearConversationState]);
+  }, [loadConversationMessages, conversationId]);
 
   const checkActiveTicket = useCallback(async () => {
     try {
@@ -1022,7 +1052,7 @@ export default function SupportScreen() {
       }
       
       setHasActiveTicket(false);
-      await clearConversationState();
+      await clearStoredConversation();
       
       const welcomeMessage: Message = {
         id: '1',
@@ -1038,7 +1068,6 @@ export default function SupportScreen() {
       
       setMessages([welcomeMessage]);
       messageIdsRef.current.add('1');
-      processedMessageIds.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -1066,7 +1095,6 @@ export default function SupportScreen() {
       
       setMessages([welcomeMessage]);
       messageIdsRef.current.add('1');
-      processedMessageIds.current.add('1');
       
       setLoadingMessages(false);
       setIsInitialLoad(false);
@@ -1077,90 +1105,7 @@ export default function SupportScreen() {
         setShowTicketModal(true);
       }
     }
-  }, [autoSelectPackage, loadConversationMessages, clearConversationState]);
-
-  // ============= MESSAGE RETRY LOGIC =============
-  
-  const scheduleMessageRetry = useCallback((tempId: string, message: Message, retryCount: number) => {
-    if (retryCount >= MAX_RETRY_ATTEMPTS) {
-      console.error('Max retry attempts reached for message:', tempId);
-      
-      setMessages(prev => prev.map(msg => 
-        msg.tempId === tempId ? { ...msg, sendStatus: 'failed', retryCount } : msg
-      ));
-      return;
-    }
-
-    const delay = RETRY_DELAYS[retryCount] || RETRY_DELAYS[RETRY_DELAYS.length - 1];
-    
-    console.log(`⏳ Scheduling retry ${retryCount + 1} for message in ${delay}ms`);
-    
-    const timeout = setTimeout(() => {
-      retryFailedMessage(tempId, retryCount + 1);
-    }, delay);
-
-    retryTimeoutsRef.current.set(tempId, timeout);
-  }, []);
-
-  const retryFailedMessage = useCallback(async (tempId: string, retryCount: number) => {
-    const message = messages.find(m => m.tempId === tempId);
-    if (!message) return;
-    
-    if (!conversationId) {
-      scheduleMessageRetry(tempId, message, retryCount);
-      return;
-    }
-
-    try {
-      console.log(`🔄 Retrying message (attempt ${retryCount}):`, tempId);
-      
-      const response = await api.post(`/api/v1/conversations/${conversationId}/send_message`, {
-        content: message.text,
-        message_type: message.type || 'text',
-        metadata: message.packageCode ? { package_code: message.packageCode } : {},
-        temp_id: tempId,
-      });
-
-      if (response.data.success && response.data.message) {
-        console.log('✅ Message retry successful');
-        
-        const serverMessageId = normalizeId(response.data.message.id);
-        processedMessageIds.current.add(serverMessageId);
-        pendingMessageIds.current.delete(tempId);
-        
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.tempId !== tempId);
-          const realMessage: Message = {
-            id: serverMessageId,
-            text: response.data.message.content,
-            timestamp: response.data.message.timestamp || new Date().toLocaleTimeString('en-US', {
-              hour12: false,
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            isSupport: false,
-            type: response.data.message.message_type || 'text',
-            delivered_at: response.data.message.delivered_at,
-            read_at: response.data.message.read_at,
-            sendStatus: 'sent',
-            created_at: response.data.message.created_at,
-          };
-          
-          const updated = [...filtered, realMessage];
-          messageIdsRef.current.add(realMessage.id);
-          saveConversationState(conversationId, updated);
-          return updated;
-        });
-        
-        retryTimeoutsRef.current.delete(tempId);
-      } else {
-        scheduleMessageRetry(tempId, message, retryCount);
-      }
-    } catch (error) {
-      console.error('Message retry failed:', error);
-      scheduleMessageRetry(tempId, message, retryCount);
-    }
-  }, [conversationId, messages, scheduleMessageRetry, saveConversationState]);
+  }, [autoSelectPackage, loadConversationMessages]);
 
   // ============= SCROLL MANAGEMENT =============
   
@@ -1199,56 +1144,7 @@ export default function SupportScreen() {
     }
   }, [messages.length, isNearBottom]);
 
-  // ============= DAY SEPARATORS =============
-  
-  const groupedMessages = useMemo(() => {
-    const groups: { [key: string]: Message[] } = {};
-    
-    messages.forEach(msg => {
-      const date = new Date(msg.created_at || msg.timestamp);
-      const dateKey = date.toDateString();
-      
-      if (!groups[dateKey]) {
-        groups[dateKey] = [];
-      }
-      groups[dateKey].push(msg);
-    });
-    
-    return groups;
-  }, [messages]);
-
-  const formatDateHeader = useCallback((dateStr: string) => {
-    const date = new Date(dateStr);
-    const today = new Date();
-    const yesterday = new Date(today);
-    yesterday.setDate(yesterday.getDate() - 1);
-    
-    if (date.toDateString() === today.toDateString()) {
-      return 'Today';
-    } else if (date.toDateString() === yesterday.toDateString()) {
-      return 'Yesterday';
-    } else {
-      return date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric',
-        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
-      });
-    }
-  }, []);
-
-  const renderDateSeparator = useCallback((dateStr: string) => (
-    <View style={styles.dateSeparator} key={`date-${dateStr}`}>
-      <View style={styles.dateSeparatorLine} />
-      <View style={styles.dateSeparatorBadge}>
-        <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
-      </View>
-      <View style={styles.dateSeparatorLine} />
-    </View>
-  ), [formatDateHeader]);
-
-  // Package and conversation creation methods continue...
-  // (keeping all existing functionality - truncated for space, but include all remaining methods from original)
-
+  // Package loading methods
   const loadUserPackages = useCallback(async () => {
     try {
       setLoadingPackages(true);
@@ -1361,7 +1257,7 @@ export default function SupportScreen() {
         setTicketStatus('pending');
         setHasActiveTicket(true);
         
-        await saveConversationState(newConversationId, []);
+        await saveConversationToStorage();
         await setupActionCableConnection();
         
         let retries = 0;
@@ -1378,65 +1274,209 @@ export default function SupportScreen() {
       console.error('Failed to create support ticket:', error);
       throw error;
     }
-  }, [conversationId, inquiryType, selectedPackage?.code, subscriptionReady, saveConversationState, setupActionCableConnection]);
+  }, [conversationId, inquiryType, selectedPackage?.code, subscriptionReady, saveConversationToStorage, setupActionCableConnection]);
 
-  useEffect(() => {
-    const keyboardDidShowListener = Keyboard.addListener(
-      'keyboardDidShow',
-      (e) => setKeyboardHeight(e.endCoordinates.height)
-    );
-    const keyboardDidHideListener = Keyboard.addListener(
-      'keyboardDidHide',
-      () => setKeyboardHeight(0)
-    );
+  // FIXED: ActionCable-only message sending
+  const sendMessage = useCallback(async () => {
+    if (!inputText.trim()) return;
 
-    const backAction = () => {
-      if (showTicketModal || showInquiryModal || showPackageModal) {
-        closeAllModals();
-        return true;
-      }
-      handleGoBack();
-      return true;
-    };
-
-    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
-
-    return () => {
-      keyboardDidHideListener.remove();
-      keyboardDidShowListener.remove();
-      backHandler.remove();
-      
-      if (typingTimeoutRef.current) {
-        clearTimeout(typingTimeoutRef.current);
-      }
-      
-      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
-      retryTimeoutsRef.current.clear();
-    };
-  }, [showTicketModal, showInquiryModal, showPackageModal, handleGoBack]);
-
-  useEffect(() => {
-    if (showTicketModal || showInquiryModal || showPackageModal) {
-      Animated.timing(slideAnim, {
-        toValue: 0,
-        duration: 300,
-        useNativeDriver: true,
-      }).start();
-    } else {
-      Animated.timing(slideAnim, {
-        toValue: SCREEN_HEIGHT,
-        duration: 250,
-        useNativeDriver: true,
-      }).start();
+    const messageContent = inputText.trim();
+    setInputText('');
+    
+    if (isTyping) {
+      setIsTyping(false);
+      sendTypingIndicator(false);
     }
-  }, [showTicketModal, showInquiryModal, showPackageModal]);
+    
+    try {
+      const convId = await ensureConversation();
+      
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const optimisticMessage: Message = {
+        id: tempId,
+        tempId: tempId,
+        text: messageContent,
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: false,
+        type: 'text',
+        packageCode: selectedPackage?.code,
+        isTagged: !!selectedPackage,
+        optimistic: true,
+        sendStatus: 'pending',
+        created_at: new Date().toISOString(),
+        retryData: {
+          content: messageContent,
+          messageType: 'text',
+          metadata: selectedPackage ? { package_code: selectedPackage.code } : undefined,
+        },
+      };
 
-  useEffect(() => {
-    if (showPackageModal && userPackages.length === 0) {
-      loadUserPackages();
+      setMessages(prev => [...prev, optimisticMessage]);
+      
+      setTimeout(() => scrollToBottom(), 100);
+
+      if (isConnected && subscriptionReady) {
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.perform('send_message', {
+          conversation_id: convId,
+          content: messageContent,
+          message_type: 'text',
+          metadata: selectedPackage ? { package_code: selectedPackage.code } : undefined,
+          temp_id: tempId,
+        });
+        
+        console.log('✅ Message sent via ActionCable');
+      } else {
+        // Add to retry queue
+        console.log('📝 Connection not ready, adding to retry queue');
+        addToPendingQueue(tempId, optimisticMessage);
+      }
+      
+      setTicketStatus('pending');
+      setHasActiveTicket(true);
+      
+    } catch (error) {
+      console.error('Failed to send message:', error);
+      // Message is already in optimistic state, retry logic will handle it
     }
-  }, [showPackageModal, userPackages.length, loadUserPackages]);
+  }, [inputText, ensureConversation, selectedPackage, isConnected, subscriptionReady, isTyping, sendTypingIndicator, scrollToBottom, addToPendingQueue]);
 
+  const handleInputTextChange = useCallback((text: string) => {
+    setInputText(text);
+    
+    if (text.trim() && conversationId) {
+      handleTyping();
+    }
+  }, [conversationId, handleTyping]);
+
+  // Modal handlers
+  const createBasicInquiryTicket = async () => {
+    if (!inquiryText.trim()) return;
+
+    setIsLoading(true);
+    
+    try {
+      setInquiryType('basic');
+      setSelectedPackage(null);
+      
+      const convId = await ensureConversation();
+      
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const optimisticMessage: Message = {
+        id: tempId,
+        tempId: tempId,
+        text: inquiryText.trim(),
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: false,
+        type: 'text',
+        optimistic: true,
+        sendStatus: 'pending',
+        created_at: new Date().toISOString(),
+        retryData: {
+          content: inquiryText.trim(),
+          messageType: 'text',
+        },
+      };
+
+      setMessages(prev => [...prev, optimisticMessage]);
+      closeAllModals();
+      
+      setTimeout(() => scrollToBottom(), 100);
+
+      if (isConnected && subscriptionReady) {
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.perform('send_message', {
+          conversation_id: convId,
+          content: inquiryText.trim(),
+          message_type: 'text',
+          temp_id: tempId,
+        });
+      } else {
+        addToPendingQueue(tempId, optimisticMessage);
+      }
+      
+      setTicketStatus('pending');
+      
+    } catch (error) {
+      console.error('Failed to create basic inquiry:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const createPackageInquiryTicket = async () => {
+    if (!selectedPackage || !packageInquiry.trim()) return;
+
+    setIsLoading(true);
+    
+    try {
+      setInquiryType('package');
+      
+      const convId = await ensureConversation();
+      
+      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      
+      const optimisticMessage: Message = {
+        id: tempId,
+        tempId: tempId,
+        text: packageInquiry.trim(),
+        timestamp: new Date().toLocaleTimeString('en-US', {
+          hour12: false,
+          hour: '2-digit',
+          minute: '2-digit',
+        }),
+        isSupport: false,
+        type: 'text',
+        packageCode: selectedPackage.code,
+        isTagged: true,
+        optimistic: true,
+        sendStatus: 'pending',
+        created_at: new Date().toISOString(),
+        retryData: {
+          content: packageInquiry.trim(),
+          messageType: 'text',
+          metadata: { package_code: selectedPackage.code },
+        },
+      };
+
+      setMessages(prev => [...prev, optimisticMessage]);
+      closeAllModals();
+      
+      setTimeout(() => scrollToBottom(), 100);
+
+      if (isConnected && subscriptionReady) {
+        const actionCable = ActionCableService.getInstance();
+        await actionCable.perform('send_message', {
+          conversation_id: convId,
+          content: packageInquiry.trim(),
+          message_type: 'text',
+          metadata: { package_code: selectedPackage.code },
+          temp_id: tempId,
+        });
+      } else {
+        addToPendingQueue(tempId, optimisticMessage);
+      }
+      
+      setTicketStatus('pending');
+      
+    } catch (error) {
+      console.error('Failed to create package inquiry:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  // Other utility functions
   const closeAllModals = () => {
     setShowTicketModal(false);
     setShowInquiryModal(false);
@@ -1456,294 +1496,6 @@ export default function SupportScreen() {
     setShowTicketModal(false);
     setShowPackageModal(true);
   };
-
-  const createBasicInquiryTicket = async () => {
-    if (!inquiryText.trim()) return;
-
-    setIsLoading(true);
-    
-    try {
-      setInquiryType('basic');
-      setSelectedPackage(null);
-      
-      const convId = await ensureConversation();
-      
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      // Track pending message
-      pendingMessageIds.current.add(tempId);
-      processedMessageIds.current.add(tempId);
-      
-      const optimisticMessage: Message = {
-        id: tempId,
-        tempId: tempId,
-        text: inquiryText.trim(),
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: false,
-        type: 'text',
-        optimistic: true,
-        sendStatus: 'pending',
-        created_at: new Date().toISOString(),
-      };
-
-      setMessages(prev => [...prev, optimisticMessage]);
-      closeAllModals();
-      
-      setTimeout(() => scrollToBottom(), 100);
-
-      const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-        content: inquiryText.trim(),
-        message_type: 'text',
-        temp_id: tempId,
-      });
-      
-      if (response.data.success && response.data.message) {
-        const serverMessageId = normalizeId(response.data.message.id);
-        processedMessageIds.current.add(serverMessageId);
-        pendingMessageIds.current.delete(tempId);
-        
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.tempId !== tempId);
-          const realMessage: Message = {
-            id: serverMessageId,
-            text: response.data.message.content,
-            timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
-            isSupport: false,
-            type: 'text',
-            delivered_at: response.data.message.delivered_at,
-            read_at: response.data.message.read_at,
-            sendStatus: 'sent',
-            created_at: response.data.message.created_at,
-          };
-          
-          const updated = [...filtered, realMessage];
-          messageIdsRef.current.add(realMessage.id);
-          saveConversationState(convId, updated);
-          return updated;
-        });
-        
-        setTicketStatus('pending');
-      } else {
-        scheduleMessageRetry(tempId, optimisticMessage, 0);
-      }
-      
-    } catch (error) {
-      console.error('Failed to create basic inquiry:', error);
-      
-      const optimisticMsg = messages.find(m => m.optimistic);
-      if (optimisticMsg && optimisticMsg.tempId) {
-        scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const createPackageInquiryTicket = async () => {
-    if (!selectedPackage || !packageInquiry.trim()) return;
-
-    setIsLoading(true);
-    
-    try {
-      setInquiryType('package');
-      
-      const convId = await ensureConversation();
-      
-      const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      pendingMessageIds.current.add(tempId);
-      processedMessageIds.current.add(tempId);
-      
-      const optimisticMessage: Message = {
-        id: tempId,
-        tempId: tempId,
-        text: packageInquiry.trim(),
-        timestamp: new Date().toLocaleTimeString('en-US', {
-          hour12: false,
-          hour: '2-digit',
-          minute: '2-digit',
-        }),
-        isSupport: false,
-        type: 'text',
-        packageCode: selectedPackage.code,
-        isTagged: true,
-        optimistic: true,
-        sendStatus: 'pending',
-        created_at: new Date().toISOString(),
-      };
-
-      setMessages(prev => [...prev, optimisticMessage]);
-      closeAllModals();
-      
-      setTimeout(() => scrollToBottom(), 100);
-
-      const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-        content: packageInquiry.trim(),
-        message_type: 'text',
-        metadata: { package_code: selectedPackage.code },
-        temp_id: tempId,
-      });
-      
-      if (response.data.success && response.data.message) {
-        const serverMessageId = normalizeId(response.data.message.id);
-        processedMessageIds.current.add(serverMessageId);
-        pendingMessageIds.current.delete(tempId);
-        
-        setMessages(prev => {
-          const filtered = prev.filter(m => m.tempId !== tempId);
-          const realMessage: Message = {
-            id: serverMessageId,
-            text: response.data.message.content,
-            timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
-            isSupport: false,
-            type: 'text',
-            packageCode: selectedPackage.code,
-            isTagged: true,
-            delivered_at: response.data.message.delivered_at,
-            read_at: response.data.message.read_at,
-            sendStatus: 'sent',
-            created_at: response.data.message.created_at,
-          };
-          
-          const updated = [...filtered, realMessage];
-          messageIdsRef.current.add(realMessage.id);
-          saveConversationState(convId, updated);
-          return updated;
-        });
-        
-        setTicketStatus('pending');
-      } else {
-        scheduleMessageRetry(tempId, optimisticMessage, 0);
-      }
-      
-    } catch (error) {
-      console.error('Failed to create package inquiry:', error);
-      
-      const optimisticMsg = messages.find(m => m.optimistic);
-      if (optimisticMsg && optimisticMsg.tempId) {
-        scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
-      }
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
- // CRITICAL FIX in sendMessage function
-const sendMessage = useCallback(async () => {
-  if (!inputText.trim()) return;
-
-  const messageContent = inputText.trim();
-  setInputText('');
-  
-  if (isTyping) {
-    setIsTyping(false);
-    sendTypingIndicator(false);
-  }
-  
-  try {
-    const convId = await ensureConversation();
-    
-    const tempId = `temp-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    
-    pendingMessageIds.current.add(tempId);
-    processedMessageIds.current.add(tempId);
-    
-    const optimisticMessage: Message = {
-      id: tempId,
-      tempId: tempId,
-      text: messageContent,
-      timestamp: new Date().toLocaleTimeString('en-US', {
-        hour12: false,
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
-      isSupport: false,
-      type: 'text',
-      packageCode: selectedPackage?.code,
-      isTagged: !!selectedPackage,
-      optimistic: true,
-      sendStatus: 'pending',
-      created_at: new Date().toISOString(),
-    };
-
-    setMessages(prev => [...prev, optimisticMessage]);
-    
-    setTimeout(() => scrollToBottom(), 100);
-
-    const metadata = selectedPackage ? { package_code: selectedPackage.code } : undefined;
-    const response = await api.post(`/api/v1/conversations/${convId}/send_message`, {
-      content: messageContent,
-      message_type: 'text',
-      metadata,
-      temp_id: tempId,
-    });
-    
-    if (response.data.success && response.data.message) {
-      const serverMessageId = normalizeId(response.data.message.id);
-      
-      // CRITICAL FIX: Check if ActionCable already added this message
-      if (processedMessageIds.current.has(serverMessageId)) {
-        console.log('⏭️ Message already processed by ActionCable, just removing optimistic');
-        // ActionCable already added it, just remove optimistic
-        setMessages(prev => prev.filter(m => m.tempId !== tempId));
-        pendingMessageIds.current.delete(tempId);
-        return;
-      }
-      
-      // ActionCable hasn't added it yet, add it now
-      processedMessageIds.current.add(serverMessageId);
-      pendingMessageIds.current.delete(tempId);
-      
-      setMessages(prev => {
-        const filtered = prev.filter(m => m.tempId !== tempId);
-        const realMessage: Message = {
-          id: serverMessageId,
-          text: response.data.message.content,
-          timestamp: response.data.message.timestamp || optimisticMessage.timestamp,
-          isSupport: false,
-          type: 'text',
-          packageCode: selectedPackage?.code,
-          isTagged: !!selectedPackage,
-          delivered_at: response.data.message.delivered_at,
-          read_at: response.data.message.read_at,
-          sendStatus: 'sent',
-          created_at: response.data.message.created_at,
-        };
-        
-        const updated = [...filtered, realMessage];
-        messageIdsRef.current.add(realMessage.id);
-        saveConversationState(convId, updated);
-        return updated;
-      });
-      
-      setTicketStatus('pending');
-      setHasActiveTicket(true);
-      
-      console.log('✅ Message sent successfully, ID:', serverMessageId);
-    } else {
-      scheduleMessageRetry(tempId, optimisticMessage, 0);
-    }
-    
-  } catch (error) {
-    console.error('Failed to send message:', error);
-    
-    const optimisticMsg = messages.find(m => m.tempId === tempId);
-    if (optimisticMsg && optimisticMsg.tempId) {
-      scheduleMessageRetry(optimisticMsg.tempId, optimisticMsg, 0);
-    }
-  }
-}, [inputText, ensureConversation, selectedPackage, isTyping, sendTypingIndicator, saveConversationState, scheduleMessageRetry, scrollToBottom, messages]);
-  const handleInputTextChange = useCallback((text: string) => {
-    setInputText(text);
-    
-    if (text.trim() && conversationId) {
-      handleTyping();
-    }
-  }, [conversationId, handleTyping]);
 
   const getStateBadgeColor = (state: string) => {
     switch (state) {
@@ -1797,7 +1549,7 @@ const sendMessage = useCallback(async () => {
           style={styles.messageStatusContainer}
           onPress={() => {
             if (message.tempId) {
-              retryFailedMessage(message.tempId, message.retryCount || 0);
+              retryFailedMessage(message.tempId);
             }
           }}
         >
@@ -1836,6 +1588,52 @@ const sendMessage = useCallback(async () => {
       </View>
     );
   };
+
+  // Render methods
+  const groupedMessages = useMemo(() => {
+    const groups: { [key: string]: Message[] } = {};
+    
+    messages.forEach(msg => {
+      const date = new Date(msg.created_at || msg.timestamp);
+      const dateKey = date.toDateString();
+      
+      if (!groups[dateKey]) {
+        groups[dateKey] = [];
+      }
+      groups[dateKey].push(msg);
+    });
+    
+    return groups;
+  }, [messages]);
+
+  const formatDateHeader = useCallback((dateStr: string) => {
+    const date = new Date(dateStr);
+    const today = new Date();
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    
+    if (date.toDateString() === today.toDateString()) {
+      return 'Today';
+    } else if (date.toDateString() === yesterday.toDateString()) {
+      return 'Yesterday';
+    } else {
+      return date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric',
+        year: date.getFullYear() !== today.getFullYear() ? 'numeric' : undefined
+      });
+    }
+  }, []);
+
+  const renderDateSeparator = useCallback((dateStr: string) => (
+    <View style={styles.dateSeparator} key={`date-${dateStr}`}>
+      <View style={styles.dateSeparatorLine} />
+      <View style={styles.dateSeparatorBadge}>
+        <Text style={styles.dateSeparatorText}>{formatDateHeader(dateStr)}</Text>
+      </View>
+      <View style={styles.dateSeparatorLine} />
+    </View>
+  ), [formatDateHeader]);
 
   const renderMessage = ({ item }: { item: Message }) => (
     <View style={styles.messageWrapper} key={item.id}>
@@ -1925,8 +1723,6 @@ const sendMessage = useCallback(async () => {
     }
     return renderMessage({ item: item.message });
   }, [renderDateSeparator]);
-
-// Continuation of support.tsx - Complete remaining UI sections
 
   const renderTicketModal = () => (
     <Modal
@@ -2171,6 +1967,63 @@ const sendMessage = useCallback(async () => {
     </Modal>
   );
 
+  useEffect(() => {
+    const keyboardDidShowListener = Keyboard.addListener(
+      'keyboardDidShow',
+      (e) => setKeyboardHeight(e.endCoordinates.height)
+    );
+    const keyboardDidHideListener = Keyboard.addListener(
+      'keyboardDidHide',
+      () => setKeyboardHeight(0)
+    );
+
+    const backAction = () => {
+      if (showTicketModal || showInquiryModal || showPackageModal) {
+        closeAllModals();
+        return true;
+      }
+      handleGoBack();
+      return true;
+    };
+
+    const backHandler = BackHandler.addEventListener('hardwareBackPress', backAction);
+
+    return () => {
+      keyboardDidHideListener.remove();
+      keyboardDidShowListener.remove();
+      backHandler.remove();
+      
+      if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+      }
+      
+      retryTimeoutsRef.current.forEach(timeout => clearTimeout(timeout));
+      retryTimeoutsRef.current.clear();
+    };
+  }, [showTicketModal, showInquiryModal, showPackageModal, handleGoBack]);
+
+  useEffect(() => {
+    if (showTicketModal || showInquiryModal || showPackageModal) {
+      Animated.timing(slideAnim, {
+        toValue: 0,
+        duration: 300,
+        useNativeDriver: true,
+      }).start();
+    } else {
+      Animated.timing(slideAnim, {
+        toValue: SCREEN_HEIGHT,
+        duration: 250,
+        useNativeDriver: true,
+      }).start();
+    }
+  }, [showTicketModal, showInquiryModal, showPackageModal]);
+
+  useEffect(() => {
+    if (showPackageModal && userPackages.length === 0) {
+      loadUserPackages();
+    }
+  }, [showPackageModal, userPackages.length, loadUserPackages]);
+
   return (
     <SafeAreaView style={styles.container}>
       <StatusBar barStyle="light-content" backgroundColor="#5A2D82" />
@@ -2258,6 +2111,10 @@ const sendMessage = useCallback(async () => {
                 )}
               </View>
             )}
+            maintainVisibleContentPosition={{
+              minIndexForVisible: 0,
+              autoscrollToTopThreshold: 10,
+            }}
           />
           
           {showScrollButton && (
@@ -2456,14 +2313,9 @@ const sendMessage = useCallback(async () => {
   );
 }
 
-// Complete styles object
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0B141B' },
   flex: { flex: 1 },
-  loadingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0B141B' },
-  loadingText: { color: '#8E8E93', fontSize: 16, marginTop: 16 },
-  retryButton: { backgroundColor: '#7B3F98', paddingHorizontal: 20, paddingVertical: 12, borderRadius: 8, marginTop: 16 },
-  retryButtonText: { color: '#fff', fontSize: 16, fontWeight: '500' },
   header: { paddingBottom: 12, elevation: 4, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 4, paddingTop: Platform.OS === 'ios' ? 44 : StatusBar.currentHeight || 0 },
   headerContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 12 },
   backButton: { marginRight: 12, padding: 4 },
